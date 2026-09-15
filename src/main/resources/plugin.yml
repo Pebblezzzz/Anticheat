@@ -1,0 +1,14 @@
+name: PhantomAC
+version: 0.1.0-SNAPSHOT
+main: dev.phantom.ac.paper.PhantomPaperPlugin
+api-version: '1.21'
+description: Deterministic movement-validation research adapter for Paper 1.21.11
+depend:
+  - packetevents
+commands:
+  phantom:
+    description: Inspect a capture or its non-enforcing diagnostic alerts
+    permission: phantom.admin
+permissions:
+  phantom.admin:
+    default: op
