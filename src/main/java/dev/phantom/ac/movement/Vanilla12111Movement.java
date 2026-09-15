@@ -9,6 +9,8 @@ import dev.phantom.ac.geometry.Directions.Direction;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * Canonical 1.21.11 vanilla movement engine bound to WorldView.
@@ -45,6 +47,13 @@ public final class Vanilla12111Movement {
 
     public static final double MODERN_INPUT_TRANSFORMER = 0.98;   // input transformer scale
     public static final double EPS = 1e-7;                      // collision epsilon
+
+    // --- Effect IDs referenced by MovementState ---
+    public static final String MOVEMENT_SPEED = "minecraft:movedeleteme";
+    public static final String JUMP_BOOST = "minecraft:jump_boost";
+    public static final String SLOW_FALLING = "minecraft:slow_falling";
+
+    private Vanilla12111Movement() {}
 
     /**
      * The deterministic Phase 5 tick.
@@ -85,7 +94,7 @@ public final class Vanilla12111Movement {
         // --- 2. Jump handling (when grounded and input.jump) ---
         boolean grounded = false;
         if (!path.collides() && input.jump()) {
-            double jumpPower = computeJumpPower(state, input);
+            double jumpPower = computeJumpPower(state);
             // Apply jump: add vertical component; horizontal sprint bonus may be added later in move
             Vec3 newVel = state.velocity().add(0, jumpPower, 0);
             if (input.sprint()) {
@@ -113,10 +122,7 @@ public final class Vanilla12111Movement {
         double friction = onGround ? slipperiness * GROUND_FRICTION_BASE : AIR_FRICTION;
 
         // Compute effective walk speed using the V_26_2 rule from BlockProperties
-        double walkSpeed = DEFAULT_WALK_SPEED;
-        if (slipperiness > 0.6) {
-            walkSpeed = DEFAULT_WALK_SPEED * WALK_ACCELERATION / (slipperiness * slipperiness * slipperiness);
-        }
+        double walkSpeed = DEFAULT_WALK_SPEED * (1.0 + state.effect(MOVEMENT_SPEED));
 
         // --- 5. Accelerate horizontal velocity ---
         double acc = WALK_ACCELERATION * friction * friction * friction * walkSpeed;
@@ -125,6 +131,11 @@ public final class Vanilla12111Movement {
         double yawRad = Math.toRadians(state.yaw());
         double dx = effF * Math.cos(yawRad) + effS * Math.sin(yawRad);
         double dz = effF * Math.sin(yawRad) - effS * Math.cos(yawRad);
+        // Apply sprint horizontal bonus if sprinting and not in water/lava
+        if (input.sprint() && !inWater && !inLava && !onGround) {
+            // Sprint air strafe uses separate speed constants
+            acc = WALK_ACCELERATION * walkSpeed;
+        }
         vel = vel.add(dx * acc, 0, dz * acc);
 
         // Sprint bonus applied after acceleration (0.2 horizontal)
@@ -193,18 +204,16 @@ public final class Vanilla12111Movement {
                 onGroundResult,
                 inWater, inLava, climbing, state.wasTouchingWater(),
                 state.effects(),
-                DEFAULT_WALK_SPEED, DEFAULT_JUMP_STRENGTH, DEFAULT_STEP_HEIGHT,
+                DEFAULT_WALK_SPEED * (1.0 + state.effect(MOVEMENT_SPEED)),
+                computeJumpPower(state),
+                DEFAULT_STEP_HEIGHT,
                 true);
     }
 
-    private static double computeJumpPower(MovementState state, MovementInput input) {
-        double jumpPower = DEFAULT_JUMP_STRENGTH;
-        // Jump boost effect
-        int jumpBoost = state.effect("jump_boost");
-        if (jumpBoost > 0) {
-            jumpPower += 0.1 * (jumpBoost + 1);
-        }
-        // Honey multiplier (slows jump)
+    private static double computeJumpPower(MovementState state) {
+        int jumpBoostAmplifier = state.effect(JUMP_BOOST);
+        double jumpPower = DEFAULT_JUMP_STRENGTH + (0.1 * (jumpBoostAmplifier + 1));
+        // Honey multiplier (slows jump) - GrimAC handles honey in JumpPower.jumpFromGround()
         if (state.hasEffect("minecraft:honey")) {
             jumpPower *= 0.5;
         }
@@ -221,9 +230,10 @@ public final class Vanilla12111Movement {
         Pose newPose = state.pose();
         if (inWater) newPose = Pose.SWIMMING;
         boolean onGround = false;
-        if (path.collides()) onGround = input.jump() == false && state.velocity().y <= EPS;
+        if (path.collides()) onGround = state.velocity().y <= EPS;
         return new MovementState(newPos, newVel, state.yaw(), newPose,
                 onGround, inWater, inLava, climbing, state.wasTouchingWater(),
-                state.effects(), DEFAULT_WALK_SPEED, DEFAULT_JUMP_STRENGTH, DEFAULT_STEP_HEIGHT, true);
+                state.effects(), DEFAULT_WALK_SPEED * (1.0 + state.effect(MOVEMENT_SPEED)),
+                computeJumpPower(state), DEFAULT_STEP_HEIGHT, true);
     }
 }
