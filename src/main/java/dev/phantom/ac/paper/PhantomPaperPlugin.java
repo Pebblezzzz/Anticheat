@@ -1,41 +1,51 @@
 package dev.phantom.ac.paper;
 
-import dev.phantom.ac.Maths.Vec3;
-import dev.phantom.ac.Packets;
-import dev.phantom.ac.Packets.RawPacket;
-import dev.phantom.ac.Timeline;
-import dev.phantom.ac.Diagnostics;
-import dev.phantom.ac.World;
-import dev.phantom.ac.LiveValidation;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Queue;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.plugin.java.JavaPlugin;
+
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.teleport.RelativeFlag;
+import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
+import com.github.retrooper.packetevents.protocol.world.states.type.StateValue;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerInput;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientTeleportConfirm;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityVelocity;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerPositionAndLook;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerMultiBlockChange;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChunkData;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityVelocity;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerMultiBlockChange;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerPositionAndLook;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUnloadChunk;
-import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
-import com.github.retrooper.packetevents.protocol.world.states.type.StateValue;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.Listener;
-import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.event.player.PlayerChangedWorldEvent;
-import org.bukkit.plugin.java.JavaPlugin;
+
+import dev.phantom.ac.Diagnostics;
+import dev.phantom.ac.LiveValidation;
+import dev.phantom.ac.Maths.Vec3;
+import dev.phantom.ac.Packets;
+import dev.phantom.ac.Packets.RawPacket;
+import dev.phantom.ac.Timeline;
+import dev.phantom.ac.World;
 
 /**
  * Paper boundary only. No Bukkit type enters the deterministic core.
@@ -83,10 +93,6 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
         WrapperPlayServerUnloadChunk packet=new WrapperPlayServerUnloadChunk(event);
         record(player,new Packets.ChunkUnload(new World.Chunk(packet.getChunkX(),packet.getChunkZ())));
       } else if(event.getPacketType() == PacketType.Play.Server.CHUNK_DATA) {
-        // A 1.21.11 chunk can require 98,304 state reads, which must not run on
-        // PacketEvents' Netty thread. The payload is therefore queued and decoded
-        // on the plugin's own scheduler thread by drainChunkQueue(), and only the
-        // resulting normalized packet is recorded in the deterministic capture.
         WrapperPlayServerChunkData packet=new WrapperPlayServerChunkData(event);
         var column=packet.getColumn();
         int chunkX=column.getX(),chunkZ=column.getZ();
@@ -100,11 +106,9 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
   @Override public void onEnable() {
     getServer().getPluginManager().registerEvents(this, this);
     PacketEvents.getAPI().getEventManager().registerListener(networkListener);
-    // Chunk decoding is deferred off the network thread, so it runs here.
     chunkTask=getServer().getScheduler().runTaskTimer(this,this::drainChunkQueue,1L,1L);
   }
 
-  /** The repeating task that decodes queued chunk payloads off the network thread. */
   private org.bukkit.scheduler.BukkitTask chunkTask;
 
   @Override public void onDisable() {
@@ -115,32 +119,27 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
 
   /**
    * Decodes queued chunk payloads on the server thread and records the resulting
-   * block states. Only states that {@code BlockCatalogue12111} can verify are
-   * recorded; every other position is left out of the capture entirely, which the
-   * deterministic core then reports as {@code UNLOADED}-style missing data rather
-   * than as air.
+   * block states. 
+   * FIXED: Added a 10ms budget to prevent the main thread from stalling on massive map copies.
    */
   private void drainChunkQueue() {
+    long startTime = System.nanoTime();
+    long maxNanosPerTick = 10_000_000L; // 10 milliseconds
+
     for(Capture capture:captures.values()) {
       PendingChunk pending;
       while((pending=capture.chunkQueue.poll())!=null) {
-        // A chunk column the deterministic core cannot fully describe is recorded
-        // as a chunk with no block states. The core then reports every position in
-        // it as missing data rather than as air, which is the honest answer.
         Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> states=decodeColumn(pending);
         record(capture,new Packets.ChunkStates(new dev.phantom.ac.world.Chunk(pending.chunkX(),pending.chunkZ()),states));
+        
+        // Break out early if we've spent too much time decoding chunks this tick
+        if (System.nanoTime() - startTime > maxNanosPerTick) {
+            return;
+        }
       }
     }
   }
 
-  /**
-   * Reads the server's authoritative block states for a queued chunk.
-   *
-   * <p>Reading the server's live chunk rather than re-parsing the packet
-   * keeps this adapter independent of PacketEvents' chunk-section internals, and
-   * the states it reads are exactly the states the client was sent, because the
-   * chunk packet is generated from them.</p>
-   */
   private Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> decodeColumn(PendingChunk pending) {
     Player player=getServer().getPlayer(pending.playerId());
     if(player==null) return Map.of();
@@ -212,14 +211,6 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
   private void record(Capture capture, Packets.Packet packet) { capture.packets.add(new RawPacket(capture.sequence.incrementAndGet(), System.nanoTime(), packet)); }
   private static Vec3 vector(double x, double y, double z) { return new Vec3(x,y,z); }
 
-  /**
-   * Translates a protocol block state into the deterministic core's Phase 4
-   * {@link dev.phantom.ac.world.BlockState}, forwarding every modelled property.
-   *
-   * <p>The core resolves the block's collision shape itself from this state. The
-   * adapter must not decide shapes, because shape data belongs to the version
-   * catalogue and not to the platform boundary.</p>
-   */
   private static dev.phantom.ac.world.BlockState toCoreState(WrappedBlockState state) {
     if(state==null||state.getType().isAir()) return dev.phantom.ac.world.BlockState.air();
     String name=state.getType().getName();
@@ -246,13 +237,6 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     return dev.phantom.ac.world.v12111.BlockCatalogue12111.decode(name,properties);
   }
 
-  /**
-   * Translates a Bukkit {@link org.bukkit.block.data.BlockData} into the core's
-   * Phase 4 {@link dev.phantom.ac.world.BlockState}. Every modelled property is
-   * forwarded; a property this build does not model simply does not reach the
-   * catalogue, which is what lets the catalogue report the state as unsupported
-   * instead of guessing.
-   */
   private static dev.phantom.ac.world.BlockState toCoreBlockData(org.bukkit.block.data.BlockData data) {
     if(data==null||data.getMaterial().isAir()) return dev.phantom.ac.world.BlockState.air();
     String name=data.getMaterial().getKey().toString();
@@ -314,11 +298,7 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
   private static void putBoolean(Map<String,String> properties,String key,Object value) {
     if(value instanceof Boolean flag) properties.put(key,Boolean.toString(flag));
   }
-  /**
-   * A chunk payload waiting to be decoded off the network thread. Decoding is
-   * deferred because a full 1.21.11 chunk is large; the payload object is only
-   * read once, on the plugin's scheduler thread.
-   */
+
   private record PendingChunk(UUID playerId,int chunkX,int chunkZ,com.github.retrooper.packetevents.protocol.player.ClientVersion clientVersion) {}
 
   private static final class Capture {
