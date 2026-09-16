@@ -39,6 +39,7 @@ public final class ControlledPhase5ScenarioDriver {
     private boolean prepared;
     private boolean done;
     private boolean failureReported;
+    private boolean preparing;
 
     public ControlledPhase5ScenarioDriver() { LAST = this; }
 
@@ -62,12 +63,19 @@ public final class ControlledPhase5ScenarioDriver {
             prepared = false;
             done = false;
             failureReported = false;
+            preparing = false;
             release(client.options);
         }
         if (done) { release(client.options); return; }
         if (!prepared) {
-            prepare(client);
-            prepared = true;
+            if (!preparing) {
+                preparing = true;
+                prepare(client);
+            }
+            release(client.options);
+            return;
+        }
+        if (phaseIndex < startIndex) {
             beginPhase(client, startIndex);
             return;
         }
@@ -205,21 +213,22 @@ public final class ControlledPhase5ScenarioDriver {
         if (server == null) throw new IllegalStateException("Integrated server required");
         int minPhase = startIndex;
         int maxPhase = endIndex;
-        server.executeSync(() -> {
-            CommandManager m = server.getCommandManager();
-            ServerCommandSource s = server.getCommandSource();
+        server.execute(() -> {
+            ServerWorld world = server.getOverworld();
             int minZ = baseZ(PHASES[minPhase]) - 8;
             int maxZ = baseZ(PHASES[maxPhase]) + 310;
-            loadArenaChunks(server.getOverworld(), minZ, maxZ);
+            loadArenaChunks(world, minZ, maxZ);
+            CommandManager m = server.getCommandManager();
+            ServerCommandSource s = server.getCommandSource();
             System.out.println("[Phase5] arena chunks loaded z=" + minZ + ".." + maxZ);
 
             cmd(m, s, "difficulty peaceful");
             cmd(m, s, "time set day");
             cmd(m, s, "weather clear");
-            cmd(m, s, "fill -24 63 " + minZ + " 24 63 " + maxZ + " minecraft:stone");
-            cmd(m, s, "fill -24 64 " + minZ + " 24 67 " + maxZ + " air");
-            cmd(m, s, "fill -24 64 " + minZ + " -23 72 " + maxZ + " minecraft:stone");
-            cmd(m, s, "fill 23 64 " + minZ + " 24 72 " + maxZ + " minecraft:stone");
+            fillZ(m, s, -24, 63, -48, 24, 63, maxZ, "minecraft:stone", 600);
+            fillZ(m, s, -24, 64, minZ, 24, 67, maxZ, "air", 160);
+            fillZ(m, s, -24, 64, minZ, -23, 72, maxZ, "minecraft:stone", 160);
+            fillZ(m, s, 23, 64, minZ, 24, 72, maxZ, "minecraft:stone", 160);
 
             int water = baseZ("water");
             cmd(m, s, "fill -8 64 " + (water + 5) + " 8 65 " + (water + 135) + " minecraft:water");
@@ -242,9 +251,12 @@ public final class ControlledPhase5ScenarioDriver {
             cmd(m, s, "fill -8 64 " + (swim + 5) + " 8 65 " + (swim + 130) + " minecraft:water");
             int glide = baseZ("glide");
             cmd(m, s, "fill -10 63 " + (glide + 4) + " 10 63 " + (glide + 300) + " minecraft:stone");
-            cmd(m, s, "fill -10 64 " + (glide + 4) + " 10 120 " + (glide + 300) + " minecraft:air");
+            fillZ(m, s, -10, 64, glide + 4, 10, 120, glide + 300, "air", 160);
             cmd(m, s, "gamemode survival @a");
             cmd(m, s, "effect clear @a");
+            prepared = true;
+            preparing = false;
+            System.out.println("[Phase5] arena preparation complete");
         });
     }
 
@@ -254,9 +266,16 @@ public final class ControlledPhase5ScenarioDriver {
         int minChunkX = Math.floorDiv(-24, 16);
         int maxChunkX = Math.floorDiv(24, 16);
         for (int cz = minChunkZ; cz <= maxChunkZ; cz++) {
-            for (int cx = minChunkX; cx <= maxChunkX; cx++) {
-                world.getChunk(cx, cz);
-            }
+            for (int cx = minChunkX; cx <= maxChunkX; cx++) world.getChunk(cx, cz);
+        }
+    }
+
+    private static void fillZ(CommandManager m, ServerCommandSource s, int x1, int y1, int z1,
+                              int x2, int y2, int z2, String block, int maxDepth) {
+        int step = Math.max(1, maxDepth);
+        for (int start = z1; start <= z2; start += step) {
+            int end = Math.min(z2, start + step - 1);
+            cmd(m, s, "fill " + x1 + " " + y1 + " " + start + " " + x2 + " " + y2 + " " + end + " " + block);
         }
     }
 
