@@ -16,7 +16,7 @@ public final class ControlledPhase5ScenarioDriver {
     private static final String NONE = "none";
 
     private static final int SETUP = 40, WALK = 100, SPRINT = 100, JUMP = 100, SNEAK = 100,
-            DIAGONAL = 100, COLLISION = 100, WATER_MOVE = 120, LAVA_MOVE = 60,
+            DIAGONAL = 100, COLLISION = 100, WATER_MOVE = 120, LAVA_MOVE = 30,
             SPEED_EFFECT = 80, SLOWNESS_EFFECT = 80, JUMP_BOOST = 100, STEP = 110, TAIL = 70;
     private static final int RESET_SETTLE = 10;
 
@@ -239,8 +239,8 @@ public final class ControlledPhase5ScenarioDriver {
         server.executeSync(() -> {
             CommandManager m = server.getCommandManager(); ServerCommandSource s = server.getCommandSource();
             command(m, s, "effect clear @a");
-            command(m, s, "execute as @a run data modify entity @s Fire set value 0s");
             command(m, s, "gamemode survival @a");
+            command(m, s, "execute as @a run data modify entity @s Fire set value 0s");
             command(m, s, "tp @a " + x + " " + y + " " + z + " " + yaw + " 0");
         });
     }
