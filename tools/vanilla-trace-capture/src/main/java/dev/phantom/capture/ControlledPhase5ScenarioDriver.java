@@ -18,7 +18,7 @@ public final class ControlledPhase5ScenarioDriver {
     private static final int SETUP = 40, WALK = 100, SPRINT = 100, JUMP = 100, SNEAK = 100,
             DIAGONAL = 100, COLLISION = 100, WATER_MOVE = 120, LAVA_MOVE = 60,
             SPEED_EFFECT = 80, SLOWNESS_EFFECT = 80, JUMP_BOOST = 100, STEP = 110, TAIL = 70;
-    private static final int RESET_SETTLE = 6;
+    private static final int RESET_SETTLE = 10;
 
     /** Each phase owns a large 140-block-long arena on its own Z segment. */
     private static final int ARENA_SPACING = 140;
@@ -26,8 +26,6 @@ public final class ControlledPhase5ScenarioDriver {
     private static final int ARENA_LENGTH = 120;
     private static final int ARENA_MIN_X = -32;
     private static final int ARENA_MAX_X = 32;
-    private static final int COURSE_MIN_Z = ARENA_START_Z - 8;
-    private static final int COURSE_MAX_Z = ARENA_START_Z + 13 * ARENA_SPACING + ARENA_LENGTH + 8;
 
     private static final int WALK_START = SETUP;
     private static final int SPRINT_START = WALK_START + WALK;
@@ -52,9 +50,10 @@ public final class ControlledPhase5ScenarioDriver {
     private long scenarioTick = -1;
     private String scenario = NONE;
     private String phase = "idle";
+    private String pendingPhase = null;
+    private long pendingResetStart = Long.MIN_VALUE;
     private boolean finished;
     private boolean worldPrepared;
-    private long lastResetStart = Long.MIN_VALUE;
     private static volatile ControlledPhase5ScenarioDriver LAST_INSTANCE;
 
     public static String phaseLabel() {
@@ -71,7 +70,7 @@ public final class ControlledPhase5ScenarioDriver {
         if (!requested.equals(ALL) && !requested.equals(WATER)) throw new IllegalArgumentException("Unsupported Phase 5 scenario: " + requested);
         if (!requested.equals(scenario)) {
             scenario = requested; scenarioTick = 0; finished = false; worldPrepared = false; phase = "setup";
-            lastResetStart = Long.MIN_VALUE;
+            pendingPhase = null; pendingResetStart = Long.MIN_VALUE;
             release(client.options);
         }
         if (finished) { release(client.options); return; }
@@ -102,49 +101,64 @@ public final class ControlledPhase5ScenarioDriver {
     private void runAll(MinecraftClient client) {
         long t = scenarioTick;
         boolean forward = false, right = false, left = false, jump = false, sneak = false, sprint = false;
-        if (t < SETUP) phase = "setup";
-        else if (t < SPRINT_START) { phase = "walk"; forward = true; }
-        else if (t < JUMP_START) { phase = "sprint"; forward = true; sprint = true; }
-        else if (t < SNEAK_START) { phase = "jump"; forward = true; jump = t >= JUMP_START + RESET_SETTLE && t < JUMP_START + RESET_SETTLE + 2; }
-        else if (t < DIAGONAL_START) { phase = "sneak"; forward = true; sneak = true; }
-        else if (t < COLLISION_START) { phase = "diagonal"; forward = true; left = true; }
-        else if (t < WATER_START) { phase = "collision"; forward = true; }
-        else if (t < LAVA_START) { phase = "water"; forward = true; sprint = true; }
-        else if (t < SPEED_START) { phase = "lava"; forward = true; }
-        else if (t < SLOWNESS_START) { phase = "speed-effect"; forward = true; }
-        else if (t < JUMP_BOOST_START) { phase = "slowness-effect"; forward = true; }
-        else if (t < STEP_START) { phase = "jump-boost"; forward = true; jump = t >= JUMP_BOOST_START + RESET_SETTLE && t < JUMP_BOOST_START + RESET_SETTLE + 2; }
-        else if (t < TAIL_START) { phase = "step"; forward = true; }
-        else phase = "tail";
+        String plannedPhase;
+        if (t < SETUP) plannedPhase = "setup";
+        else if (t < SPRINT_START) { plannedPhase = "walk"; forward = true; }
+        else if (t < JUMP_START) { plannedPhase = "sprint"; forward = true; sprint = true; }
+        else if (t < SNEAK_START) { plannedPhase = "jump"; forward = true; jump = t >= JUMP_START + RESET_SETTLE && t < JUMP_START + RESET_SETTLE + 2; }
+        else if (t < DIAGONAL_START) { plannedPhase = "sneak"; forward = true; sneak = true; }
+        else if (t < COLLISION_START) { plannedPhase = "diagonal"; forward = true; left = true; }
+        else if (t < WATER_START) { plannedPhase = "collision"; forward = true; }
+        else if (t < LAVA_START) { plannedPhase = "water"; forward = true; sprint = true; }
+        else if (t < SPEED_START) { plannedPhase = "lava"; forward = true; }
+        else if (t < SLOWNESS_START) { plannedPhase = "speed-effect"; forward = true; }
+        else if (t < JUMP_BOOST_START) { plannedPhase = "slowness-effect"; forward = true; }
+        else if (t < STEP_START) { plannedPhase = "jump-boost"; forward = true; jump = t >= JUMP_BOOST_START + RESET_SETTLE && t < JUMP_BOOST_START + RESET_SETTLE + 2; }
+        else if (t < TAIL_START) { plannedPhase = "step"; forward = true; }
+        else plannedPhase = "tail";
 
-        long start = phaseStartTick();
-        if (t == start) {
-            lastResetStart = t;
-            switch (phase) {
-                case "walk" -> serverReset(client, 0.0, 64.0, arenaStartFor("walk") + 12.0, 0);
-                case "sprint" -> serverReset(client, 0.0, 64.0, arenaStartFor("sprint") + 12.0, 0);
-                case "jump" -> serverReset(client, 0.0, 64.0, arenaStartFor("jump") + 12.0, 0);
-                case "sneak" -> serverReset(client, 0.0, 64.0, arenaStartFor("sneak") + 12.0, 0);
-                case "diagonal" -> serverReset(client, 0.0, 64.0, arenaStartFor("diagonal") + 12.0, 0);
-                case "collision" -> serverReset(client, 0.0, 64.0, arenaStartFor("collision") + 12.0, 0);
-                case "water" -> serverReset(client, 0.0, 64.0, arenaStartFor("water") + 12.0, 0);
-                case "lava" -> serverReset(client, 0.0, 64.0, arenaStartFor("lava") + 12.0, 0);
-                case "speed-effect" -> { serverReset(client, 0.0, 64.0, arenaStartFor("speed-effect") + 12.0, 0); giveEffect(client, "minecraft:speed", 0); }
-                case "slowness-effect" -> { serverReset(client, 0.0, 64.0, arenaStartFor("slowness-effect") + 12.0, 0); giveEffect(client, "minecraft:slowness", 0); }
-                case "jump-boost" -> { serverReset(client, 0.0, 64.0, arenaStartFor("jump-boost") + 12.0, 0); giveEffect(client, "minecraft:jump_boost", 0); }
-                case "step" -> serverReset(client, 0.0, 64.0, arenaStartFor("step") + 12.0, 0);
-                default -> { }
+        if (pendingPhase != null) {
+            int targetZ = arenaStartFor(pendingPhase);
+            double targetZExact = targetZ + 12.0;
+            boolean landed = Math.abs(client.player.getX()) < 1.5
+                    && Math.abs(client.player.getY() - 64.0) < 1.5
+                    && Math.abs(client.player.getZ() - targetZExact) < 1.5;
+            phase = landed ? plannedPhase : "transition";
+            if (landed) {
+                pendingPhase = null;
+                pendingResetStart = Long.MIN_VALUE;
+            } else {
+                if (t - pendingResetStart >= RESET_SETTLE) {
+                    performResetForPhase(client, pendingPhase);
+                    pendingResetStart = t;
+                }
+                apply(client.options, false, false, false, false, false, false, false);
+                scenarioTick++;
+                return;
             }
         }
-        if (lastResetStart != Long.MIN_VALUE && t - lastResetStart < RESET_SETTLE) {
+
+        if (!plannedPhase.equals("setup") && phase.equals(plannedPhase) && phaseStartTick(plannedPhase) == t) {
+            pendingPhase = plannedPhase;
+            pendingResetStart = t;
+            performResetForPhase(client, plannedPhase);
+            phase = "transition";
             forward = right = left = jump = sneak = sprint = false;
         }
+
         apply(client.options, forward, false, left, right, jump, sneak, sprint);
         finishIfDone(client, ALL_TOTAL);
     }
 
-    private long phaseStartTick() {
-        return switch (phase) {
+    private void performResetForPhase(MinecraftClient client, String phaseName) {
+        serverReset(client, 0.0, 64.0, arenaStartFor(phaseName) + 12.0, 0);
+        if (phaseName.equals("speed-effect")) giveEffect(client, "minecraft:speed", 0);
+        else if (phaseName.equals("slowness-effect")) giveEffect(client, "minecraft:slowness", 0);
+        else if (phaseName.equals("jump-boost")) giveEffect(client, "minecraft:jump_boost", 0);
+    }
+
+    private static long phaseStartTick(String name) {
+        return switch (name) {
             case "walk" -> WALK_START; case "sprint" -> SPRINT_START; case "jump" -> JUMP_START;
             case "sneak" -> SNEAK_START; case "diagonal" -> DIAGONAL_START; case "collision" -> COLLISION_START;
             case "water" -> WATER_START; case "lava" -> LAVA_START; case "speed-effect" -> SPEED_START;
@@ -213,6 +227,7 @@ public final class ControlledPhase5ScenarioDriver {
             command(m, s, "fill 101 63 " + (lavaZ + 4) + " 104 66 " + (lavaZ + 72) + " minecraft:stone");
 
             command(m, s, "gamemode survival @a"); command(m, s, "effect clear @a");
+            command(m, s, "execute as @a run data modify entity @s Fire set value 0s");
             command(m, s, "tp @a 0 64 " + (arenaStartFor("walk") + 12) + " 0 0");
             command(m, s, "forceload remove all");
         });
@@ -223,7 +238,9 @@ public final class ControlledPhase5ScenarioDriver {
         if (server == null) throw new IllegalStateException("Integrated server disappeared during Phase 5 reset");
         server.executeSync(() -> {
             CommandManager m = server.getCommandManager(); ServerCommandSource s = server.getCommandSource();
-            command(m, s, "effect clear @a"); command(m, s, "gamemode survival @a");
+            command(m, s, "effect clear @a");
+            command(m, s, "execute as @a run data modify entity @s Fire set value 0s");
+            command(m, s, "gamemode survival @a");
             command(m, s, "tp @a " + x + " " + y + " " + z + " " + yaw + " 0");
         });
     }
