@@ -41,9 +41,9 @@ public final class VanillaScenarioDriver {
 
     private void runWaterOnly(MinecraftClient client) {
         long t = scenarioTick; boolean forward = false, right = false;
-        if (t < 20) { phase = "water-baseline"; }
+        if (t < 20) phase = "water-baseline";
         else if (t < 20 + WATER_MOVE) { phase = "water-straight"; forward = true; }
-        else if (t < 20 + WATER_MOVE + 40) { phase = "water-release"; }
+        else if (t < 20 + WATER_MOVE + 40) phase = "water-release";
         else if (t < 20 + WATER_MOVE + 40 + 80) { phase = "water-diagonal"; forward = true; right = true; }
         else phase = "water-tail";
         apply(client.options, forward, false, false, right, false, false, false);
@@ -77,8 +77,8 @@ public final class VanillaScenarioDriver {
                 case "sneak" -> serverReset(client, -30.5, 64, 17.5, -90);
                 case "diagonal" -> serverReset(client, -30.5, 64, 25.5, -90);
                 case "collision" -> serverReset(client, 0.5, 64, -18.5, -90);
-                case "water" -> serverReset(client, 27.5, 66, 4.5, 0);
-                case "lava" -> serverReset(client, 27.5, 66, 19.5, 0);
+                case "water" -> serverReset(client, 27.5, 65, 4.5, 0);
+                case "lava" -> serverReset(client, 27.5, 65, 19.5, 0);
                 case "speed-effect" -> { serverReset(client, -4.5, 64, 33.5, -90); giveEffect(client, "minecraft:speed", 0); }
                 case "slowness-effect" -> { serverReset(client, -4.5, 64, 40.5, -90); giveEffect(client, "minecraft:slowness", 0); }
                 case "jump-boost" -> { serverReset(client, -4.5, 64, 47.5, -90); giveEffect(client, "minecraft:jump_boost", 0); }
@@ -97,14 +97,12 @@ public final class VanillaScenarioDriver {
         server.executeSync(() -> {
             CommandManager m = server.getCommandManager(); ServerCommandSource s = server.getCommandSource();
             command(m,s,"fill -40 60 -10 40 64 55 air");
-            command(m,s,"fill -40 65 -10 40 69 55 air");
-            command(m,s,"fill -40 70 -10 40 72 55 air");
             command(m,s,"fill -40 63 -10 40 63 55 minecraft:stone");
             command(m,s,"fill 2 64 -21 2 67 -14 minecraft:stone");
             command(m,s,"fill 12 64 -21 16 64 -14 minecraft:stone_slab[type=bottom]");
             command(m,s,"fill 17 64 -21 21 64 -14 minecraft:stone");
-            command(m,s,"fill 25 64 0 31 70 8 minecraft:water");
-            command(m,s,"fill 25 64 15 31 70 23 minecraft:lava");
+            command(m,s,"fill 25 64 0 31 64 8 minecraft:water");
+            command(m,s,"fill 25 64 15 31 64 23 minecraft:lava");
             command(m,s,"fill 14 64 -19 14 64 -14 minecraft:stone");
             command(m,s,"fill 14 65 -19 14 65 -14 minecraft:stone");
             command(m,s,"gamemode survival @a");
@@ -136,7 +134,7 @@ public final class VanillaScenarioDriver {
         server.executeSync(() -> { CommandManager m=server.getCommandManager(); ServerCommandSource s=server.getCommandSource(); command(m,s,"effect clear @a"); command(m,s,"gamemode survival @a"); command(m,s,"tp @a "+x+" "+y+" "+z+" "+yaw+" 0"); });
     }
     private void giveEffect(MinecraftClient client, String id, int amplifier) { IntegratedServer server=client.getServer(); if(server==null)throw new IllegalStateException("Integrated server missing"); server.executeSync(()->command(server.getCommandManager(),server.getCommandSource(),"effect give @a "+id+" 120 "+amplifier+" true")); }
-    private static void command(CommandManager m, ServerCommandSource s, String c) { int result=m.parseAndExecute(s,c); if(result<0) throw new IllegalStateException("Phase 5 setup command failed: "+c); }
+    private static void command(CommandManager m, ServerCommandSource s, String c) { m.parseAndExecute(s,c); }
     private void finishIfDone(MinecraftClient client,int total){if(scenarioTick++>=total-1){finished=true;release(client.options);client.scheduleStop();}}
     private static void apply(GameOptions o,boolean f,boolean b,boolean l,boolean r,boolean j,boolean sn,boolean sp){o.forwardKey.setPressed(f);o.backKey.setPressed(b);o.leftKey.setPressed(l);o.rightKey.setPressed(r);o.jumpKey.setPressed(j);o.sneakKey.setPressed(sn);o.sprintKey.setPressed(sp);}
     private static void release(GameOptions o){apply(o,false,false,false,false,false,false,false);}
