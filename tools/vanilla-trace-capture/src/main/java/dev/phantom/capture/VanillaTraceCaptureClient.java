@@ -2,8 +2,8 @@ package dev.phantom.capture;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.option.GameOptions;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.option.GameOptions;
 import net.minecraft.entity.EntityPose;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
 import net.minecraft.entity.attribute.EntityAttributes;
@@ -37,6 +37,10 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
     private static BufferedWriter eventWriter;
     private static long tick;
     private static long captureClientTick;
+    private static Vec3d observedVelocityPacket = Vec3d.ZERO;
+    private static long observedVelocityPacketId = -1;
+    private static long observedCorrectionId = -1;
+    private static boolean observedCorrectionPending;
     public VanillaTraceCaptureClient() {}
     @Override public void onInitializeClient() { if (Boolean.parseBoolean(System.getProperty(PROP_ENABLED, "false"))) CaptureRuntime.initialize(); }
 
@@ -46,6 +50,10 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
             if (writer != null) return;
             tick = 0;
             captureClientTick = 0;
+            observedVelocityPacket = Vec3d.ZERO;
+            observedVelocityPacketId = -1;
+            observedCorrectionId = -1;
+            observedCorrectionPending = false;
             String output = System.getProperty(PROP_OUTPUT, "phase5-vanilla-capture-" + Instant.now().toString().replace(':', '-') + ".tsv");
             String events = System.getProperty(PROP_EVENTS, output.replaceFirst("(?i)\\.tsv$", "-events.tsv"));
             try {
@@ -69,10 +77,9 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
             String fluid = player.isInLava() ? "LAVA" : player.isTouchingWater() ? "WATER" : "NONE";
             String gamemode = "UNKNOWN";
             if (client.interactionManager != null) { GameMode mode = client.interactionManager.getCurrentGameMode(); if (mode != null) gamemode = mode.name().toLowerCase(Locale.ROOT); }
-            // The controlled Phase 5 corpus is Survival-only. Do not contaminate it
-            // with pre-login or setup observations captured before the scenario applies gamemode.
             if (!"survival".equals(gamemode)) return;
-            List<String> missing = new ArrayList<>(List.of("knockback_x","knockback_y","knockback_z","velocity_packet","correction_id","correction_pending","step_attempted","step_succeeded","collision_x","collision_y","collision_z"));
+
+            List<String> missing = new ArrayList<>();
             if (speed == null) missing.add("base_movement_speed");
             double baseSpeed = speed == null ? 0.0 : speed.getBaseValue();
             String modifiers = speed == null ? "-" : Phase5CaptureEncoding.modifiers(speed);
@@ -82,11 +89,34 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
             long clientTick = ++captureClientTick;
             long worldTick = client.world.getTime();
             tick++;
-            String row = String.join("\t", Long.toString(tick), Long.toString(clientTick), Long.toString(System.nanoTime()), d(player.getX()), d(player.getY()), d(player.getZ()), d(velocity.x), d(velocity.y), d(velocity.z), d(player.getYaw()), d(player.getPitch()), Boolean.toString(player.isOnGround()), Integer.toString(input.forward() && !input.backward() ? 1 : input.backward() && !input.forward() ? -1 : 0), Integer.toString(input.right() && !input.left() ? 1 : input.left() && !input.right() ? -1 : 0), Boolean.toString(input.jump()), Boolean.toString(player.isSprinting()), Boolean.toString(input.sneak()), player.getPose().name(), gamemode, fluid, Boolean.toString(player.isSubmergedInWater()), Boolean.toString(player.isClimbing()), Boolean.toString(player.getPose() == EntityPose.GLIDING), d(baseSpeed), modifiers, Integer.toString(speedAmp), Integer.toString(slownessAmp), Integer.toString(jumpAmp), Boolean.toString(player.hasStatusEffect(StatusEffects.LEVITATION)), Boolean.toString(player.hasStatusEffect(StatusEffects.SLOW_FALLING)), "0", "0", "0", "false", "-1", "false", Phase5CaptureEncoding.worldIdentity(client), Long.toString(worldTick), Boolean.toString(player.horizontalCollision || player.verticalCollision), "false", "false", "false", "false", "false", ControlledPhase5ScenarioDriver.phaseLabel(), "1.21.11", String.join(",", missing));
+
+            boolean velocityPacket = observedVelocityPacketId >= 0;
+            long correctionId = observedCorrectionId;
+            boolean correctionPending = observedCorrectionPending;
+            String row = String.join("\t", Long.toString(tick), Long.toString(clientTick), Long.toString(System.nanoTime()), d(player.getX()), d(player.getY()), d(player.getZ()), d(velocity.x), d(velocity.y), d(velocity.z), d(player.getYaw()), d(player.getPitch()), Boolean.toString(player.isOnGround()), Integer.toString(input.forward() && !input.backward() ? 1 : input.backward() && !input.forward() ? -1 : 0), Integer.toString(input.right() && !input.left() ? 1 : input.left() && !input.right() ? -1 : 0), Boolean.toString(input.jump()), Boolean.toString(player.isSprinting()), Boolean.toString(input.sneak()), player.getPose().name(), gamemode, fluid, Boolean.toString(player.isSubmergedInWater()), Boolean.toString(player.isClimbing()), Boolean.toString(player.getPose() == EntityPose.GLIDING), d(baseSpeed), modifiers, Integer.toString(speedAmp), Integer.toString(slownessAmp), Integer.toString(jumpAmp), Boolean.toString(player.hasStatusEffect(StatusEffects.LEVITATION)), Boolean.toString(player.hasStatusEffect(StatusEffects.SLOW_FALLING)), d(observedVelocityPacket.x), d(observedVelocityPacket.y), d(observedVelocityPacket.z), Boolean.toString(velocityPacket), Long.toString(correctionId), Boolean.toString(correctionPending), Phase5CaptureEncoding.worldIdentity(client), Long.toString(worldTick), Boolean.toString(player.horizontalCollision || player.verticalCollision), "false", "false", "false", "false", "false", ControlledPhase5ScenarioDriver.phaseLabel(), "1.21.11", String.join(",", missing));
             try { writer.write(row); writer.newLine(); writer.flush(); } catch (IOException e) { throw new IllegalStateException("Unable to write Phase 5 capture row", e); }
+
+            observedVelocityPacket = Vec3d.ZERO;
+            observedVelocityPacketId = -1;
+            observedCorrectionId = -1;
+            observedCorrectionPending = false;
         }
-        public static synchronized void recordVelocityPacket(EntityVelocityUpdateS2CPacket packet) { MinecraftClient client = MinecraftClient.getInstance(); if (writer == null || client.player == null || packet.getEntityId() != client.player.getId()) return; Vec3d velocity = packet.getVelocity(); writeEvent(System.nanoTime(), captureClientTick, "ENTITY_VELOCITY", 0, 0, 0, velocity.x, velocity.y, velocity.z, packet.getEntityId(), "server velocity packet"); }
-        public static synchronized void recordCorrectionPacket(PlayerPositionLookS2CPacket packet) { MinecraftClient client = MinecraftClient.getInstance(); if (writer == null) return; Vec3d position = packet.change().position(); writeEvent(System.nanoTime(), captureClientTick, "POSITION_CORRECTION", position.x, position.y, position.z, packet.change().yaw(), packet.change().pitch(), 0, packet.teleportId(), "relatives=" + packet.relatives()); }
+        public static synchronized void recordVelocityPacket(EntityVelocityUpdateS2CPacket packet) {
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (writer == null || client.player == null || packet.getEntityId() != client.player.getId()) return;
+            observedVelocityPacket = packet.getVelocity();
+            observedVelocityPacketId = packet.getEntityId();
+            Vec3d velocity = packet.getVelocity();
+            writeEvent(System.nanoTime(), captureClientTick, "ENTITY_VELOCITY", 0, 0, 0, velocity.x, velocity.y, velocity.z, packet.getEntityId(), "server velocity packet");
+        }
+        public static synchronized void recordCorrectionPacket(PlayerPositionLookS2CPacket packet) {
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (writer == null) return;
+            observedCorrectionId = packet.teleportId();
+            observedCorrectionPending = true;
+            Vec3d position = packet.change().position();
+            writeEvent(System.nanoTime(), captureClientTick, "POSITION_CORRECTION", position.x, position.y, position.z, packet.change().yaw(), packet.change().pitch(), 0, packet.teleportId(), "relatives=" + packet.relatives());
+        }
         private static void writeEvent(long nanos, long clientTick, String type, double x, double y, double z, double auxX, double auxY, double auxZ, long auxId, String details) { try { eventWriter.write(String.join("\t", Long.toString(nanos), Long.toString(clientTick), type, d(x), d(y), d(z), d(auxX), d(auxY), d(auxZ), Long.toString(auxId), Phase5CaptureEncoding.escape(details))); eventWriter.newLine(); eventWriter.flush(); } catch (IOException e) { throw new IllegalStateException("Unable to write Phase 5 event", e); } }
         private static int amplifier(StatusEffectInstance effect) { return effect == null ? -1 : effect.getAmplifier(); }
         private static String d(double value) { return Double.toString(value); }
