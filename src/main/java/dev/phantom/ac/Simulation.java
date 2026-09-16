@@ -26,7 +26,7 @@ public final class Simulation {
       double speed=attributes.value()*effects.speedMultiplier()*(input.sprint()?1.3:1.0)*(input.sneak()?0.3:1.0);
       Vec3 acceleration=new Vec3(input.strafe()*WALK_ACCEL*speed*Math.cos(radians)-input.forward()*WALK_ACCEL*speed*Math.sin(radians),0,input.forward()*WALK_ACCEL*speed*Math.cos(radians)+input.strafe()*WALK_ACCEL*speed*Math.sin(radians));
       Vec3 velocity=s.velocity().add(acceleration);
-      if(env.fluid()!=Phase5Mechanics.Fluid.NONE) velocity=new Vec3(velocity.x()*env.fluidSpeedMultiplier()*env.fluidDrag,velocity.y()*env.fluidDrag,velocity.z()*env.fluidSpeedMultiplier()*env.fluidDrag);
+      if(env.fluid()!=Phase5Mechanics.Fluid.NONE) velocity=new Vec3(velocity.x()*env.fluidSpeedMultiplier()*env.fluidDrag(),velocity.y()*env.fluidDrag(),velocity.z()*env.fluidSpeedMultiplier()*env.fluidDrag());
       if(env.climbable()) velocity=new Vec3(velocity.x(),Math.max(-0.15,velocity.y()),velocity.z());
       double gravity=GRAVITY*env.gravityMultiplier();
       if(input.jump()&&s.onGround()) velocity=new Vec3(velocity.x(),JUMP+effects.jumpVelocityAdd(),velocity.z());
@@ -36,7 +36,7 @@ public final class Simulation {
       World.CollisionResult collision=World.resolveWithStep(world,start,velocity,s.onGround()?STEP_HEIGHT:0);
       Vec3 displacement=collision.resolved(); boolean grounded=collision.collidedY()&&velocity.y()<=0;
       double horizontalFactor=grounded?GROUND_FRICTION:AIR_DRAG;
-      if(env.fluid()!=Phase5Mechanics.Fluid.NONE) horizontalFactor*=env.fluidDrag;
+      if(env.fluid()!=Phase5Mechanics.Fluid.NONE) horizontalFactor*=env.fluidDrag();
       Vec3 nextVelocity=new Vec3(collision.collidedX()?0:velocity.x()*horizontalFactor,grounded?0:velocity.y()*AIR_DRAG,collision.collidedZ()?0:velocity.z()*horizontalFactor);
       Phase5Mechanics.Pose nextPose=Phase5Mechanics.nextPose(priorPose,env);
       Player next=new Player(s.position().add(displacement),nextVelocity,s.yaw(),s.pitch(),grounded,s.gamemode(),s.effects(),s.awaitingTeleport(),false);
