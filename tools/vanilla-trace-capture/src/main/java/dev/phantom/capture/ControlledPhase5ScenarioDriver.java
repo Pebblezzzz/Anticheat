@@ -9,6 +9,7 @@ import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.integrated.IntegratedServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.Locale;
@@ -207,11 +208,14 @@ public final class ControlledPhase5ScenarioDriver {
         server.executeSync(() -> {
             CommandManager m = server.getCommandManager();
             ServerCommandSource s = server.getCommandSource();
+            int minZ = baseZ(PHASES[minPhase]) - 8;
+            int maxZ = baseZ(PHASES[maxPhase]) + 310;
+            loadArenaChunks(server.getOverworld(), minZ, maxZ);
+            System.out.println("[Phase5] arena chunks loaded z=" + minZ + ".." + maxZ);
+
             cmd(m, s, "difficulty peaceful");
             cmd(m, s, "time set day");
             cmd(m, s, "weather clear");
-            int minZ = baseZ(PHASES[minPhase]) - 8;
-            int maxZ = baseZ(PHASES[maxPhase]) + 310;
             cmd(m, s, "fill -24 63 " + minZ + " 24 63 " + maxZ + " minecraft:stone");
             cmd(m, s, "fill -24 64 " + minZ + " 24 67 " + maxZ + " air");
             cmd(m, s, "fill -24 64 " + minZ + " -23 72 " + maxZ + " minecraft:stone");
@@ -242,6 +246,18 @@ public final class ControlledPhase5ScenarioDriver {
             cmd(m, s, "gamemode survival @a");
             cmd(m, s, "effect clear @a");
         });
+    }
+
+    private static void loadArenaChunks(ServerWorld world, int minZ, int maxZ) {
+        int minChunkZ = Math.floorDiv(minZ, 16);
+        int maxChunkZ = Math.floorDiv(maxZ, 16);
+        int minChunkX = Math.floorDiv(-24, 16);
+        int maxChunkX = Math.floorDiv(24, 16);
+        for (int cz = minChunkZ; cz <= maxChunkZ; cz++) {
+            for (int cx = minChunkX; cx <= maxChunkX; cx++) {
+                world.getChunk(cx, cz);
+            }
+        }
     }
 
     private static int baseZ(String phase) {
