@@ -4,6 +4,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.EntityPose;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 
@@ -47,6 +48,40 @@ final class Phase5CaptureDebug {
         }
     }
 
+    static void waiting(MinecraftClient client, String phase, int elapsed,
+                        double expectedX, double expectedY, double expectedZ, double expectedYaw,
+                        int settledTicks) {
+        ClientPlayerEntity player = client.player;
+        if (player == null || client.world == null) return;
+
+        Vec3d velocity = player.getVelocity();
+        double dx = player.getX() - expectedX;
+        double dy = player.getY() - expectedY;
+        double dz = player.getZ() - expectedZ;
+        double yawDelta = wrapDegrees(player.getYaw() - (float) expectedYaw);
+
+        String row = "WAITING"
+                + "\tphase=" + phase
+                + "\telapsed=" + elapsed
+                + "\texpected=" + expectedX + "," + expectedY + "," + expectedZ + ",yaw=" + expectedYaw
+                + "\tactual=" + player.getX() + "," + player.getY() + "," + player.getZ() + ",yaw=" + player.getYaw()
+                + "\tdelta=" + dx + "," + dy + "," + dz + ",yawDelta=" + yawDelta
+                + "\tvelocity=" + velocity.x + "," + velocity.y + "," + velocity.z
+                + "\tground=" + player.isOnGround()
+                + "\tclimbing=" + player.isClimbing()
+                + "\tholding_ladder=" + player.isHoldingOntoLadder()
+                + "\tclimbing_pos=" + player.getClimbingPos().map(BlockPos::toShortString).orElse("none")
+                + "\tsettled_ticks=" + settledTicks;
+
+        synchronized (LOCK) {
+            initialize();
+            write(row);
+            if (elapsed % 10 == 0 || settledTicks > 0) {
+                System.out.println("[Phase5-Debug] " + row);
+            }
+        }
+    }
+
     static void tick(MinecraftClient client, String phase, int elapsed, int ladderZ) {
         ClientPlayerEntity player = client.player;
         if (player == null || client.world == null) return;
@@ -65,7 +100,7 @@ final class Phase5CaptureDebug {
         minZ = Math.min(minZ, player.getZ());
         maxZ = Math.max(maxZ, player.getZ());
 
-        StringBuilder row = new StringBuilder(512);
+        StringBuilder row = new StringBuilder(1024);
         append(row, "TICK");
         append(row, "phase=" + phase);
         append(row, "elapsed=" + elapsed);
@@ -82,7 +117,9 @@ final class Phase5CaptureDebug {
         append(row, "swimming=" + player.isSwimming());
         append(row, "climbing=" + climbing);
         append(row, "holding_ladder=" + holding);
+        append(row, "climbing_pos=" + player.getClimbingPos().map(BlockPos::toShortString).orElse("none"));
         append(row, "fall_flying=" + (player.getPose() == EntityPose.GLIDING));
+        append(row, "bbox=" + box(player.getBoundingBox()));
         append(row, "block_pos=" + pos.getX() + "," + pos.getY() + "," + pos.getZ());
         append(row, "ladder_z=" + ladderZ);
         append(row, "dz_to_ladder=" + (player.getZ() - ladderZ));
@@ -150,7 +187,12 @@ final class Phase5CaptureDebug {
                 + ",yaw=" + player.getYaw() + ",pose=" + player.getPose()
                 + ",ground=" + player.isOnGround() + ",climbing=" + player.isClimbing()
                 + ",holding=" + player.isHoldingOntoLadder()
+                + ",climbing_pos=" + player.getClimbingPos().map(BlockPos::toShortString).orElse("none")
                 + ",vel=" + v.x + "," + v.y + "," + v.z;
+    }
+
+    private static String box(Box box) {
+        return box.minX + "," + box.minY + "," + box.minZ + ".." + box.maxX + "," + box.maxY + "," + box.maxZ;
     }
 
     private static String nearby(World world, BlockPos center, int ladderZ) {
@@ -166,6 +208,13 @@ final class Phase5CaptureDebug {
             }
         }
         return out.toString();
+    }
+
+    private static double wrapDegrees(double value) {
+        double wrapped = value % 360.0;
+        if (wrapped >= 180.0) wrapped -= 360.0;
+        if (wrapped < -180.0) wrapped += 360.0;
+        return wrapped;
     }
 
     private static void append(StringBuilder out, String value) {
