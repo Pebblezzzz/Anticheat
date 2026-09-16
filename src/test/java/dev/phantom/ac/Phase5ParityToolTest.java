@@ -77,7 +77,6 @@ class Phase5ParityToolTest {
     var result = new Simulation.Vanilla12111Physics().step(context);
     var actual = result.state();
 
-    // Measured from a real Minecraft Java 1.21.11 client trace on a stone platform.
     assertEquals(-177.6696265266769,actual.position().x(),1e-6);
     assertEquals(-463.3852016465647,actual.position().z(),1e-6);
     assertEquals(0.0018207,actual.velocity().x(),1e-6);
@@ -109,9 +108,6 @@ class Phase5ParityToolTest {
     var result = new Simulation.Vanilla12111Physics().step(context);
     var actual = result.state();
 
-    // The real trace's component direction can contain sub-tick input/rotation timing;
-    // horizontal speed is the stable invariant at this observation point.
-    // Measured from Minecraft Java 1.21.11 sprint4.tsv on a stone platform.
     double horizontalSpeed=Math.hypot(actual.velocity().x(),actual.velocity().z());
     assertEquals(0.09422147450988827,horizontalSpeed,1e-6);
   }
@@ -141,7 +137,6 @@ class Phase5ParityToolTest {
     var result = new Simulation.Vanilla12111Physics().step(context);
     var actual = result.state();
 
-    // Measured from a real Minecraft Java 1.21.11 sprint-jump trace on a stone platform.
     assertEquals(72.41999998688698,actual.position().y(),1e-6);
     assertEquals(0.33319999363422365,actual.velocity().y(),1e-6);
   }
@@ -161,7 +156,7 @@ class Phase5ParityToolTest {
     var world = new World.Snapshot(
       Map.of(new World.Pos(-23,71,26),World.Block.FULL,new World.Pos(-23,71,27),World.Block.FULL,
              new World.Pos(-22,71,26),World.Block.FULL,new World.Pos(-22,71,27),World.Block.FULL),
-      List.of(World.Chunk.containing(-23,26)));
+      Set.of(World.Chunk.containing(-23,26)));
     var context = new Simulation.PhysicsContext(
       108,
       initial,
@@ -174,11 +169,8 @@ class Phase5ParityToolTest {
     var result = new Simulation.Vanilla12111Physics().step(context);
     var actual = result.state();
 
-    // Measured from a real Minecraft Java 1.21.11 client jump2.tsv on a stone platform.
     assertEquals(-22.696485054542087,actual.position().x(),1e-6);
     assertEquals(72.0,actual.position().y(),1e-6);
-    // The observed trace and the deterministic simulator differ here by 1.237e-6 block;
-    // retain a 2e-6 bound for the captured floating-point observation point.
     assertEquals(26.464200266029426,actual.position().z(),2e-6);
     assertTrue(actual.onGround());
     assertEquals(-0.0784000015258789,actual.velocity().y(),1e-6);
