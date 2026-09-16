@@ -16,7 +16,7 @@ public final class ControlledPhase5ScenarioDriver {
     private static final String NONE = "none";
     private static final int SETUP = 40, WALK = 100, SPRINT = 100, JUMP = 100, SNEAK = 100,
             DIAGONAL = 100, COLLISION = 100, WATER_MOVE = 120, LAVA_MOVE = 60,
-            SPEED_EFFECT = 80, SLOWNESS_EFFECT = 80, JUMP_BOOST = 100, STEP = 110, TAIL = 40;
+            SPEED_EFFECT = 80, SLOWNESS_EFFECT = 80, JUMP_BOOST = 100, STEP = 110, TAIL = 70;
     private static final int ALL_TOTAL = SETUP + WALK + SPRINT + JUMP + SNEAK + DIAGONAL + COLLISION
             + WATER_MOVE + LAVA_MOVE + SPEED_EFFECT + SLOWNESS_EFFECT + JUMP_BOOST + STEP + TAIL;
     private long scenarioTick = -1;
@@ -49,7 +49,7 @@ public final class ControlledPhase5ScenarioDriver {
 
     private void runWaterOnly(MinecraftClient client) {
         long t = scenarioTick; boolean forward = false, right = false;
-        if (t < 20) { phase = "water-baseline"; if (t == 0) serverReset(client, -10.5, 65.0, -5.5, -90); }
+        if (t < 20) { phase = "water-baseline"; if (t == 0) serverReset(client, -10.5, 65.0, -10.5, -90); }
         else if (t < 20 + WATER_MOVE) { phase = "water-straight"; forward = true; }
         else if (t < 20 + WATER_MOVE + 40) { phase = "water-release"; }
         else if (t < 20 + WATER_MOVE + 40 + 80) { phase = "water-diagonal"; forward = true; right = true; }
@@ -85,8 +85,8 @@ public final class ControlledPhase5ScenarioDriver {
                 case "sneak" -> serverReset(client, -10.5, 64.0, 6.5, -90);
                 case "diagonal" -> serverReset(client, -10.5, 64.0, 8.5, -90);
                 case "collision" -> serverReset(client, -10.5, 64.0, 10.5, -90);
-                case "water" -> serverReset(client, -10.5, 65.0, -5.5, -90);
-                case "lava" -> serverReset(client, -10.5, 65.0, -12.5, -90);
+                case "water" -> serverReset(client, -10.5, 65.0, -10.5, -90);
+                case "lava" -> serverReset(client, -10.5, 65.0, -14.0, -90);
                 case "speed-effect" -> { serverReset(client, -10.5, 64.0, 13.5, -90); giveEffect(client, "minecraft:speed", 0); }
                 case "slowness-effect" -> { serverReset(client, -10.5, 64.0, 15.5, -90); giveEffect(client, "minecraft:slowness", 0); }
                 case "jump-boost" -> { serverReset(client, -10.5, 64.0, 17.5, -90); giveEffect(client, "minecraft:jump_boost", 0); }
@@ -110,9 +110,8 @@ public final class ControlledPhase5ScenarioDriver {
             command(m, s, "fill -16 63 -16 16 63 24 minecraft:stone");
             command(m, s, "fill 0 64 9 0 66 12 minecraft:stone");
             command(m, s, "fill 0 64 20 4 64 21 minecraft:stone");
-            command(m, s, "fill 0 65 20 4 65 21 minecraft:stone");
-            command(m, s, "fill -15 64 -6 15 66 -5 minecraft:water");
-            command(m, s, "fill -15 64 -13 15 66 -12 minecraft:lava");
+            command(m, s, "fill -15 64 -13 15 66 -8 minecraft:water");
+            command(m, s, "fill -15 64 -16 15 66 -13 minecraft:lava");
             command(m, s, "gamemode survival @a"); command(m, s, "effect clear @a"); command(m, s, "tp @a -10.5 64 0.5 -90 0");
         });
     }
