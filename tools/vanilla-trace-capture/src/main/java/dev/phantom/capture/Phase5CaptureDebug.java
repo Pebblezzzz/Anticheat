@@ -3,30 +3,25 @@ package dev.phantom.capture;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.server.integrated.IntegratedServer;
-import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 
+import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
-/** Detailed, observation-only diagnostics for the controlled Phase 5 corpus. */
+/** Disk-backed Phase 5 diagnostics; console output is intentionally compact. */
 final class Phase5CaptureDebug {
     private static final String PROP = "phantom.capture.debug";
     private static final Path DEFAULT = Path.of("C:\\phase5\\phase5-driver-debug.tsv");
     private static final Object LOCK = new Object();
-    private static Path path;
-    private static boolean initialized;
+    private static BufferedWriter writer;
     private static String activePhase = "unknown";
-    private static String activeWaitingPhase = "unknown";
     private static long phaseRows;
     private static long climbingRows;
     private static long holdingRows;
@@ -36,108 +31,41 @@ final class Phase5CaptureDebug {
     private static double maxY;
     private static double minZ;
     private static double maxZ;
-    private static int glideStartAttempts;
-    private static boolean glideFailureReported;
-    private static boolean lastConsoleClimbing;
-    private static boolean lastConsoleHolding;
-    private static boolean lastConsoleSwimming;
-    private static boolean lastConsoleGliding;
+    private static boolean lastClimbing;
+    private static boolean lastHolding;
+    private static boolean lastSwimming;
+    private static boolean lastGliding;
 
     private Phase5CaptureDebug() {}
 
-    static void resetAndStart(MinecraftClient client, String phase, int index, int ladderZ) {
+    static void resetAndStart(MinecraftClient client, String phase, int index, int markerZ) {
         synchronized (LOCK) {
             initialize();
             activePhase = phase;
             phaseRows = climbingRows = holdingRows = swimmingRows = glidingRows = 0;
-            glideStartAttempts = 0;
-            glideFailureReported = false;
-            lastConsoleClimbing = false;
-            lastConsoleHolding = false;
-            lastConsoleSwimming = false;
-            lastConsoleGliding = false;
             minY = Double.POSITIVE_INFINITY;
             maxY = Double.NEGATIVE_INFINITY;
             minZ = Double.POSITIVE_INFINITY;
             maxZ = Double.NEGATIVE_INFINITY;
-            write("PHASE_START\tphase=" + phase + "\tindex=" + index + "\tplayer=" + describe(client.player)
-                    + "\tladder_z=" + ladderZ);
+            lastClimbing = false;
+            lastHolding = false;
+            lastSwimming = false;
+            lastGliding = false;
+            write("PHASE_START\tphase=" + phase + "\tindex=" + index + "\tmarker_z=" + markerZ + "\tstate=" + describe(client.player));
         }
     }
 
-    static void waiting(MinecraftClient client, String phase, int elapsed,
-                        double expectedX, double expectedY, double expectedZ, double expectedYaw,
-                        int settledTicks) {
+    static void tick(MinecraftClient client, String phase, int elapsed, int markerZ) {
         ClientPlayerEntity player = client.player;
-        if (player == null || client.world == null) return;
+        if (player == null || client.world == null || !phase.equals(activePhase)) return;
 
-        if (!phase.equals(activeWaitingPhase)) {
-            activeWaitingPhase = phase;
-            if (!phase.equals("lava")) {
-                extinguish(client);
-            }
-        }
-
-        // Warmup is outside the captured trace. Keep both sides of the integrated
-        // client authoritative reset pinned to the requested origin until settled.
-        if (Math.abs(player.getX() - expectedX) > 1.0e-6
-                || Math.abs(player.getY() - expectedY) > 1.0e-6
-                || Math.abs(player.getZ() - expectedZ) > 1.0e-6
-                || Math.abs(player.getYaw() - (float) expectedYaw) > 1.0e-4) {
-            player.requestTeleport(expectedX, expectedY, expectedZ);
-            player.setVelocity(0.0D, 0.0D, 0.0D);
-            player.setOnGround(true);
-            player.setYaw((float) expectedYaw);
-            player.setPitch(0.0F);
-            player.fallDistance = 0.0F;
-        }
-
-        Vec3d velocity = player.getVelocity();
-        double dx = player.getX() - expectedX;
-        double dy = player.getY() - expectedY;
-        double dz = player.getZ() - expectedZ;
-        double yawDelta = wrapDegrees(player.getYaw() - (float) expectedYaw);
-
-        String row = "WAITING"
-                + "\tphase=" + phase
-                + "\telapsed=" + elapsed
-                + "\texpected=" + expectedX + "," + expectedY + "," + expectedZ + ",yaw=" + expectedYaw
-                + "\tactual=" + player.getX() + "," + player.getY() + "," + player.getZ() + ",yaw=" + player.getYaw()
-                + "\tdelta=" + dx + "," + dy + "," + dz + ",yawDelta=" + yawDelta
-                + "\tvelocity=" + velocity.x + "," + velocity.y + "," + velocity.z
-                + "\tground=" + player.isOnGround()
-                + "\tclimbing=" + player.isClimbing()
-                + "\tholding_ladder=" + player.isHoldingOntoLadder()
-                + "\tclimbing_pos=" + player.getClimbingPos().map(BlockPos::toShortString).orElse("none")
-                + "\tgliding=" + player.isGliding()
-                + "\tpose=" + player.getPose()
-                + "\tchest=" + player.getEquippedStack(EquipmentSlot.CHEST)
-                + "\tsettled_ticks=" + settledTicks;
-
-        synchronized (LOCK) {
-            initialize();
-            write(row);
-            if (elapsed == 0 || elapsed % 25 == 0 || settledTicks > 0) {
-                System.out.println("[Phase5-Debug] " + row);
-            }
-        }
-    }
-
-    static void tick(MinecraftClient client, String phase, int elapsed, int ladderZ) {
-        ClientPlayerEntity player = client.player;
-        if (player == null || client.world == null) return;
-        if (!phase.equals(activePhase)) return;
-
-        if (phase.equals("glide")) {
-            driveGlideTransition(player, elapsed);
-        }
-
-        BlockPos pos = player.getBlockPos();
-        Vec3d velocity = player.getVelocity();
         boolean climbing = player.isClimbing();
         boolean holding = player.isHoldingOntoLadder();
         boolean swimming = player.isSwimming();
         boolean gliding = player.isGliding();
+        Vec3d velocity = player.getVelocity();
+        BlockPos pos = player.getBlockPos();
+
         phaseRows++;
         if (climbing) climbingRows++;
         if (holding) holdingRows++;
@@ -167,14 +95,12 @@ final class Phase5CaptureDebug {
         append(row, "climbing=" + climbing);
         append(row, "holding_ladder=" + holding);
         append(row, "climbing_pos=" + player.getClimbingPos().map(BlockPos::toShortString).orElse("none"));
-        append(row, "fall_flying=" + gliding);
         append(row, "fall_distance=" + player.fallDistance);
         append(row, "chest=" + player.getEquippedStack(EquipmentSlot.CHEST));
         append(row, "check_gliding=" + player.checkGliding());
         append(row, "bbox=" + box(player.getBoundingBox()));
         append(row, "block_pos=" + pos.getX() + "," + pos.getY() + "," + pos.getZ());
-        append(row, "ladder_z=" + ladderZ);
-        append(row, "dz_to_ladder=" + (player.getZ() - ladderZ));
+        append(row, "marker_z=" + markerZ);
         append(row, "forward=" + client.options.forwardKey.isPressed());
         append(row, "back=" + client.options.backKey.isPressed());
         append(row, "left=" + client.options.leftKey.isPressed());
@@ -182,147 +108,97 @@ final class Phase5CaptureDebug {
         append(row, "jump=" + client.options.jumpKey.isPressed());
         append(row, "sneak=" + client.options.sneakKey.isPressed());
         append(row, "sprint=" + client.options.sprintKey.isPressed());
-        append(row, "nearby=" + nearby(client.world, pos, ladderZ));
+        append(row, "nearby=" + nearby(client.world, pos, markerZ));
 
-        boolean importantStateChange = climbing != lastConsoleClimbing
-                || holding != lastConsoleHolding
-                || swimming != lastConsoleSwimming
-                || gliding != lastConsoleGliding;
+        boolean importantStateChange = climbing != lastClimbing || holding != lastHolding
+                || swimming != lastSwimming || gliding != lastGliding;
         synchronized (LOCK) {
             write(row.toString());
-            if (elapsed == 0 || elapsed % 20 == 0 || importantStateChange) {
-                System.out.println("[Phase5-Debug] " + row);
+            if (elapsed == 0 || importantStateChange || elapsed % 50 == 0) {
+                System.out.println("[Phase5] " + phase + " t=" + elapsed + " pos=" + compact(player)
+                        + (importantStateChange ? " state-change" : ""));
             }
         }
-        lastConsoleClimbing = climbing;
-        lastConsoleHolding = holding;
-        lastConsoleSwimming = swimming;
-        lastConsoleGliding = gliding;
-
-        if (phase.equals("glide") && elapsed >= 10 && glidingRows < 5 && !glideFailureReported) {
-            glideFailureReported = true;
-            String diagnostic = "ELYTRA GLIDE FAILED: fewer than 5 gliding ticks; "
-                    + "glidingRows=" + glidingRows
-                    + " elapsed=" + elapsed
-                    + " state=" + describe(player)
-                    + " chest=" + player.getEquippedStack(EquipmentSlot.CHEST)
-                    + " checkGliding=" + player.checkGliding();
-            System.err.println("[Phase5-Debug] " + diagnostic);
-            write("GLIDE_FAILURE\t" + diagnostic.replace('\t', ' '));
-            throw new IllegalStateException(diagnostic);
-        }
+        lastClimbing = climbing;
+        lastHolding = holding;
+        lastSwimming = swimming;
+        lastGliding = gliding;
     }
 
-    private static void driveGlideTransition(ClientPlayerEntity player, int elapsed) {
-        if (player.isGliding()) return;
-
-        ItemStack chest = player.getEquippedStack(EquipmentSlot.CHEST);
-        if (!chest.isOf(Items.ELYTRA)) {
-            player.equipStack(EquipmentSlot.CHEST, new ItemStack(Items.ELYTRA));
-            chest = player.getEquippedStack(EquipmentSlot.CHEST);
-        }
-
-        if (elapsed < 8) {
-            if (player.getY() <= 89.0D && glideStartAttempts == 0) {
-                System.out.println("[Phase5-Debug][ELYTRA] glide start is too low: " + describe(player));
-            }
-
-            if (player.isOnGround()) {
-                Vec3d v = player.getVelocity();
-                player.setVelocity(v.x, -0.22D, v.z);
-            } else if (player.getVelocity().y >= -0.02D) {
-                Vec3d v = player.getVelocity();
-                player.setVelocity(v.x, -0.22D, v.z);
-            }
-            if (player.fallDistance < 2.0F) player.fallDistance = 2.0F;
-
-            boolean eligible = player.checkGliding();
-            glideStartAttempts++;
-            System.out.println("[Phase5-Debug][ELYTRA] activation attempt=" + glideStartAttempts
-                    + " elapsed=" + elapsed + " eligible=" + eligible);
-            if (eligible) {
-                player.startGliding();
-                System.out.println("[Phase5-Debug][ELYTRA] glide activated state=" + describe(player));
-            }
+    static void failure(String phase, String message) {
+        synchronized (LOCK) {
+            initialize();
+            write("FAILURE\tphase=" + phase + "\tmessage=" + Phase5CaptureEncoding.escape(message));
+            System.err.println("[Phase5] FAILURE " + phase + " :: " + message);
         }
     }
 
     static void end(String phase) {
         synchronized (LOCK) {
             if (!phase.equals(activePhase)) return;
-            write("PHASE_END\tphase=" + phase + "\trows=" + phaseRows + "\tclimbing_rows=" + climbingRows
-                    + "\tholding_ladder_rows=" + holdingRows + "\tswimming_rows=" + swimmingRows
-                    + "\tgliding_rows=" + glidingRows + "\tmin_y=" + minY + "\tmax_y=" + maxY
-                    + "\tmin_z=" + minZ + "\tmax_z=" + maxZ
-                    + "\tglide_start_attempts=" + glideStartAttempts);
-            System.out.println("[Phase5-Debug] PHASE_END phase=" + phase
-                    + " rows=" + phaseRows + " climbing=" + climbingRows
-                    + " holding_ladder=" + holdingRows + " swimming=" + swimmingRows
-                    + " gliding=" + glidingRows + " yRange=" + minY + ".." + maxY
-                    + " zRange=" + minZ + ".." + maxZ
-                    + " glideAttempts=" + glideStartAttempts);
+            flush();
+            write("PHASE_END\tphase=" + phase + "\trows=" + phaseRows + "\tclimbing=" + climbingRows
+                    + "\tholding_ladder=" + holdingRows + "\tswimming=" + swimmingRows
+                    + "\tgliding=" + glidingRows + "\ty_range=" + minY + ".." + maxY
+                    + "\tz_range=" + minZ + ".." + maxZ);
+            flush();
+            System.out.println("[Phase5] END " + phase + " rows=" + phaseRows
+                    + " y=" + minY + ".." + maxY + " z=" + minZ + ".." + maxZ
+                    + " swim=" + swimmingRows + " climb=" + climbingRows + " glide=" + glidingRows);
             activePhase = "unknown";
         }
     }
 
-    private static void extinguish(MinecraftClient client) {
-        client.player.extinguish();
-        IntegratedServer server = client.getServer();
-        if (server != null) {
-            server.executeSync(() -> {
-                ServerPlayerEntity player = server.getPlayerManager().getPlayer(client.player.getUuid());
-                if (player != null) player.extinguish();
-            });
-        }
-    }
-
     private static void initialize() {
-        if (initialized) return;
-        synchronized (LOCK) {
-            if (initialized) return;
-            path = Path.of(System.getProperty(PROP, DEFAULT.toString())).toAbsolutePath();
-            try {
-                if (path.getParent() != null) Files.createDirectories(path.getParent());
-                Files.writeString(path, "event\tphase\tdata\n", StandardCharsets.UTF_8,
-                        StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
-                initialized = true;
-                System.out.println("[Phase5-Debug] debug_file=" + path);
-            } catch (IOException e) {
-                throw new IllegalStateException("Unable to initialize Phase 5 debug trace: " + path, e);
-            }
+        if (writer != null) return;
+        Path path = Path.of(System.getProperty(PROP, DEFAULT.toString())).toAbsolutePath();
+        try {
+            if (path.getParent() != null) Files.createDirectories(path.getParent());
+            writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+            writer.write("event\tdata");
+            writer.newLine();
+            writer.flush();
+            System.out.println("[Phase5] debug=" + path);
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to initialize Phase 5 debug trace: " + path, e);
         }
     }
 
     private static void write(String line) {
         try {
-            Files.writeString(path, line + "\n", StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND, StandardOpenOption.WRITE);
+            writer.write(line);
+            writer.newLine();
+            if (phaseRows % 20 == 0) flush();
         } catch (IOException e) {
-            throw new IllegalStateException("Unable to write Phase 5 debug trace: " + path, e);
+            throw new IllegalStateException("Unable to write Phase 5 debug trace", e);
         }
+    }
+
+    private static void flush() {
+        try { writer.flush(); }
+        catch (IOException e) { throw new IllegalStateException("Unable to flush Phase 5 debug trace", e); }
+    }
+
+    private static String compact(ClientPlayerEntity player) {
+        return String.format(java.util.Locale.ROOT, "%.2f,%.2f,%.2f v=%.3f,%.3f,%.3f ground=%s pose=%s", 
+                player.getX(), player.getY(), player.getZ(), player.getVelocity().x, player.getVelocity().y,
+                player.getVelocity().z, player.isOnGround(), player.getPose());
     }
 
     private static String describe(ClientPlayerEntity player) {
         if (player == null) return "null";
-        Vec3d v = player.getVelocity();
-        return "x=" + player.getX() + ",y=" + player.getY() + ",z=" + player.getZ()
-                + ",yaw=" + player.getYaw() + ",pose=" + player.getPose()
-                + ",ground=" + player.isOnGround() + ",gliding=" + player.isGliding()
-                + ",swimming=" + player.isSwimming() + ",fallDistance=" + player.fallDistance
-                + ",climbing=" + player.isClimbing()
-                + ",holding=" + player.isHoldingOntoLadder()
-                + ",climbing_pos=" + player.getClimbingPos().map(BlockPos::toShortString).orElse("none")
-                + ",vel=" + v.x + "," + v.y + "," + v.z;
+        return compact(player) + " hp=" + player.getHealth();
     }
 
     private static String box(Box box) {
         return box.minX + "," + box.minY + "," + box.minZ + ".." + box.maxX + "," + box.maxY + "," + box.maxZ;
     }
 
-    private static String nearby(World world, BlockPos center, int ladderZ) {
+    private static String nearby(World world, BlockPos center, int markerZ) {
         StringBuilder out = new StringBuilder();
         for (int y = center.getY(); y <= center.getY() + 1; y++) {
-            for (int z = ladderZ - 2; z <= ladderZ + 2; z++) {
+            for (int z = markerZ - 2; z <= markerZ + 2; z++) {
                 for (int x = -1; x <= 1; x++) {
                     if (out.length() > 0) out.append('|');
                     BlockPos p = new BlockPos(x, y, z);
@@ -332,13 +208,6 @@ final class Phase5CaptureDebug {
             }
         }
         return out.toString();
-    }
-
-    private static double wrapDegrees(double value) {
-        double wrapped = value % 360.0;
-        if (wrapped >= 180.0) wrapped -= 360.0;
-        if (wrapped < -180.0) wrapped += 360.0;
-        return wrapped;
     }
 
     private static void append(StringBuilder out, String value) {
