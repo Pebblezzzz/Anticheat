@@ -43,7 +43,7 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
     private static BufferedWriter eventWriter;
     private static long tick;
 
-    private VanillaTraceCaptureClient() {}
+    public VanillaTraceCaptureClient() {}
 
     @Override
     public void onInitializeClient() {
