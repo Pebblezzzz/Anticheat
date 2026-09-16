@@ -19,9 +19,9 @@ class Phase5MechanicsTest {
   @Test void sprintAndSneakAreExplicitInputs() {
     var physics=new Vanilla12111Physics();
     var state=Player.initial(Vec3.ZERO);
-    var normal=physics.step(new PhysicsContext(1,state,new AdvancedInput(1,0,false),air(),Simulation.Environment.DRY,Attributes.DEFAULT));
-    var sprint=physics.step(new PhysicsContext(1,state,new AdvancedInput(1,0,false,true,false),air(),Simulation.Environment.DRY,Attributes.DEFAULT));
-    var sneak=physics.step(new PhysicsContext(1, state, new AdvancedInput(1, 0, false, false, true), air(), Simulation.Environment.DRY, Attributes.DEFAULT));
+    var normal=physics.step(new PhysicsContext(1,state,new AdvancedInput(1,0,false),air(),Simulation.Environment.DRY,new Attributes(.1)));
+    var sprint=physics.step(new PhysicsContext(1,state,new AdvancedInput(1,0,false,true,false),air(),Simulation.Environment.DRY,new Attributes(.1)));
+    var sneak=physics.step(new PhysicsContext(1, state, new AdvancedInput(1, 0, false, false, true), air(), Simulation.Environment.DRY, new Attributes(.1)));
     assertTrue(sprint.state().position().z()>normal.state().position().z());
     assertTrue(sneak.state().position().z()<normal.state().position().z());
   }
@@ -32,10 +32,24 @@ class Phase5MechanicsTest {
     assertEquals(fast,repeat);
     assertFalse(fast.state().uncertain());
   }
+  @Test void diagonalInputPreservesVanillaHorizontalMagnitude() {
+    var physics=new Vanilla12111Physics(); var state=Player.initial(Vec3.ZERO);
+    var diagonal=physics.step(new PhysicsContext(3,state,new AdvancedInput(1,-1,false),air(),Simulation.Environment.DRY,new Attributes(.1)));
+    assertEquals(Math.sqrt(2.0) * 0.053508007029666405, Math.hypot(diagonal.state().velocity().x(), diagonal.state().velocity().z()), 1e-12);
+  }
+  @Test void tracedWaterAndLavaFactorsAreExplicit() {
+    var physics=new Vanilla12111Physics();
+    var water=physics.step(new PhysicsContext(4,Player.initial(Vec3.ZERO),new AdvancedInput(1,0,false,true,false),air(),Simulation.Environment.WATER,new Attributes(.1),Phase5Mechanics.MovementEffects.NONE,Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.vanillaWater(false,true,false,true)));
+    var lava=physics.step(new PhysicsContext(5,Player.initial(Vec3.ZERO),new AdvancedInput(1,0,false),air(),Simulation.Environment.LAVA,new Attributes(.1),Phase5Mechanics.MovementEffects.NONE,Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.vanillaLava(true,false,false)));
+    assertEquals(0.01764, water.state().velocity().x(), 1e-12);
+    assertEquals(0.0, water.state().velocity().y(), 1e-12);
+    assertEquals(0.0098, lava.state().velocity().x(), 1e-12);
+    assertEquals(-0.02, lava.state().velocity().y(), 1e-12);
+  }
   @Test void waterAndClimbableDoNotBecomeUnknownByConvenience() {
     var physics=new Vanilla12111Physics(); var state=Player.initial(Vec3.ZERO);
-    var water=physics.step(new PhysicsContext(3,state,new AdvancedInput(0,0,false),air(),Simulation.Environment.WATER,Attributes.DEFAULT));
-    var climb=physics.step(new PhysicsContext(3,state,new AdvancedInput(0,0,false),air(),Simulation.Environment.CLIMBABLE,Attributes.DEFAULT));
+    var water=physics.step(new PhysicsContext(6,state,new AdvancedInput(0,0,false),air(),Simulation.Environment.WATER,Attributes.DEFAULT));
+    var climb=physics.step(new PhysicsContext(6,state,new AdvancedInput(0,0,false),air(),Simulation.Environment.CLIMBABLE,Attributes.DEFAULT));
     assertFalse(water.state().uncertain()); assertFalse(climb.state().uncertain());
   }
 }
