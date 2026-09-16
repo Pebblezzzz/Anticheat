@@ -52,6 +52,38 @@ class Phase5ParityToolTest {
     assertEquals(5*3*2*2*2*2*2*2*2*2,count);
   }
 
+  @Test void stoneWalkingBaselineMatchesObservedVanillaTransition() {
+    var initial = new State.Player(
+      new Maths.Vec3(-177.67296117572545,73.0,-463.2872583970999),
+      Maths.Vec3.ZERO,
+      -178.05001831054688f,
+      9.150008201599121f,
+      true,
+      "survival",
+      Map.of(),
+      OptionalInt.empty(),
+      false
+    );
+    var world = World.Snapshot.emptyVisibleChunks(List.of(World.Chunk.containing(-178,-463)));
+    var context = new Simulation.PhysicsContext(
+      93,
+      initial,
+      new Simulation.AdvancedInput(1,0,false,false,false),
+      world,
+      Simulation.Environment.DRY,
+      new Simulation.Attributes(0.10000000149011612)
+    );
+
+    var result = new Simulation.Vanilla12111Physics().step(context);
+    var actual = result.state();
+
+    // Measured from a real Minecraft Java 1.21.11 client trace on a stone platform.
+    assertEquals(-177.6696265266769,actual.position().x(),1e-6);
+    assertEquals(-463.3852016465647,actual.position().z(),1e-6);
+    assertEquals(0.0018207,actual.velocity().x(),1e-6);
+    assertEquals(-0.0534770,actual.velocity().z(),1e-6);
+  }
+
   private static Phase5TraceTool.Row row(long tick,long client,long receive) {
     return new Phase5TraceTool.Row(tick,client,receive,0,0,0,0,0,0,0,0,true,0,0,false,false,false,
       Phase5Mechanics.Pose.STANDING,"survival",Phase5Mechanics.Fluid.NONE,false,false,false,1,List.of(),
