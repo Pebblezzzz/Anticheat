@@ -12,6 +12,7 @@ public final class Simulation {
     public static final double GRAVITY=.08, AIR_DRAG=.98, AIR_HORIZONTAL_FRICTION=.91, AIR_VERTICAL_DRAG=.98,
         AIR_ACCEL=.0196, GROUND_FRICTION=.546, WALK_ACCEL=.98, JUMP=.42, STEP_HEIGHT=.6;
     private static final double DIAGONAL_ACCEL=.1;
+    private static final double WATER_DRAG=.9, LAVA_DRAG=.5, CLIMB_MAX_DOWN=.15, CLIMB_MAX_UP=.15, GLIDE_GRAVITY=.035;
 
     public Player tick(Player s, Input input, World.Snapshot world) {
       return step(new TickContext(0,s,input,world),0).state();
@@ -50,20 +51,30 @@ public final class Simulation {
       double radians=Math.toRadians(s.yaw());
       double speed=attributes.value()*effects.speedMultiplier()*(input.sprint()?1.3:1.0)*(input.sneak()?0.3:1.0);
       boolean fluid=env.fluid()!=Phase5Mechanics.Fluid.NONE;
+      boolean climbing=env.climbable();
+      boolean gliding=env.gliding();
       double inputMagnitude=Math.hypot(input.forward(),input.strafe());
       double inputScale=inputMagnitude>1.0?1.0/Math.sqrt(2.0):1.0;
       double inputAcceleration;
       if(fluid) inputAcceleration=AIR_ACCEL;
       else if(s.onGround() && inputMagnitude>1.0) inputAcceleration=DIAGONAL_ACCEL*effects.speedMultiplier()*(input.sprint()?1.3:1.0)*(input.sneak()?0.3:1.0);
       else inputAcceleration=s.onGround()?WALK_ACCEL*speed:AIR_ACCEL;
+      if(gliding) inputAcceleration=AIR_ACCEL;
       Vec3 acceleration=new Vec3(
           inputScale*(input.strafe()*inputAcceleration*Math.cos(radians)-input.forward()*inputAcceleration*Math.sin(radians)),
           0,
           inputScale*(input.forward()*inputAcceleration*Math.cos(radians)+input.strafe()*inputAcceleration*Math.sin(radians)));
 
       Vec3 velocity=s.velocity().add(acceleration);
-      if(env.climbable()) velocity=new Vec3(velocity.x(),Math.max(-0.15,velocity.y()),velocity.z());
-      boolean jumped=input.jump()&&s.onGround()&&!fluid&&!env.climbable();
+      if(climbing) {
+        double verticalInput=input.forward();
+        double climbY=velocity.y();
+        if(verticalInput>0) climbY=Math.min(CLIMB_MAX_UP, climbY+0.15*verticalInput);
+        else if(verticalInput<0) climbY=Math.max(CLIMB_MAX_DOWN, climbY+0.15*verticalInput);
+        climbY=Math.max(CLIMB_MAX_DOWN,Math.min(CLIMB_MAX_UP,climbY));
+        velocity=new Vec3(velocity.x(),climbY,velocity.z());
+      }
+      boolean jumped=input.jump()&&s.onGround()&&!fluid&&!climbing&&!gliding;
       if(jumped) velocity=new Vec3(velocity.x(),JUMP+effects.jumpVelocityAdd(),velocity.z());
       if(effects.levitation()) velocity=new Vec3(velocity.x(),effects.levitationVelocity(),velocity.z());
 
@@ -71,19 +82,35 @@ public final class Simulation {
       if(world.hasUnsupported(swept) && environment==Environment.DRY)
         return new StepResult(tick,uncertain(s),false,priorPose,"swept collision volume is not fully known");
 
-      World.CollisionResult collision=World.resolveWithStep(world,start,velocity,s.onGround()&&!fluid&&!env.climbable()?STEP_HEIGHT:0);
+      World.CollisionResult collision=World.resolveWithStep(world,start,velocity,s.onGround()&&!fluid&&!climbing&&!gliding?STEP_HEIGHT:0);
       Vec3 displacement=collision.resolved();
       boolean grounded=collision.collidedY()&&velocity.y()<=0;
 
-      double horizontalFactor=fluid?env.fluidSpeedMultiplier()*env.fluidDrag():(s.onGround()?GROUND_FRICTION:AIR_HORIZONTAL_FRICTION);
+      double horizontalFactor;
+      if(env.fluid()==Phase5Mechanics.Fluid.WATER) horizontalFactor=env.fluidSpeedMultiplier()*WATER_DRAG;
+      else if(env.fluid()==Phase5Mechanics.Fluid.LAVA) horizontalFactor=env.fluidSpeedMultiplier()*LAVA_DRAG;
+      else if(climbing) horizontalFactor=s.onGround()?GROUND_FRICTION:AIR_HORIZONTAL_FRICTION;
+      else if(gliding) horizontalFactor=AIR_DRAG;
+      else horizontalFactor=s.onGround()?GROUND_FRICTION:AIR_HORIZONTAL_FRICTION;
+
       double gravity=GRAVITY*env.gravityMultiplier();
       double postTickVerticalVelocity;
       if(effects.levitation()) postTickVerticalVelocity=effects.levitationVelocity();
-      else if(env.climbable()) postTickVerticalVelocity=velocity.y();
-      else if(fluid) postTickVerticalVelocity=velocity.y()*env.fluidDrag()-gravity;
-      else postTickVerticalVelocity=jumped?(velocity.y()-gravity)*AIR_VERTICAL_DRAG:velocity.y()*AIR_VERTICAL_DRAG-gravity*AIR_VERTICAL_DRAG;
-      double groundedVerticalVelocity=fluid?velocity.y()*env.fluidDrag()-gravity:-gravity*AIR_VERTICAL_DRAG;
-      double nextY=grounded&&!effects.levitation()&&!env.climbable()?groundedVerticalVelocity:postTickVerticalVelocity;
+      else if(climbing) postTickVerticalVelocity=velocity.y();
+      else if(env.fluid()==Phase5Mechanics.Fluid.WATER) postTickVerticalVelocity=velocity.y()*env.fluidDrag()-gravity;
+      else if(env.fluid()==Phase5Mechanics.Fluid.LAVA) postTickVerticalVelocity=velocity.y()*env.fluidDrag()-gravity;
+      else if(gliding) postTickVerticalVelocity=velocity.y()-GLIDE_GRAVITY;
+      else {
+        double effectiveGravity=gravity*effects.fallGravityMultiplier();
+        postTickVerticalVelocity=jumped?(velocity.y()-effectiveGravity)*AIR_VERTICAL_DRAG:velocity.y()*AIR_VERTICAL_DRAG-effectiveGravity*AIR_VERTICAL_DRAG;
+      }
+      double groundedVerticalVelocity;
+      if(effects.levitation()) groundedVerticalVelocity=effects.levitationVelocity();
+      else if(climbing) groundedVerticalVelocity=velocity.y();
+      else if(env.fluid()==Phase5Mechanics.Fluid.WATER) groundedVerticalVelocity=velocity.y()*env.fluidDrag()-gravity;
+      else if(env.fluid()==Phase5Mechanics.Fluid.LAVA) groundedVerticalVelocity=velocity.y()*env.fluidDrag()-gravity;
+      else groundedVerticalVelocity=-gravity*AIR_VERTICAL_DRAG*effects.fallGravityMultiplier();
+      double nextY=grounded&&!effects.levitation()&&!climbing?groundedVerticalVelocity:postTickVerticalVelocity;
       Vec3 nextVelocity=new Vec3(collision.collidedX()?0:velocity.x()*horizontalFactor,nextY,collision.collidedZ()?0:velocity.z()*horizontalFactor);
 
       Phase5Mechanics.Pose requestedPose=Phase5Mechanics.nextPose(priorPose,env);
