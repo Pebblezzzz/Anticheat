@@ -48,12 +48,14 @@ class Phase5VanillaBatchAuditTest {
         assertFluidPhase(phases.get("all:water"), "WATER", "water");
         assertFluidPhase(phases.get("all:lava"), "LAVA", "lava");
         assertTrue(phases.get("all:water").stream().anyMatch(r -> "SWIMMING".equals(r.pose())), "Water phase never entered vanilla SWIMMING pose");
+        assertTrue(phases.get("all:water").stream().anyMatch(r -> "SWIMMING".equals(r.pose()) && r.submerged() && Boolean.parseBoolean(r.sprint())), "Water phase never recorded submerged sprint-swimming state");
         for (String phase : DRY_PHASES) assertNoFluid(phases.get(phase), phase);
         assertEffectPhase(phases.get("all:speed-effect"), 0, "speed-effect", Phase5VanillaTrace.Row::speedAmp);
         assertEffectPhase(phases.get("all:slowness-effect"), 0, "slowness-effect", Phase5VanillaTrace.Row::slownessAmp);
         assertEffectPhase(phases.get("all:jump-boost"), 0, "jump-boost", Phase5VanillaTrace.Row::jumpBoostAmp);
-        assertJumpPulse(phases.get("all:jump"), "jump");
-        assertJumpPulse(phases.get("all:jump-boost"), "jump-boost");
+        assertJumpPulseWithTrajectory(phases.get("all:jump"), "jump");
+        assertJumpPulseWithTrajectory(phases.get("all:jump-boost"), "jump-boost");
+        assertStepTransition(phases.get("all:step"));
 
         Phase5VanillaTrace.Row first = trace.rows().getFirst();
         Phase5VanillaTrace.Row last = trace.rows().getLast();
@@ -73,13 +75,20 @@ class Phase5VanillaBatchAuditTest {
     private static void assertEffectPhase(List<Phase5VanillaTrace.Row> rows, int expectedAmp, String label, Function<Phase5VanillaTrace.Row, String> getter) {
         assertTrue(rows.stream().anyMatch(r -> Integer.toString(expectedAmp).equals(getter.apply(r))), "No " + label + " effect observation with amplifier " + expectedAmp);
     }
-    private static void assertJumpPulse(List<Phase5VanillaTrace.Row> rows, String label) {
+    private static void assertJumpPulseWithTrajectory(List<Phase5VanillaTrace.Row> rows, String label) {
         int consecutive = 0, total = 0;
+        boolean launched = false;
         for (Phase5VanillaTrace.Row row : rows) {
             boolean jump = Boolean.parseBoolean(row.jump());
             if (jump) { consecutive++; total++; assertTrue(consecutive <= 2, label + " jump key was held for more than two ticks at tick " + row.tick()); }
             else consecutive = 0;
+            if (Double.parseDouble(row.velocityY()) > 0.3 && Double.parseDouble(row.velocityY()) < 0.6) launched = true;
         }
         assertTrue(total >= 1, label + " phase contains no jump input");
+        assertTrue(launched, label + " phase contains no positive vanilla jump launch velocity");
+    }
+    private static void assertStepTransition(List<Phase5VanillaTrace.Row> rows) {
+        assertTrue(rows.stream().anyMatch(r -> Double.parseDouble(r.positionY()) > 64.25), "Step phase never recorded a raised Y position");
+        assertTrue(rows.stream().anyMatch(r -> Math.abs(Double.parseDouble(r.positionY()) - 64.5) < 1e-6), "Step phase never recorded the expected half-block standing height");
     }
 }
