@@ -3,6 +3,7 @@ package dev.phantom.capture;
 import net.fabricmc.api.ClientModInitializer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.entity.EntityPose;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.effect.StatusEffectInstance;
@@ -167,7 +168,7 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
                     fluid,
                     Boolean.toString(player.isSubmergedInWater()),
                     Boolean.toString(player.isClimbing()),
-                    Boolean.toString(player.isFallFlying()),
+                    Boolean.toString(player.getPose() == EntityPose.FALL_FLYING),
                     d(baseSpeed),
                     modifiers,
                     Integer.toString(speedAmp),
