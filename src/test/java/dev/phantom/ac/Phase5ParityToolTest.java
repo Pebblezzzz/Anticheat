@@ -87,7 +87,7 @@ class Phase5ParityToolTest {
   @Test void stoneSprintStartMatchesObservedVanillaTransition() {
     var initial = new State.Player(
       new Maths.Vec3(-35.480283411415854,72.0,26.612638960388164),
-      new Maths.Vec3(0.0451647358656705, -0.0784000015258789, 0.0004348622147),
+      new Maths.Vec3(0.0451647358656705, -0.0784000015258789, 0.0004348622147246182),
       270.4493408203125f,
       0.0f,
       true,
