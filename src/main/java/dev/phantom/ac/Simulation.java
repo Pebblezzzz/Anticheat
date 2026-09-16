@@ -10,7 +10,7 @@ public final class Simulation {
 
   public static final class Vanilla12111Physics implements Contracts.PhysicsEngine {
     /** Empirical Phase 5 stone-ground baseline from a real 1.21.11 client trace. */
-    public static final double GRAVITY=.08, AIR_DRAG=.98, GROUND_FRICTION=.546, WALK_ACCEL=.98, JUMP=.42, STEP_HEIGHT=.6;
+    public static final double GRAVITY=.08, AIR_DRAG=.98, AIR_HORIZONTAL_FRICTION=.91, AIR_VERTICAL_DRAG=.98, AIR_ACCEL=.02, GROUND_FRICTION=.546, WALK_ACCEL=.98, JUMP=.42, STEP_HEIGHT=.6;
     public Player tick(Player s, Input input, World.Snapshot world) { return step(new TickContext(0,s,input,world),0).state(); }
     public StepResult step(PhysicsContext context) {
       Objects.requireNonNull(context,"context");
@@ -25,7 +25,8 @@ public final class Simulation {
       if(!s.gamemode().equals("survival")) return new StepResult(tick,new Player(s.position(),Vec3.ZERO,s.yaw(),s.pitch(),false,s.gamemode(),s.effects(),s.awaitingTeleport(),false),false,priorPose,"non-survival movement is not simulated");
       double radians=Math.toRadians(s.yaw());
       double speed=attributes.value()*effects.speedMultiplier()*(input.sprint()?1.3:1.0)*(input.sneak()?0.3:1.0);
-      Vec3 acceleration=new Vec3(input.strafe()*WALK_ACCEL*speed*Math.cos(radians)-input.forward()*WALK_ACCEL*speed*Math.sin(radians),0,input.forward()*WALK_ACCEL*speed*Math.cos(radians)+input.strafe()*WALK_ACCEL*speed*Math.sin(radians));
+      double inputAcceleration=s.onGround()?WALK_ACCEL*speed:AIR_ACCEL;
+      Vec3 acceleration=new Vec3(input.strafe()*inputAcceleration*Math.cos(radians)-input.forward()*inputAcceleration*Math.sin(radians),0,input.forward()*inputAcceleration*Math.cos(radians)+input.strafe()*inputAcceleration*Math.sin(radians));
       Vec3 velocity=s.velocity().add(acceleration);
       if(env.fluid()!=Phase5Mechanics.Fluid.NONE) velocity=new Vec3(velocity.x()*env.fluidSpeedMultiplier()*env.fluidDrag(),velocity.y()*env.fluidDrag(),velocity.z()*env.fluidSpeedMultiplier()*env.fluidDrag());
       if(env.climbable()) velocity=new Vec3(velocity.x(),Math.max(-0.15,velocity.y()),velocity.z());
@@ -37,10 +38,11 @@ public final class Simulation {
       if(world.hasUnsupported(swept) && environment==Environment.DRY) return new StepResult(tick,uncertain(s),false,priorPose,"swept collision volume is not fully known");
       World.CollisionResult collision=World.resolveWithStep(world,start,velocity,s.onGround()?STEP_HEIGHT:0);
       Vec3 displacement=collision.resolved(); boolean grounded=collision.collidedY()&&velocity.y()<=0;
-      double horizontalFactor=s.onGround()?GROUND_FRICTION:AIR_DRAG;
+      double horizontalFactor=s.onGround()?GROUND_FRICTION:AIR_HORIZONTAL_FRICTION;
       if(env.fluid()!=Phase5Mechanics.Fluid.NONE) horizontalFactor*=env.fluidDrag();
-      double postTickVerticalVelocity=jumped?(velocity.y()-gravity)*AIR_DRAG:velocity.y()*AIR_DRAG;
-      Vec3 nextVelocity=new Vec3(collision.collidedX()?0:velocity.x()*horizontalFactor,postTickVerticalVelocity,collision.collidedZ()?0:velocity.z()*horizontalFactor);
+      double postTickVerticalVelocity=jumped?(velocity.y()-gravity)*AIR_VERTICAL_DRAG:velocity.y()*AIR_VERTICAL_DRAG;
+      double groundedVerticalVelocity=-gravity*AIR_VERTICAL_DRAG;
+      Vec3 nextVelocity=new Vec3(collision.collidedX()?0:velocity.x()*horizontalFactor,grounded?groundedVerticalVelocity:postTickVerticalVelocity,collision.collidedZ()?0:velocity.z()*horizontalFactor);
       Phase5Mechanics.Pose nextPose=Phase5Mechanics.nextPose(priorPose,env);
       Player next=new Player(s.position().add(displacement),nextVelocity,s.yaw(),s.pitch(),grounded,s.gamemode(),s.effects(),s.awaitingTeleport(),false);
       return new StepResult(tick,next,collision.collidedHorizontally()||collision.collidedY(),nextPose,"deterministic collision-resolved movement step");
