@@ -30,7 +30,9 @@ public final class ControlledPhase5ScenarioDriver {
     private static final int PHASE_SPACING = 140;
     private static final double RESET_EPSILON = 1.0e-4;
     private static final int REQUIRED_SETTLED_TICKS = 3;
-    private static final int RESET_TIMEOUT_TICKS = 100;
+    // World preparation intentionally queues a large amount of integrated-server work.
+    // Give the server enough client ticks to drain that queue before declaring a reset stuck.
+    private static final int RESET_TIMEOUT_TICKS = 600;
 
     private int phaseIndex = -1;
     private int elapsed;
@@ -335,6 +337,22 @@ public final class ControlledPhase5ScenarioDriver {
         IntegratedServer server = client.getServer();
         if (server == null) throw new IllegalStateException("Integrated server required");
 
+        // Apply the client-side reset immediately. In an integrated server the command queue
+        // can be several seconds behind while the scenario course is being generated; using
+        // requestTeleport() here does not update the local player position until the server's
+        // correction packet arrives, which makes the harness time out before the reset lands.
+        client.player.refreshPositionAndAngles(x, y, z, (float) yaw, 0.0F);
+        client.player.setVelocity(0.0D, 0.0D, 0.0D);
+        client.player.setOnGround(false);
+        client.player.fallDistance = 0.0F;
+        client.player.setYaw((float) yaw);
+        client.player.setPitch(0.0F);
+        System.out.println("[Phase5-Debug] RESET_CLIENT x=" + client.player.getX()
+                + " y=" + client.player.getY() + " z=" + client.player.getZ()
+                + " yaw=" + client.player.getYaw());
+
+        // Queue the authoritative integrated-server position as well. This will eventually
+        // reconcile the server copy with the client once the prep command backlog drains.
         server.executeSync(() -> {
             ServerPlayerEntity serverPlayer = server.getPlayerManager().getPlayer(client.player.getUuid());
             if (serverPlayer == null) {
@@ -356,18 +374,6 @@ public final class ControlledPhase5ScenarioDriver {
                     + " x=" + x + " y=" + y + " z=" + z + " yaw=" + yaw
                     + " serverPos=" + serverPlayer.getX() + "," + serverPlayer.getY() + "," + serverPlayer.getZ());
         });
-
-        // Keep the integrated client immediately aligned with the same reset. The next
-        // server tick still owns the authoritative entity and will correct any drift.
-        client.player.requestTeleport(x, y, z);
-        client.player.setVelocity(0.0D, 0.0D, 0.0D);
-        client.player.setOnGround(false);
-        client.player.fallDistance = 0.0F;
-        client.player.setYaw((float) yaw);
-        client.player.setPitch(0.0F);
-        System.out.println("[Phase5-Debug] RESET_CLIENT x=" + client.player.getX()
-                + " y=" + client.player.getY() + " z=" + client.player.getZ()
-                + " yaw=" + client.player.getYaw());
     }
 
     private void effect(MinecraftClient client, String id) {
