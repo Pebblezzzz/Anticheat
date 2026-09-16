@@ -38,3 +38,13 @@ processResources {
         expand 'version': project.version
     }
 }
+
+tasks.named('runClient') {
+    def captureEnabled = providers.gradleProperty('phantom.capture.enabled').orElse('false')
+    def captureOutput = providers.gradleProperty('phantom.capture.output')
+    def captureEvents = providers.gradleProperty('phantom.capture.events')
+
+    systemProperty 'phantom.capture.enabled', captureEnabled.get()
+    captureOutput.orNull?.with { systemProperty 'phantom.capture.output', it }
+    captureEvents.orNull?.with { systemProperty 'phantom.capture.events', it }
+}
