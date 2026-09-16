@@ -22,13 +22,13 @@ public final class Phase5Mechanics {
     }
   }
 
-  /** Vanilla AttributeInstance modifier order: additive, base-multiplicative, then total-multiplicative. */
+  /** Vanilla EntityAttributeInstance modifier order: additive, base-multiplicative, then total-multiplicative. */
   public static double resolveAttribute(double base, Collection<AttributeModifier> modifiers) {
     if (!Double.isFinite(base) || base < 0) throw new IllegalArgumentException("invalid base attribute");
     double value = base;
     for (AttributeModifier m : modifiers) if (m.operation() == ModifierOperation.ADD_VALUE) value += m.amount();
-    double baseStage = value;
-    for (AttributeModifier m : modifiers) if (m.operation() == ModifierOperation.ADD_MULTIPLIED_BASE) value += baseStage * m.amount();
+    final double originalBase = base;
+    for (AttributeModifier m : modifiers) if (m.operation() == ModifierOperation.ADD_MULTIPLIED_BASE) value += originalBase * m.amount();
     for (AttributeModifier m : modifiers) if (m.operation() == ModifierOperation.ADD_MULTIPLIED_TOTAL) value *= 1.0 + m.amount();
     return value;
   }
