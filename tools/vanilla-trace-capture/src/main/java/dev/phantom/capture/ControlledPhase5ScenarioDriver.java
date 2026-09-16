@@ -19,7 +19,7 @@ public final class ControlledPhase5ScenarioDriver {
             DIAGONAL = 100, COLLISION = 100, WATER_MOVE = 120, LAVA_MOVE = 30,
             SPEED_EFFECT = 80, SLOWNESS_EFFECT = 80, JUMP_BOOST = 100, STEP = 110, TAIL = 70,
             STAIRS = 90, CLIMBABLE = 100, EDGE_CORNER = 100, SWIM_TRANSITION = 120,
-            GLIDE = 120, CORRECTION = 40, VELOCITY = 80;
+            GLIDE = 120, CORRECTION = 40;
     private static final int RESET_SETTLE = 10;
 
     /** Each phase owns a large 140-block-long arena on its own Z segment. */
@@ -32,17 +32,17 @@ public final class ControlledPhase5ScenarioDriver {
     private static final String[] ALL_PHASES = {
             "walk", "sprint", "jump", "sneak", "diagonal", "collision",
             "water", "lava", "speed-effect", "slowness-effect", "jump-boost", "step", "tail",
-            "stairs", "climbable", "edge-corner", "swim-transition", "glide", "correction", "velocity"
+            "stairs", "climbable", "edge-corner", "swim-transition", "glide", "correction"
     };
     private static final int[] ALL_DURATIONS = {
             WALK, SPRINT, JUMP, SNEAK, DIAGONAL, COLLISION,
             WATER_MOVE, LAVA_MOVE, SPEED_EFFECT, SLOWNESS_EFFECT, JUMP_BOOST, STEP, TAIL,
-            STAIRS, CLIMBABLE, EDGE_CORNER, SWIM_TRANSITION, GLIDE, CORRECTION, VELOCITY
+            STAIRS, CLIMBABLE, EDGE_CORNER, SWIM_TRANSITION, GLIDE, CORRECTION
     };
 
     private static final String[] DRY_ARENAS = {
             "walk", "sprint", "jump", "sneak", "diagonal", "collision",
-            "speed-effect", "slowness-effect", "jump-boost", "step", "tail", "stairs", "climbable", "edge-corner", "glide", "correction", "velocity"
+            "speed-effect", "slowness-effect", "jump-boost", "step", "tail", "stairs", "climbable", "edge-corner", "glide", "correction"
     };
 
     private long scenarioTick = -1;
@@ -147,19 +147,16 @@ public final class ControlledPhase5ScenarioDriver {
             case "jump-boost" -> jump = activePhaseElapsed < 2;
             case "step", "tail" -> { }
             case "stairs" -> { sprint = true; jump = activePhaseElapsed % 28 == 1; }
-            case "climbable" -> { sprint = false; }
+            case "climbable" -> { }
             case "edge-corner" -> { left = activePhaseElapsed < 50; right = !left; }
             case "swim-transition" -> { sprint = true; jump = activePhaseElapsed % 24 < 6; sneak = activePhaseElapsed % 24 >= 12 && activePhaseElapsed % 24 < 18; }
             case "glide" -> { sprint = true; }
             case "correction" -> { }
-            case "velocity" -> { }
             default -> throw new IllegalStateException("Unknown active Phase 5 phase: " + current);
         }
 
         if (current.equals("correction") && activePhaseElapsed == 8) serverReset(client, 2.0, 65.0, arenaStartFor(current) + 20.0, 90);
         if (current.equals("correction") && activePhaseElapsed == 24) serverReset(client, -2.0, 65.0, arenaStartFor(current) + 24.0, 270);
-        if (current.equals("velocity") && activePhaseElapsed == 12) applyWindChargeImpulse(client);
-        if (current.equals("velocity") && activePhaseElapsed == 44) applyWindChargeImpulse(client);
 
         phase = current;
         apply(client.options, forward, back, left, right, jump, sneak, sprint);
@@ -167,13 +164,8 @@ public final class ControlledPhase5ScenarioDriver {
         scenarioTick++;
 
         if (activePhaseElapsed >= ALL_DURATIONS[activePhaseIndex]) {
-            if (activePhaseIndex + 1 < ALL_PHASES.length) {
-                beginPhaseTransition(client, activePhaseIndex + 1);
-            } else {
-                finished = true;
-                release(client.options);
-                client.scheduleStop();
-            }
+            if (activePhaseIndex + 1 < ALL_PHASES.length) beginPhaseTransition(client, activePhaseIndex + 1);
+            else { finished = true; release(client.options); client.scheduleStop(); }
         }
     }
 
@@ -194,21 +186,15 @@ public final class ControlledPhase5ScenarioDriver {
         if (phaseName.equals("speed-effect")) giveEffect(client, "minecraft:speed", 0);
         else if (phaseName.equals("slowness-effect")) giveEffect(client, "minecraft:slowness", 0);
         else if (phaseName.equals("jump-boost")) giveEffect(client, "minecraft:jump_boost", 0);
-        else if (phaseName.equals("climbable")) {
-            giveEffect(client, "minecraft:slow_falling", 0);
-            facePhase(client, 180);
-        } else if (phaseName.equals("glide")) {
+        else if (phaseName.equals("climbable")) facePhase(client, 180);
+        else if (phaseName.equals("glide")) {
             equipElytra(client);
             setFallFlying(client, true);
-            facePhase(client, 0);
-        } else if (phaseName.equals("velocity")) {
             facePhase(client, 0);
         }
     }
 
-    private static double arenaStartYFor(String name) {
-        return name.equals("glide") ? 110.0 : 64.0;
-    }
+    private static double arenaStartYFor(String name) { return name.equals("glide") ? 110.0 : 64.0; }
 
     private static int arenaStartFor(String name) {
         return switch (name) {
@@ -231,7 +217,6 @@ public final class ControlledPhase5ScenarioDriver {
             case "swim-transition" -> ARENA_START_Z + ARENA_SPACING * 16;
             case "glide" -> ARENA_START_Z + ARENA_SPACING * 17;
             case "correction" -> ARENA_START_Z + ARENA_SPACING * 18;
-            case "velocity" -> ARENA_START_Z + ARENA_SPACING * 19;
             default -> throw new IllegalArgumentException("Unknown Phase 5 arena: " + name);
         };
     }
@@ -286,10 +271,6 @@ public final class ControlledPhase5ScenarioDriver {
             command(m, s, "fill -8 64 " + (correctionZ + 8) + " 8 67 " + (correctionZ + 90) + " air");
             command(m, s, "fill -8 63 " + (correctionZ + 8) + " 8 63 " + (correctionZ + 90) + " minecraft:stone");
 
-            int velocityZ = arenaStartFor("velocity");
-            command(m, s, "fill -12 64 " + (velocityZ + 8) + " 12 67 " + (velocityZ + 90) + " air");
-            command(m, s, "fill -12 63 " + (velocityZ + 8) + " 12 63 " + (velocityZ + 90) + " minecraft:stone");
-
             command(m, s, "gamemode survival @a"); command(m, s, "effect clear @a");
             command(m, s, "execute as @a run data modify entity @s Fire set value 0s");
             command(m, s, "tp @a 0 64 " + (arenaStartFor("walk") + 12) + " 0 0");
@@ -342,15 +323,6 @@ public final class ControlledPhase5ScenarioDriver {
         server.executeSync(() -> {
             CommandManager m = server.getCommandManager(); ServerCommandSource s = server.getCommandSource();
             command(m, s, "tp @a ~ ~ ~ " + yaw + " 0");
-        });
-    }
-
-    private void applyWindChargeImpulse(MinecraftClient client) {
-        IntegratedServer server = client.getServer();
-        if (server == null) throw new IllegalStateException("Integrated server disappeared during Phase 5 velocity setup");
-        server.executeSync(() -> {
-            CommandManager m = server.getCommandManager(); ServerCommandSource s = server.getCommandSource();
-            command(m, s, "execute as @a at @s run summon minecraft:wind_charge ~ ~1 ~ {Motion:[0.0d,0.0d,1.0d],AccelerationPower:1.0f}");
         });
     }
 
