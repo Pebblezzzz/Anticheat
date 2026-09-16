@@ -84,11 +84,12 @@ class Phase5FullMechanicsTest {
         var blocks = new java.util.HashMap<World.Pos, World.Block>();
         blocks.put(new World.Pos(0, 1, 0), World.Block.FULL);
         World.Snapshot world = new World.Snapshot(blocks, java.util.Set.of(new World.Chunk(0, 0)));
-        Player state = Player.initial(Vec3.ZERO);
-        var env = Phase5Mechanics.MovementEnvironment.vanillaWater(false, false, false, true);
+        Player state = new Player(Vec3.ZERO, Vec3.ZERO, 0, 0, false, "survival", java.util.Map.of(), OptionalInt.empty(), false);
+        var env = new Phase5Mechanics.MovementEnvironment(Phase5Mechanics.Fluid.WATER, true, false, false,
+                false, false, false, false, 1.0, 0.9, 0.0);
         var result = new Vanilla12111Physics().step(new PhysicsContext(6, state, new AdvancedInput(0, 0, false), world,
                 Simulation.Environment.WATER, Attributes.DEFAULT, Phase5Mechanics.MovementEffects.NONE,
-                Phase5Mechanics.Pose.STANDING, env));
+                Phase5Mechanics.Pose.SWIMMING, env));
         assertEquals(Phase5Mechanics.Pose.STANDING, result.pose());
     }
 }
