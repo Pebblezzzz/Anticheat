@@ -48,7 +48,9 @@ class Phase5VanillaBatchAuditTest {
         assertFluidPhase(phases.get("all:water"), "WATER", "water");
         assertFluidPhase(phases.get("all:lava"), "LAVA", "lava");
         assertTrue(phases.get("all:water").stream().anyMatch(r -> "SWIMMING".equals(r.pose())), "Water phase never entered vanilla SWIMMING pose");
-        assertTrue(phases.get("all:water").stream().anyMatch(r -> "SWIMMING".equals(r.pose()) && r.submerged() && Boolean.parseBoolean(r.sprint())), "Water phase never recorded submerged sprint-swimming state");
+        assertTrue(phases.get("all:water").stream().anyMatch(r -> "SWIMMING".equals(r.pose())
+                && Boolean.parseBoolean(r.submerged()) && Boolean.parseBoolean(r.sprint())),
+                "Water phase never recorded submerged sprint-swimming state");
         for (String phase : DRY_PHASES) assertNoFluid(phases.get(phase), phase);
         assertEffectPhase(phases.get("all:speed-effect"), 0, "speed-effect", Phase5VanillaTrace.Row::speedAmp);
         assertEffectPhase(phases.get("all:slowness-effect"), 0, "slowness-effect", Phase5VanillaTrace.Row::slownessAmp);
@@ -82,7 +84,8 @@ class Phase5VanillaBatchAuditTest {
             boolean jump = Boolean.parseBoolean(row.jump());
             if (jump) { consecutive++; total++; assertTrue(consecutive <= 2, label + " jump key was held for more than two ticks at tick " + row.tick()); }
             else consecutive = 0;
-            if (Double.parseDouble(row.velocityY()) > 0.3 && Double.parseDouble(row.velocityY()) < 0.6) launched = true;
+            double vy = Double.parseDouble(row.velocityY());
+            if (vy > 0.3 && vy < 0.6) launched = true;
         }
         assertTrue(total >= 1, label + " phase contains no jump input");
         assertTrue(launched, label + " phase contains no positive vanilla jump launch velocity");
