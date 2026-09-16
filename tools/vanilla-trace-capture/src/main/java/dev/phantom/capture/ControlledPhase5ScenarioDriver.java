@@ -106,19 +106,17 @@ public final class ControlledPhase5ScenarioDriver {
 
         if (waitingForReset) {
             release(client.options);
-            Phase5CaptureDebug.waiting(client, PHASES[phaseIndex], elapsed, expectedX, expectedY, expectedZ, expectedYaw, settledTicks);
+            Phase5CaptureDebug.waiting(client, PHASES[phaseIndex], elapsed,
+                    expectedX, expectedY, expectedZ, expectedYaw, settledTicks);
 
-            if (resetHasSettled(client)) {
-                settledTicks++;
-            } else {
-                settledTicks = 0;
-            }
+            if (resetHasSettled(client)) settledTicks++;
+            else settledTicks = 0;
 
             if (settledTicks >= REQUIRED_SETTLED_TICKS) {
                 waitingForReset = false;
                 elapsed = 0;
-                Phase5CaptureDebug.resetAndStart(client, PHASES[phaseIndex], phaseIndex,
-                        PHASES[phaseIndex].equals("climbable") ? baseZ(PHASES[phaseIndex]) + 29 : baseZ(PHASES[phaseIndex]));
+                int ladderZ = baseZ(PHASES[phaseIndex]) + 29;
+                Phase5CaptureDebug.resetAndStart(client, PHASES[phaseIndex], phaseIndex, ladderZ);
                 System.out.println("[Phase5-Debug] PHASE_START index=" + phaseIndex
                         + " phase=" + PHASES[phaseIndex]
                         + " zBase=" + baseZ(PHASES[phaseIndex])
@@ -165,19 +163,22 @@ public final class ControlledPhase5ScenarioDriver {
             default -> throw new IllegalStateException(phase);
         }
 
-        if (phase.equals("correction") && elapsed == 8) reset(client, 2, 65, baseZ(phase) + 20, 90);
-        if (phase.equals("correction") && elapsed == 24) reset(client, -2, 65, baseZ(phase) + 24, 270);
+        if (phase.equals("correction") && elapsed == 8) {
+            reset(client, 2, 65, baseZ(phase) + 20, 90);
+        }
+        if (phase.equals("correction") && elapsed == 24) {
+            reset(client, -2, 65, baseZ(phase) + 24, 270);
+        }
 
         apply(client.options, forward, back, left, right, jump, sneak, sprint);
-        Phase5CaptureDebug.tick(client, phase, elapsed, phase.equals("climbable") ? baseZ(phase) + 29 : baseZ(phase));
+        Phase5CaptureDebug.tick(client, phase, elapsed, baseZ(phase) + 29);
 
         elapsed++;
         if (elapsed >= DURATIONS[phaseIndex]) {
             Phase5CaptureDebug.end(phase);
             phaseIndex++;
-            if (phaseIndex < PHASES.length) {
-                begin(client, phaseIndex);
-            } else {
+            if (phaseIndex < PHASES.length) begin(client, phaseIndex);
+            else {
                 done = true;
                 release(client.options);
                 client.scheduleStop();
@@ -210,6 +211,7 @@ public final class ControlledPhase5ScenarioDriver {
             expectedZ = baseZ(phase) + 12;
             expectedYaw = 0;
         }
+
         reset(client, expectedX, expectedY, expectedZ, expectedYaw);
 
         if (phase.equals("speed-effect")) effect(client, "minecraft:speed");
@@ -223,18 +225,20 @@ public final class ControlledPhase5ScenarioDriver {
 
     private boolean resetHasSettled(MinecraftClient client) {
         if (client.player == null) return false;
+
         double dx = client.player.getX() - expectedX;
         double dy = client.player.getY() - expectedY;
         double dz = client.player.getZ() - expectedZ;
         var velocity = client.player.getVelocity();
+
         boolean positionOk = Math.abs(dx) <= RESET_EPSILON
                 && Math.abs(dy) <= RESET_EPSILON
                 && Math.abs(dz) <= RESET_EPSILON;
-        boolean velocityOk = Math.abs(velocity.x) <= RESET_EPSILON
-                && Math.abs(velocity.y) <= RESET_EPSILON
+        boolean horizontalVelocityOk = Math.abs(velocity.x) <= RESET_EPSILON
                 && Math.abs(velocity.z) <= RESET_EPSILON;
+        boolean verticalVelocityOk = client.player.isOnGround() || Math.abs(velocity.y) <= RESET_EPSILON;
         boolean yawOk = Math.abs(wrapDegrees(client.player.getYaw() - (float) expectedYaw)) <= RESET_EPSILON;
-        return positionOk && velocityOk && yawOk;
+        return positionOk && horizontalVelocityOk && verticalVelocityOk && yawOk;
     }
 
     private static double wrapDegrees(double value) {
