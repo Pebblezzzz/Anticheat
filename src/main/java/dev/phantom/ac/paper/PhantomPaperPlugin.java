@@ -10,6 +10,7 @@ import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
@@ -60,6 +61,13 @@ import dev.phantom.ac.World;
 public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
   private final Map<UUID, Capture> captures = new ConcurrentHashMap<>();
   private org.bukkit.scheduler.BukkitTask validationTask;
+  private volatile boolean alertsEnabled;
+  private volatile boolean broadcastAlerts;
+  private volatile boolean kicksEnabled;
+  private volatile boolean permissionExempt;
+  private volatile String exemptPermission;
+  private volatile double minimumConfidence;
+  private volatile int validationBudget;
   private final PacketListenerAbstract networkListener = new PacketListenerAbstract() {
     @Override public void onPacketReceive(PacketReceiveEvent event) {
       Object rawPlayer = event.getPlayer();
@@ -113,8 +121,16 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     getServer().getPluginManager().registerEvents(this, this);
     PacketEvents.getAPI().getEventManager().registerListener(networkListener);
     saveDefaultConfig();
+    alertsEnabled=getConfig().getBoolean("alerts.enabled",true);
+    broadcastAlerts=getConfig().getBoolean("alerts.broadcast",false);
+    kicksEnabled=getConfig().getBoolean("enforcement.kick-enabled",false);
+    permissionExempt=getConfig().getBoolean("enforcement.permission-exempt",true);
+    exemptPermission=getConfig().getString("enforcement.permission","phantom.exempt");
+    minimumConfidence=getConfig().getDouble("enforcement.minimum-confidence",0.90);
+    validationBudget=Math.max(1,getConfig().getInt("validation.candidate-budget",4096));
     chunkTask=getServer().getScheduler().runTaskTimer(this,this::drainChunkQueue,1L,1L);
-    validationTask=getServer().getScheduler().runTaskTimer(this,this::evaluateCaptures,10L,10L);
+    int validationInterval=Math.max(1,getConfig().getInt("validation.interval-ticks",10));
+    validationTask=getServer().getScheduler().runTaskTimerAsynchronously(this,this::evaluateCapturesAsync,validationInterval,validationInterval);
   }
 
   private org.bukkit.scheduler.BukkitTask chunkTask;
@@ -181,25 +197,28 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     return states;
   }
 
-  private void evaluateCaptures() {
-    FileConfiguration config=getConfig();
-    boolean alerts=config.getBoolean("alerts.enabled",true);
-    boolean broadcast=config.getBoolean("alerts.broadcast",false);
-    boolean kicks=config.getBoolean("enforcement.kick-enabled",false);
-    int budget=Math.max(1,config.getInt("validation.candidate-budget",4096));
-    boolean permissionExempt=config.getBoolean("enforcement.permission-exempt",true);
-    String exemptPermission=config.getString("enforcement.permission","phantom.exempt");
-    double minimumConfidence=config.getDouble("enforcement.minimum-confidence",0.90);
-    if(!alerts && !kicks) return;
+  private void evaluateCapturesAsync() {
+    if(!alertsEnabled && !kicksEnabled) return;
     for(Map.Entry<UUID,Capture> entry:captures.entrySet()) {
       Capture capture=entry.getValue();
+      if(!capture.validationRunning.compareAndSet(false,true)) continue;
       List<Packets.RawPacket> raw=capture.copy();
-      if(raw.isEmpty()) continue;
-      LiveValidation.Report report;
-      try { report=LiveValidation.analyze(Timeline.assign(new Packets.Normalizer().normalize(raw),capture.epochNanos,50_000_000L),budget); }
-      catch(RuntimeException failure) { getLogger().warning("validation skipped for "+entry.getKey()+": "+failure.getClass().getSimpleName()); continue; }
-      Player player=getServer().getPlayer(entry.getKey());
-      if(player==null) continue;
+      if(raw.isEmpty()) { capture.validationRunning.set(false); continue; }
+      try {
+        Timeline.Snapshot timeline=Timeline.assign(new Packets.Normalizer().normalize(raw),capture.epochNanos,50_000_000L);
+        LiveValidation.Report report=LiveValidation.analyze(timeline,validationBudget);
+        getServer().getScheduler().runTask(this,()->applyValidationResult(entry.getKey(),capture,report));
+      } catch(RuntimeException failure) {
+        capture.validationRunning.set(false);
+        getLogger().warning("validation skipped for "+entry.getKey()+": "+failure.getClass().getSimpleName());
+      }
+    }
+  }
+
+  private void applyValidationResult(UUID playerId,Capture capture,LiveValidation.Report report) {
+    try {
+      Player player=getServer().getPlayer(playerId);
+      if(player==null) return;
       synchronized(capture) {
         int start=Math.min(capture.processedFindings,report.findings().size());
         for(int i=start;i<report.findings().size();i++) {
@@ -215,13 +234,13 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
           capture.aggregator=result.state();
           if(result.alert().isPresent()) {
             OperatorValidation.Alert alert=result.alert().orElseThrow();
-            if(alerts) sendOperatorAlert(alert.message(),broadcast);
-            if(kicks && alert.confidence()>=minimumConfidence && !(permissionExempt && player.hasPermission(exemptPermission))) player.kickPlayer("Movement validation failed: "+alert.reason());
+            if(alertsEnabled) sendOperatorAlert(alert.message(),broadcastAlerts);
+            if(kicksEnabled && alert.confidence()>=minimumConfidence && !(permissionExempt && player.hasPermission(exemptPermission))) player.kickPlayer("Movement validation failed: "+alert.reason());
           }
         }
         capture.processedFindings=report.findings().size();
       }
-    }
+    } finally { capture.validationRunning.set(false); }
   }
 
   @EventHandler public void joined(PlayerJoinEvent event) { captures.put(event.getPlayer().getUniqueId(), new Capture(System.nanoTime())); }
@@ -402,6 +421,7 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     final Queue<PendingChunk> chunkQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
     final List<RawPacket> packets = Collections.synchronizedList(new ArrayList<>());
     OperatorValidation.Aggregator aggregator=OperatorValidation.Aggregator.empty();
+    final AtomicBoolean validationRunning=new AtomicBoolean();
     int processedFindings;
     Capture(long epochNanos) { this.epochNanos=epochNanos; }
     List<RawPacket> copy() { synchronized (packets) { return List.copyOf(packets); } }
