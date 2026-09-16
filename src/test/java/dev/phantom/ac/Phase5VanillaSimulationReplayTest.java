@@ -179,7 +179,7 @@ class Phase5VanillaSimulationReplayTest {
                 environment,
                 attributes,
                 effects,
-                Phase5Mechanics.Pose.valueOf(current.pose()),
+                Phase5Mechanics.Pose.valueOf(previous.pose()),
                 movement);
     }
 
@@ -205,9 +205,10 @@ class Phase5VanillaSimulationReplayTest {
     }
 
     private static List<Phase5Mechanics.AttributeModifier> parseModifiers(String raw) {
-        if (raw.equals("-")) return List.of();
+        if (raw == null || raw.isBlank() || raw.equals("-")) return List.of();
         List<Phase5Mechanics.AttributeModifier> out = new ArrayList<>();
         for (String encoded : raw.split(";", -1)) {
+            if (encoded.isBlank()) continue;
             String[] parts = encoded.split(":", 3);
             if (parts.length != 3) throw new IllegalArgumentException("invalid modifier " + encoded);
             out.add(new Phase5Mechanics.AttributeModifier(
