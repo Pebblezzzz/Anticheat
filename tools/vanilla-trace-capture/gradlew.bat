@@ -3,7 +3,7 @@ setlocal EnableExtensions
 
 rem Phase 5 project-local Gradle launcher.
 rem Downloads the pinned Gradle distribution only when it is not already cached.
-set "GRADLE_VERSION=8.14.3"
+set "GRADLE_VERSION=9.2"
 set "SCRIPT_DIR=%~dp0"
 set "DIST_DIR=%SCRIPT_DIR%.gradle-dist\gradle-%GRADLE_VERSION%"
 set "ZIP_FILE=%SCRIPT_DIR%.gradle-dist\gradle-%GRADLE_VERSION%-bin.zip"
