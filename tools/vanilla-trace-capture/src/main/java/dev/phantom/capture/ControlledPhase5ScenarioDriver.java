@@ -5,7 +5,6 @@ import net.minecraft.client.option.GameOptions;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.integrated.IntegratedServer;
-import net.minecraft.server.network.ServerPlayerEntity;
 
 import java.util.Locale;
 
@@ -258,38 +257,38 @@ public final class ControlledPhase5ScenarioDriver {
             command(m, s, "fill -4 64 " + (stepZ + 32) + " 4 64 " + (stepZ + 35) + " minecraft:oak_slab[type=bottom]");
 
             int stairsZ = arenaStartFor("stairs");
-            command(m, s, "fill -2 64 " + (stairsZ + 30) " 2 64 " + (stairsZ + 32) + " minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");
-            command(m, s, "fill -2 65 " + (stairsZ + 33) " 2 65 " + (stairsZ + 35) + " minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");
-            command(m, s, "fill -2 66 " + (stairsZ + 36) " 2 66 " + (stairsZ + 38) + " minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");
+            command(m, s, "fill -2 64 " + (stairsZ + 30) + " 2 64 " + (stairsZ + 32) + " minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");
+            command(m, s, "fill -2 65 " + (stairsZ + 33) + " 2 65 " + (stairsZ + 35) + " minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");
+            command(m, s, "fill -2 66 " + (stairsZ + 36) + " 2 66 " + (stairsZ + 38) + " minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");
 
             int climbZ = arenaStartFor("climbable");
-            command(m, s, "fill -2 64 " + (climbZ + 30) " 2 69 " + (climbZ + 30) + " minecraft:stone");
-            command(m, s, "fill -2 64 " + (climbZ + 29) " 2 69 " + (climbZ + 29) + " minecraft:ladder[facing=south]");
-            command(m, s, "fill -1 64 " + (climbZ + 20) " 1 69 " + (climbZ + 20) + " minecraft:vine");
+            command(m, s, "fill -2 64 " + (climbZ + 30) + " 2 69 " + (climbZ + 30) + " minecraft:stone");
+            command(m, s, "fill -2 64 " + (climbZ + 29) + " 2 69 " + (climbZ + 29) + " minecraft:ladder[facing=south]");
+            command(m, s, "fill -1 64 " + (climbZ + 20) + " 1 69 " + (climbZ + 20) + " minecraft:vine");
 
             int edgeZ = arenaStartFor("edge-corner");
-            command(m, s, "fill 3 64 " + (edgeZ + 28) " 3 67 " + (edgeZ + 70) + " minecraft:stone");
-            command(m, s, "fill 3 64 " + (edgeZ + 50) " 8 67 " + (edgeZ + 50) + " minecraft:stone");
-            command(m, s, "fill -3 64 " + (edgeZ + 65) " 2 67 " + (edgeZ + 65) + " minecraft:stone");
+            command(m, s, "fill 3 64 " + (edgeZ + 28) + " 3 67 " + (edgeZ + 70) + " minecraft:stone");
+            command(m, s, "fill 3 64 " + (edgeZ + 50) + " 8 67 " + (edgeZ + 50) + " minecraft:stone");
+            command(m, s, "fill -3 64 " + (edgeZ + 65) + " 2 67 " + (edgeZ + 65) + " minecraft:stone");
 
             int swimZ = arenaStartFor("swim-transition");
-            command(m, s, "fill -40 62 " + (swimZ + 6) " 40 62 " + (swimZ + 100) + " minecraft:stone");
-            command(m, s, "fill -40 63 " + (swimZ + 6) " 40 67 " + (swimZ + 100) + " minecraft:water");
-            command(m, s, "fill -40 68 " + (swimZ + 6) " 40 68 " + (swimZ + 45) + " minecraft:air");
-            command(m, s, "fill -40 68 " + (swimZ + 46) " 40 68 " + (swimZ + 100) + " minecraft:glass");
+            command(m, s, "fill -40 62 " + (swimZ + 6) + " 40 62 " + (swimZ + 100) + " minecraft:stone");
+            command(m, s, "fill -40 63 " + (swimZ + 6) + " 40 67 " + (swimZ + 100) + " minecraft:water");
+            command(m, s, "fill -40 68 " + (swimZ + 6) + " 40 68 " + (swimZ + 45) + " minecraft:air");
+            command(m, s, "fill -40 68 " + (swimZ + 46) + " 40 68 " + (swimZ + 100) + " minecraft:glass");
 
             int glideZ = arenaStartFor("glide");
-            command(m, s, "fill -30 63 " + (glideZ + 6) " 30 63 " + (glideZ + 110) + " minecraft:stone");
-            command(m, s, "fill -30 64 " + (glideZ + 6) " 30 108 " + (glideZ + 110) + " minecraft:air");
-            command(m, s, "fill -30 64 " + (glideZ + 90) " 30 90 " + (glideZ + 90) + " minecraft:glass");
+            command(m, s, "fill -30 63 " + (glideZ + 6) + " 30 63 " + (glideZ + 110) + " minecraft:stone");
+            command(m, s, "fill -30 64 " + (glideZ + 6) + " 30 108 " + (glideZ + 110) + " minecraft:air");
+            command(m, s, "fill -30 90 " + (glideZ + 90) + " 30 90 " + (glideZ + 90) + " minecraft:glass");
 
             int correctionZ = arenaStartFor("correction");
-            command(m, s, "fill -8 64 " + (correctionZ + 8) " 8 67 " + (correctionZ + 90) + " air");
-            command(m, s, "fill -8 63 " + (correctionZ + 8) " 8 63 " + (correctionZ + 90) + " minecraft:stone");
+            command(m, s, "fill -8 64 " + (correctionZ + 8) + " 8 67 " + (correctionZ + 90) + " air");
+            command(m, s, "fill -8 63 " + (correctionZ + 8) + " 8 63 " + (correctionZ + 90) + " minecraft:stone");
 
             int velocityZ = arenaStartFor("velocity");
-            command(m, s, "fill -12 64 " + (velocityZ + 8) " 12 67 " + (velocityZ + 90) + " air");
-            command(m, s, "fill -12 63 " + (velocityZ + 8) " 12 63 " + (velocityZ + 90) + " minecraft:stone");
+            command(m, s, "fill -12 64 " + (velocityZ + 8) + " 12 67 " + (velocityZ + 90) + " air");
+            command(m, s, "fill -12 63 " + (velocityZ + 8) + " 12 63 " + (velocityZ + 90) + " minecraft:stone");
 
             command(m, s, "gamemode survival @a"); command(m, s, "effect clear @a");
             command(m, s, "execute as @a run data modify entity @s Fire set value 0s");
@@ -355,9 +354,7 @@ public final class ControlledPhase5ScenarioDriver {
         });
     }
 
-    private static void command(CommandManager m, ServerCommandSource s, String value) {
-        m.parseAndExecute(s, value);
-    }
+    private static void command(CommandManager m, ServerCommandSource s, String value) { m.parseAndExecute(s, value); }
 
     private static void finishIfDone(MinecraftClient client, long total) {
         ControlledPhase5ScenarioDriver d = LAST_INSTANCE;
