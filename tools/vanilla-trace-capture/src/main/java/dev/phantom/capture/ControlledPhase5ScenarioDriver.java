@@ -112,7 +112,6 @@ public final class ControlledPhase5ScenarioDriver {
             }
         }
         if (lastResetStart != Long.MIN_VALUE && t - lastResetStart < RESET_SETTLE) {
-            phase = "transition";
             forward = right = left = jump = sneak = sprint = false;
         }
         apply(client.options, forward, false, left, right, jump, sneak, sprint);
@@ -129,7 +128,7 @@ public final class ControlledPhase5ScenarioDriver {
             command(m, s, "fill -16 60 -16 16 67 24 air");
             command(m, s, "fill -16 63 -16 16 63 24 minecraft:stone");
             command(m, s, "fill 0 64 9 0 66 12 minecraft:stone");
-            command(m, s, "fill 0 64 20 4 64 21 minecraft:stone");
+            command(m, s, "fill 0 64 20 4 64 21 minecraft:oak_slab[type=bottom]");
             command(m, s, "fill -15 62 -14 15 62 -7 minecraft:stone");
             command(m, s, "fill -15 63 -14 15 65 -7 minecraft:water");
             command(m, s, "fill -15 63 -15 15 66 -15 minecraft:stone");
@@ -164,5 +163,5 @@ public final class ControlledPhase5ScenarioDriver {
     private static void command(CommandManager m, ServerCommandSource s, String c) { m.parseAndExecute(s, c); }
     private void finishIfDone(MinecraftClient client, int total) { if (scenarioTick++ >= total - 1) { finished = true; release(client.options); client.scheduleStop(); } }
     private static void apply(GameOptions o, boolean f, boolean b, boolean l, boolean r, boolean j, boolean sn, boolean sp) { o.forwardKey.setPressed(f); o.backKey.setPressed(b); o.leftKey.setPressed(l); o.rightKey.setPressed(r); o.jumpKey.setPressed(j); o.sneakKey.setPressed(sn); o.sprintKey.setPressed(sp); }
-    private static void release(GameOptions o) { apply(o, false, false, false, false, false, false, false); }
+    private static void release(GameOptions o) { apply(o, false, false, false, false, false, false); }
 }
