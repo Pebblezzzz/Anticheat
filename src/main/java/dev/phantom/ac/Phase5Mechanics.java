@@ -49,6 +49,11 @@ public final class Phase5Mechanics {
     public double jumpVelocityAdd() { return jumpBoostAmplifier >= 0 ? 0.1 * (jumpBoostAmplifier + 1) : 0.0; }
   }
 
+  /**
+   * Environment factors measured from the real 1.21.11 Phase 5 capture.
+   * The fluid speed factor is kept separate from the observed drag so callers
+   * can represent any independently established attribute modifier later.
+   */
   public record MovementEnvironment(Fluid fluid, boolean submerged, boolean climbable, boolean onGround,
                                     boolean sprinting, boolean sneaking, boolean swimmingInput, boolean gliding,
                                     double fluidSpeedMultiplier, double fluidDrag, double gravityMultiplier) implements Serializable {
@@ -59,6 +64,14 @@ public final class Phase5Mechanics {
     }
     public static MovementEnvironment dry(boolean onGround, boolean sprinting, boolean sneaking) {
       return new MovementEnvironment(Fluid.NONE,false,false,onGround,sprinting,sneaking,false,false,1.0,1.0,1.0);
+    }
+    /** Composite horizontal/vertical damping observed in the controlled water lane. */
+    public static MovementEnvironment vanillaWater(boolean onGround, boolean sprinting, boolean sneaking, boolean swimmingInput) {
+      return new MovementEnvironment(Fluid.WATER,true,false,onGround,sprinting,sneaking,swimmingInput,false,1.0,0.9,0.0);
+    }
+    /** Composite horizontal/vertical damping and fall acceleration observed in the controlled lava lane. */
+    public static MovementEnvironment vanillaLava(boolean onGround, boolean sprinting, boolean sneaking) {
+      return new MovementEnvironment(Fluid.LAVA,true,false,onGround,sprinting,sneaking,false,false,1.0,0.5,0.5);
     }
   }
 
