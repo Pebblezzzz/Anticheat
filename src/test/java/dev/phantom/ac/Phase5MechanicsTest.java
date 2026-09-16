@@ -32,10 +32,12 @@ class Phase5MechanicsTest {
     assertEquals(fast,repeat);
     assertFalse(fast.state().uncertain());
   }
-  @Test void diagonalInputPreservesVanillaHorizontalMagnitude() {
+  @Test void diagonalGroundInputMatchesTraceDerivedFirstStep() {
     var physics=new Vanilla12111Physics(); var state=Player.initial(Vec3.ZERO);
     var diagonal=physics.step(new PhysicsContext(3,state,new AdvancedInput(1,-1,false),air(),Simulation.Environment.DRY,new Attributes(.1)));
-    assertEquals(Math.sqrt(2.0) * 0.053508007029666405, Math.hypot(diagonal.state().velocity().x(), diagonal.state().velocity().z()), 1e-12);
+    assertEquals(0.038608008, Math.abs(diagonal.state().velocity().x()), 1e-8);
+    assertEquals(0.038608008, Math.abs(diagonal.state().velocity().z()), 1e-8);
+    assertEquals(0.0546, Math.hypot(diagonal.state().velocity().x(), diagonal.state().velocity().z()), 1e-8);
   }
   @Test void tracedWaterAndLavaFactorsAreExplicit() {
     var physics=new Vanilla12111Physics();
