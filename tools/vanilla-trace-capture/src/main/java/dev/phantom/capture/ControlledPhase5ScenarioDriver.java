@@ -177,10 +177,10 @@ public final class ControlledPhase5ScenarioDriver {
             command(m, s, "fill " + COURSE_MIN_X + " 63 " + COURSE_MIN_Z + " " + COURSE_MAX_X + " 63 " + COURSE_MAX_Z + " minecraft:stone");
 
             int collisionZ = arenaStartFor("collision");
-            command(m, s, "fill -2 64 " + (collisionZ + 48) + " 2 66 " + (collisionZ + 52) minecraft:stone");
+            command(m, s, "fill -2 64 " + (collisionZ + 48) + " 2 66 " + (collisionZ + 52) + " minecraft:stone");
 
             int stepZ = arenaStartFor("step");
-            command(m, s, "fill -4 64 " + (stepZ + 32) + " 4 64 " + (stepZ + 35) minecraft:oak_slab[type=bottom]");
+            command(m, s, "fill -4 64 " + (stepZ + 32) + " 4 64 " + (stepZ + 35) + " minecraft:oak_slab[type=bottom]");
 
             int waterZ = arenaStartFor("water");
             command(m, s, "fill -100 62 " + (waterZ + 8) + " 100 62 " + (waterZ + 112) + " minecraft:stone");
@@ -214,12 +214,32 @@ public final class ControlledPhase5ScenarioDriver {
     }
 
     private void giveEffect(MinecraftClient client, String id, int amplifier) {
-        IntegratedServer server = client.getServer(); if (server == null) throw new IllegalStateException("Integrated server missing");
-        server.executeSync(() -> command(server.getCommandManager(), server.getCommandSource(), "effect give @a " + id + " 120 " + amplifier + " true"));
+        IntegratedServer server = client.getServer();
+        if (server == null) throw new IllegalStateException("Integrated server disappeared during Phase 5 effect setup");
+        server.executeSync(() -> {
+            CommandManager m = server.getCommandManager(); ServerCommandSource s = server.getCommandSource();
+            command(m, s, "effect give @a " + id + " 30 " + amplifier + " true");
+        });
     }
 
-    private static void command(CommandManager m, ServerCommandSource s, String c) { m.parseAndExecute(s, c); }
-    private void finishIfDone(MinecraftClient client, int total) { if (scenarioTick++ >= total - 1) { finished = true; release(client.options); client.scheduleStop(); } }
-    private static void apply(GameOptions o, boolean f, boolean b, boolean l, boolean r, boolean j, boolean sn, boolean sp) { o.forwardKey.setPressed(f); o.backKey.setPressed(b); o.leftKey.setPressed(l); o.rightKey.setPressed(r); o.jumpKey.setPressed(j); o.sneakKey.setPressed(sn); o.sprintKey.setPressed(sp); }
+    private static void command(CommandManager m, ServerCommandSource s, String value) {
+        m.executeWithPrefix(s, value.startsWith("/") ? value.substring(1) : value);
+    }
+
+    private static void finishIfDone(MinecraftClient client, long total) {
+        ControlledPhase5ScenarioDriver d = LAST_INSTANCE;
+        if (d != null && d.scenarioTick >= total) {
+            d.finished = true;
+            release(client.options);
+        }
+        if (d != null) d.scenarioTick++;
+    }
+
+    private static void apply(GameOptions o, boolean forward, boolean back, boolean left, boolean right,
+                              boolean jump, boolean sneak, boolean sprint) {
+        o.forwardKey.setPressed(forward); o.backKey.setPressed(back); o.leftKey.setPressed(left); o.rightKey.setPressed(right);
+        o.jumpKey.setPressed(jump); o.sneakKey.setPressed(sneak); o.sprintKey.setPressed(sprint);
+    }
+
     private static void release(GameOptions o) { apply(o, false, false, false, false, false, false, false); }
 }
