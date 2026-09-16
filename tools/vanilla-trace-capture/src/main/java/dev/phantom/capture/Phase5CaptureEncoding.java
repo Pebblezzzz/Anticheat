@@ -4,7 +4,6 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
 import net.minecraft.entity.attribute.EntityAttributeModifier;
 
-import java.util.Locale;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -18,17 +17,9 @@ final class Phase5CaptureEncoding {
     }
 
     private static String modifier(EntityAttributeModifier modifier) {
-        return escape(modifier.getId().toString()) + ":"
-                + Double.toString(modifier.getValue()) + ":"
-                + operation(modifier.getOperation());
-    }
-
-    private static String operation(EntityAttributeModifier.Operation operation) {
-        return switch (operation) {
-            case ADD_VALUE -> "ADD_VALUE";
-            case ADD_MULTIPLIED_BASE -> "ADD_MULTIPLIED_BASE";
-            case ADD_MULTIPLIED_TOTAL -> "ADD_MULTIPLIED_TOTAL";
-        };
+        return escape(modifier.id().toString()) + ":"
+                + Double.toString(modifier.value()) + ":"
+                + modifier.operation().name();
     }
 
     static String worldIdentity(MinecraftClient client) {
