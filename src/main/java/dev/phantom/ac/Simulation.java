@@ -30,7 +30,8 @@ public final class Simulation {
       if(env.fluid()!=Phase5Mechanics.Fluid.NONE) velocity=new Vec3(velocity.x()*env.fluidSpeedMultiplier()*env.fluidDrag(),velocity.y()*env.fluidDrag(),velocity.z()*env.fluidSpeedMultiplier()*env.fluidDrag());
       if(env.climbable()) velocity=new Vec3(velocity.x(),Math.max(-0.15,velocity.y()),velocity.z());
       double gravity=GRAVITY*env.gravityMultiplier();
-      if(input.jump()&&s.onGround()) velocity=new Vec3(velocity.x(),JUMP+effects.jumpVelocityAdd(),velocity.z());
+      boolean jumped=input.jump()&&s.onGround();
+      if(jumped) velocity=new Vec3(velocity.x(),JUMP+effects.jumpVelocityAdd(),velocity.z());
       else velocity=new Vec3(velocity.x(),velocity.y()-gravity,velocity.z());
       Aabb swept=new Aabb(Math.min(start.minX(),start.minX()+velocity.x()),Math.min(start.minY(),start.minY()+velocity.y()),Math.min(start.minZ(),start.minZ()+velocity.z()),Math.max(start.maxX(),start.maxX()+velocity.x()),Math.max(start.maxY(),start.maxY()+velocity.y()),Math.max(start.maxZ(),start.maxZ()+velocity.z()));
       if(world.hasUnsupported(swept) && environment==Environment.DRY) return new StepResult(tick,uncertain(s),false,priorPose,"swept collision volume is not fully known");
@@ -38,7 +39,8 @@ public final class Simulation {
       Vec3 displacement=collision.resolved(); boolean grounded=collision.collidedY()&&velocity.y()<=0;
       double horizontalFactor=s.onGround()?GROUND_FRICTION:AIR_DRAG;
       if(env.fluid()!=Phase5Mechanics.Fluid.NONE) horizontalFactor*=env.fluidDrag();
-      Vec3 nextVelocity=new Vec3(collision.collidedX()?0:velocity.x()*horizontalFactor,grounded?0:velocity.y()*AIR_DRAG,collision.collidedZ()?0:velocity.z()*horizontalFactor);
+      double postTickVerticalVelocity=jumped?(velocity.y()-gravity)*AIR_DRAG:velocity.y()*AIR_DRAG;
+      Vec3 nextVelocity=new Vec3(collision.collidedX()?0:velocity.x()*horizontalFactor,grounded?0:postTickVerticalVelocity,collision.collidedZ()?0:velocity.z()*horizontalFactor);
       Phase5Mechanics.Pose nextPose=Phase5Mechanics.nextPose(priorPose,env);
       Player next=new Player(s.position().add(displacement),nextVelocity,s.yaw(),s.pitch(),grounded,s.gamemode(),s.effects(),s.awaitingTeleport(),false);
       return new StepResult(tick,next,collision.collidedHorizontally()||collision.collidedY(),nextPose,"deterministic collision-resolved movement step");
