@@ -1,0 +1,37 @@
+name: Phase 5 validation
+
+on:
+  push:
+    branches: ["main", "phase5-completion-2026-09-16"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  core-maven:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Run complete Maven package/test suite
+        run: mvn -B package
+
+  vanilla-capture-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/vanilla-trace-capture
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.2"
+      - name: Build observation-only 1.21.11 capture harness
+        run: gradle build
