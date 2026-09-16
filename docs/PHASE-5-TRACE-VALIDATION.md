@@ -5,7 +5,7 @@ Audit date: 2026-09-16.
 ## Status
 Phase 5 remains **PARTIAL / BLOCKED BY EXTERNAL DATA** for empirical vanilla validation. The repository now contains the deterministic simulator primitives, the original 46-column trace validator, an extended version-2 capture format with explicit missing-field provenance, and an observation-only Fabric capture harness pinned to Minecraft Java 1.21.11.
 
-No real vanilla trace is committed by this pass because the actual licensed 1.21.11 client cannot be launched in this execution environment. This is an external-data blocker, not a permission to synthesize traces.
+No real vanilla trace is committed by this pass because the actual licensed 1.21.11 client cannot be launched in this execution environment. External captures supplied from a real client are used to drive regression tests, but the raw trace files remain outside the repository unless deliberately preserved as corpus fixtures.
 
 ## Exact target client
 
@@ -33,6 +33,14 @@ The capture harness takes player state **after the real `ClientPlayerEntity.tick
 A second event stream records inbound `ENTITY_VELOCITY` and `POSITION_CORRECTION` packets with their receive timestamp and packet payload. These packet events are kept separate from the post-tick row because packet arrival and player-state observation are distinct timing points.
 
 The current harness can independently observe position, velocity, rotation, ground state, discrete `PlayerInput`, sprint/sneak/jump state, resolved client pose, fluid/submerged/climbing/gliding state, movement-speed base/modifiers, movement effects, world identity/tick, and aggregate collision flags. It deliberately declares knockback decomposition, correction-pending state, step attempt/result, and per-axis collision clipping missing until a measurement procedure can reconstruct them without inventing data.
+
+## Empirical baselines captured so far
+
+The external 1.21.11 captures supplied for Phase 5 have established two controlled **stone-ground** movement baselines. A walking capture produced the measured first controlled forward transition used by `stoneWalkingBaselineMatchesObservedVanillaTransition()` in `Phase5ParityToolTest`. A later sprint capture produced a clean sprint-start transition at tick 70 from the observed tick-69 state; that transition is covered by `stoneSprintStartMatchesObservedVanillaTransition()`.
+
+The sprint trace recorded `sprint=true` during the controlled sprint section. Its settled horizontal speed was approximately `0.1532`, while the sprint-start transition was consistent with the existing `1.3` sprint multiplier, `0.98` movement acceleration, and `0.546` stone-ground post-movement friction. These observations do not justify treating `0.546` as a universal block friction constant or claiming parity for unmeasured scenarios.
+
+The raw captures are not stored in the repository by default, so these observations are regression evidence rather than a self-contained reproducible fixture corpus. They should continue to be treated as **VANILLA VALIDATED** only for the specifically measured stone-ground transitions.
 
 ## Controlled-corpus procedure
 
@@ -68,4 +76,4 @@ No repository fixture currently claims to be one of these real-client captures.
 - **PARTIAL:** some machinery exists but an empirical requirement remains.
 - **BLOCKED BY EXTERNAL DATA:** the missing evidence must come from running the exact client outside this execution environment.
 
-Phase 5 is currently **PARTIAL / BLOCKED BY EXTERNAL DATA**. No simulator-generated row is valid empirical evidence and no tolerance/fudge factor is accepted as a substitute for fixing the first actual divergence.
+Phase 5 is currently **PARTIAL / BLOCKED BY EXTERNAL DATA** overall. The stone-ground walking and sprint-start transitions have empirical vanilla evidence and regression coverage, but the broader corpus is still unvalidated. No simulator-generated row is valid empirical evidence and no tolerance/fudge factor is accepted as a substitute for fixing the first actual divergence.
