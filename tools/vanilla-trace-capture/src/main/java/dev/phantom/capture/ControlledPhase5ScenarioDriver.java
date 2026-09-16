@@ -246,6 +246,7 @@ public final class ControlledPhase5ScenarioDriver {
         if (d != null && d.scenarioTick >= total) {
             d.finished = true;
             release(client.options);
+            client.scheduleStop();
         }
         if (d != null) d.scenarioTick++;
     }
