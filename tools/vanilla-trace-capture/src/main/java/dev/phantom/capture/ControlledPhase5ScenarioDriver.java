@@ -400,7 +400,7 @@ public final class ControlledPhase5ScenarioDriver {
         o.jumpKey.setPressed(j); o.sneakKey.setPressed(sn); o.sprintKey.setPressed(sp);
     }
 
-    private static void release(GameOptions o) { apply(o, false, false, false, false, false, false); }
+    private static void release(GameOptions o) { apply(o, false, false, false, false, false, false, false); }
 
     private static void cmd(CommandManager m, ServerCommandSource s, String command) { m.parseAndExecute(s, command); }
 
