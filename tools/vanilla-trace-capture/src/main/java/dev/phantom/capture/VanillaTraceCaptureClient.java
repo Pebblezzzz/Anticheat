@@ -168,7 +168,7 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
                     fluid,
                     Boolean.toString(player.isSubmergedInWater()),
                     Boolean.toString(player.isClimbing()),
-                    Boolean.toString(player.getPose() == EntityPose.FALL_FLYING),
+                    Boolean.toString(player.getPose() == EntityPose.GLIDING),
                     d(baseSpeed),
                     modifiers,
                     Integer.toString(speedAmp),
