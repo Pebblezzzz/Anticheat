@@ -26,7 +26,7 @@ Standing, crouching, swimming, fall-flying and sleeping are explicit states. Pos
 
 ### Fluids
 
-Water and lava remain separate movement paths. Their drag and gravity factors are explicit environment inputs rather than inferred from a generic fluid rule. The real 1.21.11 client exposes distinct water and lava travel methods; Phase 5 keeps that distinction in the model.
+Water and lava remain separate movement paths. Their drag and gravity factors are explicit environment inputs rather than inferred from a generic fluid rule. The real 1.21.11 client exposes distinct water and lava travel methods, including dedicated fluid and water/lava travel paths; Phase 5 keeps that distinction in the model. citeturn679842search0
 
 ### Climbables
 
@@ -34,7 +34,7 @@ Ladder/vine-like movement has a bounded vertical velocity. Forward input control
 
 ### Gliding
 
-Fall-flying is an explicit movement mode with its own horizontal drag and bounded downward acceleration rather than ordinary airborne gravity.
+Fall-flying is an explicit movement mode with its own horizontal drag and bounded downward acceleration.
 
 ### Effects and attributes
 
@@ -42,15 +42,17 @@ Movement-speed modifiers support additive, base-multiplied and total-multiplied 
 
 ### External impulses
 
-Observed server velocity/knockback is represented as an explicit velocity impulse. It is applied before subsequent deterministic movement integration instead of being treated as unexplained motion.
+Observed server velocity is represented as an explicit velocity impulse. The capture harness now records an observed `ENTITY_VELOCITY` event into both the event trace and the corresponding state row, so the simulator can distinguish an observed external impulse from unexplained motion. A packet observation is evidence of an authoritative velocity update, not by itself a semantic claim about the exact gameplay cause.
 
 ### Corrections
 
-Teleport/correction state establishes an authoritative barrier. Motion is not integrated through an outstanding correction confirmation. Matching confirmation clears the barrier; a mismatched confirmation does not.
+Teleport/correction state establishes an authoritative barrier. Motion is not integrated through an outstanding correction confirmation. Matching confirmation clears the barrier; a mismatched confirmation does not. The capture harness records correction IDs and pending state on the corresponding state row while retaining the raw packet event with relative-position metadata.
 
 ## World and collision requirements
 
 The collision layer must distinguish full blocks, partial blocks, slabs, stairs, edges/corners and step-up resolution. Unknown/unloaded or unsupported geometry is never treated as air for validation.
+
+The deterministic vanilla capture course now includes dedicated phases for stairs, ladder/vine climbables, edge/corner interaction, swimming/air transition, fall-flying, server correction, and environmental impulse observation in addition to the original walk/sprint/jump/sneak/diagonal/collision/fluid/effect/step phases.
 
 ## Empirical reference requirements
 
@@ -63,9 +65,11 @@ The capture/audit pipeline validates:
 3. Survival-mode capture purity.
 4. Fluid and pose state transitions.
 5. Effect and attribute observations.
-6. Jump and step trajectories.
-7. Replay through the deterministic simulator for states where the trace preserves enough causal information.
-8. Explicitly skips underdetermined fluid/jump-transition replay rather than masking them with broad tolerances.
+6. Jump, stair and step trajectories.
+7. Climbable, swimming, gliding and correction observations where the client exposes those states.
+8. Replay through the deterministic simulator for states where the trace preserves enough causal information.
+9. Explicitly skips underdetermined fluid/jump-transition replay rather than masking them with broad tolerances.
+10. Correlates packet events to the nearest captured state row using the capture client tick, without fabricating missing server semantics.
 
 ## Completion gate
 
@@ -75,6 +79,7 @@ Phase 5 is complete only when all of the following remain green:
 - Phase 5 mechanics acceptance tests.
 - Vanilla 1.21.11 batch capture audit.
 - Vanilla-to-Phantom replay audit for causally reconstructable rows.
+- Advanced vanilla capture phases have actually produced representative observations.
 - No fabricated telemetry.
 - No broad replay tolerance used to hide simulator divergence.
 - Unknown world/correction state propagates as uncertainty.
