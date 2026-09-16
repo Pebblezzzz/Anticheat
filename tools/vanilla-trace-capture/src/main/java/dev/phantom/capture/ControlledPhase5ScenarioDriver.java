@@ -1,28 +1,281 @@
 package dev.phantom.capture;
+
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.GameOptions;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.integrated.IntegratedServer;
+
 import java.util.Locale;
+
 public final class ControlledPhase5ScenarioDriver {
- private static final String PROP="phantom.capture.scenario",ALL="all",NONE="none";
- private static final String[] P={"walk","sprint","jump","sneak","diagonal","collision","water","lava","speed-effect","slowness-effect","jump-boost","step","tail","stairs","climbable","edge-corner","swim-transition","glide","correction"};
- private static final int[] D={100,100,100,100,100,100,120,30,80,80,100,110,70,90,100,100,120,120,40};
- private static final int START=-80,SP=140;
- private int pi=-1,elapsed,tick; private boolean prepared,done; private String scenario=NONE; private static volatile ControlledPhase5ScenarioDriver LAST;
- public ControlledPhase5ScenarioDriver(){LAST=this;}
- public static String phaseLabel(){var d=LAST;if(d==null)return "unknown";if(d.pi<0)return d.scenario+":setup";if(d.pi>=d.P.length)return d.scenario+":done";return d.scenario+":"+d.P[d.pi];}
- public void tick(MinecraftClient c){if(!Boolean.parseBoolean(System.getProperty("phantom.capture.enabled","false")))return;String r=System.getProperty(PROP,NONE).trim().toLowerCase(Locale.ROOT);if(r.equals(NONE)||c.player==null||c.world==null){release(c.options);return;}if(!r.equals(ALL))throw new IllegalArgumentException("Unsupported Phase 5 scenario: "+r);if(!r.equals(scenario)){scenario=r;pi=-1;elapsed=0;tick=0;prepared=false;done=false;release(c.options);}if(done){release(c.options);return;}if(!prepared){prepare(c);prepared=true;return;}run(c);}
- private void run(MinecraftClient c){if(pi<0){release(c.options);if(++tick>40)begin(c,0);return;}String p=P[pi];boolean f=true,b=false,l=false,r=false,j=false,n=false,s=false;switch(p){case "walk"->{} case "sprint"->s=true;case "jump"->j=elapsed<2;case "sneak"->n=true;case "diagonal"->l=true;case "water"->s=true;case "jump-boost"->j=elapsed<2;case "stairs"->{s=true;j=elapsed%28==1;}case "climbable"->f=true;case "edge-corner"->{l=elapsed<50;r=!l;}case "swim-transition"->{s=true;j=elapsed%24<6;n=elapsed%24>=12&&elapsed%24<18;}case "glide"->s=true;case "correction","lava","collision","step","tail","speed-effect","slowness-effect"->{}default->throw new IllegalStateException(p);}if(p.equals("correction")&&elapsed==8)reset(c,2,65,z(p)+20,90);if(p.equals("correction")&&elapsed==24)reset(c,-2,65,z(p)+24,270);apply(c.options,f,b,l,r,j,n,s);if(++elapsed>=D[pi]){if(++pi<P.length)begin(c,pi);else{done=true;release(c.options);c.scheduleStop();}}tick++;}
- private void begin(MinecraftClient c,int i){pi=i;elapsed=0;resetFor(c,P[i]);release(c.options);}
- private void resetFor(MinecraftClient c,String p){if(p.equals("climbable")){reset(c,0,64,z(p)+32,180);face(c,180);return;}reset(c,0,p.equals("glide")?90:64,z(p)+12,0);if(p.equals("speed-effect"))effect(c,"minecraft:speed");else if(p.equals("slowness-effect"))effect(c,"minecraft:slowness");else if(p.equals("jump-boost"))effect(c,"minecraft:jump_boost");else if(p.equals("glide")){elytra(c);fly(c,true);}}
- private static int z(String p){for(int i=0;i<P.length;i++)if(P[i].equals(p))return START+SP*i;throw new IllegalArgumentException(p);}
- private void prepare(MinecraftClient c){IntegratedServer s=c.getServer();if(s==null)throw new IllegalStateException("Integrated server required");s.executeSync(()->{CommandManager m=s.getCommandManager();ServerCommandSource q=s.getCommandSource();cmd(m,q,"difficulty peaceful");cmd(m,q,"time set day");cmd(m,q,"weather clear");for(int i=0;i<P.length;i++){int z=START+SP*i;cmd(m,q,"forceload add -16 "+z+" 16 "+(z+119));cmd(m,q,"fill -16 64 "+z+" 16 67 "+(z+119)+" air");cmd(m,q,"fill -16 63 "+z+" 16 63 "+(z+119)+" minecraft:stone");}int w=z("water");cmd(m,q,"fill -12 62 "+(w+8)+" 12 62 "+(w+70)+" minecraft:stone");cmd(m,q,"fill -12 63 "+(w+8)+" 12 65 "+(w+70)+" minecraft:water");int la=z("lava");cmd(m,q,"fill -12 62 "+(la+8)+" 12 62 "+(la+50)+" minecraft:stone");cmd(m,q,"fill -12 63 "+(la+8)+" 12 65 "+(la+50)+" minecraft:lava");int co=z("collision");cmd(m,q,"fill -2 64 "+(co+48)+" 2 66 "+(co+52)+" minecraft:stone");int st=z("step");cmd(m,q,"fill -4 64 "+(st+32)+" 4 64 "+(st+35)+" minecraft:oak_slab[type=bottom]");int a=z("stairs");cmd(m,q,"fill -2 64 "+(a+30)+" 2 64 "+(a+32)+" minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");cmd(m,q,"fill -2 65 "+(a+33)+" 2 65 "+(a+35)+" minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");cmd(m,q,"fill -2 66 "+(a+36)+" 2 66 "+(a+38)+" minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");int cl=z("climbable");cmd(m,q,"fill -2 64 "+(cl+30)+" 2 69 "+(cl+30)+" minecraft:stone");cmd(m,q,"fill -2 64 "+(cl+29)+" 2 69 "+(cl+29)+" minecraft:ladder[facing=south]");int e=z("edge-corner");cmd(m,q,"fill 3 64 "+(e+28)+" 3 67 "+(e+70)+" minecraft:stone");cmd(m,q,"fill 3 64 "+(e+50)+" 8 67 "+(e+50)+" minecraft:stone");cmd(m,q,"fill -3 64 "+(e+65)+" 2 67 "+(e+65)+" minecraft:stone");int sw=z("swim-transition");cmd(m,q,"fill -16 62 "+(sw+6)+" 16 62 "+(sw+50)+" minecraft:stone");cmd(m,q,"fill -16 63 "+(sw+6)+" 16 65 "+(sw+50)+" minecraft:water");cmd(m,q,"fill -16 66 "+(sw+6)+" 16 66 "+(sw+24)+" minecraft:air");cmd(m,q,"fill -16 66 "+(sw+25)+" 16 66 "+(sw+50)+" minecraft:glass");int g=z("glide");cmd(m,q,"fill -10 63 "+(g+6)+" 10 63 "+(g+60)+" minecraft:stone");cmd(m,q,"fill -8 64 "+(g+6)+" 8 89 "+(g+60)+" minecraft:air");int cr=z("correction");cmd(m,q,"fill -8 64 "+(cr+8)+" 8 67 "+(cr+90)+" air");cmd(m,q,"fill -8 63 "+(cr+8)+" 8 63 "+(cr+90)+" minecraft:stone");cmd(m,q,"gamemode survival @a");cmd(m,q,"effect clear @a");cmd(m,q,"tp @a 0 64 "+(z("walk")+12)+" 0 0");});}
- private void reset(MinecraftClient c,double x,double y,double zz,double yaw){IntegratedServer s=c.getServer();s.executeSync(()->{CommandManager m=s.getCommandManager();ServerCommandSource q=s.getCommandSource();cmd(m,q,"effect clear @a");cmd(m,q,"gamemode survival @a");cmd(m,q,"tp @a "+x+" "+y+" "+zz+" "+yaw+" 0");});}
- private void effect(MinecraftClient c,String id){IntegratedServer s=c.getServer();s.executeSync(()->cmd(s.getCommandManager(),s.getCommandSource(),"effect give @a "+id+" 30 0 true"));}
- private void elytra(MinecraftClient c){IntegratedServer s=c.getServer();s.executeSync(()->cmd(s.getCommandManager(),s.getCommandSource(),"item replace entity @a armor.chest with minecraft:elytra"));}
- private void fly(MinecraftClient c,boolean v){IntegratedServer s=c.getServer();s.executeSync(()->cmd(s.getCommandManager(),s.getCommandSource(),"execute as @a run data modify entity @s FallFlying set value "+(v?"1b":"0b")));}
- private void face(MinecraftClient c,int yaw){IntegratedServer s=c.getServer();s.executeSync(()->cmd(s.getCommandManager(),s.getCommandSource(),"tp @a ~ ~ ~ "+yaw+" 0"));}
- private static void cmd(CommandManager m,ServerCommandSource s,String v){m.parseAndExecute(s,v);}private static void apply(GameOptions o,boolean f,boolean b,boolean l,boolean r,boolean j,boolean n,boolean s){o.forwardKey.setPressed(f);o.backKey.setPressed(b);o.leftKey.setPressed(l);o.rightKey.setPressed(r);o.jumpKey.setPressed(j);o.sneakKey.setPressed(n);o.sprintKey.setPressed(s);}private static void release(GameOptions o){apply(o,false,false,false,false,false,false,false);}
+    private static final String PROP = "phantom.capture.scenario";
+    private static final String ALL = "all";
+    private static final String NONE = "none";
+    private static final String[] P = {
+            "walk", "sprint", "jump", "sneak", "diagonal", "collision", "water", "lava",
+            "speed-effect", "slowness-effect", "jump-boost", "step", "tail", "stairs", "climbable",
+            "edge-corner", "swim-transition", "glide", "correction"
+    };
+    private static final int[] D = {100, 100, 100, 100, 100, 100, 120, 30, 80, 80, 100, 110, 70, 90, 100, 100, 120, 120, 40};
+    private static final int START = -80, SP = 140;
+
+    private int pi = -1;
+    private int elapsed;
+    private int tick;
+    private boolean prepared;
+    private boolean done;
+    private String scenario = NONE;
+    private static volatile ControlledPhase5ScenarioDriver LAST;
+
+    public ControlledPhase5ScenarioDriver() {
+        LAST = this;
+    }
+
+    public static String phaseLabel() {
+        var d = LAST;
+        if (d == null) return "unknown";
+        if (d.pi < 0) return d.scenario + ":setup";
+        if (d.pi >= d.P.length) return d.scenario + ":done";
+        return d.scenario + ":" + d.P[d.pi];
+    }
+
+    public void tick(MinecraftClient c) {
+        if (!Boolean.parseBoolean(System.getProperty("phantom.capture.enabled", "false"))) return;
+        String requested = System.getProperty(PROP, NONE).trim().toLowerCase(Locale.ROOT);
+        if (requested.equals(NONE) || c.player == null || c.world == null) {
+            release(c.options);
+            return;
+        }
+        if (!requested.equals(ALL)) {
+            throw new IllegalArgumentException("Unsupported Phase 5 scenario: " + requested);
+        }
+        if (!requested.equals(scenario)) {
+            scenario = requested;
+            pi = -1;
+            elapsed = 0;
+            tick = 0;
+            prepared = false;
+            done = false;
+            Phase5CaptureDebug.resetAndStart(c, "scenario-reset", -1, 0);
+            release(c.options);
+        }
+        if (done) {
+            release(c.options);
+            return;
+        }
+        if (!prepared) {
+            prepare(c);
+            prepared = true;
+            System.out.println("[Phase5-Debug] world preparation complete; waiting for scenario execution");
+            return;
+        }
+        run(c);
+    }
+
+    private void run(MinecraftClient c) {
+        if (pi < 0) {
+            release(c.options);
+            if (++tick > 40) {
+                begin(c, 0);
+            }
+            return;
+        }
+
+        String p = P[pi];
+        boolean f = true, b = false, l = false, r = false, j = false, n = false, s = false;
+        switch (p) {
+            case "walk" -> { }
+            case "sprint" -> s = true;
+            case "jump" -> j = elapsed < 2;
+            case "sneak" -> n = true;
+            case "diagonal" -> l = true;
+            case "water" -> s = true;
+            case "jump-boost" -> j = elapsed < 2;
+            case "stairs" -> { s = true; j = elapsed % 28 == 1; }
+            case "climbable" -> f = true;
+            case "edge-corner" -> { l = elapsed < 50; r = !l; }
+            case "swim-transition" -> {
+                s = true;
+                j = elapsed % 24 < 6;
+                n = elapsed % 24 >= 12 && elapsed % 24 < 18;
+            }
+            case "glide" -> s = true;
+            case "correction", "lava", "collision", "step", "tail", "speed-effect", "slowness-effect" -> { }
+            default -> throw new IllegalStateException(p);
+        }
+
+        if (p.equals("correction") && elapsed == 8) reset(c, 2, 65, z(p) + 20, 90);
+        if (p.equals("correction") && elapsed == 24) reset(c, -2, 65, z(p) + 24, 270);
+
+        apply(c.options, f, b, l, r, j, n, s);
+        if ("climbable".equals(p)) {
+            Phase5CaptureDebug.tick(c, p, elapsed, z(p) + 29);
+        }
+
+        if (++elapsed >= D[pi]) {
+            Phase5CaptureDebug.end(p);
+            if (++pi < P.length) {
+                begin(c, pi);
+            } else {
+                done = true;
+                release(c.options);
+                c.scheduleStop();
+            }
+        }
+        tick++;
+    }
+
+    private void begin(MinecraftClient c, int i) {
+        pi = i;
+        elapsed = 0;
+        String phase = P[i];
+        resetFor(c, phase);
+        release(c.options);
+        Phase5CaptureDebug.resetAndStart(c, phase, i, "climbable".equals(phase) ? z(phase) + 29 : z(phase));
+        System.out.println("[Phase5-Debug] PHASE_START index=" + i + " phase=" + phase
+                + " zBase=" + z(phase) + " player=" + describe(c));
+    }
+
+    private void resetFor(MinecraftClient c, String p) {
+        if (p.equals("climbable")) {
+            // Ladder is mounted on the south face of the stone wall at z+30,
+            // with the ladder occupying z+29. Start south of the ladder and face north.
+            reset(c, 0, 64, z(p) + 28, 0);
+            return;
+        }
+        reset(c, 0, p.equals("glide") ? 90 : 64, z(p) + 12, 0);
+        if (p.equals("speed-effect")) effect(c, "minecraft:speed");
+        else if (p.equals("slowness-effect")) effect(c, "minecraft:slowness");
+        else if (p.equals("jump-boost")) effect(c, "minecraft:jump_boost");
+        else if (p.equals("glide")) {
+            elytra(c);
+            fly(c, true);
+        }
+    }
+
+    private static int z(String p) {
+        for (int i = 0; i < P.length; i++) {
+            if (P[i].equals(p)) return START + SP * i;
+        }
+        throw new IllegalArgumentException(p);
+    }
+
+    private void prepare(MinecraftClient c) {
+        IntegratedServer server = c.getServer();
+        if (server == null) throw new IllegalStateException("Integrated server required");
+        server.executeSync(() -> {
+            CommandManager m = server.getCommandManager();
+            ServerCommandSource q = server.getCommandSource();
+            cmd(m, q, "difficulty peaceful");
+            cmd(m, q, "time set day");
+            cmd(m, q, "weather clear");
+            for (int i = 0; i < P.length; i++) {
+                int z = START + SP * i;
+                cmd(m, q, "forceload add -16 " + z + " 16 " + (z + 119));
+                cmd(m, q, "fill -16 64 " + z + " 16 67 " + (z + 119) + " air");
+                cmd(m, q, "fill -16 63 " + z + " 16 63 " + (z + 119) + " minecraft:stone");
+            }
+            int w = z("water");
+            cmd(m, q, "fill -12 62 " + (w + 8) + " 12 62 " + (w + 70) + " minecraft:stone");
+            cmd(m, q, "fill -12 63 " + (w + 8) + " 12 65 " + (w + 70) + " minecraft:water");
+            int la = z("lava");
+            cmd(m, q, "fill -12 62 " + (la + 8) + " 12 62 " + (la + 50) + " minecraft:stone");
+            cmd(m, q, "fill -12 63 " + (la + 8) + " 12 65 " + (la + 50) + " minecraft:lava");
+            int co = z("collision");
+            cmd(m, q, "fill -2 64 " + (co + 48) + " 2 66 " + (co + 52) + " minecraft:stone");
+            int st = z("step");
+            cmd(m, q, "fill -4 64 " + (st + 32) + " 4 64 " + (st + 35) + " minecraft:oak_slab[type=bottom]");
+            int a = z("stairs");
+            cmd(m, q, "fill -2 64 " + (a + 30) + " 2 64 " + (a + 32) + " minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");
+            cmd(m, q, "fill -2 65 " + (a + 33) + " 2 65 " + (a + 35) + " minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");
+            cmd(m, q, "fill -2 66 " + (a + 36) + " 2 66 " + (a + 38) + " minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");
+            int cl = z("climbable");
+            cmd(m, q, "fill -2 64 " + (cl + 30) + " 2 69 " + (cl + 30) + " minecraft:stone");
+            cmd(m, q, "fill -2 64 " + (cl + 29) + " 2 69 " + (cl + 29) + " minecraft:ladder[facing=south]");
+            int e = z("edge-corner");
+            cmd(m, q, "fill 3 64 " + (e + 28) + " 3 67 " + (e + 70) + " minecraft:stone");
+            cmd(m, q, "fill 3 64 " + (e + 50) + " 8 67 " + (e + 50) + " minecraft:stone");
+            cmd(m, q, "fill -3 64 " + (e + 65) + " 2 67 " + (e + 65) + " minecraft:stone");
+            int sw = z("swim-transition");
+            cmd(m, q, "fill -16 62 " + (sw + 6) + " 16 62 " + (sw + 50) + " minecraft:stone");
+            cmd(m, q, "fill -16 63 " + (sw + 6) + " 16 65 " + (sw + 50) + " minecraft:water");
+            cmd(m, q, "fill -16 66 " + (sw + 6) + " 16 66 " + (sw + 24) + " minecraft:air");
+            cmd(m, q, "fill -16 66 " + (sw + 25) + " 16 66 " + (sw + 50) + " minecraft:glass");
+            int g = z("glide");
+            cmd(m, q, "fill -10 63 " + (g + 6) + " 10 63 " + (g + 60) + " minecraft:stone");
+            cmd(m, q, "fill -8 64 " + (g + 6) + " 8 89 " + (g + 60) + " minecraft:air");
+            int cr = z("correction");
+            cmd(m, q, "fill -8 64 " + (cr + 8) + " 8 67 " + (cr + 90) + " air");
+            cmd(m, q, "fill -8 63 " + (cr + 8) + " 8 63 " + (cr + 90) + " minecraft:stone");
+            cmd(m, q, "gamemode survival @a");
+            cmd(m, q, "effect clear @a");
+            cmd(m, q, "tp @a 0 64 " + (z("walk") + 12) + " 0 0");
+        });
+    }
+
+    private void reset(MinecraftClient c, double x, double y, double zz, double yaw) {
+        IntegratedServer server = c.getServer();
+        server.executeSync(() -> {
+            CommandManager m = server.getCommandManager();
+            ServerCommandSource q = server.getCommandSource();
+            cmd(m, q, "effect clear @a");
+            cmd(m, q, "gamemode survival @a");
+            cmd(m, q, "tp @a " + x + " " + y + " " + zz + " " + yaw + " 0");
+            System.out.println("[Phase5-Debug] RESET x=" + x + " y=" + y + " z=" + zz + " yaw=" + yaw);
+        });
+    }
+
+    private void effect(MinecraftClient c, String id) {
+        IntegratedServer server = c.getServer();
+        server.executeSync(() -> cmd(server.getCommandManager(), server.getCommandSource(), "effect give @a " + id + " 30 0 true"));
+        System.out.println("[Phase5-Debug] EFFECT_APPLIED id=" + id + " player=" + describe(c));
+    }
+
+    private void elytra(MinecraftClient c) {
+        IntegratedServer server = c.getServer();
+        server.executeSync(() -> cmd(server.getCommandManager(), server.getCommandSource(), "item replace entity @a armor.chest with minecraft:elytra"));
+        System.out.println("[Phase5-Debug] ELYTRA_EQUIPPED player=" + describe(c));
+    }
+
+    private void fly(MinecraftClient c, boolean v) {
+        IntegratedServer server = c.getServer();
+        server.executeSync(() -> cmd(server.getCommandManager(), server.getCommandSource(), "execute as @a run data modify entity @s FallFlying set value " + (v ? "1b" : "0b")));
+        System.out.println("[Phase5-Debug] FALL_FLYING_NBT_SET value=" + v + " player=" + describe(c));
+    }
+
+    private void face(MinecraftClient c, int yaw) {
+        IntegratedServer server = c.getServer();
+        server.executeSync(() -> cmd(server.getCommandManager(), server.getCommandSource(), "tp @a ~ ~ ~ " + yaw + " 0"));
+    }
+
+    private static void cmd(CommandManager m, ServerCommandSource s, String value) {
+        m.parseAndExecute(s, value);
+    }
+
+    private static String describe(MinecraftClient c) {
+        if (c.player == null) return "player=null";
+        var p = c.player;
+        var v = p.getVelocity();
+        return "x=" + p.getX() + ",y=" + p.getY() + ",z=" + p.getZ()
+                + ",yaw=" + p.getYaw() + ",pose=" + p.getPose()
+                + ",ground=" + p.isOnGround() + ",climbing=" + p.isClimbing()
+                + ",holding=" + p.isHoldingOntoLadder()
+                + ",fallFlying=" + p.isFallFlying()
+                + ",vel=" + v.x + "," + v.y + "," + v.z;
+    }
+
+    private static void apply(GameOptions o, boolean f, boolean b, boolean l, boolean r, boolean j, boolean n, boolean s) {
+        o.forwardKey.setPressed(f);
+        o.backKey.setPressed(b);
+        o.leftKey.setPressed(l);
+        o.rightKey.setPressed(r);
+        o.jumpKey.setPressed(j);
+        o.sneakKey.setPressed(n);
+        o.sprintKey.setPressed(s);
+    }
+
+    private static void release(GameOptions o) {
+        apply(o, false, false, false, false, false, false, false);
+    }
 }
