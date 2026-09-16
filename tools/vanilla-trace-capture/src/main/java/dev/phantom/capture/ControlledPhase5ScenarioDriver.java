@@ -207,7 +207,9 @@ public final class ControlledPhase5ScenarioDriver {
             expectedYaw = 0;
         } else {
             expectedX = 0;
-            expectedY = phase.equals("glide") ? 90 : 64;
+            // The fluid test chambers occupy Y=63..65 and the supporting floor is Y=62,
+            // so a settled player has feet at Y=63 rather than the generic dry-course Y=64.
+            expectedY = (phase.equals("water") || phase.equals("lava") || phase.equals("swim-transition")) ? 63 : (phase.equals("glide") ? 90 : 64);
             expectedZ = baseZ(phase) + 12;
             expectedYaw = 0;
         }
