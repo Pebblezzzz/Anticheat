@@ -161,7 +161,7 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
                     Integer.toString(input.forward() && !input.backward() ? 1 : input.backward() && !input.forward() ? -1 : 0),
                     Integer.toString(input.right() && !input.left() ? 1 : input.left() && !input.right() ? -1 : 0),
                     Boolean.toString(input.jump()),
-                    Boolean.toString(input.sprint()),
+                    Boolean.toString(player.isSprinting()),
                     Boolean.toString(input.sneak()),
                     player.getPose().name(),
                     gamemode,
