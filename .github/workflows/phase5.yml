@@ -32,6 +32,6 @@ jobs:
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "9.2"
+          gradle-version: "9.2.1"
       - name: Build observation-only 1.21.11 capture harness
         run: gradle build
