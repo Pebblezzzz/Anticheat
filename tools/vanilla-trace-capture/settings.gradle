@@ -7,7 +7,10 @@ pluginManagement {
 }
 
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    // Fabric Loom adds a project-level remapped-mod repository during plugin application.
+    // Prefer project repositories so Loom can install its required repository without
+    // conflicting with Gradle's settings-level repository enforcement.
+    repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
     repositories {
         maven { url = 'https://maven.fabricmc.net/' }
         mavenCentral()
