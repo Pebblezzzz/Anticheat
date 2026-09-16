@@ -17,8 +17,20 @@ public final class ControlledPhase5ScenarioDriver {
     private static final int SETUP = 40, WALK = 100, SPRINT = 100, JUMP = 100, SNEAK = 100,
             DIAGONAL = 100, COLLISION = 100, WATER_MOVE = 120, LAVA_MOVE = 60,
             SPEED_EFFECT = 80, SLOWNESS_EFFECT = 80, JUMP_BOOST = 100, STEP = 110, TAIL = 70;
-    private static final int ALL_TOTAL = SETUP + WALK + SPRINT + JUMP + SNEAK + DIAGONAL + COLLISION
-            + WATER_MOVE + LAVA_MOVE + SPEED_EFFECT + SLOWNESS_EFFECT + JUMP_BOOST + STEP + TAIL;
+    private static final int WALK_START = SETUP;
+    private static final int SPRINT_START = WALK_START + WALK;
+    private static final int JUMP_START = SPRINT_START + SPRINT;
+    private static final int SNEAK_START = JUMP_START + JUMP;
+    private static final int DIAGONAL_START = SNEAK_START + SNEAK;
+    private static final int COLLISION_START = DIAGONAL_START + DIAGONAL;
+    private static final int WATER_START = COLLISION_START + COLLISION;
+    private static final int LAVA_START = WATER_START + WATER_MOVE;
+    private static final int SPEED_START = LAVA_START + LAVA_MOVE;
+    private static final int SLOWNESS_START = SPEED_START + SPEED_EFFECT;
+    private static final int JUMP_BOOST_START = SLOWNESS_START + SLOWNESS_EFFECT;
+    private static final int STEP_START = JUMP_BOOST_START + JUMP_BOOST;
+    private static final int TAIL_START = STEP_START + STEP;
+    private static final int ALL_TOTAL = TAIL_START + TAIL;
     private long scenarioTick = -1;
     private String scenario = NONE;
     private String phase = "idle";
@@ -59,21 +71,21 @@ public final class ControlledPhase5ScenarioDriver {
     }
 
     private void runAll(MinecraftClient client) {
-        long t = scenarioTick, cursor = SETUP;
+        long t = scenarioTick;
         boolean forward = false, right = false, left = false, jump = false, sneak = false, sprint = false;
-        if (t < cursor) phase = "setup";
-        else if (t < cursor + WALK) { phase = "walk"; forward = true; }
-        else if ((cursor += WALK) + SPRINT > t) { phase = "sprint"; forward = true; sprint = true; }
-        else if ((cursor += SPRINT) + JUMP > t) { phase = "jump"; forward = true; jump = t == cursor || t == cursor + 1; }
-        else if ((cursor += JUMP) + SNEAK > t) { phase = "sneak"; forward = true; sneak = true; }
-        else if ((cursor += SNEAK) + DIAGONAL > t) { phase = "diagonal"; forward = true; left = true; }
-        else if ((cursor += DIAGONAL) + COLLISION > t) { phase = "collision"; forward = true; }
-        else if ((cursor += COLLISION) + WATER_MOVE > t) { phase = "water"; forward = true; }
-        else if ((cursor += WATER_MOVE) + LAVA_MOVE > t) { phase = "lava"; forward = true; }
-        else if ((cursor += LAVA_MOVE) + SPEED_EFFECT > t) { phase = "speed-effect"; forward = true; }
-        else if ((cursor += SPEED_EFFECT) + SLOWNESS_EFFECT > t) { phase = "slowness-effect"; forward = true; }
-        else if ((cursor += SLOWNESS_EFFECT) + JUMP_BOOST > t) { phase = "jump-boost"; forward = true; jump = t == cursor || t == cursor + 1; }
-        else if ((cursor += JUMP_BOOST) + STEP > t) { phase = "step"; forward = true; }
+        if (t < SETUP) phase = "setup";
+        else if (t < SPRINT_START) { phase = "walk"; forward = true; }
+        else if (t < JUMP_START) { phase = "sprint"; forward = true; sprint = true; }
+        else if (t < SNEAK_START) { phase = "jump"; forward = true; jump = t == JUMP_START || t == JUMP_START + 1; }
+        else if (t < DIAGONAL_START) { phase = "sneak"; forward = true; sneak = true; }
+        else if (t < COLLISION_START) { phase = "diagonal"; forward = true; left = true; }
+        else if (t < WATER_START) { phase = "collision"; forward = true; }
+        else if (t < LAVA_START) { phase = "water"; forward = true; }
+        else if (t < SPEED_START) { phase = "lava"; forward = true; }
+        else if (t < SLOWNESS_START) { phase = "speed-effect"; forward = true; }
+        else if (t < JUMP_BOOST_START) { phase = "slowness-effect"; forward = true; }
+        else if (t < STEP_START) { phase = "jump-boost"; forward = true; jump = t == JUMP_BOOST_START || t == JUMP_BOOST_START + 1; }
+        else if (t < TAIL_START) { phase = "step"; forward = true; }
         else phase = "tail";
 
         long start = phaseStartTick();
@@ -95,7 +107,6 @@ public final class ControlledPhase5ScenarioDriver {
             }
         }
         apply(client.options, forward, false, left, right, jump, sneak, sprint);
-        if (t >= ALL_TOTAL - TAIL) phase = "tail";
         finishIfDone(client, ALL_TOTAL);
     }
 
@@ -118,16 +129,11 @@ public final class ControlledPhase5ScenarioDriver {
 
     private long phaseStartTick() {
         return switch (phase) {
-            case "walk" -> SETUP; case "sprint" -> SETUP + WALK; case "jump" -> SETUP + WALK + SPRINT;
-            case "sneak" -> SETUP + WALK + SPRINT + JUMP; case "diagonal" -> SETUP + WALK + SPRINT + JUMP + SNEAK;
-            case "collision" -> SETUP + WALK + SPRINT + JUMP + SNEAK + DIAGONAL;
-            case "water" -> SETUP + WALK + SPRINT + JUMP + SNEAK + DIAGONAL + COLLISION;
-            case "lava" -> SETUP + WALK + SPRINT + JUMP + SNEAK + DIAGONAL + COLLISION + WATER_MOVE;
-            case "speed-effect" -> SETUP + WALK + SPRINT + JUMP + SNEAK + DIAGONAL + COLLISION + WATER_MOVE + LAVA_MOVE;
-            case "slowness-effect" -> SETUP + WALK + SPRINT + JUMP + SNEAK + DIAGONAL + COLLISION + WATER_MOVE + LAVA_MOVE + SPEED_EFFECT;
-            case "jump-boost" -> SETUP + WALK + SPRINT + JUMP + SNEAK + DIAGONAL + COLLISION + WATER_MOVE + LAVA_MOVE + SPEED_EFFECT + SLOWNESS_EFFECT;
-            case "step" -> SETUP + WALK + SPRINT + JUMP + SNEAK + DIAGONAL + COLLISION + WATER_MOVE + LAVA_MOVE + SPEED_EFFECT + SLOWNESS_EFFECT + JUMP_BOOST;
-            default -> -1;
+            case "walk" -> WALK_START; case "sprint" -> SPRINT_START; case "jump" -> JUMP_START;
+            case "sneak" -> SNEAK_START; case "diagonal" -> DIAGONAL_START; case "collision" -> COLLISION_START;
+            case "water" -> WATER_START; case "lava" -> LAVA_START; case "speed-effect" -> SPEED_START;
+            case "slowness-effect" -> SLOWNESS_START; case "jump-boost" -> JUMP_BOOST_START; case "step" -> STEP_START;
+            case "tail" -> TAIL_START; default -> -1;
         };
     }
 
