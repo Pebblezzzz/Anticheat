@@ -6,10 +6,7 @@
   "client": [
     "MinecraftClientMixin",
     "ClientPlayerEntityMixin",
-    "ClientPlayNetworkHandlerMixin",
-    "ElytraGlideActivationMixin"
+    "ClientPlayNetworkHandlerMixin"
   ],
-  "injectors": {
-    "defaultRequire": 1
-  }
+  "injectors": {"defaultRequire": 1}
 }
