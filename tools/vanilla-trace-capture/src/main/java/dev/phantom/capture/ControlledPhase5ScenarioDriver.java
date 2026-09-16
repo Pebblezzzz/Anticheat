@@ -138,7 +138,7 @@ public final class ControlledPhase5ScenarioDriver {
             }
         }
 
-        if (!plannedPhase.equals("setup") && phase.equals(plannedPhase) && phaseStartTick(plannedPhase) == t) {
+        if (!plannedPhase.equals("setup") && pendingPhase == null && phaseStartTick(plannedPhase) == t) {
             pendingPhase = plannedPhase;
             pendingResetStart = t;
             performResetForPhase(client, plannedPhase);
