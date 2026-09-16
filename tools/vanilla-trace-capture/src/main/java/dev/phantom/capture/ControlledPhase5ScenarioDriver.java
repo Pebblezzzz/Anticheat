@@ -10,6 +10,7 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.integrated.IntegratedServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.Locale;
@@ -156,10 +157,8 @@ public final class ControlledPhase5ScenarioDriver {
     }
 
     private void requestPhaseReset(MinecraftClient client, String phase) {
-        boolean fluidEntry = phase.equals("water") || phase.equals("lava") || phase.equals("swim-transition");
         double y = phase.equals("glide") ? 90.0D : 64.0D;
-        double z = baseZ(phase) + (fluidEntry ? 2.0D : 2.0D);
-        requestReset(client, 0.0D, y, z, 0.0D);
+        requestReset(client, 0.0D, y, baseZ(phase) + 2.0D, 0.0D);
     }
 
     private void requestReset(MinecraftClient client, double x, double y, double z, double yaw) {
@@ -176,11 +175,22 @@ public final class ControlledPhase5ScenarioDriver {
     private void waitForReset(MinecraftClient client) {
         if (client.player == null) return;
         resetWait++;
+        client.player.requestTeleport(resetX, resetY, resetZ);
+        client.player.setVelocity(Vec3d.ZERO);
+        client.player.setYaw(resetYaw);
+        client.player.setPitch(0.0F);
+
         if (resetWait == 1 || resetWait % 20 == 0) {
             System.out.println("[Phase5] waiting reset phase=" + PHASES[phaseIndex] + " tick=" + resetWait + " state=" + describe(client));
         }
-        boolean atTarget = client.player.getX() - resetX == 0.0D && client.player.getY() - resetY == 0.0D && client.player.getZ() - resetZ == 0.0D;
-        boolean grounded = PHASES[phaseIndex].equals("glide") || client.player.isOnGround();
+
+        boolean atTarget = Math.abs(client.player.getX() - resetX) <= RESET_TOLERANCE
+                && Math.abs(client.player.getY() - resetY) <= RESET_TOLERANCE
+                && Math.abs(client.player.getZ() - resetZ) <= RESET_TOLERANCE;
+        BlockPos below = BlockPos.ofFloored(resetX, resetY - 0.05D, resetZ);
+        boolean blockPresent = client.world.getBlockState(below).isAir() == false;
+        boolean grounded = PHASES[phaseIndex].equals("glide") || blockPresent;
+
         if (atTarget && grounded) {
             phaseResetPending = false;
             resetWait = 0;
