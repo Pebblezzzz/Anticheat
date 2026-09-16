@@ -36,7 +36,6 @@ public final class Simulation {
       else inputAcceleration=s.onGround()?WALK_ACCEL*speed:AIR_ACCEL;
       Vec3 acceleration=new Vec3(inputScale*(input.strafe()*inputAcceleration*Math.cos(radians)-input.forward()*inputAcceleration*Math.sin(radians)),0,inputScale*(input.forward()*inputAcceleration*Math.cos(radians)+input.strafe()*inputAcceleration*Math.sin(radians)));
       Vec3 velocity=s.velocity().add(acceleration);
-      if(fluid) velocity=new Vec3(velocity.x()*env.fluidSpeedMultiplier()*env.fluidDrag(),velocity.y()*env.fluidDrag(),velocity.z()*env.fluidSpeedMultiplier()*env.fluidDrag());
       if(env.climbable()) velocity=new Vec3(velocity.x(),Math.max(-0.15,velocity.y()),velocity.z());
       double gravity=GRAVITY*env.gravityMultiplier();
       boolean jumped=input.jump()&&s.onGround();
@@ -47,12 +46,14 @@ public final class Simulation {
       World.CollisionResult collision=World.resolveWithStep(world,start,velocity,s.onGround()?STEP_HEIGHT:0);
       Vec3 displacement=collision.resolved(); boolean grounded=collision.collidedY()&&velocity.y()<=0;
       double horizontalFactor;
-      if(fluid) horizontalFactor=env.fluidDrag();
+      if(fluid) horizontalFactor=env.fluidSpeedMultiplier()*env.fluidDrag();
       else horizontalFactor=s.onGround()?GROUND_FRICTION:AIR_HORIZONTAL_FRICTION;
-      double verticalDrag=fluid ? env.fluidDrag() : AIR_VERTICAL_DRAG;
-      double postTickVerticalVelocity=jumped?(velocity.y()-gravity)*verticalDrag:velocity.y()*verticalDrag;
-      double groundedVerticalVelocity=fluid ? velocity.y()*verticalDrag : -gravity*AIR_VERTICAL_DRAG;
-      Vec3 nextVelocity=new Vec3(collision.collidedX()?0:velocity.x()*horizontalFactor,grounded?groundedVerticalVelocity:postTickVerticalVelocity,collision.collidedZ()?0:velocity.z()*horizontalFactor);
+      double postTickVerticalVelocity;
+      if(fluid) postTickVerticalVelocity=velocity.y()*env.fluidDrag()-gravity;
+      else postTickVerticalVelocity=jumped?(velocity.y()-gravity)*AIR_VERTICAL_DRAG:velocity.y()*AIR_VERTICAL_DRAG;
+      double groundedVerticalVelocity=fluid ? velocity.y()*env.fluidDrag()-gravity : -gravity*AIR_VERTICAL_DRAG;
+      double nextY=grounded?groundedVerticalVelocity:postTickVerticalVelocity;
+      Vec3 nextVelocity=new Vec3(collision.collidedX()?0:velocity.x()*horizontalFactor,nextY,collision.collidedZ()?0:velocity.z()*horizontalFactor);
       Phase5Mechanics.Pose nextPose=Phase5Mechanics.nextPose(priorPose,env);
       Player next=new Player(s.position().add(displacement),nextVelocity,s.yaw(),s.pitch(),grounded,s.gamemode(),s.effects(),s.awaitingTeleport(),false);
       return new StepResult(tick,next,collision.collidedHorizontally()||collision.collidedY(),nextPose,"deterministic collision-resolved movement step");
