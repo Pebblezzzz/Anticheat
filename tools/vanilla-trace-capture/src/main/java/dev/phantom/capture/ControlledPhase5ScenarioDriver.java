@@ -112,6 +112,7 @@ public final class ControlledPhase5ScenarioDriver {
             }
         }
         if (lastResetStart != Long.MIN_VALUE && t - lastResetStart < RESET_SETTLE) {
+            phase = "transition";
             forward = right = left = jump = sneak = sprint = false;
         }
         apply(client.options, forward, false, left, right, jump, sneak, sprint);
