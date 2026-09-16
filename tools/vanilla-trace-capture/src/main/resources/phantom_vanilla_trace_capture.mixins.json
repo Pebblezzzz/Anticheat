@@ -4,6 +4,7 @@
   "package": "dev.phantom.capture.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "MinecraftClientMixin",
     "ClientPlayerEntityMixin",
     "ClientPlayNetworkHandlerMixin"
   ],
