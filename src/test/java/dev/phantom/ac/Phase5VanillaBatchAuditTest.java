@@ -72,7 +72,14 @@ class Phase5VanillaBatchAuditTest {
         assertTrue(rows.stream().anyMatch(r -> expectedFluid.equals(r.columns()[19])), "No " + label + " fluid observation was captured");
     }
     private static void assertNoFluid(List<Phase5VanillaTrace.Row> rows, String label) {
-        assertTrue(rows.stream().allMatch(r -> "NONE".equals(r.columns()[19])), "Unexpected fluid contamination in phase " + label);
+        List<Phase5VanillaTrace.Row> offenders = rows.stream()
+                .filter(r -> !"NONE".equals(r.fluid()))
+                .limit(8)
+                .toList();
+        assertTrue(offenders.isEmpty(), () -> "Unexpected fluid contamination in phase " + label + ": " + offenders.stream()
+                .map(r -> "tick=" + r.tick() + ",client_tick=" + r.clientTick() + ",x=" + r.positionX() + ",y=" + r.positionY()
+                        + ",z=" + r.positionZ() + ",fluid=" + r.fluid() + ",pose=" + r.pose())
+                .toList());
     }
     private static void assertEffectPhase(List<Phase5VanillaTrace.Row> rows, int expectedAmp, String label, Function<Phase5VanillaTrace.Row, String> getter) {
         assertTrue(rows.stream().anyMatch(r -> Integer.toString(expectedAmp).equals(getter.apply(r))), "No " + label + " effect observation with amplifier " + expectedAmp);
