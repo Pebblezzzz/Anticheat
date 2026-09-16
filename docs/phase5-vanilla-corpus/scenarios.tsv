@@ -1,0 +1,38 @@
+scenario_id	category	controlled_setup	primary_inputs	required_observations	status
+idle	baseline	flat non-fluid stone platform	no input	position velocity rotation ground pose	BLOCKED_BY_EXTERNAL_DATA
+walking	ground	flat stone platform	forward	position velocity acceleration friction	BLOCKED_BY_EXTERNAL_DATA
+sprinting	ground	flat stone platform	forward+sprint	position velocity sprint state	BLOCKED_BY_EXTERNAL_DATA
+sneaking	ground	flat stone platform	forward+sneak	pose speed input	BLOCKED_BY_EXTERNAL_DATA
+forward	input	flat stone platform	forward	position velocity input	BLOCKED_BY_EXTERNAL_DATA
+strafe	input	flat stone platform	left/right	position velocity input	BLOCKED_BY_EXTERNAL_DATA
+diagonal	input	flat stone platform	forward+left/right	position velocity input	BLOCKED_BY_EXTERNAL_DATA
+jumping	jump	flat stone platform	jump+forward	jump timing velocity ground transition	BLOCKED_BY_EXTERNAL_DATA
+sprint-jumping	jump	flat stone platform	jump+forward+sprint	jump timing sprint velocity	BLOCKED_BY_EXTERNAL_DATA
+falling	air	platform edge or raised start	no input	vertical velocity position ground	BLOCKED_BY_EXTERNAL_DATA
+landing	air	controlled drop onto flat platform	no input	collision ground vertical velocity	BLOCKED_BY_EXTERNAL_DATA
+slab-up	step	bottom slab to upper slab	forward	collision step geometry position	BLOCKED_BY_EXTERNAL_DATA
+stairs-up	step	straight stair run	forward	step sequence collision position	BLOCKED_BY_EXTERNAL_DATA
+step-up	step	single-block controlled ledge	forward	step attempt/result position	BLOCKED_BY_EXTERNAL_DATA
+corner	collision	inside-corner wall geometry	forward+strafe	per-axis collision clipping	BLOCKED_BY_EXTERNAL_DATA
+edge	collision	platform edge	forward	ground and horizontal collision	BLOCKED_BY_EXTERNAL_DATA
+water	fluid	still water volume	forward	fluid state drag velocity	BLOCKED_BY_EXTERNAL_DATA
+lava	fluid	still lava volume	forward	fluid state drag velocity	BLOCKED_BY_EXTERNAL_DATA
+swimming	pose	deep water volume	forward+jump	pose submerged velocity	BLOCKED_BY_EXTERNAL_DATA
+ladder	climbable	vertical ladder	forward	climbing velocity collision	BLOCKED_BY_EXTERNAL_DATA
+vines	climbable	vertical vine wall	forward	climbing velocity collision	BLOCKED_BY_EXTERNAL_DATA
+speed-effect	effect	flat stone platform	forward+speed effect	attribute/effect velocity	BLOCKED_BY_EXTERNAL_DATA
+slowness-effect	effect	flat stone platform	forward+slowness effect	attribute/effect velocity	BLOCKED_BY_EXTERNAL_DATA
+jump-boost-effect	effect	flat stone platform	jump+forward+jump boost	jump velocity effect	BLOCKED_BY_EXTERNAL_DATA
+slow-falling-effect	effect	controlled drop+slow falling	no input	fall velocity	BLOCKED_BY_EXTERNAL_DATA
+levitation-effect	effect	open air	no input	vertical velocity effect	BLOCKED_BY_EXTERNAL_DATA
+attribute-modifier	attribute	flat stone platform	forward	base/modifier/value velocity	BLOCKED_BY_EXTERNAL_DATA
+knockback	impulse	flat stone platform	no input plus server impulse	velocity packet impulse response	BLOCKED_BY_EXTERNAL_DATA
+teleport-correction	correction	flat stone platform	forward plus server correction	packet id correction recovery timing	BLOCKED_BY_EXTERNAL_DATA
+water-sprint	combination	water volume	forward+sprint	fluid+sprint interaction	BLOCKED_BY_EXTERNAL_DATA
+water-jump	combination	water volume	jump+forward	fluid+jump interaction	BLOCKED_BY_EXTERNAL_DATA
+water-swim-sprint	combination	deep water	forward+sprint+jump	fluid+swim+sprint interaction	BLOCKED_BY_EXTERNAL_DATA
+ladder-sprint	combination	ladder	forward+sprint	climb+sprint interaction	BLOCKED_BY_EXTERNAL_DATA
+step-sprint-jump	combination	single-block step	forward+sprint+jump	step+sprint+jump ordering	BLOCKED_BY_EXTERNAL_DATA
+knockback-in-air	combination	controlled airborne state	server impulse	airborne impulse+gravity	BLOCKED_BY_EXTERNAL_DATA
+teleport-water	combination	water volume	forward plus server correction	correction+fluid ordering	BLOCKED_BY_EXTERNAL_DATA
+corner-sprint	combination	corner geometry	forward+strafe+sprint	corner clipping+sprint	BLOCKED_BY_EXTERNAL_DATA
