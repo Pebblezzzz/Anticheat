@@ -65,7 +65,7 @@ public final class ControlledPhase5ScenarioDriver {
 
     private void runWaterOnly(MinecraftClient client) {
         long t = scenarioTick; boolean forward = false, right = false, sprint = false;
-        if (t < 20) { phase = "water-baseline"; if (t == 0) serverReset(client, -10.5, 64.0, -11.5, -90); }
+        if (t < 20) { phase = "water-baseline"; if (t == 0) serverReset(client, 20.5, 64.0, -11.5, -90); }
         else if (t < 20 + WATER_MOVE) { phase = "water"; forward = true; sprint = true; }
         else if (t < 20 + WATER_MOVE + 40) { phase = "water-release"; }
         else if (t < 20 + WATER_MOVE + 40 + 80) { phase = "water-diagonal"; forward = true; right = true; sprint = true; }
@@ -100,11 +100,10 @@ public final class ControlledPhase5ScenarioDriver {
                 case "sprint" -> serverReset(client, -10.5, 64.0, 2.5, -90);
                 case "jump" -> serverReset(client, -10.5, 64.0, 4.5, -90);
                 case "sneak" -> serverReset(client, -10.5, 64.0, 6.5, -90);
-                // Keep the diagonal lane on the opposite side of the dedicated collision wall.
                 case "diagonal" -> serverReset(client, 8.5, 64.0, 8.5, -90);
                 case "collision" -> serverReset(client, -10.5, 64.0, 10.5, -90);
-                case "water" -> serverReset(client, -10.5, 64.0, -11.5, -90);
-                case "lava" -> serverReset(client, -10.5, 64.0, -5.0, -90);
+                case "water" -> serverReset(client, 20.5, 64.0, -11.5, -90);
+                case "lava" -> serverReset(client, 20.5, 64.0, -5.0, -90);
                 case "speed-effect" -> { serverReset(client, -10.5, 64.0, 13.5, -90); giveEffect(client, "minecraft:speed", 0); }
                 case "slowness-effect" -> { serverReset(client, -10.5, 64.0, 15.5, -90); giveEffect(client, "minecraft:slowness", 0); }
                 case "jump-boost" -> { serverReset(client, -10.5, 64.0, 17.5, -90); giveEffect(client, "minecraft:jump_boost", 0); }
@@ -124,20 +123,20 @@ public final class ControlledPhase5ScenarioDriver {
         if (server == null) throw new IllegalStateException("Phase 5 requires a local singleplayer world (integrated server)");
         server.executeSync(() -> {
             CommandManager m = server.getCommandManager(); ServerCommandSource s = server.getCommandSource();
-            command(m, s, "forceload add -16 -16 16 16");
+            command(m, s, "forceload add -32 -16 32 24");
             command(m, s, "difficulty peaceful"); command(m, s, "time set day"); command(m, s, "weather clear");
-            command(m, s, "fill -16 60 -16 16 67 24 air");
-            command(m, s, "fill -16 63 -16 16 63 24 minecraft:stone");
+            command(m, s, "fill -32 60 -16 32 67 24 air");
+            command(m, s, "fill -32 63 -16 32 63 24 minecraft:stone");
             command(m, s, "fill 0 64 9 0 66 12 minecraft:stone");
             command(m, s, "fill 0 64 20 4 64 21 minecraft:oak_slab[type=bottom]");
-            command(m, s, "fill -15 62 -14 15 62 -7 minecraft:stone");
-            command(m, s, "fill -15 63 -14 15 65 -7 minecraft:water");
-            command(m, s, "fill -15 63 -15 15 66 -15 minecraft:stone");
-            command(m, s, "fill -15 63 -6 15 66 -6 minecraft:stone");
-            command(m, s, "fill -15 62 -5 15 62 -2 minecraft:stone");
-            command(m, s, "fill -15 63 -5 15 65 -2 minecraft:lava");
-            command(m, s, "fill -15 63 -6 15 66 -6 minecraft:stone");
-            command(m, s, "fill -15 63 -1 15 66 -1 minecraft:stone");
+            command(m, s, "fill 20 62 -14 31 62 -7 minecraft:stone");
+            command(m, s, "fill 20 63 -14 31 65 -7 minecraft:water");
+            command(m, s, "fill 20 63 -15 31 66 -15 minecraft:stone");
+            command(m, s, "fill 20 63 -6 31 66 -6 minecraft:stone");
+            command(m, s, "fill 20 62 -5 31 62 -2 minecraft:stone");
+            command(m, s, "fill 20 63 -5 31 65 -2 minecraft:lava");
+            command(m, s, "fill 20 63 -6 31 66 -6 minecraft:stone");
+            command(m, s, "fill 20 63 -1 31 66 -1 minecraft:stone");
             command(m, s, "gamemode survival @a"); command(m, s, "effect clear @a"); command(m, s, "tp @a -10.5 64 0.5 -90 0");
         });
     }
