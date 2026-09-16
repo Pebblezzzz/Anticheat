@@ -163,7 +163,7 @@ class Phase5VanillaSimulationReplayTest {
                     Boolean.parseBoolean(current.submerged()),
                     Boolean.parseBoolean(current.climbable()),
                     Boolean.parseBoolean(current.onGround()),
-                    Boolean.parseBoolean(current.sneak()),
+                    Boolean.parseBoolean(current.sprint()),
                     Boolean.parseBoolean(current.sneak()),
                     false,
                     Boolean.parseBoolean(current.gliding()),
@@ -202,9 +202,6 @@ class Phase5VanillaSimulationReplayTest {
             }
         }
 
-        // on_ground is an observed fact, so a horizontal support plane one block
-        // below the observed standing position is a valid minimal replay anchor.
-        // This does not invent stairs/slabs/edges; those still require serialized geometry.
         if (Boolean.parseBoolean(previous.onGround())) {
             Map<World.Pos, World.Block> blocks = new HashMap<>();
             int floorY = (int) Math.floor(Double.parseDouble(previous.positionY())) - 1;
