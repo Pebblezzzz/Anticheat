@@ -27,6 +27,11 @@ class Phase5VanillaSimulationReplayTest {
             "all:water", "all:lava", "all:speed-effect", "all:slowness-effect",
             "all:jump-boost", "all:tail");
 
+    private static final Set<String> OBSERVED_FIELDS = Set.of(
+            "x", "y", "z", "vx", "vy", "vz", "on_ground", "forward", "strafe", "jump",
+            "fluid", "pose", "base_movement_speed", "modifiers", "speed_amp", "slowness_amp",
+            "jump_boost_amp", "levitation", "slow_falling");
+
     @Test
     void capturedVanillaTicksReplayThroughSimulation() throws Exception {
         String rawPath = System.getProperty(TRACE_PROPERTY);
@@ -62,9 +67,7 @@ class Phase5VanillaSimulationReplayTest {
                 previousPhase = phase;
                 continue;
             }
-            if (!sameObserved(current, "x", "y", "z", "vx", "vy", "vz", "on_ground", "forward", "strafe", "jump",
-                    "fluid", "pose", "base_movement_speed", "modifiers", "speed_amp", "slowness_amp", "jump_boost_amp",
-                    "levitation", "slow_falling")) {
+            if (!sameObserved(current, OBSERVED_FIELDS.toArray(String[]::new))) {
                 previous = current;
                 previousPhase = phase;
                 continue;
@@ -82,6 +85,9 @@ class Phase5VanillaSimulationReplayTest {
             compare(divergences, current, phase, "vz", current.velocityZ(), actual.velocity().z());
             if (Boolean.parseBoolean(current.onGround()) != actual.onGround()) {
                 divergences.add(format(current, phase, "on_ground", current.onGround(), Boolean.toString(actual.onGround()), 1.0));
+            }
+            if (Phase5Mechanics.Pose.valueOf(current.pose()) != result.pose()) {
+                divergences.add(format(current, phase, "pose", current.pose(), result.pose().name(), 1.0));
             }
             if (divergences.size() >= 20) break;
 
@@ -182,12 +188,20 @@ class Phase5VanillaSimulationReplayTest {
         int bz = (int) Math.floor(Double.parseDouble(row.positionZ()));
         int by = (int) Math.floor(Double.parseDouble(row.positionY())) - 1;
         Map<World.Pos, World.Block> blocks = new HashMap<>();
-        if (Boolean.parseBoolean(row.onGround())) {
-            for (int x = bx - 1; x <= bx + 1; x++) {
-                for (int z = bz - 1; z <= bz + 1; z++) blocks.put(new World.Pos(x, by, z), World.Block.FULL);
+        Set<World.Chunk> chunks = new HashSet<>();
+        for (int cx = Math.floorDiv(bx, 16) - 1; cx <= Math.floorDiv(bx, 16) + 1; cx++) {
+            for (int cz = Math.floorDiv(bz, 16) - 1; cz <= Math.floorDiv(bz, 16) + 1; cz++) {
+                chunks.add(new World.Chunk(cx, cz));
             }
         }
-        return new World.Snapshot(blocks, Set.of(World.Chunk.containing(bx, bz)));
+        if (Boolean.parseBoolean(row.onGround())) {
+            for (int x = bx - 2; x <= bx + 2; x++) {
+                for (int z = bz - 2; z <= bz + 2; z++) {
+                    blocks.put(new World.Pos(x, by, z), World.Block.FULL);
+                }
+            }
+        }
+        return new World.Snapshot(blocks, chunks);
     }
 
     private static List<Phase5Mechanics.AttributeModifier> parseModifiers(String raw) {
