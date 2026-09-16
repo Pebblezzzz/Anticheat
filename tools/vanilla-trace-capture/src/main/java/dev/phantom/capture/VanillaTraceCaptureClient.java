@@ -109,7 +109,7 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
 
             PlayerInput input = player.input.playerInput;
             Vec3d velocity = player.getVelocity();
-            EntityAttributeInstance speed = player.getAttributeInstance(EntityAttributes.GENERIC_MOVEMENT_SPEED);
+            EntityAttributeInstance speed = player.getAttributeInstance(EntityAttributes.MOVEMENT_SPEED);
 
             String fluid;
             if (player.isInLava()) fluid = "LAVA";
@@ -204,12 +204,13 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
         public static synchronized void recordVelocityPacket(EntityVelocityUpdateS2CPacket packet) {
             MinecraftClient client = MinecraftClient.getInstance();
             if (writer == null || client.player == null || packet.getEntityId() != client.player.getId()) return;
+            Vec3d velocity = packet.getVelocity();
             writeEvent(
                     System.nanoTime(),
                     client.player.age,
                     "ENTITY_VELOCITY",
                     0, 0, 0,
-                    packet.getVelocityX(), packet.getVelocityY(), packet.getVelocityZ(),
+                    velocity.x, velocity.y, velocity.z,
                     packet.getEntityId(),
                     "server velocity packet"
             );
@@ -219,14 +220,15 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
             MinecraftClient client = MinecraftClient.getInstance();
             if (writer == null) return;
             long clientTick = client.player == null ? -1 : client.player.age;
+            Vec3d position = packet.change().position();
             writeEvent(
                     System.nanoTime(),
                     clientTick,
                     "POSITION_CORRECTION",
-                    packet.getX(), packet.getY(), packet.getZ(),
-                    packet.getYaw(), packet.getPitch(), 0,
-                    packet.getTeleportId(),
-                    "flags=" + packet.getFlags()
+                    position.x, position.y, position.z,
+                    packet.change().yaw(), packet.change().pitch(), 0,
+                    packet.teleportId(),
+                    "relatives=" + packet.relatives()
             );
         }
 
