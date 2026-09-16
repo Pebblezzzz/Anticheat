@@ -186,7 +186,6 @@ class Phase5VanillaSimulationReplayTest {
     private static World.Snapshot visibleFloor(Phase5VanillaTrace.Row row) {
         int bx = (int) Math.floor(Double.parseDouble(row.positionX()));
         int bz = (int) Math.floor(Double.parseDouble(row.positionZ()));
-        int by = (int) Math.floor(Double.parseDouble(row.positionY())) - 1;
         Map<World.Pos, World.Block> blocks = new HashMap<>();
         Set<World.Chunk> chunks = new HashSet<>();
         for (int cx = Math.floorDiv(bx, 16) - 1; cx <= Math.floorDiv(bx, 16) + 1; cx++) {
@@ -194,10 +193,16 @@ class Phase5VanillaSimulationReplayTest {
                 chunks.add(new World.Chunk(cx, cz));
             }
         }
-        if (Boolean.parseBoolean(row.onGround())) {
+
+        // The controlled dry arenas all start the player at Y=64 on a flat
+        // Y=63 floor. Keep that fixed across falling/jump rows; deriving the
+        // floor from the current Y creates artificial holes as the player
+        // descends between ticks.
+        if (Boolean.parseBoolean(row.onGround()) || Double.parseDouble(row.positionY()) < 64.0) {
+            int floorY = 63;
             for (int x = bx - 2; x <= bx + 2; x++) {
                 for (int z = bz - 2; z <= bz + 2; z++) {
-                    blocks.put(new World.Pos(x, by, z), World.Block.FULL);
+                    blocks.put(new World.Pos(x, floorY, z), World.Block.FULL);
                 }
             }
         }
@@ -208,7 +213,6 @@ class Phase5VanillaSimulationReplayTest {
         if (raw == null || raw.isBlank() || raw.equals("-")) return List.of();
         List<Phase5Mechanics.AttributeModifier> out = new ArrayList<>();
         for (String encoded : raw.split(";", -1)) {
-            if (encoded.isBlank()) continue;
             String[] parts = encoded.split(":", 3);
             if (parts.length != 3) throw new IllegalArgumentException("invalid modifier " + encoded);
             out.add(new Phase5Mechanics.AttributeModifier(
