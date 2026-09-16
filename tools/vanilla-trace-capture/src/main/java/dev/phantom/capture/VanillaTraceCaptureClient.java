@@ -3,11 +3,12 @@ package dev.phantom.capture;
 import net.fabricmc.api.ClientModInitializer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.EntityPose;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
+import net.minecraft.network.packet.s2c.play.EntityVelocityUpdateS2CPacket;
+import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
 import net.minecraft.util.PlayerInput;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
@@ -23,17 +24,22 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Observation-only recorder. It reads client state after ClientPlayerEntity.tick()
- * and writes TSV. It does not alter movement/input/world logic.
+ * Observation-only recorder for a real 1.21.11 client.
+ *
+ * The hooks read existing client state after the normal player tick and observe
+ * inbound movement-affecting packets. They do not change movement, input, or world state.
  */
 public final class VanillaTraceCaptureClient implements ClientModInitializer {
-    static final String MAGIC = "# phantom-phase5-trace version=2 protocol=minecraft-java-1.21.11 format=tsv";
-    static final String HEADER = "tick\tclient_tick\treceive_nanos\tx\ty\tz\tvx\tvy\tvz\tyaw\tpitch\ton_ground\tforward\tstrafe\tjump\tsprint\tsneak\tpose\tgamemode\tfluid\tsubmerged\tclimbable\tgliding\tbase_movement_speed\tmodifiers\tspeed_amp\tslowness_amp\tjump_boost_amp\tlevitation\tslow_falling\tknockback_x\tknockback_y\tknockback_z\tvelocity_packet\tcorrection_id\tcorrection_pending\tworld_identity\tworld_tick\tcollision\tstep_attempted\tstep_succeeded\tcollision_x\tcollision_y\tcollision_z\tinput_source\tclient_version\tmissing_fields";
+    public static final String MAGIC = "# phantom-phase5-trace version=2 protocol=minecraft-java-1.21.11 format=tsv";
+    public static final String HEADER = "tick\tclient_tick\treceive_nanos\tx\ty\tz\tvx\tvy\tvz\tyaw\tpitch\ton_ground\tforward\tstrafe\tjump\tsprint\tsneak\tpose\tgamemode\tfluid\tsubmerged\tclimbable\tgliding\tbase_movement_speed\tmodifiers\tspeed_amp\tslowness_amp\tjump_boost_amp\tlevitation\tslow_falling\tknockback_x\tknockback_y\tknockback_z\tvelocity_packet\tcorrection_id\tcorrection_pending\tworld_identity\tworld_tick\tcollision\tstep_attempted\tstep_succeeded\tcollision_x\tcollision_y\tcollision_z\tinput_source\tclient_version\tmissing_fields";
+    public static final String EVENT_HEADER = "receive_nanos\tclient_tick\tevent_type\tx\ty\tz\taux_x\taux_y\taux_z\taux_id\tdetails";
 
     private static final String PROP_ENABLED = "phantom.capture.enabled";
     private static final String PROP_OUTPUT = "phantom.capture.output";
+    private static final String PROP_EVENTS = "phantom.capture.events";
 
     private static BufferedWriter writer;
+    private static BufferedWriter eventWriter;
     private static long tick;
 
     private VanillaTraceCaptureClient() {}
@@ -46,17 +52,30 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
         CaptureRuntime.initialize();
     }
 
-    static final class CaptureRuntime {
+    public static final class CaptureRuntime {
         private CaptureRuntime() {}
 
         static synchronized void initialize() {
             if (writer != null) return;
-            String output = System.getProperty(PROP_OUTPUT,
-                    "phase5-vanilla-capture-" + Instant.now().toString().replace(':', '-') + ".tsv");
+
+            String output = System.getProperty(
+                    PROP_OUTPUT,
+                    "phase5-vanilla-capture-" + Instant.now().toString().replace(':', '-') + ".tsv"
+            );
+            String events = System.getProperty(
+                    PROP_EVENTS,
+                    output.replaceFirst("(?i)\\.tsv$", "-events.tsv")
+            );
+
             try {
                 Path path = Path.of(output).toAbsolutePath();
                 if (path.getParent() != null) Files.createDirectories(path.getParent());
                 writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8);
+
+                Path eventPath = Path.of(events).toAbsolutePath();
+                if (eventPath.getParent() != null) Files.createDirectories(eventPath.getParent());
+                eventWriter = Files.newBufferedWriter(eventPath, StandardCharsets.UTF_8);
+
                 writer.write(MAGIC);
                 writer.newLine();
                 writer.write("# source_id=vanilla-client-1.21.11");
@@ -65,10 +84,24 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
                 writer.newLine();
                 writer.write(HEADER);
                 writer.newLine();
+
+                eventWriter.write("# phantom-phase5-events version=1 protocol=minecraft-java-1.21.11 format=tsv");
+                eventWriter.newLine();
+                eventWriter.write("# captured_at_utc=" + Instant.now());
+                eventWriter.newLine();
+                eventWriter.write(EVENT_HEADER);
+                eventWriter.newLine();
+
                 writer.flush();
+                eventWriter.flush();
             } catch (IOException e) {
-                throw new IllegalStateException("Unable to open Phase 5 capture output: " + output, e);
+                throw new IllegalStateException("Unable to open Phase 5 capture output", e);
             }
+        }
+
+        /** Called by the player mixin after vanilla's normal ClientPlayerEntity.tick(). */
+        public static synchronized void recordForMixin(MinecraftClient client, ClientPlayerEntity player) {
+            record(client, player);
         }
 
         static synchronized void record(MinecraftClient client, ClientPlayerEntity player) {
@@ -90,8 +123,8 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
             }
 
             List<String> missing = new ArrayList<>();
-            // These values are not safely recoverable from a post-tick observation alone.
-            // They stay explicitly marked missing instead of being invented.
+            // A post-tick observer cannot reconstruct these without changing or replaying vanilla logic.
+            // Packet hooks below provide the independent event stream needed for correction/velocity analysis.
             missing.add("knockback_x");
             missing.add("knockback_y");
             missing.add("knockback_z");
@@ -165,6 +198,56 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
                 if ((tick & 63) == 0) writer.flush();
             } catch (IOException e) {
                 throw new IllegalStateException("Unable to write Phase 5 capture row", e);
+            }
+        }
+
+        public static synchronized void recordVelocityPacket(EntityVelocityUpdateS2CPacket packet) {
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (writer == null || client.player == null || packet.getEntityId() != client.player.getId()) return;
+            writeEvent(
+                    System.nanoTime(),
+                    client.player.age,
+                    "ENTITY_VELOCITY",
+                    0, 0, 0,
+                    packet.getVelocityX(), packet.getVelocityY(), packet.getVelocityZ(),
+                    packet.getEntityId(),
+                    "server velocity packet"
+            );
+        }
+
+        public static synchronized void recordCorrectionPacket(PlayerPositionLookS2CPacket packet) {
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (writer == null) return;
+            long clientTick = client.player == null ? -1 : client.player.age;
+            writeEvent(
+                    System.nanoTime(),
+                    clientTick,
+                    "POSITION_CORRECTION",
+                    packet.getX(), packet.getY(), packet.getZ(),
+                    packet.getYaw(), packet.getPitch(), 0,
+                    packet.getTeleportId(),
+                    "flags=" + packet.getFlags()
+            );
+        }
+
+        private static void writeEvent(long nanos, long clientTick, String type,
+                                       double x, double y, double z,
+                                       double auxX, double auxY, double auxZ,
+                                       long auxId, String details) {
+            try {
+                eventWriter.write(String.join("\t",
+                        Long.toString(nanos),
+                        Long.toString(clientTick),
+                        type,
+                        d(x), d(y), d(z),
+                        d(auxX), d(auxY), d(auxZ),
+                        Long.toString(auxId),
+                        Phase5CaptureEncoding.escape(details)
+                ));
+                eventWriter.newLine();
+                eventWriter.flush();
+            } catch (IOException e) {
+                throw new IllegalStateException("Unable to write Phase 5 event", e);
             }
         }
 
