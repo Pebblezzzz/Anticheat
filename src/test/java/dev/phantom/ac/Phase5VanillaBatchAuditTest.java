@@ -54,7 +54,7 @@ class Phase5VanillaBatchAuditTest {
                 && Boolean.parseBoolean(r.submerged()) && Boolean.parseBoolean(r.sprint())),
                 "Water phase never recorded submerged sprint-swimming state");
         assertTrue(phases.get("all:climbable").stream().anyMatch(r -> Boolean.parseBoolean(r.climbable())),
-                "Climbable phase never recorded a climbable state");
+                () -> "Climbable phase never recorded a climbable state. Observed rows: " + summarizeRows(phases.get("all:climbable")));
         assertTrue(phases.get("all:swim-transition").stream().anyMatch(r -> "SWIMMING".equals(r.pose())),
                 "Swimming transition phase never recorded SWIMMING");
         assertTrue(phases.get("all:swim-transition").stream().anyMatch(r -> !"SWIMMING".equals(r.pose())),
@@ -112,5 +112,13 @@ class Phase5VanillaBatchAuditTest {
     private static void assertStepTransition(List<Phase5VanillaTrace.Row> rows) {
         assertTrue(rows.stream().anyMatch(r -> Double.parseDouble(r.positionY()) > 64.25), "Step phase never recorded a raised Y position");
         assertTrue(rows.stream().anyMatch(r -> Math.abs(Double.parseDouble(r.positionY()) - 64.5) < 1e-6), "Step phase never recorded the expected half-block standing height");
+    }
+    private static List<String> summarizeRows(List<Phase5VanillaTrace.Row> rows) {
+        return rows.stream().limit(30).map(r -> "tick=" + r.tick()
+                + ",x=" + r.positionX() + ",y=" + r.positionY() + ",z=" + r.positionZ()
+                + ",vx=" + r.velocityX() + ",vy=" + r.velocityY() + ",vz=" + r.velocityZ()
+                + ",yaw=" + r.yaw() + ",ground=" + r.onGround() + ",forward=" + r.forward()
+                + ",sprint=" + r.sprint() + ",pose=" + r.pose() + ",climbable=" + r.climbable()
+                + ",missing=" + r.missingFields()).toList();
     }
 }
