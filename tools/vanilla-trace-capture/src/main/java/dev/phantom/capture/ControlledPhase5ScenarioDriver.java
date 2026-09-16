@@ -20,9 +20,8 @@ public final class ControlledPhase5ScenarioDriver {
             SPEED_EFFECT = 80, SLOWNESS_EFFECT = 80, JUMP_BOOST = 100, STEP = 110, TAIL = 70,
             STAIRS = 90, CLIMBABLE = 100, EDGE_CORNER = 100, SWIM_TRANSITION = 120,
             GLIDE = 120, CORRECTION = 40;
-    private static final int RESET_SETTLE = 10;
+    private static final int RESET_SETTLE = 50;
 
-    /** Each phase owns a large 140-block-long arena on its own Z segment. */
     private static final int ARENA_SPACING = 140;
     private static final int ARENA_START_Z = -80;
     private static final int ARENA_LENGTH = 120;
@@ -150,7 +149,7 @@ public final class ControlledPhase5ScenarioDriver {
             case "climbable" -> { }
             case "edge-corner" -> { left = activePhaseElapsed < 50; right = !left; }
             case "swim-transition" -> { sprint = true; jump = activePhaseElapsed % 24 < 6; sneak = activePhaseElapsed % 24 >= 12 && activePhaseElapsed % 24 < 18; }
-            case "glide" -> { sprint = true; }
+            case "glide" -> sprint = true;
             case "correction" -> { }
             default -> throw new IllegalStateException("Unknown active Phase 5 phase: " + current);
         }
@@ -194,7 +193,7 @@ public final class ControlledPhase5ScenarioDriver {
         }
     }
 
-    private static double arenaStartYFor(String name) { return name.equals("glide") ? 110.0 : 64.0; }
+    private static double arenaStartYFor(String name) { return name.equals("glide") ? 90.0 : 64.0; }
 
     private static int arenaStartFor(String name) {
         return switch (name) {
@@ -230,10 +229,17 @@ public final class ControlledPhase5ScenarioDriver {
 
             for (String arena : DRY_ARENAS) {
                 int z = arenaStartFor(arena);
-                command(m, s, "forceload add " + ARENA_MIN_X + " " + z + " " + ARENA_MAX_X + " " + (z + ARENA_LENGTH - 1));
-                command(m, s, "fill " + ARENA_MIN_X + " 64 " + z + " " + ARENA_MAX_X + " 108 " + (z + ARENA_LENGTH - 1) + " air");
+                command(m, s, "fill " + ARENA_MIN_X + " 64 " + z + " " + ARENA_MAX_X + " 67 " + (z + ARENA_LENGTH - 1) + " air");
                 command(m, s, "fill " + ARENA_MIN_X + " 63 " + z + " " + ARENA_MAX_X + " 63 " + (z + ARENA_LENGTH - 1) + " minecraft:stone");
             }
+
+            int waterZ = arenaStartFor("water");
+            command(m, s, "fill -12 62 " + (waterZ + 8) + " 12 62 " + (waterZ + 70) + " minecraft:stone");
+            command(m, s, "fill -12 63 " + (waterZ + 8) + " 12 65 " + (waterZ + 70) + " minecraft:water");
+
+            int lavaZ = arenaStartFor("lava");
+            command(m, s, "fill -12 62 " + (lavaZ + 8) + " 12 62 " + (lavaZ + 50) + " minecraft:stone");
+            command(m, s, "fill -12 63 " + (lavaZ + 8) + " 12 65 " + (lavaZ + 50) + " minecraft:lava");
 
             int collisionZ = arenaStartFor("collision");
             command(m, s, "fill -2 64 " + (collisionZ + 48) + " 2 66 " + (collisionZ + 52) + " minecraft:stone");
@@ -257,15 +263,15 @@ public final class ControlledPhase5ScenarioDriver {
             command(m, s, "fill -3 64 " + (edgeZ + 65) + " 2 67 " + (edgeZ + 65) + " minecraft:stone");
 
             int swimZ = arenaStartFor("swim-transition");
-            command(m, s, "fill -40 62 " + (swimZ + 6) + " 40 62 " + (swimZ + 100) + " minecraft:stone");
-            command(m, s, "fill -40 63 " + (swimZ + 6) + " 40 67 " + (swimZ + 100) + " minecraft:water");
-            command(m, s, "fill -40 68 " + (swimZ + 6) + " 40 68 " + (swimZ + 45) + " minecraft:air");
-            command(m, s, "fill -40 68 " + (swimZ + 46) + " 40 68 " + (swimZ + 100) + " minecraft:glass");
+            command(m, s, "fill -16 62 " + (swimZ + 6) + " 16 62 " + (swimZ + 50) + " minecraft:stone");
+            command(m, s, "fill -16 63 " + (swimZ + 6) + " 16 65 " + (swimZ + 50) + " minecraft:water");
+            command(m, s, "fill -16 66 " + (swimZ + 6) + " 16 66 " + (swimZ + 24) + " minecraft:air");
+            command(m, s, "fill -16 66 " + (swimZ + 25) + " 16 66 " + (swimZ + 50) + " minecraft:glass");
 
             int glideZ = arenaStartFor("glide");
-            command(m, s, "fill -30 63 " + (glideZ + 6) + " 30 63 " + (glideZ + 110) + " minecraft:stone");
-            command(m, s, "fill -30 64 " + (glideZ + 6) + " 30 108 " + (glideZ + 110) + " minecraft:air");
-            command(m, s, "fill -30 90 " + (glideZ + 90) + " 30 90 " + (glideZ + 90) + " minecraft:glass");
+            command(m, s, "fill -10 63 " + (glideZ + 6) + " 10 63 " + (glideZ + 60) + " minecraft:stone");
+            command(m, s, "fill -8 64 " + (glideZ + 6) + " 8 89 " + (glideZ + 60) + " minecraft:air");
+            command(m, s, "fill -8 78 " + (glideZ + 45) + " 8 78 " + (glideZ + 45) + " minecraft:glass");
 
             int correctionZ = arenaStartFor("correction");
             command(m, s, "fill -8 64 " + (correctionZ + 8) + " 8 67 " + (correctionZ + 90) + " air");
@@ -274,7 +280,6 @@ public final class ControlledPhase5ScenarioDriver {
             command(m, s, "gamemode survival @a"); command(m, s, "effect clear @a");
             command(m, s, "execute as @a run data modify entity @s Fire set value 0s");
             command(m, s, "tp @a 0 64 " + (arenaStartFor("walk") + 12) + " 0 0");
-            command(m, s, "forceload remove all");
         });
     }
 
