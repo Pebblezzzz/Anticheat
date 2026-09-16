@@ -42,7 +42,7 @@ Movement-speed modifiers support additive, base-multiplied and total-multiplied 
 
 ### External impulses
 
-Observed server velocity is represented as an explicit velocity impulse. The capture harness now records an observed `ENTITY_VELOCITY` event into both the event trace and the corresponding state row, so the simulator can distinguish an observed external impulse from unexplained motion. A packet observation is evidence of an authoritative velocity update, not by itself a semantic claim about the exact gameplay cause.
+Observed server velocity is represented as an explicit velocity impulse. The capture harness records an observed `ENTITY_VELOCITY` event into both the event trace and the corresponding state row, so the simulator can distinguish an observed external impulse from unexplained motion. A packet observation is evidence of an authoritative velocity update, not by itself a semantic claim about the exact gameplay cause.
 
 ### Corrections
 
@@ -52,7 +52,9 @@ Teleport/correction state establishes an authoritative barrier. Motion is not in
 
 The collision layer must distinguish full blocks, partial blocks, slabs, stairs, edges/corners and step-up resolution. Unknown/unloaded or unsupported geometry is never treated as air for validation.
 
-The deterministic vanilla capture course now includes dedicated phases for stairs, ladder/vine climbables, edge/corner interaction, swimming/air transition, fall-flying, server correction, and environmental impulse observation in addition to the original walk/sprint/jump/sneak/diagonal/collision/fluid/effect/step phases.
+The deterministic vanilla capture course now includes dedicated phases for stairs, ladder/vine climbables, edge/corner interaction, swimming/air transition, fall-flying, and server correction in addition to the original walk/sprint/jump/sneak/diagonal/collision/fluid/effect/step phases.
+
+The course is observation-only. It does not generate synthetic knockback data. Authoritative velocity events are recorded when the real client receives them; absence of such an event remains absence of evidence.
 
 ## Empirical reference requirements
 
@@ -69,7 +71,7 @@ The capture/audit pipeline validates:
 7. Climbable, swimming, gliding and correction observations where the client exposes those states.
 8. Replay through the deterministic simulator for states where the trace preserves enough causal information.
 9. Explicitly skips underdetermined fluid/jump-transition replay rather than masking them with broad tolerances.
-10. Correlates packet events to the nearest captured state row using the capture client tick, without fabricating missing server semantics.
+10. Correlates packet events to the captured state row using the capture client tick, without fabricating missing server semantics.
 
 ## Completion gate
 
