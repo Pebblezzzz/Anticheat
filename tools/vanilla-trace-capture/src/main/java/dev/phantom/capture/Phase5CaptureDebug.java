@@ -82,7 +82,7 @@ final class Phase5CaptureDebug {
         append(row, "swimming=" + player.isSwimming());
         append(row, "climbing=" + climbing);
         append(row, "holding_ladder=" + holding);
-        append(row, "fall_flying=" + player.isFallFlying());
+        append(row, "fall_flying=" + (player.getPose() == EntityPose.GLIDING));
         append(row, "block_pos=" + pos.getX() + "," + pos.getY() + "," + pos.getZ());
         append(row, "ladder_z=" + ladderZ);
         append(row, "dz_to_ladder=" + (player.getZ() - ladderZ));
@@ -124,12 +124,8 @@ final class Phase5CaptureDebug {
             path = Path.of(System.getProperty(PROP, DEFAULT.toString())).toAbsolutePath();
             try {
                 if (path.getParent() != null) Files.createDirectories(path.getParent());
-                Files.writeString(path,
-                        "event\tphase\tdata\n",
-                        StandardCharsets.UTF_8,
-                        StandardOpenOption.CREATE,
-                        StandardOpenOption.TRUNCATE_EXISTING,
-                        StandardOpenOption.WRITE);
+                Files.writeString(path, "event\tphase\tdata\n", StandardCharsets.UTF_8,
+                        StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
                 initialized = true;
                 System.out.println("[Phase5-Debug] debug_file=" + path);
             } catch (IOException e) {
