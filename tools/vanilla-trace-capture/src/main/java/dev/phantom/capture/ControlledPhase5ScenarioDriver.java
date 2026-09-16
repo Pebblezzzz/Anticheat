@@ -100,7 +100,8 @@ public final class ControlledPhase5ScenarioDriver {
                 case "sprint" -> serverReset(client, -10.5, 64.0, 2.5, -90);
                 case "jump" -> serverReset(client, -10.5, 64.0, 4.5, -90);
                 case "sneak" -> serverReset(client, -10.5, 64.0, 6.5, -90);
-                case "diagonal" -> serverReset(client, -10.5, 64.0, 8.5, -90);
+                // Keep the diagonal lane on the opposite side of the dedicated collision wall.
+                case "diagonal" -> serverReset(client, 8.5, 64.0, 8.5, -90);
                 case "collision" -> serverReset(client, -10.5, 64.0, 10.5, -90);
                 case "water" -> serverReset(client, -10.5, 64.0, -11.5, -90);
                 case "lava" -> serverReset(client, -10.5, 64.0, -5.0, -90);
