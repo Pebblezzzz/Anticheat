@@ -18,7 +18,7 @@ function Require-Command([string]$name) {
 }
 function Invoke-Native([string]$exe,[string[]]$arguments) {
     & $exe @arguments
-    if ($LASTEXITCODE -ne 0) { throw "Command failed with exit code $LASTEXITCODE: $exe $($arguments -join ' ')" }
+    if ($LASTEXITCODE -ne 0) { throw "Command failed with exit code ${LASTEXITCODE}: $exe $($arguments -join ' ')" }
 }
 
 New-Item -ItemType Directory -Force -Path $CaptureRoot | Out-Null
