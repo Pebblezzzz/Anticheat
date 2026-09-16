@@ -9,15 +9,15 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Replays each stable, observation-rich vanilla tick through the real Phantom
- * 1.21.11 integrator. The prior vanilla row is used as the authoritative
- * pre-tick state, so this test measures the integrator itself rather than
- * depending on an invented initial state or a synthetic trajectory.
+ * Replays stable, observation-rich vanilla ticks through the real Phantom
+ * 1.21.11 integrator. The previous post-tick vanilla row is used as the
+ * authoritative pre-tick state, which isolates one integrator step without
+ * inventing a synthetic trajectory.
  *
- * Collision/step ticks are deliberately excluded here: the capture records
- * the result, but the batch course geometry is not serialized into the trace.
- * Those rows remain covered by dedicated collision/step fixtures until their
- * exact world snapshot is available.
+ * Collision/step result rows are skipped because the course geometry is not
+ * serialized in the trace. Those mechanics remain covered by dedicated
+ * world-shape/regression tests until the exact captured world snapshot is
+ * available.
  */
 class Phase5VanillaSimulationReplayTest {
     private static final String TRACE_PROPERTY = "phantom.phase5.trace";
@@ -62,18 +62,26 @@ class Phase5VanillaSimulationReplayTest {
                 previousPhase = phase;
                 continue;
             }
+            if (!sameObserved(current, "x", "y", "z", "vx", "vy", "vz", "on_ground", "forward", "strafe", "jump",
+                    "fluid", "pose", "base_movement_speed", "modifiers", "speed_amp", "slowness_amp", "jump_boost_amp",
+                    "levitation", "slow_falling")) {
+                previous = current;
+                previousPhase = phase;
+                continue;
+            }
 
             Simulation.PhysicsContext context = contextFrom(previous, current);
             Simulation.StepResult result = physics.step(context);
             State.Player actual = result.state();
+
             compare(divergences, current, phase, "x", current.positionX(), actual.position().x());
             compare(divergences, current, phase, "y", current.positionY(), actual.position().y());
             compare(divergences, current, phase, "z", current.positionZ(), actual.position().z());
             compare(divergences, current, phase, "vx", current.velocityX(), actual.velocity().x());
             compare(divergences, current, phase, "vy", current.velocityY(), actual.velocity().y());
             compare(divergences, current, phase, "vz", current.velocityZ(), actual.velocity().z());
-            if (current.onGround() != actual.onGround()) {
-                divergences.add(format(current, phase, "on_ground", Boolean.toString(current.onGround()), Boolean.toString(actual.onGround()), 1.0));
+            if (Boolean.parseBoolean(current.onGround()) != actual.onGround()) {
+                divergences.add(format(current, phase, "on_ground", current.onGround(), Boolean.toString(actual.onGround()), 1.0));
             }
             if (divergences.size() >= 20) break;
 
@@ -84,49 +92,97 @@ class Phase5VanillaSimulationReplayTest {
         assertTrue(divergences.isEmpty(), () -> "Vanilla→simulation replay divergences:\n" + String.join("\n", divergences));
     }
 
+    private static boolean sameObserved(Phase5VanillaTrace.Row row, String... fields) {
+        for (String field : fields) if (row.missingFields().contains(field)) return false;
+        return true;
+    }
+
     private static Simulation.PhysicsContext contextFrom(Phase5VanillaTrace.Row previous, Phase5VanillaTrace.Row current) {
+        Phase5Mechanics.MovementEffects effects = new Phase5Mechanics.MovementEffects(
+                Integer.parseInt(current.speedAmp()),
+                Integer.parseInt(current.slownessAmp()),
+                Integer.parseInt(current.jumpBoostAmp()),
+                Boolean.parseBoolean(current.levitation()),
+                Boolean.parseBoolean(current.slowFalling()));
+
         State.Player player = new State.Player(
-                new Maths.Vec3(previous.positionXValue(), previous.positionYValue(), previous.positionZValue()),
-                new Maths.Vec3(previous.velocityXValue(), previous.velocityYValue(), previous.velocityZValue()),
-                (float) previous.yawValue(),
-                (float) previous.pitchValue(),
-                previous.onGroundValue(),
+                new Maths.Vec3(Double.parseDouble(previous.positionX()), Double.parseDouble(previous.positionY()), Double.parseDouble(previous.positionZ())),
+                new Maths.Vec3(Double.parseDouble(previous.velocityX()), Double.parseDouble(previous.velocityY()), Double.parseDouble(previous.velocityZ())),
+                Float.parseFloat(previous.yaw()),
+                Float.parseFloat(previous.pitch()),
+                Boolean.parseBoolean(previous.onGround()),
                 previous.gamemode(),
-                effects(current),
+                Map.of(),
                 OptionalInt.empty(),
                 false);
 
         Simulation.AdvancedInput input = new Simulation.AdvancedInput(
-                parseSigned(current.forward()), parseSigned(current.strafe()),
-                Boolean.parseBoolean(current.jump()), Boolean.parseBoolean(current.sprint()),
+                Integer.parseInt(current.forward()),
+                Integer.parseInt(current.strafe()),
+                Boolean.parseBoolean(current.jump()),
+                Boolean.parseBoolean(current.sprint()),
                 Boolean.parseBoolean(current.sneak()));
 
         Simulation.Environment environment = switch (current.fluid()) {
-            case WATER -> Simulation.Environment.WATER;
-            case LAVA -> Simulation.Environment.LAVA;
-            case NONE -> Simulation.Environment.DRY;
+            case "WATER" -> Simulation.Environment.WATER;
+            case "LAVA" -> Simulation.Environment.LAVA;
+            default -> Simulation.Environment.DRY;
         };
 
         Simulation.Attributes attributes = new Simulation.Attributes(
-                Double.parseDouble(current.baseMovementSpeed()), current.modifiers());
+                Double.parseDouble(current.baseMovementSpeed()), parseModifiers(current.modifiers()));
 
         Phase5Mechanics.MovementEnvironment movement = switch (current.fluid()) {
-            case WATER -> Phase5Mechanics.vanillaWaterEnv(current.onGroundValue(), current.sprintingValue(), current.sneakingValue(), "SWIMMING".equals(current.pose()));
-            case LAVA -> Phase5Mechanics.vanillaLavaEnv(current.onGroundValue(), current.sprintingValue(), current.sneakingValue());
-            case NONE -> Phase5Mechanics.MovementEnvironment.dry(current.onGroundValue(), current.sprintingValue(), current.sneakingValue());
+            case "WATER" -> new Phase5Mechanics.MovementEnvironment(
+                    Phase5Mechanics.Fluid.WATER,
+                    Boolean.parseBoolean(current.submerged()),
+                    Boolean.parseBoolean(current.climbable()),
+                    Boolean.parseBoolean(current.onGround()),
+                    Boolean.parseBoolean(current.sprint()),
+                    Boolean.parseBoolean(current.sneak()),
+                    "SWIMMING".equals(current.pose()),
+                    Boolean.parseBoolean(current.gliding()),
+                    1.0, 0.9, 0.0);
+            case "LAVA" -> new Phase5Mechanics.MovementEnvironment(
+                    Phase5Mechanics.Fluid.LAVA,
+                    Boolean.parseBoolean(current.submerged()),
+                    Boolean.parseBoolean(current.climbable()),
+                    Boolean.parseBoolean(current.onGround()),
+                    Boolean.parseBoolean(current.sprint()),
+                    Boolean.parseBoolean(current.sneak()),
+                    false,
+                    Boolean.parseBoolean(current.gliding()),
+                    1.0, 0.5, 0.5);
+            default -> new Phase5Mechanics.MovementEnvironment(
+                    Phase5Mechanics.Fluid.NONE,
+                    false,
+                    Boolean.parseBoolean(current.climbable()),
+                    Boolean.parseBoolean(current.onGround()),
+                    Boolean.parseBoolean(current.sprint()),
+                    Boolean.parseBoolean(current.sneak()),
+                    false,
+                    Boolean.parseBoolean(current.gliding()),
+                    1.0, 1.0, 1.0);
         };
 
-        World.Snapshot world = visibleFloor(previous);
-        return new Simulation.PhysicsContext(previous.tick(), player, input, world, environment, attributes,
-                effects(current), pose(current), movement);
+        return new Simulation.PhysicsContext(
+                Long.parseLong(previous.tick()),
+                player,
+                input,
+                visibleFloor(previous),
+                environment,
+                attributes,
+                effects,
+                Phase5Mechanics.Pose.valueOf(current.pose()),
+                movement);
     }
 
     private static World.Snapshot visibleFloor(Phase5VanillaTrace.Row row) {
-        int bx = (int) Math.floor(row.positionXValue());
-        int bz = (int) Math.floor(row.positionZValue());
-        int by = (int) Math.floor(row.positionYValue()) - 1;
+        int bx = (int) Math.floor(Double.parseDouble(row.positionX()));
+        int bz = (int) Math.floor(Double.parseDouble(row.positionZ()));
+        int by = (int) Math.floor(Double.parseDouble(row.positionY())) - 1;
         Map<World.Pos, World.Block> blocks = new HashMap<>();
-        if (row.onGroundValue()) {
+        if (Boolean.parseBoolean(row.onGround())) {
             for (int x = bx - 1; x <= bx + 1; x++) {
                 for (int z = bz - 1; z <= bz + 1; z++) blocks.put(new World.Pos(x, by, z), World.Block.FULL);
             }
@@ -134,15 +190,22 @@ class Phase5VanillaSimulationReplayTest {
         return new World.Snapshot(blocks, Set.of(World.Chunk.containing(bx, bz)));
     }
 
-    private static Phase5Mechanics.MovementEffects effects(Phase5VanillaTrace.Row row) {
-        return row.effects();
+    private static List<Phase5Mechanics.AttributeModifier> parseModifiers(String raw) {
+        if (raw.equals("-")) return List.of();
+        List<Phase5Mechanics.AttributeModifier> out = new ArrayList<>();
+        for (String encoded : raw.split(";", -1)) {
+            String[] parts = encoded.split(":", 3);
+            if (parts.length != 3) throw new IllegalArgumentException("invalid modifier " + encoded);
+            out.add(new Phase5Mechanics.AttributeModifier(
+                    unescape(parts[0]), Double.parseDouble(parts[1]),
+                    Phase5Mechanics.ModifierOperation.valueOf(parts[2])));
+        }
+        return List.copyOf(out);
     }
 
-    private static Phase5Mechanics.Pose pose(Phase5VanillaTrace.Row row) {
-        return Phase5Mechanics.Pose.valueOf(row.pose());
+    private static String unescape(String value) {
+        return value.replace("%0D", "\r").replace("%0A", "\n").replace("%09", "\t").replace("%25", "%");
     }
-
-    private static int parseSigned(String value) { return Integer.parseInt(value); }
 
     private static void compare(List<String> out, Phase5VanillaTrace.Row row, String phase,
                                 String field, String expectedRaw, double actual) {
