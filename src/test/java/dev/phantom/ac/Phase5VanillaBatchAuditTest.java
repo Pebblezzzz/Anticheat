@@ -47,6 +47,7 @@ class Phase5VanillaBatchAuditTest {
 
         assertFluidPhase(phases.get("all:water"), "WATER", "water");
         assertFluidPhase(phases.get("all:lava"), "LAVA", "lava");
+        assertTrue(phases.get("all:water").stream().anyMatch(r -> "SWIMMING".equals(r.pose())), "Water phase never entered vanilla SWIMMING pose");
         for (String phase : DRY_PHASES) assertNoFluid(phases.get(phase), phase);
         assertEffectPhase(phases.get("all:speed-effect"), 0, "speed-effect", Phase5VanillaTrace.Row::speedAmp);
         assertEffectPhase(phases.get("all:slowness-effect"), 0, "slowness-effect", Phase5VanillaTrace.Row::slownessAmp);
