@@ -44,10 +44,10 @@ try {
     if (!(Test-Path -LiteralPath $events)) { throw "Vanilla event trace was not produced: $events" }
 
     Write-Host '== Phase 5: audit captured vanilla trace =='
-    Invoke-Native 'mvn' @('-B', "-Dphantom.phase5.trace=$trace", '-Dtest=Phase5VanillaBatchAuditTest', 'test')
+    Invoke-Native 'mvn' @('-B', "-Dphantom.phase5.trace=$trace", '-Dtest=Phase5VanillaBatchAuditTest,Phase5VanillaSimulationReplayTest', 'test')
 
     Write-Host ''
-    Write-Host 'Phase 5 automated run finished successfully.'
+    Write-Host 'Phase 5 automated capture + simulation replay finished successfully.'
     Write-Host "Vanilla trace: $trace"
     Write-Host "Event trace:   $events"
 }
