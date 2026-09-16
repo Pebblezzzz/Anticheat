@@ -1,6 +1,6 @@
 package dev.phantom.ac;
 
-import java.util.List;
+import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 import org.junit.jupiter.api.Test;
 
@@ -32,11 +32,24 @@ class Phase5ParityToolTest {
   }
 
   @Test void traceValidatorRejectsTickAndTimingRegressions() {
-    var e=new Phase5TraceTool.ReferenceTrace("independent-client-1","2026-09-16T00:00:00Z","1.21.11",List.of(
-      row(1,1,10),row(2,2,9)));
+    var e=new Phase5TraceTool.ReferenceTrace("independent-client-1","2026-09-16T00:00:00Z","1.21.11",List.of(row(1,1,10),row(2,2,9)));
     var result=Phase5TraceTool.validate(e);
     assertFalse(result.valid());
     assertTrue(result.diagnostics().stream().anyMatch(d->d.field().equals("receive_nanos")));
+  }
+
+  @Test void combinationMatrixCoversEnvironmentPoseInputCorrectionAndCollisionFlags() {
+    int count=0;
+    for (var fluid: Phase5Mechanics.Fluid.values()) for (var pose: Phase5Mechanics.Pose.values())
+      for (boolean climb: new boolean[]{false,true}) for (boolean sprint: new boolean[]{false,true})
+      for (boolean sneak: new boolean[]{false,true}) for (boolean jump: new boolean[]{false,true})
+      for (boolean glide: new boolean[]{false,true}) for (boolean knock: new boolean[]{false,true})
+      for (boolean step: new boolean[]{false,true}) for (boolean corrected: new boolean[]{false,true}) {
+        var c=new Phase5Mechanics.Combination(pose,fluid,climb,sprint,sneak,jump,glide,knock,step,corrected);
+        assertNotNull(c);
+        count++;
+      }
+    assertEquals(5*3*2*2*2*2*2*2*2*2,count);
   }
 
   private static Phase5TraceTool.Row row(long tick,long client,long receive) {
