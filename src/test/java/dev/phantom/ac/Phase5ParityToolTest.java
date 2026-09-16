@@ -100,7 +100,7 @@ class Phase5ParityToolTest {
     var context = new Simulation.PhysicsContext(
       70,
       initial,
-      new Simulation.AdvancedInput(1,0,true,false,false),
+      new Simulation.AdvancedInput(1,0,false,true,false),
       world,
       Simulation.Environment.DRY,
       new Simulation.Attributes(0.10000000149011612)
@@ -114,6 +114,36 @@ class Phase5ParityToolTest {
     assertEquals(26.61406317283386,actual.position().z(),1e-6);
     assertEquals(0.09421826556363626,actual.velocity().x(),1e-6);
     assertEquals(0.0007776200856718,actual.velocity().z(),1e-6);
+  }
+
+  @Test void stoneSprintJumpMatchesObservedVanillaVerticalLifecycle() {
+    var initial = new State.Player(
+      new Maths.Vec3(-6.881738915342083,72.0,26.65862746198882),
+      new Maths.Vec3(-0.14170886575634412,-0.0784000015258789,0.000854445744),
+      8.0f,
+      0.0f,
+      true,
+      "survival",
+      Map.of(),
+      OptionalInt.empty(),
+      false
+    );
+    var world = World.Snapshot.emptyVisibleChunks(List.of(World.Chunk.containing(-7,26)));
+    var context = new Simulation.PhysicsContext(
+      54,
+      initial,
+      new Simulation.AdvancedInput(1,0,true,true,false),
+      world,
+      Simulation.Environment.DRY,
+      new Simulation.Attributes(0.10000000149011612)
+    );
+
+    var result = new Simulation.Vanilla12111Physics().step(context);
+    var actual = result.state();
+
+    // Measured from a real Minecraft Java 1.21.11 sprint-jump trace on a stone platform.
+    assertEquals(72.41999998688698,actual.position().y(),1e-6);
+    assertEquals(0.33319999363422365,actual.velocity().y(),1e-6);
   }
 
   private static Phase5TraceTool.Row row(long tick,long client,long receive) {
