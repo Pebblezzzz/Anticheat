@@ -14,16 +14,10 @@ The harness is observation-only: it reads the real client's post-tick player sta
 .\gradlew.bat clean build
 ```
 
-4. Run the Loom client with capture explicitly enabled. **Put the `-D...` system properties before `runClient` on Windows PowerShell.** This avoids PowerShell/Gradle interpreting the property as a task name.
+4. Run the Loom client with capture explicitly enabled. **On Windows PowerShell, use Gradle's long-form project-property syntax**. This avoids the parsing behavior seen with short `-P...` arguments.
 
 ```powershell
-.\gradlew.bat -Dphantom.capture.enabled=true -Dphantom.capture.output="C:\phase5\capture.tsv" -Dphantom.capture.events="C:\phase5\events.tsv" runClient
-```
-
-Do not use this ordering in PowerShell:
-
-```powershell
-.\gradlew.bat runClient -Dphantom.capture.enabled=true ...
+.\gradlew.bat --project-prop=phantom.capture.enabled=true --project-prop=phantom.capture.output=C:\phase5\capture.tsv --project-prop=phantom.capture.events=C:\phase5\events.tsv runClient
 ```
 
 5. For an empirical corpus, each scenario must begin from a documented initial state. Record the exact Minecraft version, seed/world identity, player coordinates, rotation, gamemode, attributes/effects, relevant block/fluid geometry, and the scenario identifier.
