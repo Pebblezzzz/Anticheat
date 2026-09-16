@@ -36,10 +36,10 @@ public final class ControlledPhase5ScenarioDriver {
     private int startIndex;
     private int endIndex;
     private int elapsed;
-    private boolean prepared;
-    private boolean done;
-    private boolean failureReported;
-    private boolean preparing;
+    private volatile boolean prepared;
+    private volatile boolean done;
+    private volatile boolean failureReported;
+    private volatile boolean preparing;
 
     public ControlledPhase5ScenarioDriver() { LAST = this; }
 
