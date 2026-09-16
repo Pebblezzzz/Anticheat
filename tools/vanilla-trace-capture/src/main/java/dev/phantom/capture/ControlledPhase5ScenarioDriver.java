@@ -199,16 +199,12 @@ public final class ControlledPhase5ScenarioDriver {
 
     private void resetFor(MinecraftClient client, String phase) {
         if (phase.equals("climbable")) {
-            // Start inside the ladder block so the empirical test verifies the vanilla
-            // climbing state itself rather than relying on a collision edge to trigger it.
             expectedX = 0;
             expectedY = 64;
             expectedZ = baseZ(phase) + 29.1;
             expectedYaw = 0;
         } else {
             expectedX = 0;
-            // The fluid test chambers occupy Y=63..65 and the supporting floor is Y=62,
-            // so a settled player has feet at Y=63 rather than the generic dry-course Y=64.
             expectedY = (phase.equals("water") || phase.equals("lava") || phase.equals("swim-transition")) ? 63 : (phase.equals("glide") ? 90 : 64);
             expectedZ = baseZ(phase) + 12;
             expectedYaw = 0;
@@ -221,7 +217,9 @@ public final class ControlledPhase5ScenarioDriver {
         else if (phase.equals("jump-boost")) effect(client, "minecraft:jump_boost");
         else if (phase.equals("glide")) {
             elytra(client);
-            fly(client, true);
+            // Do not set FallFlying NBT. The glide phase deliberately performs the
+            // client-side vanilla transition after the teleport has become airborne.
+            System.out.println("[Phase5-Debug] ELYTRA_PREPARED; awaiting airborne vanilla activation player=" + describe(client));
         }
     }
 
@@ -346,13 +344,6 @@ public final class ControlledPhase5ScenarioDriver {
         System.out.println("[Phase5-Debug] ELYTRA_EQUIPPED player=" + describe(client));
     }
 
-    private void fly(MinecraftClient client, boolean value) {
-        IntegratedServer server = client.getServer();
-        server.executeSync(() -> cmd(server.getCommandManager(), server.getCommandSource(),
-                "execute as @a run data modify entity @s FallFlying set value " + (value ? "1b" : "0b")));
-        System.out.println("[Phase5-Debug] FALL_FLYING_NBT_SET value=" + value + " player=" + describe(client));
-    }
-
     private static void cmd(CommandManager manager, ServerCommandSource source, String value) {
         manager.parseAndExecute(source, value);
     }
@@ -369,6 +360,7 @@ public final class ControlledPhase5ScenarioDriver {
                 + ",ground=" + player.isOnGround()
                 + ",climbing=" + player.isClimbing()
                 + ",holding=" + player.isHoldingOntoLadder()
+                + ",gliding=" + player.isGliding()
                 + ",glidingPose=" + (player.getPose() == EntityPose.GLIDING)
                 + ",vel=" + velocity.x + "," + velocity.y + "," + velocity.z;
     }
