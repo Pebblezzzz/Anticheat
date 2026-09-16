@@ -15,9 +15,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * inventing a synthetic trajectory.
  *
  * Collision/step result rows are skipped because the course geometry is not
- * serialized in the trace. Those mechanics remain covered by dedicated
- * world-shape/regression tests until the exact captured world snapshot is
- * available.
+ * serialized in the trace. Fluid rows never receive a fabricated solid floor:
+ * the capture does not establish a fluid-floor collision snapshot.
  */
 class Phase5VanillaSimulationReplayTest {
     private static final String TRACE_PROPERTY = "phantom.phase5.trace";
@@ -175,7 +174,7 @@ class Phase5VanillaSimulationReplayTest {
                 Long.parseLong(previous.tick()),
                 player,
                 input,
-                visibleFloor(previous),
+                visibleWorld(previous, current),
                 environment,
                 attributes,
                 effects,
@@ -183,10 +182,9 @@ class Phase5VanillaSimulationReplayTest {
                 movement);
     }
 
-    private static World.Snapshot visibleFloor(Phase5VanillaTrace.Row row) {
-        int bx = (int) Math.floor(Double.parseDouble(row.positionX()));
-        int bz = (int) Math.floor(Double.parseDouble(row.positionZ()));
-        Map<World.Pos, World.Block> blocks = new HashMap<>();
+    private static World.Snapshot visibleWorld(Phase5VanillaTrace.Row previous, Phase5VanillaTrace.Row current) {
+        int bx = (int) Math.floor(Double.parseDouble(previous.positionX()));
+        int bz = (int) Math.floor(Double.parseDouble(previous.positionZ()));
         Set<World.Chunk> chunks = new HashSet<>();
         for (int cx = Math.floorDiv(bx, 16) - 1; cx <= Math.floorDiv(bx, 16) + 1; cx++) {
             for (int cz = Math.floorDiv(bz, 16) - 1; cz <= Math.floorDiv(bz, 16) + 1; cz++) {
@@ -194,19 +192,20 @@ class Phase5VanillaSimulationReplayTest {
             }
         }
 
-        // The controlled dry arenas all start the player at Y=64 on a flat
-        // Y=63 floor. Keep that fixed across falling/jump rows; deriving the
-        // floor from the current Y creates artificial holes as the player
-        // descends between ticks.
-        if (Boolean.parseBoolean(row.onGround()) || Double.parseDouble(row.positionY()) < 64.0) {
-            int floorY = 63;
+        // Only a steady dry standing state establishes a flat floor. Falling,
+        // jumping transitions, and fluid states deliberately receive no
+        // fabricated solid geometry because exact world geometry is absent.
+        if (current.fluid().equals("NONE") && Boolean.parseBoolean(previous.onGround())) {
+            Map<World.Pos, World.Block> blocks = new HashMap<>();
+            int floorY = (int) Math.floor(Double.parseDouble(previous.positionY())) - 1;
             for (int x = bx - 2; x <= bx + 2; x++) {
                 for (int z = bz - 2; z <= bz + 2; z++) {
                     blocks.put(new World.Pos(x, floorY, z), World.Block.FULL);
                 }
             }
+            return new World.Snapshot(blocks, chunks);
         }
-        return new World.Snapshot(blocks, chunks);
+        return new World.Snapshot(Map.of(), chunks);
     }
 
     private static List<Phase5Mechanics.AttributeModifier> parseModifiers(String raw) {
