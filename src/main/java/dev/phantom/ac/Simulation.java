@@ -53,9 +53,9 @@ public final class Simulation {
       double inputMagnitude=Math.hypot(input.forward(),input.strafe());
       double inputScale=inputMagnitude>1.0?1.0/Math.sqrt(2.0):1.0;
       double inputAcceleration;
-      if(fluid) inputAcceleration=AIR_ACCEL*speed;
+      if(fluid) inputAcceleration=AIR_ACCEL;
       else if(s.onGround() && inputMagnitude>1.0) inputAcceleration=DIAGONAL_ACCEL*effects.speedMultiplier()*(input.sprint()?1.3:1.0)*(input.sneak()?0.3:1.0);
-      else inputAcceleration=s.onGround()?WALK_ACCEL*speed:AIR_ACCEL*speed;
+      else inputAcceleration=s.onGround()?WALK_ACCEL*speed:AIR_ACCEL;
       Vec3 acceleration=new Vec3(
           inputScale*(input.strafe()*inputAcceleration*Math.cos(radians)-input.forward()*inputAcceleration*Math.sin(radians)),
           0,
