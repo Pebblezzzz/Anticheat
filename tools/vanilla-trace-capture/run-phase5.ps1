@@ -6,8 +6,9 @@ $events = Join-Path $captureDir 'phase5-all-events.tsv'
 
 function Invoke-Native([string] $exe, [string[]] $arguments) {
     & $exe @arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Command failed with exit code $LASTEXITCODE: $exe $($arguments -join ' ')"
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw "Command failed with exit code ${exitCode}: $exe $($arguments -join ' ')"
     }
 }
 
