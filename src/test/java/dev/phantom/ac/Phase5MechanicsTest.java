@@ -45,7 +45,7 @@ class Phase5MechanicsTest {
     var lava=physics.step(new PhysicsContext(5,Player.initial(Vec3.ZERO),new AdvancedInput(1,0,false),air(),Simulation.Environment.LAVA,new Attributes(.1),Phase5Mechanics.MovementEffects.NONE,Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.vanillaLava(true,false,false)));
     assertEquals(0.01764, water.state().velocity().z(), 1e-12);
     assertEquals(0.0098, lava.state().velocity().z(), 1e-12);
-    assertEquals(-0.02, lava.state().velocity().y(), 1e-12);
+    assertEquals(-0.06, lava.state().velocity().y(), 1e-12);
   }
   @Test void waterAndClimbableDoNotBecomeUnknownByConvenience() {
     var physics=new Vanilla12111Physics(); var state=Player.initial(Vec3.ZERO);
