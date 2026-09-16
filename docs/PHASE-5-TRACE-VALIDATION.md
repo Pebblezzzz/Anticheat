@@ -3,80 +3,69 @@
 Audit date: 2026-09-16.
 
 ## Status
-Phase 5 remains **PARTIAL / UNVERIFIED**. The repository now has explicit mechanics primitives, stricter trace import/validation, correction barriers, detailed divergence diagnostics, and a substantially expanded local combination matrix. It is intentionally **not** declared vanilla-complete because this repository cannot generate an independent Minecraft Java 1.21.11 client reference trace.
+Phase 5 remains **PARTIAL / BLOCKED BY EXTERNAL DATA** for empirical vanilla validation. The repository now contains the deterministic simulator primitives, the original 46-column trace validator, an extended version-2 capture format with explicit missing-field provenance, and an observation-only Fabric capture harness pinned to Minecraft Java 1.21.11.
 
-Fabric Yarn 1.21.11 mappings establish the existence and structure of the relevant client/entity movement paths (`travel`, `travelInWater`, `travelInLava`, climbing, movement-speed attributes, pose/bounding-box queries, and status-effect handling), but mappings are not an empirical movement trace and do not establish every numeric/order detail. See the 1.21.11 `LivingEntity` mapping and the Fabric attribute documentation in the project validation notes.
+No real vanilla trace is committed by this pass because the actual licensed 1.21.11 client cannot be launched in this execution environment. This is an external-data blocker, not a permission to synthesize traces.
 
-## Exact external trace format
+## Exact target client
 
-The machine-readable format is `Phase5TraceTool` TSV, schema version 1. The first four lines are fixed:
+The empirical reference is exactly **Minecraft Java Edition 1.21.11**, not latest, a release candidate, a snapshot, or a different 1.21.x release. The official 1.21.11 release page directs players to launch the release through the Minecraft Launcher. Fabric documents that 1.21.11 is the final obfuscated release before the 26.1 transition; the capture harness therefore pins Minecraft `1.21.11`, Yarn `1.21.11+build.4`, Fabric Loader `0.18.2`, and Loom `1.14.10`.
 
-1. `# phantom-phase5-trace version=1 protocol=minecraft-java-1.21.11 format=tsv`
-2. `# source_id=<escaped independent-capture-id>`
-3. `# captured_at_utc=<escaped UTC timestamp>`
-4. the exact `Phase5TraceTool.HEADER` column line.
+## Version-2 empirical trace format
 
-Every subsequent non-comment row has exactly 46 tab-separated columns:
+The original `Phase5TraceTool` 46-column schema remains supported for fully observed legacy data. The empirical capture harness uses version 2, which adds a single `missing_fields` column to prevent unknown observations from being misrepresented as zero/false values.
 
-| # | Field | Meaning |
-|---:|---|---|
-| 1–3 | `tick`, `client_tick`, `receive_nanos` | server/simulation tick, client tick, capture receive timestamp |
-| 4–6 | `x,y,z` | client-observed position |
-| 7–9 | `vx,vy,vz` | client-observed velocity/state velocity |
-| 10–11 | `yaw,pitch` | rotation |
-| 12 | `on_ground` | client ground flag |
-| 13–17 | `forward,strafe,jump,sprint,sneak` | input for this movement step |
-| 18–19 | `pose,gamemode` | resolved pose and game mode |
-| 20–23 | `fluid,submerged,climbable,gliding` | movement environment |
-| 24–24 | `base_movement_speed` | attribute base value before modifiers |
-| 25 | `modifiers` | ordered modifier records `id:amount:operation`, where operation is `ADD_VALUE`, `ADD_MULTIPLIED_BASE`, or `ADD_MULTIPLIED_TOTAL` |
-| 26–30 | effect fields | speed/slowness/jump-boost amplifiers plus levitation/slow-falling flags |
-| 31–33 | `knockback_x/y/z` | applied knockback impulse for the step |
-| 34 | `velocity_packet` | whether a server velocity packet was observed for the state transition |
-| 35–36 | correction fields | correction id and whether recovery is still pending |
-| 37–38 | world identity/tick | immutable client-visible world snapshot identity and world tick |
-| 39–44 | collision/step fields | collision result plus step attempted/succeeded and per-axis clipping |
-| 45–46 | provenance | input source and exact client version |
+The first four lines of a version-2 capture are:
 
-Escaping replaces `%` with `%25`, tab with `%09`, newline with `%0A`, and carriage return with `%0D`. A missing modifier list is `-`.
+1. `# phantom-phase5-trace version=2 protocol=minecraft-java-1.21.11 format=tsv`
+2. `# source_id=<capture id>`
+3. `# captured_at_utc=<UTC timestamp>`
+4. the exact 47-column header emitted by `VanillaTraceCaptureClient`.
 
-The importer rejects missing magic/header, wrong column count, non-increasing simulation ticks, decreasing client ticks, decreasing receive time, malformed modifiers, invalid enums, and non-finite numeric values. `validate()` additionally reports field-level timing/world/version diagnostics.
+Columns 1–46 retain the Phase 5 fields: tick/timing, position, velocity, rotation, ground/input state, pose/gamemode, fluid/submerged/climbing/gliding, movement-speed attribute data, movement effects, impulse/correction fields, world identity/tick, collision/step data, and provenance.
 
-## Required capture procedure for real vanilla 1.21.11 evidence
+Column 47 is `missing_fields`, a comma-separated list of fields that the capture mechanism could not independently reconstruct at the recorded observation point. `-` means no missing field was declared. Unknown must never be silently encoded as zero or false.
 
-A reference capture **must be produced independently of this simulator**. Do not generate the reference rows by calling `Vanilla12111Physics` or copying simulator output.
+## Observation points
 
-1. Use an unmodified Minecraft Java **1.21.11** client and record the exact client version.
-2. Start from a deterministic test world and record its identity, relevant block/fluid states, chunk visibility and the initial player state.
-3. Record client input per tick, including forward/strafe/jump/sprint/sneak and the state used to resolve pose.
-4. Record client-observed position/rotation/ground state and the velocity available to the capture mechanism. If a field cannot be independently observed, use an explicit missing/unknown capture representation rather than inventing it.
-5. Record server correction/teleport ids, velocity packets, their receive times, and the first subsequent client movement state.
-6. Record the client-visible world snapshot identity/tick used by the trace and the relevant fluid/climbable/collision states.
-7. Run isolated scenarios and combination scenarios, preserving exact tick order and capture timing.
-8. Export the fixed TSV schema and run `Phase5TraceTool.read()` followed by `validate()` before using the trace for parity comparison.
+The capture harness takes player state **after the real `ClientPlayerEntity.tick()` returns**. This is intentionally an observation point; it does not replace or wrap the movement algorithm.
 
-The repository's server-side adapter is not, by itself, an independent vanilla client trace generator. This distinction is mandatory for Phase 5 closure.
+A second event stream records inbound `ENTITY_VELOCITY` and `POSITION_CORRECTION` packets with their receive timestamp and packet payload. These packet events are kept separate from the post-tick row because packet arrival and player-state observation are distinct timing points.
 
-## First-divergence diagnostics
+The current harness can independently observe position, velocity, rotation, ground state, discrete `PlayerInput`, sprint/sneak/jump state, resolved client pose, fluid/submerged/climbing/gliding state, movement-speed base/modifiers, movement effects, world identity/tick, and aggregate collision flags. It deliberately declares knockback decomposition, correction-pending state, step attempt/result, and per-axis collision clipping missing until a measurement procedure can reconstruct them without inventing data.
 
-`Phase5TraceTool.firstDivergence()` compares the independent rows against a reconstructed `Simulation.Trace` and returns the first divergent tick with field name, expected value, actual value, numeric delta, and a reason. It checks tick identity, position, velocity, rotation, ground state and input before declaring later rows relevant. A trace-length mismatch is reported at the first missing row.
+## Controlled-corpus procedure
 
-## Mechanics matrix
+Every scenario must use a separate deterministic test world or a documented fresh state. Record the world identity/seed, exact client version, initial position and rotation, gamemode, attribute state, effect state, relevant blocks/fluid, and scenario id before the first measured tick.
 
-| Mechanic | Implementation status | Validation status |
-|---|---|---|
-| Pose transitions | Explicit `Phase5Mechanics.Pose`; standing/crouching/swimming/fall-flying transitions | Mapping-informed; independent trace required |
-| Swimming pose/state | Explicit submerged + swimming-input transition | Independent client trace required |
-| Movement effects | Speed/slowness/jump-boost/levitation/slow-falling state is explicit | Numeric/order parity still requires client traces |
-| Attribute modifiers | Full three-operation evaluation order represented | Independent numeric trace required |
-| Teleport/correction recovery | `CorrectionRecovery` is a hard barrier; simulation refuses to integrate while awaiting confirmation | Packet/client ordering still requires independent trace |
-| Water/lava/climbables | Environment carries fluid, drag, speed and gravity inputs; climbable branch is explicit | Exact 1.21.11 factors/order remain trace-dependent |
-| Knockback | Impulse and velocity-packet provenance are explicit | Exact client response remains unverified |
-| Step/collision order | Uses the shared Phase 4 resolver and records step/collision outcomes | Exact vanilla order remains unverified |
-| Combination matrix | Expanded deterministic test covers modifier, pose, correction and trace paths; existing Phase 5 matrix remains | Coverage is local, not vanilla parity evidence |
+Run isolated scenarios first, then controlled combinations. Each scenario must have a fixed start state, a fixed input sequence, and a fixed terminal tick. Preserve the main TSV and packet-event TSV together.
 
-## Vanilla-reference limitation
+The required scenario checklist is stored in `docs/phase5-vanilla-corpus/scenarios.tsv`.
 
-The official 1.21.11 release notes establish the target release, while Yarn 1.21.11 mappings provide authoritative structural names. Neither source supplies an independently captured end-to-end client movement trace for this repository. Therefore this phase must not be marked COMPLETE until real independent reference traces are imported and compared.
+A scenario may be changed from `BLOCKED_BY_EXTERNAL_DATA` to `CAPTURED` only when an actual Minecraft Java 1.21.11 run produced the trace and the artifacts were preserved outside the simulator source tree.
 
-No fabricated trace, simulator-generated trace, generic speed threshold, or inferred numeric constant is accepted as parity evidence.
+## Import and comparison
+
+`Phase5VanillaTrace.read()` rejects malformed version-2 headers, wrong column counts, timing regressions, malformed primitive fields, and non-finite numeric state. `Phase5VanillaTrace.validate()` produces field-level timing/world/version diagnostics. `fullyObservedForLegacyComparison()` identifies rows that can safely be compared by the original 46-column comparator without hiding missing observations.
+
+For parity, use the order:
+
+**vanilla capture → structural validation → missing-field review → simulation replay → first divergence → source/cause investigation → simulator fix → regression test → repeat capture**.
+
+The existing `Phase5TraceTool.firstDivergence()` remains the detailed state comparator for traces whose required fields are available. It reports the first mismatching tick and field rather than only the final displacement error.
+
+## Required empirical corpus
+
+The initial corpus manifest requires at least: idle, walking, sprinting, sneaking, forward, strafe, diagonal movement, jumping, sprint-jumping, falling, landing, slabs, stairs, step-ups, corners/edges, water, lava, swimming, ladders/vines/climbables, movement effects, attribute changes, knockback, teleport/correction, and controlled combinations of these mechanics.
+
+No repository fixture currently claims to be one of these real-client captures.
+
+## Vanilla-validation classification
+
+- **IMPLEMENTED:** modeled in the simulator or capture tooling.
+- **INTERNALLY TESTED:** repository tests exercise the model/tooling.
+- **VANILLA VALIDATED:** reserved for a behavior actually compared against an independently captured 1.21.11 client trace.
+- **PARTIAL:** some machinery exists but an empirical requirement remains.
+- **BLOCKED BY EXTERNAL DATA:** the missing evidence must come from running the exact client outside this execution environment.
+
+Phase 5 is currently **PARTIAL / BLOCKED BY EXTERNAL DATA**. No simulator-generated row is valid empirical evidence and no tolerance/fudge factor is accepted as a substitute for fixing the first actual divergence.
