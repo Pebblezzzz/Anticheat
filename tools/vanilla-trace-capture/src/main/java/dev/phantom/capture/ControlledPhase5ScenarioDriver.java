@@ -1,5 +1,6 @@
 package dev.phantom.capture;
 
+import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.GameOptions;
 import net.minecraft.entity.EquipmentSlot;
@@ -110,6 +111,13 @@ public final class ControlledPhase5ScenarioDriver {
         return true;
     }
 
+    private int laneZ(String phase) {
+        for (int i = 0; i < PHASES.length; i++) {
+            if (PHASES[i].equals(phase)) return START_Z + SPACING * (i - startIndex);
+        }
+        throw new IllegalArgumentException(phase);
+    }
+
     private void runPhase(MinecraftClient client) {
         if (client.player == null) return;
         if ((client.player.isDead() || client.player.getHealth() <= 0.0F || client.player.getY() < FALL_CUTOFF_Y) && !failureReported) {
@@ -129,10 +137,10 @@ public final class ControlledPhase5ScenarioDriver {
         configureInput(client.options, phase, elapsed);
         if (phase.equals("glide")) driveGlide(client);
         if (phase.equals("correction")) {
-            if (elapsed == 8) requestReset(client, 2, 65, baseZ(phase) + 20, 90);
-            if (elapsed == 24) requestReset(client, -2, 65, baseZ(phase) + 24, 270);
+            if (elapsed == 8) requestReset(client, 2, 65, laneZ(phase) + 20, 90);
+            if (elapsed == 24) requestReset(client, -2, 65, laneZ(phase) + 24, 270);
         }
-        Phase5CaptureDebug.tick(client, phase, elapsed, baseZ(phase) + 80);
+        Phase5CaptureDebug.tick(client, phase, elapsed, laneZ(phase) + 80);
         elapsed++;
 
         if (elapsed >= DURATIONS[phaseIndex]) {
@@ -158,7 +166,7 @@ public final class ControlledPhase5ScenarioDriver {
 
     private void requestPhaseReset(MinecraftClient client, String phase) {
         double y = phase.equals("glide") ? 90.0D : 64.0D;
-        requestReset(client, 0.0D, y, baseZ(phase) + 2.0D, 0.0D);
+        requestReset(client, 0.0D, y, laneZ(phase) + 2.0D, 0.0D);
     }
 
     private void requestReset(MinecraftClient client, double x, double y, double z, double yaw) {
@@ -188,7 +196,7 @@ public final class ControlledPhase5ScenarioDriver {
                 && Math.abs(client.player.getY() - resetY) <= RESET_TOLERANCE
                 && Math.abs(client.player.getZ() - resetZ) <= RESET_TOLERANCE;
         BlockPos below = BlockPos.ofFloored(resetX, resetY - 0.05D, resetZ);
-        boolean blockPresent = client.world.getBlockState(below).isAir() == false;
+        boolean blockPresent = !client.world.getBlockState(below).isAir();
         boolean grounded = PHASES[phaseIndex].equals("glide") || blockPresent;
 
         if (atTarget && grounded) {
@@ -196,7 +204,7 @@ public final class ControlledPhase5ScenarioDriver {
             resetWait = 0;
             resetForPhase(client, PHASES[phaseIndex]);
             release(client.options);
-            Phase5CaptureDebug.resetAndStart(client, PHASES[phaseIndex], phaseIndex, baseZ(PHASES[phaseIndex]) + 80);
+            Phase5CaptureDebug.resetAndStart(client, PHASES[phaseIndex], phaseIndex, laneZ(PHASES[phaseIndex]) + 80);
             System.out.println("[Phase5] START " + scenario + " / " + PHASES[phaseIndex] + " (" + (phaseIndex - startIndex + 1) + "/" + (endIndex - startIndex + 1) + ")");
             return;
         }
@@ -276,12 +284,10 @@ public final class ControlledPhase5ScenarioDriver {
     private void prepare(MinecraftClient client) {
         IntegratedServer server = client.getServer();
         if (server == null) throw new IllegalStateException("Integrated server required");
-        int minPhase = startIndex;
-        int maxPhase = endIndex;
+        int minZ = laneZ(PHASES[startIndex]) - 8;
+        int maxZ = laneZ(PHASES[endIndex]) + 150;
         server.execute(() -> {
             ServerWorld world = server.getOverworld();
-            int minZ = baseZ(PHASES[minPhase]) - 8;
-            int maxZ = baseZ(PHASES[maxPhase]) + 310;
             loadArenaChunks(world, minZ, maxZ);
             CommandManager m = server.getCommandManager();
             ServerCommandSource s = server.getCommandSource();
@@ -290,39 +296,69 @@ public final class ControlledPhase5ScenarioDriver {
             cmd(m, s, "difficulty peaceful");
             cmd(m, s, "time set day");
             cmd(m, s, "weather clear");
-            fillZ(m, s, -24, 63, -48, 24, 63, maxZ, "minecraft:stone", 600);
+            fillZ(m, s, -24, 63, minZ, 24, 63, maxZ, "minecraft:stone", 600);
             fillZ(m, s, -24, 64, minZ, 24, 67, maxZ, "air", 160);
             fillZ(m, s, -24, 64, minZ, -23, 72, maxZ, "minecraft:stone", 160);
             fillZ(m, s, 23, 64, minZ, 24, 72, maxZ, "minecraft:stone", 160);
 
-            int water = baseZ("water");
-            cmd(m, s, "fill -8 64 " + (water + 5) + " 8 65 " + (water + 135) + " minecraft:water");
-            int lava = baseZ("lava");
-            cmd(m, s, "fill -8 64 " + (lava + 5) + " 8 65 " + (lava + 135) + " minecraft:lava");
-            int collision = baseZ("collision");
-            cmd(m, s, "fill -3 64 " + (collision + 55) + " 3 66 " + (collision + 59) + " minecraft:stone");
-            int step = baseZ("step");
-            cmd(m, s, "fill -3 64 " + (step + 25) + " 3 64 " + (step + 29) + " minecraft:oak_slab[type=bottom]");
-            int stairs = baseZ("stairs");
-            cmd(m, s, "fill -3 64 " + (stairs + 30) + " 3 64 " + (stairs + 33) + " minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");
-            cmd(m, s, "fill -3 65 " + (stairs + 34) + " 3 65 " + (stairs + 37) + " minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");
-            int climb = baseZ("climbable");
-            cmd(m, s, "fill -1 64 " + (climb + 25) + " 1 68 " + (climb + 25) + " minecraft:stone");
-            cmd(m, s, "fill -1 64 " + (climb + 24) + " 1 68 " + (climb + 24) + " minecraft:ladder[facing=south]");
-            int edge = baseZ("edge-corner");
-            cmd(m, s, "fill 4 64 " + (edge + 20) + " 4 68 " + (edge + 70) + " minecraft:stone");
-            cmd(m, s, "fill 4 64 " + (edge + 45) + " 8 68 " + (edge + 45) + " minecraft:stone");
-            int swim = baseZ("swim-transition");
-            cmd(m, s, "fill -8 64 " + (swim + 5) + " 8 65 " + (swim + 130) + " minecraft:water");
-            int glide = baseZ("glide");
-            cmd(m, s, "fill -10 63 " + (glide + 4) + " 10 63 " + (glide + 300) + " minecraft:stone");
-            fillZ(m, s, -10, 64, glide + 4, 10, 120, glide + 300, "air", 160);
+            if (includes(6, 9)) {
+                int water = laneZ("water");
+                setBlockBox(world, -8, 64, water + 5, 8, 65, water + 135, Blocks.WATER);
+                int lava = laneZ("lava");
+                setBlockBox(world, -8, 64, lava + 5, 8, 65, lava + 135, Blocks.LAVA);
+            }
+            if (includes(5)) {
+                int collision = laneZ("collision");
+                fillZ(m, s, -3, 64, collision + 55, 3, 66, collision + 59, "minecraft:stone", 32);
+            }
+            if (includes(11)) {
+                int step = laneZ("step");
+                fillZ(m, s, -3, 64, step + 25, 3, 64, step + 29, "minecraft:oak_slab[type=bottom]", 32);
+            }
+            if (includes(13)) {
+                int stairs = laneZ("stairs");
+                fillZ(m, s, -3, 64, stairs + 30, 3, 64, stairs + 33, "minecraft:oak_stairs[facing=south,half=bottom,shape=straight]", 32);
+                fillZ(m, s, -3, 65, stairs + 34, 3, 65, stairs + 37, "minecraft:oak_stairs[facing=south,half=bottom,shape=straight]", 32);
+            }
+            if (includes(14)) {
+                int climb = laneZ("climbable");
+                fillZ(m, s, -1, 64, climb + 25, 1, 68, climb + 25, "minecraft:stone", 32);
+                fillZ(m, s, -1, 64, climb + 24, 1, 68, climb + 24, "minecraft:ladder[facing=south]", 32);
+            }
+            if (includes(15)) {
+                int edge = laneZ("edge-corner");
+                fillZ(m, s, 4, 64, edge + 20, 4, 68, edge + 70, "minecraft:stone", 64);
+                fillZ(m, s, 4, 64, edge + 45, 8, 68, edge + 45, "minecraft:stone", 32);
+            }
+            if (includes(16)) {
+                int swim = laneZ("swim-transition");
+                setBlockBox(world, -8, 64, swim + 5, 8, 65, swim + 130, Blocks.WATER);
+            }
+            if (includes(17)) {
+                int glide = laneZ("glide");
+                fillZ(m, s, -10, 63, glide + 4, 10, 63, glide + 300, "minecraft:stone", 300);
+                fillZ(m, s, -10, 64, glide + 4, 10, 120, glide + 300, "air", 160);
+            }
             cmd(m, s, "gamemode survival @a");
             cmd(m, s, "effect clear @a");
             prepared = true;
             preparing = false;
             System.out.println("[Phase5] arena preparation complete");
         });
+    }
+
+    private boolean includes(int first, int last) {
+        return startIndex <= last && endIndex >= first;
+    }
+
+    private static void setBlockBox(ServerWorld world, int x1, int y1, int z1, int x2, int y2, int z2, net.minecraft.block.Block block) {
+        for (int z = z1; z <= z2; z++) {
+            for (int y = y1; y <= y2; y++) {
+                for (int x = x1; x <= x2; x++) {
+                    world.setBlockState(new BlockPos(x, y, z), block.getDefaultState());
+                }
+            }
+        }
     }
 
     private static void loadArenaChunks(ServerWorld world, int minZ, int maxZ) {
@@ -342,11 +378,6 @@ public final class ControlledPhase5ScenarioDriver {
             int end = Math.min(z2, start + step - 1);
             cmd(m, s, "fill " + x1 + " " + y1 + " " + start + " " + x2 + " " + y2 + " " + end + " " + block);
         }
-    }
-
-    private static int baseZ(String phase) {
-        for (int i = 0; i < PHASES.length; i++) if (PHASES[i].equals(phase)) return START_Z + SPACING * i;
-        throw new IllegalArgumentException(phase);
     }
 
     private static void configureInput(GameOptions o, String phase, int t) {
@@ -369,7 +400,7 @@ public final class ControlledPhase5ScenarioDriver {
         o.jumpKey.setPressed(j); o.sneakKey.setPressed(sn); o.sprintKey.setPressed(sp);
     }
 
-    private static void release(GameOptions o) { apply(o, false, false, false, false, false, false, false); }
+    private static void release(GameOptions o) { apply(o, false, false, false, false, false, false); }
 
     private static void cmd(CommandManager m, ServerCommandSource s, String command) { m.parseAndExecute(s, command); }
 
