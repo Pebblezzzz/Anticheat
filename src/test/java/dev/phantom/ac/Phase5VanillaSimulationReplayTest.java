@@ -213,11 +213,21 @@ class Phase5VanillaSimulationReplayTest {
         if (raw == null || raw.isBlank() || raw.equals("-")) return List.of();
         List<Phase5Mechanics.AttributeModifier> out = new ArrayList<>();
         for (String encoded : raw.split(";", -1)) {
-            String[] parts = encoded.split(":", 3);
-            if (parts.length != 3) throw new IllegalArgumentException("invalid modifier " + encoded);
+            if (encoded.isBlank()) continue;
+            int last = encoded.lastIndexOf(':');
+            if (last <= 0 || last == encoded.length() - 1) {
+                throw new IllegalArgumentException("invalid modifier " + encoded);
+            }
+            int secondLast = encoded.lastIndexOf(':', last - 1);
+            if (secondLast <= 0 || secondLast == last - 1) {
+                throw new IllegalArgumentException("invalid modifier " + encoded);
+            }
+            String id = encoded.substring(0, secondLast);
+            String amount = encoded.substring(secondLast + 1, last);
+            String operation = encoded.substring(last + 1);
             out.add(new Phase5Mechanics.AttributeModifier(
-                    unescape(parts[0]), Double.parseDouble(parts[1]),
-                    Phase5Mechanics.ModifierOperation.valueOf(parts[2])));
+                    unescape(id), Double.parseDouble(amount),
+                    Phase5Mechanics.ModifierOperation.valueOf(operation)));
         }
         return List.copyOf(out);
     }
