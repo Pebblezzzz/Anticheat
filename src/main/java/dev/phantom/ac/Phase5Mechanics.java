@@ -30,19 +30,28 @@ public final class Phase5Mechanics {
     public double jumpVelocityAdd(){return jumpBoostAmplifier>=0?0.1*(jumpBoostAmplifier+1):0.0;}
     public boolean levitation(){return levitationAmplifier>=0;}
     public double levitationVelocity(){return 0.05*(levitationAmplifier+1);}
+    public double fallGravityMultiplier(){return slowFalling?0.2:1.0;}
   }
 
   public record MovementEnvironment(Fluid fluid,boolean submerged,boolean climbable,boolean onGround,boolean sprinting,boolean sneaking,boolean swimmingInput,boolean gliding,double fluidSpeedMultiplier,double fluidDrag,double gravityMultiplier) implements Serializable {
     public MovementEnvironment { Objects.requireNonNull(fluid);if(!Double.isFinite(fluidSpeedMultiplier)||!Double.isFinite(fluidDrag)||!Double.isFinite(gravityMultiplier))throw new IllegalArgumentException("non-finite environment factor");if(fluidSpeedMultiplier<0||fluidDrag<0||gravityMultiplier<0)throw new IllegalArgumentException("negative environment factor"); }
     public static MovementEnvironment dry(boolean onGround,boolean sprinting,boolean sneaking){return new MovementEnvironment(Fluid.NONE,false,false,onGround,sprinting,sneaking,false,false,1.0,1.0,1.0);}
     public static MovementEnvironment vanillaWater(boolean onGround,boolean sprinting,boolean sneaking,boolean swimmingInput){return new MovementEnvironment(Fluid.WATER,true,false,onGround,sprinting,sneaking,swimmingInput,false,1.0,0.9,0.0);}
-    public static MovementEnvironment vanillaLava(boolean onGround,boolean sprinting,boolean sneaking){
-      // 1.21.11 observed lava motion follows vy' = 0.5*vy - 0.02.
-      // 0.02 is one quarter of the base 0.08 gravity constant.
-      return new MovementEnvironment(Fluid.LAVA,true,false,onGround,sprinting,sneaking,false,false,1.0,0.5,0.25);
-    }
+    public static MovementEnvironment vanillaLava(boolean onGround,boolean sprinting,boolean sneaking){return new MovementEnvironment(Fluid.LAVA,true,false,onGround,sprinting,sneaking,false,false,1.0,0.5,0.25);}
+    public static MovementEnvironment vanillaClimbable(boolean onGround,boolean sprinting,boolean sneaking){return new MovementEnvironment(Fluid.NONE,false,true,onGround,sprinting,sneaking,false,false,1.0,1.0,1.0);}
   }
   public static Pose nextPose(Pose previous,MovementEnvironment env){Objects.requireNonNull(previous);Objects.requireNonNull(env);if(env.gliding())return Pose.FALL_FLYING;if(env.submerged()&&env.swimmingInput())return Pose.SWIMMING;if(env.sneaking())return Pose.CROUCHING;return Pose.STANDING;}
+
+  /** Applies an authoritative server velocity/knockback event without inventing acceleration. */
+  public static State.Player applyVelocityImpulse(State.Player state, Vec3Like impulse) {
+    Objects.requireNonNull(state); Objects.requireNonNull(impulse);
+    return new State.Player(state.position(), state.velocity().add(new Maths.Vec3(impulse.x(), impulse.y(), impulse.z())),
+        state.yaw(), state.pitch(), state.onGround(), state.gamemode(), state.effects(), state.awaitingTeleport(), state.uncertain());
+  }
+
+  /** True when an impulse came from an observed server velocity event. */
+  public static Knockback observedKnockback(Vec3Like impulse) { return new Knockback(impulse, true); }
+
   public record Knockback(Vec3Like impulse,boolean serverVelocityPacketObserved) implements Serializable {public Knockback{Objects.requireNonNull(impulse);}}
   public record Vec3Like(double x,double y,double z) implements Serializable {}
 
