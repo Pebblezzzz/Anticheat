@@ -100,7 +100,6 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
             }
         }
 
-        /** Called by the player mixin after vanilla's normal ClientPlayerEntity.tick(). */
         public static synchronized void recordForMixin(MinecraftClient client, ClientPlayerEntity player) {
             record(client, player);
         }
@@ -124,8 +123,6 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
             }
 
             List<String> missing = new ArrayList<>();
-            // A post-tick observer cannot reconstruct these without changing or replaying vanilla logic.
-            // Packet hooks below provide the independent event stream needed for correction/velocity analysis.
             missing.add("knockback_x");
             missing.add("knockback_y");
             missing.add("knockback_z");
@@ -188,7 +185,7 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
                     "false",
                     "false",
                     "false",
-                    "capture-post-tick",
+                    "capture-post-tick:" + VanillaScenarioDriver.phaseLabel(),
                     client.getGameVersion(),
                     String.join(",", missing)
             );
@@ -206,15 +203,8 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
             MinecraftClient client = MinecraftClient.getInstance();
             if (writer == null || client.player == null || packet.getEntityId() != client.player.getId()) return;
             Vec3d velocity = packet.getVelocity();
-            writeEvent(
-                    System.nanoTime(),
-                    client.player.age,
-                    "ENTITY_VELOCITY",
-                    0, 0, 0,
-                    velocity.x, velocity.y, velocity.z,
-                    packet.getEntityId(),
-                    "server velocity packet"
-            );
+            writeEvent(System.nanoTime(), client.player.age, "ENTITY_VELOCITY", 0, 0, 0,
+                    velocity.x, velocity.y, velocity.z, packet.getEntityId(), "server velocity packet");
         }
 
         public static synchronized void recordCorrectionPacket(PlayerPositionLookS2CPacket packet) {
@@ -222,15 +212,8 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
             if (writer == null) return;
             long clientTick = client.player == null ? -1 : client.player.age;
             Vec3d position = packet.change().position();
-            writeEvent(
-                    System.nanoTime(),
-                    clientTick,
-                    "POSITION_CORRECTION",
-                    position.x, position.y, position.z,
-                    packet.change().yaw(), packet.change().pitch(), 0,
-                    packet.teleportId(),
-                    "relatives=" + packet.relatives()
-            );
+            writeEvent(System.nanoTime(), clientTick, "POSITION_CORRECTION", position.x, position.y, position.z,
+                    packet.change().yaw(), packet.change().pitch(), 0, packet.teleportId(), "relatives=" + packet.relatives());
         }
 
         private static void writeEvent(long nanos, long clientTick, String type,
@@ -238,15 +221,8 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
                                        double auxX, double auxY, double auxZ,
                                        long auxId, String details) {
             try {
-                eventWriter.write(String.join("\t",
-                        Long.toString(nanos),
-                        Long.toString(clientTick),
-                        type,
-                        d(x), d(y), d(z),
-                        d(auxX), d(auxY), d(auxZ),
-                        Long.toString(auxId),
-                        Phase5CaptureEncoding.escape(details)
-                ));
+                eventWriter.write(String.join("\t", Long.toString(nanos), Long.toString(clientTick), type,
+                        d(x), d(y), d(z), d(auxX), d(auxY), d(auxZ), Long.toString(auxId), Phase5CaptureEncoding.escape(details)));
                 eventWriter.newLine();
                 eventWriter.flush();
             } catch (IOException e) {
