@@ -6,6 +6,7 @@ import net.minecraft.entity.EntityPose;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.server.network.ServerPlayerEntity;
 
 import java.util.Locale;
 
@@ -29,11 +30,13 @@ public final class ControlledPhase5ScenarioDriver {
     private static final int PHASE_SPACING = 140;
     private static final double RESET_EPSILON = 1.0e-4;
     private static final int REQUIRED_SETTLED_TICKS = 3;
+    private static final int RESET_TIMEOUT_TICKS = 100;
 
     private int phaseIndex = -1;
     private int elapsed;
     private int driverTick;
     private int settledTicks;
+    private int resetWaitTicks;
     private boolean prepared;
     private boolean done;
     private boolean waitingForReset;
@@ -76,6 +79,7 @@ public final class ControlledPhase5ScenarioDriver {
             elapsed = 0;
             driverTick = 0;
             settledTicks = 0;
+            resetWaitTicks = 0;
             prepared = false;
             done = false;
             waitingForReset = false;
@@ -109,11 +113,13 @@ public final class ControlledPhase5ScenarioDriver {
             Phase5CaptureDebug.waiting(client, PHASES[phaseIndex], elapsed,
                     expectedX, expectedY, expectedZ, expectedYaw, settledTicks);
 
+            resetWaitTicks++;
             if (resetHasSettled(client)) settledTicks++;
             else settledTicks = 0;
 
             if (settledTicks >= REQUIRED_SETTLED_TICKS) {
                 waitingForReset = false;
+                resetWaitTicks = 0;
                 elapsed = 0;
                 int ladderZ = baseZ(PHASES[phaseIndex]) + 29;
                 Phase5CaptureDebug.resetAndStart(client, PHASES[phaseIndex], phaseIndex, ladderZ);
@@ -121,6 +127,12 @@ public final class ControlledPhase5ScenarioDriver {
                         + " phase=" + PHASES[phaseIndex]
                         + " zBase=" + baseZ(PHASES[phaseIndex])
                         + " player=" + describe(client));
+            } else if (resetWaitTicks >= RESET_TIMEOUT_TICKS) {
+                String diagnostic = "RESET TIMEOUT phase=" + PHASES[phaseIndex]
+                        + " expected=" + expectedX + "," + expectedY + "," + expectedZ + ",yaw=" + expectedYaw
+                        + " actual=" + describe(client);
+                System.err.println("[Phase5-Debug] " + diagnostic);
+                throw new IllegalStateException(diagnostic);
             }
             driverTick++;
             return;
@@ -192,6 +204,7 @@ public final class ControlledPhase5ScenarioDriver {
         phaseIndex = index;
         elapsed = 0;
         settledTicks = 0;
+        resetWaitTicks = 0;
         waitingForReset = true;
         resetFor(client, PHASES[index]);
         release(client.options);
@@ -217,8 +230,6 @@ public final class ControlledPhase5ScenarioDriver {
         else if (phase.equals("jump-boost")) effect(client, "minecraft:jump_boost");
         else if (phase.equals("glide")) {
             elytra(client);
-            // Do not set FallFlying NBT. The glide phase deliberately performs the
-            // client-side vanilla transition after the teleport has become airborne.
             System.out.println("[Phase5-Debug] ELYTRA_PREPARED; awaiting airborne vanilla activation player=" + describe(client));
         }
     }
@@ -322,14 +333,41 @@ public final class ControlledPhase5ScenarioDriver {
 
     private void reset(MinecraftClient client, double x, double y, double z, double yaw) {
         IntegratedServer server = client.getServer();
+        if (server == null) throw new IllegalStateException("Integrated server required");
+
         server.executeSync(() -> {
+            ServerPlayerEntity serverPlayer = server.getPlayerManager().getPlayer(client.player.getUuid());
+            if (serverPlayer == null) {
+                throw new IllegalStateException("Server player not found for client UUID=" + client.player.getUuid());
+            }
+
+            serverPlayer.setOnGround(false);
+            serverPlayer.setVelocity(0.0D, 0.0D, 0.0D);
+            serverPlayer.fallDistance = 0.0F;
+            serverPlayer.refreshPositionAndAngles(x, y, z, (float) yaw, 0.0F);
+            serverPlayer.requestTeleport(x, y, z);
+
             CommandManager manager = server.getCommandManager();
             ServerCommandSource source = server.getCommandSource();
             cmd(manager, source, "effect clear @a");
             cmd(manager, source, "gamemode survival @a");
-            cmd(manager, source, "tp @a " + x + " " + y + " " + z + " " + yaw + " 0");
-            System.out.println("[Phase5-Debug] RESET x=" + x + " y=" + y + " z=" + z + " yaw=" + yaw);
+
+            System.out.println("[Phase5-Debug] RESET_SERVER uuid=" + serverPlayer.getUuid()
+                    + " x=" + x + " y=" + y + " z=" + z + " yaw=" + yaw
+                    + " serverPos=" + serverPlayer.getX() + "," + serverPlayer.getY() + "," + serverPlayer.getZ());
         });
+
+        // Keep the integrated client immediately aligned with the same reset. The next
+        // server tick still owns the authoritative entity and will correct any drift.
+        client.player.requestTeleport(x, y, z);
+        client.player.setVelocity(0.0D, 0.0D, 0.0D);
+        client.player.setOnGround(false);
+        client.player.fallDistance = 0.0F;
+        client.player.setYaw((float) yaw);
+        client.player.setPitch(0.0F);
+        System.out.println("[Phase5-Debug] RESET_CLIENT x=" + client.player.getX()
+                + " y=" + client.player.getY() + " z=" + client.player.getZ()
+                + " yaw=" + client.player.getYaw());
     }
 
     private void effect(MinecraftClient client, String id) {
@@ -341,6 +379,7 @@ public final class ControlledPhase5ScenarioDriver {
     private void elytra(MinecraftClient client) {
         IntegratedServer server = client.getServer();
         server.executeSync(() -> cmd(server.getCommandManager(), server.getCommandSource(), "item replace entity @a armor.chest with minecraft:elytra"));
+        client.player.equipStack(net.minecraft.entity.EquipmentSlot.CHEST, new net.minecraft.item.ItemStack(net.minecraft.item.Items.ELYTRA));
         System.out.println("[Phase5-Debug] ELYTRA_EQUIPPED player=" + describe(client));
     }
 
