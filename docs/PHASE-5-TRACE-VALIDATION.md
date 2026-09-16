@@ -5,7 +5,7 @@ Audit date: 2026-09-16.
 ## Status
 Phase 5 remains **PARTIAL / UNVERIFIED**. The repository now has explicit mechanics primitives, stricter trace import/validation, correction barriers, detailed divergence diagnostics, and a substantially expanded local combination matrix. It is intentionally **not** declared vanilla-complete because this repository cannot generate an independent Minecraft Java 1.21.11 client reference trace.
 
-Fabric Yarn 1.21.11 mappings establish the existence and structure of the relevant client/entity movement paths (`travel`, `travelInWater`, `travelInLava`, climbing, movement-speed attributes, pose/bounding-box queries, and status-effect handling), but mappings are not an empirical movement trace and do not establish every numeric/order detail. citeturn0search1turn1search1
+Fabric Yarn 1.21.11 mappings establish the existence and structure of the relevant client/entity movement paths (`travel`, `travelInWater`, `travelInLava`, climbing, movement-speed attributes, pose/bounding-box queries, and status-effect handling), but mappings are not an empirical movement trace and do not establish every numeric/order detail. See the 1.21.11 `LivingEntity` mapping and the Fabric attribute documentation in the project validation notes.
 
 ## Exact external trace format
 
