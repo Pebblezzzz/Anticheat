@@ -1,5 +1,5 @@
 # Phases 1–8 requirements audit
-Audit date: 2026-09-16. Phase 6–8 were not started or advanced by this pass.
+Audit date: 2026-09-16. This pass is **Phase 5 only**; Phase 6–8 were not started or advanced.
 
 ## Summary
 | Phase | Status | Main limitation |
@@ -8,41 +8,46 @@ Audit date: 2026-09-16. Phase 6–8 were not started or advanced by this pass.
 | 2 | PARTIAL | Attribute/pose provenance and correction metadata remain outside the immutable Player record |
 | 3 | PARTIAL | Downstream world/timing/validation result capture is not one complete replay artifact |
 | 4 | PARTIAL | Exact client-payload decoding and exhaustive 1.21.11 shapes remain incomplete |
-| 5 | PARTIAL / UNVERIFIED | Mechanics and trace tooling expanded; independent vanilla 1.21.11 reference data is still the closure blocker |
-| 6 | PARTIAL | Existing bounded reachability remains unchanged in this pass |
-| 7 | PARTIAL | Existing client-tick/acknowledgement reconstruction remains unchanged |
-| 8 | PARTIAL | Existing live adapter remains dependent on Phase 5 validation |
+| 5 | PARTIAL / BLOCKED BY EXTERNAL DATA | Empirical capture workflow is implemented; no actual 1.21.11 vanilla corpus has been captured in this environment |
+| 6 | PARTIAL | Unchanged by this pass |
+| 7 | PARTIAL | Unchanged by this pass |
+| 8 | PARTIAL | Unchanged by this pass |
 
 ## Phase 5 requirement-by-requirement audit
 
-| Requirement | Status | Evidence in repository | Remaining blocker |
+| Requirement | Classification | Evidence in repository | Remaining blocker |
 |---|---|---|---|
-| Deterministic physics/collision/replay | IMPLEMENTED / UNVALIDATED | `Simulation.Vanilla12111Physics`, shared Phase 4 resolver, deterministic tests | Independent 1.21.11 trace |
-| Acceleration/friction/gravity/jump/basic collision | IMPLEMENTED / UNVALIDATED | `Simulation`; existing `SimulationTickTest` and Phase 5 tests | Exact constants/order require trace comparison |
-| Sprint/sneak transitions | IMPLEMENTED / UNVALIDATED | `AdvancedInput`, simulation speed path | Independent trace |
-| Player pose transitions | IMPLEMENTED PRIMITIVE / UNVALIDATED | `Phase5Mechanics.Pose`, `nextPose`, `StepResult.pose` | Full client pose/collision-dimension sequence needs traces |
-| Swimming-related pose/state transitions | IMPLEMENTED PRIMITIVE / UNVALIDATED | submerged/swimming-input branch to `SWIMMING` | Independent trace of transition and bounding-box timing |
-| Movement-affecting effects | IMPLEMENTED INPUT MODEL / UNVALIDATED | `MovementEffects` speed/slowness/jump-boost plus levitation/slow-falling state | Exact per-effect travel ordering needs traces |
-| Vanilla attribute modifier semantics | IMPLEMENTED | `ADD_VALUE`, `ADD_MULTIPLIED_BASE`, `ADD_MULTIPLIED_TOTAL` with explicit order | Independent numeric validation |
-| Water movement | IMPLEMENTED INPUT MODEL / UNVALIDATED | explicit fluid speed/drag/gravity factors | Exact 1.21.11 values/order need trace |
-| Lava movement | IMPLEMENTED INPUT MODEL / UNVALIDATED | same explicit environment seam | Exact 1.21.11 values/order need trace |
-| Ladders/vines/climbables | IMPLEMENTED INPUT MODEL / UNVALIDATED | climbable state and vertical clamp path | Exhaustive climbable block behavior needs reference traces |
-| Knockback | IMPLEMENTED REPRESENTATION / UNVALIDATED | `Knockback`, velocity-packet provenance | Exact impulse/client response/order needs trace |
-| Step behavior | IMPLEMENTED THROUGH SHARED RESOLVER / UNVALIDATED | `World.resolveWithStep` | Exact vanilla step attempt/order needs trace |
-| Collision ordering | IMPLEMENTED THROUGH SHARED RESOLVER / UNVALIDATED | shared axis clipping; no duplicate Phase 5 shape model | Exact vanilla ordering needs trace |
-| Teleport/server correction recovery | IMPLEMENTED BARRIER / UNVALIDATED | `CorrectionRecovery`; simulation blocks pre-confirmation integration | Real client/server correction sequence required |
-| Trace schema completeness | IMPLEMENTED | `Phase5TraceTool.HEADER`, 46 fixed fields | Independent producer must populate fields honestly |
-| Trace import/validation | IMPLEMENTED | `Phase5TraceTool.read`, `validate` | Real corpus not yet available |
-| First-divergence diagnostics | IMPLEMENTED | `Phase5TraceTool.firstDivergence` | More fields become comparable once real traces exist |
-| Mechanic-combination matrix | EXPANDED | `Phase5ParityToolTest` plus existing `Phase5MechanicsTest` | Needs independent vanilla matrix |
-| Independent vanilla reference comparison | NOT YET POSSIBLE IN REPO | strict external-trace tooling exists | External Minecraft 1.21.11 client capture is required |
+| Deterministic physics/collision/replay | IMPLEMENTED / INTERNALLY TESTED | `Simulation.Vanilla12111Physics`, shared resolver, Phase 5 tests | VANILLA VALIDATED evidence |
+| Acceleration/friction/gravity/jump/basic collision | IMPLEMENTED / INTERNALLY TESTED | `Simulation`, existing tests | Exact vanilla first-divergence comparison |
+| Sprint/sneak transitions | IMPLEMENTED / INTERNALLY TESTED | `AdvancedInput`, simulator speed path | Actual client trace |
+| Player pose transitions | IMPLEMENTED / INTERNALLY TESTED | `Phase5Mechanics.Pose`, `nextPose`, `StepResult.pose` | Full client pose/dimension timing trace |
+| Swimming-related pose/state transitions | IMPLEMENTED / INTERNALLY TESTED | submerged/swimming branch | Actual client trace |
+| Movement-affecting effects | IMPLEMENTED / INTERNALLY TESTED | `MovementEffects` | Actual client ordering/numeric trace |
+| Vanilla attribute modifier semantics | IMPLEMENTED / INTERNALLY TESTED | three-operation order; regression fixed after Maven test exposed base-stage bug | Actual client numeric trace |
+| Water movement | IMPLEMENTED / INTERNALLY TESTED | explicit fluid environment seam | Actual client trace |
+| Lava movement | IMPLEMENTED / INTERNALLY TESTED | explicit fluid environment seam | Actual client trace |
+| Ladders/vines/climbables | IMPLEMENTED / INTERNALLY TESTED | climbable state and vertical branch | Actual client trace |
+| Knockback | IMPLEMENTED / PARTIAL | `Knockback`, packet-event capture hook | Empirical packet→state alignment |
+| Step behavior | IMPLEMENTED / PARTIAL | shared resolver and trace fields | Empirical per-tick step reconstruction |
+| Collision ordering | IMPLEMENTED / PARTIAL | shared axis clipping | Empirical first-divergence evidence |
+| Teleport/server correction recovery | IMPLEMENTED / PARTIAL | `CorrectionRecovery`, correction packet observation | Empirical client correction/confirmation sequence |
+| Original 46-column trace schema | IMPLEMENTED / INTERNALLY TESTED | `Phase5TraceTool` | It does not represent unknown observations |
+| Extended empirical trace schema | IMPLEMENTED / INTERNALLY TESTED | `Phase5VanillaTrace`, 47th `missing_fields` column | Actual capture corpus |
+| Observation-only vanilla capture harness | IMPLEMENTED | `tools/vanilla-trace-capture`, post-tick state hook + packet observation hook | Must be run against licensed vanilla 1.21.11 |
+| Trace import/validation | IMPLEMENTED / INTERNALLY TESTED | `Phase5VanillaTrace.read/validate` | Actual captured files |
+| First-divergence diagnostics | IMPLEMENTED / INTERNALLY TESTED | `Phase5TraceTool.firstDivergence` | More fields become comparable as observations become complete |
+| Mechanic-combination matrix | IMPLEMENTED / INTERNALLY TESTED | existing Phase 5 matrix covers 3,840 combinations | Independent vanilla matrix |
+| Required vanilla scenario corpus | PARTIAL / BLOCKED BY EXTERNAL DATA | `docs/phase5-vanilla-corpus/scenarios.tsv` contains the controlled scenario checklist | Actual trace files |
+| Independent vanilla reference comparison | BLOCKED BY EXTERNAL DATA | Capture harness and importer are present | Run exact Minecraft Java 1.21.11 client and preserve traces |
 
-## Exact Phase 5 closure condition
+## Empirical evidence rule
 
-Phase 5 must remain **PARTIAL / UNVERIFIED** until real independently captured Minecraft Java 1.21.11 reference traces are imported. Passing repository tests proves internal consistency only; it does not prove vanilla parity.
+`IMPLEMENTED` and `INTERNALLY TESTED` are not equivalent to `VANILLA VALIDATED`. A behavior becomes **VANILLA VALIDATED** only after a real Minecraft Java Edition 1.21.11 client trace is imported and compared. Mappings, decompiled code, documentation, and simulator-generated traces remain explanatory or regression evidence only.
 
-The only current closure blocker that cannot be generated by this server-side repository is the independent client-reference corpus. No simulator-generated rows are accepted as reference evidence.
+## Current external dependency
 
-## Phase 1–4 and 6–8 scope guard
+The execution environment used to make repository changes cannot launch the user's licensed Minecraft client or provide a GUI/game session. Consequently this pass does not contain fabricated reference rows or simulator-generated substitutes. The remaining external action is to install/run the exact 1.21.11 release with the observation-only capture harness, execute every manifest scenario, validate the resulting files, and then perform the simulator comparison.
 
-This pass did not intentionally implement Phase 6, 7, or 8 work. Their existing statuses remain unchanged. Phase 1–4 statuses are retained except where Phase 5 adds an explicit consumer-facing correction/pose/trace primitive; that does not retroactively make earlier phases complete.
+## Phase 5 closure condition
+
+Do not mark Phase 5 COMPLETE until the required real 1.21.11 corpus has been captured, imported, and used to resolve first-divergence discrepancies with regression coverage. Phase 6–8 remain out of scope until that condition is met.
