@@ -177,7 +177,7 @@ public final class ControlledPhase5ScenarioDriver {
         if (resetWait == 1 || resetWait % 20 == 0) {
             System.out.println("[Phase5] waiting reset phase=" + PHASES[phaseIndex] + " tick=" + resetWait + " state=" + describe(client));
         }
-        boolean atTarget = client.player.getPos().squaredDistanceTo(new Vec3d(resetX, resetY, resetZ)) <= RESET_TOLERANCE * RESET_TOLERANCE;
+        boolean atTarget = client.player.getX() - resetX == 0.0D && client.player.getY() - resetY == 0.0D && client.player.getZ() - resetZ == 0.0D;
         boolean grounded = PHASES[phaseIndex].equals("glide") || client.player.isOnGround();
         if (atTarget && grounded) {
             phaseResetPending = false;
