@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "phantom_vanilla_trace_capture",
+  "version": "${version}",
+  "name": "Phantom Vanilla Trace Capture",
+  "description": "Observation-only capture harness for empirical Minecraft Java 1.21.11 movement traces.",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "dev.phantom.capture.VanillaTraceCaptureClient"
+    ]
+  },
+  "mixins": [
+    "phantom_vanilla_trace_capture.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.18.2",
+    "minecraft": "1.21.11",
+    "java": ">=21"
+  }
+}

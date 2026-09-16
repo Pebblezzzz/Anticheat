@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+set -eu
+
+GRADLE_VERSION="8.14.3"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+DIST_DIR="$SCRIPT_DIR/.gradle-dist/gradle-$GRADLE_VERSION"
+ZIP_FILE="$SCRIPT_DIR/.gradle-dist/gradle-$GRADLE_VERSION-bin.zip"
+DIST_URL="https://services.gradle.org/distributions/gradle-$GRADLE_VERSION-bin.zip"
+
+if [ ! -x "$DIST_DIR/bin/gradle" ]; then
+  mkdir -p "$SCRIPT_DIR/.gradle-dist"
+  echo "Gradle $GRADLE_VERSION is not installed for this project."
+  echo "Downloading $DIST_URL"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fL "$DIST_URL" -o "$ZIP_FILE"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -O "$ZIP_FILE" "$DIST_URL"
+  else
+    echo "curl or wget is required to bootstrap Gradle." >&2
+    exit 1
+  fi
+  command -v unzip >/dev/null 2>&1 || { echo "unzip is required to bootstrap Gradle." >&2; exit 1; }
+  unzip -q -o "$ZIP_FILE" -d "$SCRIPT_DIR/.gradle-dist"
+  rm -f "$ZIP_FILE"
+fi
+
+exec "$DIST_DIR/bin/gradle" "$@"
