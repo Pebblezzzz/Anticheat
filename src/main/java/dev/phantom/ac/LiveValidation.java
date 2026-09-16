@@ -23,30 +23,51 @@ public final class LiveValidation {
     Vanilla12111Physics physics=new Vanilla12111Physics();
     Set<Player> candidates=Set.of();
     Input currentInput=null;
+    boolean anchored=false;
     List<Finding> findings=new ArrayList<>(); int movements=0;
     for(Timeline.Event event:timeline.events()) {
       Packet packet=event.packet().packet();
       if(packet instanceof ClientInput input) { currentInput=new Input(axis(input.forward(),input.backward()),axis(input.right(),input.left()),input.jump()); continue; }
       if(!(packet instanceof Move move) || move.position()==null) continue;
       movements++;
-      Player observed=State.apply(candidates.isEmpty()?Player.initial(move.position()):candidates.iterator().next(),event.packet());
-      if(candidates.isEmpty()) {
-        // A first movement packet is only an anchor, not evidence that a prior state was impossible.
+      if (anchored && candidates.isEmpty()) {
+        // A previous world/timing gap invalidated the envelope. Re-establishing
+        // an anchor is uncertainty, never a violation, and prevents iterator
+        // failure on the next packet.
+        anchored=false;
+        findings.add(new Finding(event.serverTick(),Verdict.UNCERTAIN,0,List.of("prediction envelope was lost during an unsupported interval; observation re-anchors validation")));
+      }
+      Player observed=State.apply(anchored?candidates.iterator().next():Player.initial(move.position()),event.packet());
+      if(!anchored) {
+        // The first movement packet establishes an observation anchor. It cannot
+        // prove or disprove a prior client state that was not captured.
         candidates=Set.of(Player.initial(move.position()));
+        anchored=true;
         findings.add(new Finding(event.serverTick(),Verdict.UNCERTAIN,1,List.of("first observed position anchors the replay; no preceding client state is available")));
         continue;
       }
-      World.Snapshot world=worldHistory.at(event.serverTick()); Set<Player> next=new HashSet<>(); boolean unsupported=false;
+      World.Snapshot world=worldHistory.at(event.serverTick()); Set<Player> next=new HashSet<>(); boolean unsupported=false; boolean uncertainTransition=false;
       for(Player candidate:candidates) {
         if(candidate.uncertain()||world.hasUnsupportedAt(candidate.position())) { unsupported=true; continue; }
-        if(currentInput!=null) next.add(physics.tick(candidate,currentInput,world));
-        else for(int forward=-1;forward<=1;forward++)for(int strafe=-1;strafe<=1;strafe++)for(boolean jump:List.of(false,true)) next.add(physics.tick(candidate,new Input(forward,strafe,jump),world));
-        if(next.size()>maximumCandidates) { findings.add(new Finding(event.serverTick(),Verdict.UNCERTAIN,next.size(),List.of("candidate budget exceeded; no branches were discarded"))); return new Report(findings,movements); }
+        Set<Player> transitions=new HashSet<>();
+        if(currentInput!=null) transitions.add(physics.tick(candidate,currentInput,world));
+        else for(int forward=-1;forward<=1;forward++) for(int strafe=-1;strafe<=1;strafe++) for(boolean jump:List.of(false,true)) transitions.add(physics.tick(candidate,new Input(forward,strafe,jump),world));
+        for(Player transition:transitions) { if(transition.uncertain()) uncertainTransition=true; else next.add(transition); }
+        if(next.size()>maximumCandidates) { findings.add(new Finding(event.serverTick(),Verdict.UNCERTAIN,next.size(),List.of("candidate budget exceeded; result is incomplete"))); candidates=Set.of(); anchored=false; continue; }
       }
-      if(unsupported) { findings.add(new Finding(event.serverTick(),Verdict.UNCERTAIN,0,List.of("client-visible world has unsupported or unknown space"))); candidates=Set.of(); continue; }
-      candidates=next.stream().filter(candidate -> candidate.position().equals(observed.position()) && candidate.onGround()==observed.onGround()).collect(java.util.stream.Collectors.toUnmodifiableSet());
-      if(candidates.isEmpty()) findings.add(new Finding(event.serverTick(),Verdict.IMPOSSIBLE,0,List.of("no simulated state matches the observed position and ground state", "diagnostic only: 1.21.11 mechanics are not independently trace-validated")));
-      else findings.add(new Finding(event.serverTick(),Verdict.POSSIBLE,candidates.size(),List.of("observed position and ground state remain reachable", "velocity is not present in movement packets and was not invented")));
+      if(unsupported && next.isEmpty()) { findings.add(new Finding(event.serverTick(),Verdict.UNCERTAIN,0,List.of("client-visible world has unsupported or unknown space"))); candidates=Set.of(); anchored=false; continue; }
+      if(next.isEmpty()) { findings.add(new Finding(event.serverTick(),Verdict.UNCERTAIN,0,List.of("all simulated transitions are uncertain; no violation inferred"))); candidates=Set.of(); anchored=false; continue; }
+      Set<Player> matches=next.stream().filter(candidate -> candidate.position().equals(observed.position()) && candidate.onGround()==observed.onGround()).collect(java.util.stream.Collectors.toUnmodifiableSet());
+      if(matches.isEmpty()) {
+        // Keep the simulated envelope after an impossible observation. Resetting
+        // to the next observed position would turn every later packet into a new
+        // anchor and make sustained flight produce only one isolated finding.
+        candidates=Set.copyOf(next);
+        findings.add(new Finding(event.serverTick(),Verdict.IMPOSSIBLE,0,List.of("no simulated state matches the observed position and ground state", "prediction envelope retained after divergence", "1.21.11 mechanics are not independently trace-validated")));
+      } else {
+        candidates=matches;
+        findings.add(new Finding(event.serverTick(),Verdict.POSSIBLE,candidates.size(),List.of("observed position and ground state remain reachable", "velocity is not present in movement packets and was not invented")));
+      }
     }
     return new Report(findings,movements);
   }

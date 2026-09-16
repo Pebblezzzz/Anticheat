@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -41,6 +42,10 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUn
 
 import dev.phantom.ac.Diagnostics;
 import dev.phantom.ac.LiveValidation;
+import dev.phantom.ac.OperatorValidation;
+import dev.phantom.ac.Contracts;
+import dev.phantom.ac.State;
+import dev.phantom.ac.Validation;
 import dev.phantom.ac.Maths.Vec3;
 import dev.phantom.ac.Packets;
 import dev.phantom.ac.Packets.RawPacket;
@@ -54,6 +59,7 @@ import dev.phantom.ac.World;
  */
 public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
   private final Map<UUID, Capture> captures = new ConcurrentHashMap<>();
+  private org.bukkit.scheduler.BukkitTask validationTask;
   private final PacketListenerAbstract networkListener = new PacketListenerAbstract() {
     @Override public void onPacketReceive(PacketReceiveEvent event) {
       Object rawPlayer = event.getPlayer();
@@ -106,20 +112,23 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
   @Override public void onEnable() {
     getServer().getPluginManager().registerEvents(this, this);
     PacketEvents.getAPI().getEventManager().registerListener(networkListener);
+    saveDefaultConfig();
     chunkTask=getServer().getScheduler().runTaskTimer(this,this::drainChunkQueue,1L,1L);
+    validationTask=getServer().getScheduler().runTaskTimer(this,this::evaluateCaptures,10L,10L);
   }
 
   private org.bukkit.scheduler.BukkitTask chunkTask;
 
   @Override public void onDisable() {
     if(chunkTask!=null) chunkTask.cancel();
+    if(validationTask!=null) validationTask.cancel();
     PacketEvents.getAPI().getEventManager().unregisterListener(networkListener);
     captures.clear();
   }
 
   /**
    * Decodes queued chunk payloads on the server thread and records the resulting
-   * block states. 
+   * block states.
    * FIXED: Added a 10ms budget to prevent the main thread from stalling on massive map copies.
    */
   private void drainChunkQueue() {
@@ -130,8 +139,14 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
       PendingChunk pending;
       while((pending=capture.chunkQueue.poll())!=null) {
         Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> states=decodeColumn(pending);
+        Map<World.Pos,World.Block> legacy=new LinkedHashMap<>();
+        for (Map.Entry<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> entry : states.entrySet()) {
+          legacy.put(new World.Pos(entry.getKey().x(),entry.getKey().y(),entry.getKey().z()),toLegacyBlock(entry.getValue()));
+        }
+        World.Chunk legacyChunk=new World.Chunk(pending.chunkX(),pending.chunkZ());
+        record(capture,new Packets.ChunkData(legacyChunk,legacy));
         record(capture,new Packets.ChunkStates(new dev.phantom.ac.world.Chunk(pending.chunkX(),pending.chunkZ()),states));
-        
+
         // Break out early if we've spent too much time decoding chunks this tick
         if (System.nanoTime() - startTime > maxNanosPerTick) {
             return;
@@ -166,6 +181,49 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     return states;
   }
 
+  private void evaluateCaptures() {
+    FileConfiguration config=getConfig();
+    boolean alerts=config.getBoolean("alerts.enabled",true);
+    boolean broadcast=config.getBoolean("alerts.broadcast",false);
+    boolean kicks=config.getBoolean("enforcement.kick-enabled",false);
+    int budget=Math.max(1,config.getInt("validation.candidate-budget",4096));
+    boolean permissionExempt=config.getBoolean("enforcement.permission-exempt",true);
+    String exemptPermission=config.getString("enforcement.permission","phantom.exempt");
+    double minimumConfidence=config.getDouble("enforcement.minimum-confidence",0.90);
+    if(!alerts && !kicks) return;
+    for(Map.Entry<UUID,Capture> entry:captures.entrySet()) {
+      Capture capture=entry.getValue();
+      List<Packets.RawPacket> raw=capture.copy();
+      if(raw.isEmpty()) continue;
+      LiveValidation.Report report;
+      try { report=LiveValidation.analyze(Timeline.assign(new Packets.Normalizer().normalize(raw),capture.epochNanos,50_000_000L),budget); }
+      catch(RuntimeException failure) { getLogger().warning("validation skipped for "+entry.getKey()+": "+failure.getClass().getSimpleName()); continue; }
+      Player player=getServer().getPlayer(entry.getKey());
+      if(player==null) continue;
+      synchronized(capture) {
+        int start=Math.min(capture.processedFindings,report.findings().size());
+        for(int i=start;i<report.findings().size();i++) {
+          LiveValidation.Finding finding=report.findings().get(i);
+          Validation.Verdict verdict=finding.verdict();
+          Validation.Reachability reachability=new Validation.Reachability(verdict,java.util.Set.of(),finding.reasons());
+          Validation.Evidence evidence=new Validation.Evidence(verdict,"MOVEMENT_REACHABILITY",Double.NaN,finding.reasons());
+          boolean timingUncertain=verdict==Validation.Verdict.UNCERTAIN || finding.reasons().stream().anyMatch(reason -> reason.contains("unknown") || reason.contains("unsupported") || reason.contains("budget"));
+          Validation.SyncWindow sync=new Validation.SyncWindow(finding.tick(),finding.tick(),timingUncertain,finding.reasons());
+          State.Player anchor=State.Player.initial(Vec3.ZERO);
+          OperatorValidation.Observation observation=new OperatorValidation.Observation(player.getName(),finding.tick(),anchor,anchor,sync,Contracts.TARGET_VERSION,List.of(),reachability,evidence);
+          OperatorValidation.Result result=OperatorValidation.aggregate(capture.aggregator,observation);
+          capture.aggregator=result.state();
+          if(result.alert().isPresent()) {
+            OperatorValidation.Alert alert=result.alert().orElseThrow();
+            if(alerts) sendOperatorAlert(alert.message(),broadcast);
+            if(kicks && alert.confidence()>=minimumConfidence && !(permissionExempt && player.hasPermission(exemptPermission))) player.kickPlayer("Movement validation failed: "+alert.reason());
+          }
+        }
+        capture.processedFindings=report.findings().size();
+      }
+    }
+  }
+
   @EventHandler public void joined(PlayerJoinEvent event) { captures.put(event.getPlayer().getUniqueId(), new Capture(System.nanoTime())); }
   @EventHandler public void changedWorld(PlayerChangedWorldEvent event) { captures.put(event.getPlayer().getUniqueId(),new Capture(System.nanoTime())); }
   @EventHandler public void quit(PlayerQuitEvent event) { captures.remove(event.getPlayer().getUniqueId()); }
@@ -190,6 +248,18 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
       sender.sendMessage("Phantom movement diagnostic: "+report.movementObservations()+" observations; "+possible+" reachable, "+uncertain+" uncertain, "+impossible+" impossible.");
       sender.sendMessage("Diagnostic only: no enforcement or punishment; independent 1.21.11 vanilla traces are still required before any cheat flag.");
       report.findings().stream().filter(f -> f.verdict()!=dev.phantom.ac.Validation.Verdict.POSSIBLE).limit(3).forEach(f -> sender.sendMessage("["+f.verdict()+"] tick "+f.tick()+": "+f.reasons().getFirst()));
+      OperatorValidation.Aggregator aggregate=OperatorValidation.Aggregator.empty();
+      State.Player anchor=State.Player.initial(Vec3.ZERO);
+      for (LiveValidation.Finding finding : report.findings()) {
+        Validation.Reachability reachability=new Validation.Reachability(finding.verdict(),java.util.Set.of(),finding.reasons());
+        Validation.Evidence evidence=new Validation.Evidence(finding.verdict(),"MOVEMENT_REACHABILITY",Double.NaN,finding.reasons());
+        OperatorValidation.Observation observation=new OperatorValidation.Observation(player.getName(),finding.tick(),anchor,anchor,
+            new Validation.SyncWindow(finding.tick(),finding.tick(),false,java.util.List.of("command-time replay has no measured RTT")),
+            Contracts.TARGET_VERSION,java.util.List.of(),reachability,evidence);
+        OperatorValidation.Result result=OperatorValidation.aggregate(aggregate,observation);
+        aggregate=result.state();
+        result.alert().ifPresent(alert -> sender.sendMessage(alert.message()));
+      }
       return true;
     }
     Diagnostics.Report report = Diagnostics.audit(timeline);
@@ -209,7 +279,32 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
 
   private void record(Player player, Packets.Packet packet) { record(captures.computeIfAbsent(player.getUniqueId(), ignored -> new Capture(System.nanoTime())), packet); }
   private void record(Capture capture, Packets.Packet packet) { capture.packets.add(new RawPacket(capture.sequence.incrementAndGet(), System.nanoTime(), packet)); }
+  private void sendOperatorAlert(String message, boolean broadcast) {
+    if (broadcast) { getServer().broadcastMessage(message); return; }
+    for (Player recipient : getServer().getOnlinePlayers())
+      if (recipient.hasPermission("phantom.admin")) recipient.sendMessage(message);
+    getLogger().info(message);
+  }
+
   private static Vec3 vector(double x, double y, double z) { return new Vec3(x,y,z); }
+
+  private static World.Block toLegacyBlock(dev.phantom.ac.world.BlockState state) {
+    if (state.isAir()) return World.Block.AIR;
+    return switch (state.variant()) {
+      case FULL_CUBE -> state.blockId().contains("ice") ? World.Block.ICE : World.Block.FULL;
+      case SLAB -> state.half()==dev.phantom.ac.world.BlockState.Half.TOP ? World.Block.SLAB_TOP : World.Block.SLAB_BOTTOM;
+      case STAIRS -> switch (state.facing()) {
+        case NORTH -> World.Block.STAIRS_NORTH; case SOUTH -> World.Block.STAIRS_SOUTH;
+        case EAST -> World.Block.STAIRS_EAST; case WEST -> World.Block.STAIRS_WEST; default -> World.Block.UNSUPPORTED;
+      };
+      case CARPET -> World.Block.CARPET;
+      case SNOW_LAYER -> World.Block.values()[World.Block.SNOW_LAYER_1.ordinal()+Math.max(0,state.layers()-1)];
+      case FENCE, WALL, PANE -> World.Block.FENCE;
+      case FLUID -> World.Block.WATER;
+      case LADDER -> World.Block.LADDER;
+      default -> World.Block.UNSUPPORTED;
+    };
+  }
 
   private static dev.phantom.ac.world.BlockState toCoreState(WrappedBlockState state) {
     if(state==null||state.getType().isAir()) return dev.phantom.ac.world.BlockState.air();
@@ -306,6 +401,8 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     final AtomicLong chunkPackets = new AtomicLong();
     final Queue<PendingChunk> chunkQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
     final List<RawPacket> packets = Collections.synchronizedList(new ArrayList<>());
+    OperatorValidation.Aggregator aggregator=OperatorValidation.Aggregator.empty();
+    int processedFindings;
     Capture(long epochNanos) { this.epochNanos=epochNanos; }
     List<RawPacket> copy() { synchronized (packets) { return List.copyOf(packets); } }
   }

@@ -66,6 +66,7 @@ public final class Packets {
   public record NormalizedPacket(long sequence, long receivedNanos, Packet packet, EnumSet<PacketFlag> flags) implements Serializable { public NormalizedPacket { if(sequence<0||receivedNanos<0) throw new IllegalArgumentException("sequence and receivedNanos must be non-negative"); Objects.requireNonNull(packet,"packet"); flags=flags==null?EnumSet.noneOf(PacketFlag.class):EnumSet.copyOf(flags); if(flags.isEmpty()) flags=EnumSet.of(PacketFlag.NORMAL); } @Override public EnumSet<PacketFlag> flags(){return EnumSet.copyOf(flags);} }
   public static final class Normalizer implements Contracts.PacketNormalizer {
     public List<NormalizedPacket> normalize(Collection<RawPacket> raw) {
+      Objects.requireNonNull(raw,"raw packets");
       List<RawPacket> ordered = raw.stream().sorted(Comparator.comparingLong(RawPacket::receivedNanos).thenComparingLong(RawPacket::sequence)).toList();
       Set<Long> seen = new HashSet<>(); long highestSequence = -1; List<NormalizedPacket> result = new ArrayList<>();
       for (RawPacket p : ordered) { EnumSet<PacketFlag> f=EnumSet.of(PacketFlag.NORMAL); if (!seen.add(p.sequence())) f.add(PacketFlag.DUPLICATE); if (highestSequence>=0&&p.sequence()<highestSequence) f.add(PacketFlag.OUT_OF_ORDER); if(highestSequence>=0&&p.sequence()>highestSequence+1) f.add(PacketFlag.SEQUENCE_GAP); highestSequence=Math.max(highestSequence,p.sequence()); result.add(new NormalizedPacket(p.sequence(),p.receivedNanos(),p.packet(),f)); }

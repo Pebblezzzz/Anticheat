@@ -1,8 +1,9 @@
 # Validation report
 
-Phases 1–8 have initial implementations in `src/main/java/dev/phantom/ac`.
+Phases 1–8 have deterministic implementations in `src/main/java/dev/phantom/ac`.
 **Phase 0's architecture contract is complete** and documented in
-[`ARCHITECTURE.md`](ARCHITECTURE.md). The later phases are not complete.
+[`ARCHITECTURE.md`](ARCHITECTURE.md). This document records verified behavior and
+explicit limitations; it does not claim vanilla parity where no independent trace exists.
 
 * 0: immutable component contracts and deterministic data flow;
 * 1–2: normalized packet/timeline events and explicit uncertain state reconstruction;
@@ -11,8 +12,9 @@ Phases 1–8 have initial implementations in `src/main/java/dev/phantom/ac`.
 * 5: `Vanilla12111Physics`, with first-divergence trace comparison;
 * 6–8: finite input reachability, timing-window uncertainty, and explainable possible/uncertain/impossible evidence.
 
-The current clean Maven execution passes **261 tests** with 0 failures, 0 errors,
- and 0 skips. It covers architecture boundary contracts and platform-leak guards,
+The repository contains unit and integration coverage across the core. A clean Maven
+execution must be run in an environment with JDK 21 and Maven available; this audit
+must not claim a fresh pass when those tools are unavailable. It covers architecture boundary contracts and platform-leak guards,
  immutable value boundaries, replay round trips/determinism/invalid input,
  packet ordering/deduplication, timeline boundaries, state transitions, the Phase 4
  voxel/AABB geometry catalogue, block-state-dependent shapes, immutable chunk and
@@ -34,4 +36,5 @@ Known limitations: the Phase 4 entity interface is complete, but live entity
  capture uses the platform boundary and must still be validated against live
  PacketEvents/Paper capture traces.
 
-GrimAC was referenced conceptually only. No GPL code is present.
+GrimAC was reviewed as a serious technical reference. The comparison is recorded in
+[`GRIM-COMPARISON.md`](GRIM-COMPARISON.md). No Grim GPL source code is present.

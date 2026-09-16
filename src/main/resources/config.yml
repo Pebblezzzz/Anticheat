@@ -1,0 +1,12 @@
+alerts:
+  enabled: true
+  broadcast: false
+enforcement:
+  # Disabled by default. Enable only in a controlled test server after reviewing evidence.
+  kick-enabled: true
+  minimum-confidence: 0.90
+  permission-exempt: true
+  permission: phantom.exempt
+validation:
+  candidate-budget: 4096
+  interval-ticks: 10

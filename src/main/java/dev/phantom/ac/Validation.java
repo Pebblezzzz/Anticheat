@@ -36,17 +36,30 @@ public final class Validation {
           if(candidate.uncertain()||world.hasUnsupported(Aabb.playerAt(candidate.position()))) return new SearchResult(Verdict.UNCERTAIN,Set.of(),offset,List.of("unsupported environment or uncertain state at tick "+(firstTick+offset)));
           if(inputs.get(offset).isPresent()) next.add(physics.tick(candidate,inputs.get(offset).orElseThrow(),world));
           else for(int forward=-1;forward<=1;forward++) for(int strafe=-1;strafe<=1;strafe++) for(boolean jump:List.of(false,true)) next.add(physics.tick(candidate,new Input(forward,strafe,jump),world));
-          if(next.size()>maximumCandidates) return new SearchResult(Verdict.UNCERTAIN,Set.copyOf(next),offset+1,List.of("reachable-state budget exceeded; branches were not discarded"));
+          if(next.stream().anyMatch(Player::uncertain)) return new SearchResult(Verdict.UNCERTAIN,Set.copyOf(next),offset+1,next.size(),0,List.of("simulation encountered an unsupported or uncertain transition"));
+          if(next.size()>maximumCandidates) {
+            List<Player> ordered=new ArrayList<>(next); ordered.sort(Comparator.comparing(Player::toString));
+            return new SearchResult(Verdict.UNCERTAIN,Set.copyOf(ordered.subList(0,maximumCandidates)),offset+1,next.size(),next.size()-maximumCandidates,List.of("reachable-state budget exceeded; branches were sampled deterministically and result is not complete"));
+          }
         }
         current=Set.copyOf(next);
       }
-      return new SearchResult(Verdict.POSSIBLE,current,inputs.size(),List.of("searched "+inputs.size()+" ticks without pruning candidates"));
+      return new SearchResult(Verdict.POSSIBLE,current,inputs.size(),current.size(),0,List.of("searched "+inputs.size()+" ticks; identical exact states were merged"));
     }
   }
-  public record SearchResult(Verdict verdict, Set<Player> candidates, int simulatedTicks, List<String> reasons) { public SearchResult { candidates=Set.copyOf(candidates); reasons=List.copyOf(reasons); } }
+  public record SearchResult(Verdict verdict, Set<Player> candidates, int simulatedTicks, int peakCandidates, int prunedCandidates, List<String> reasons) {
+    public SearchResult { candidates=Set.copyOf(candidates); reasons=List.copyOf(reasons); if(simulatedTicks<0||peakCandidates<0||prunedCandidates<0) throw new IllegalArgumentException("invalid search metrics"); }
+    public SearchResult(Verdict verdict, Set<Player> candidates, int simulatedTicks, List<String> reasons) { this(verdict,candidates,simulatedTicks,candidates.size(),0,reasons); }
+  }
   public record SyncWindow(long earliestClientTick,long latestClientTick,boolean uncertain,List<String> reasons) { public SyncWindow {reasons=List.copyOf(reasons);} }
-  public static final class DefaultSynchronizer implements Contracts.Synchronizer { @Override public SyncWindow reconstruct(long serverTick,long roundTripNanos,long jitterNanos,boolean awaitingTeleport) { return synchronize(serverTick,roundTripNanos,jitterNanos,awaitingTeleport); } }
-  public static SyncWindow synchronize(long serverTick,long rttNanos,long jitterNanos,boolean awaitingTeleport) { long half=Math.max(0,(rttNanos+jitterNanos)/2/50_000_000L); boolean u=jitterNanos>0||awaitingTeleport; return new SyncWindow(Math.max(0,serverTick-half),serverTick+half,u,u?List.of("latency/jitter or teleport acknowledgement widens timeline"):List.of()); }
+  public static final class DefaultSynchronizer implements Contracts.Synchronizer { @Override public SyncWindow reconstruct(long serverTick,long roundTripNanos,long jitterNanos,boolean awaitingTeleport) { return checkedSynchronize(serverTick,roundTripNanos,jitterNanos,awaitingTeleport); } }
+  public static SyncWindow synchronize(long serverTick,long rttNanos,long jitterNanos,boolean awaitingTeleport) { if(serverTick<0||rttNanos<0||jitterNanos<0) throw new IllegalArgumentException("timing values must be non-negative"); long half=(rttNanos+jitterNanos+99_999_999L)/100_000_000L; boolean u=jitterNanos>0||awaitingTeleport; return new SyncWindow(Math.max(0,serverTick-half),serverTick+half,u,u?List.of("latency/jitter or teleport acknowledgement widens timeline"):List.of()); }
+  public static SyncWindow checkedSynchronize(long serverTick,long rttNanos,long jitterNanos,boolean awaitingTeleport) {
+    if(serverTick<0||rttNanos<0||jitterNanos<0) throw new IllegalArgumentException("timing values must be non-negative");
+    long half=(rttNanos+jitterNanos+99_999_999L)/100_000_000L;
+    boolean uncertain=jitterNanos>0||awaitingTeleport;
+    return new SyncWindow(Math.max(0,serverTick-half),serverTick+half,uncertain,uncertain?List.of("arrival timing or teleport acknowledgement is ambiguous"):List.of("stable acknowledgement timing"));
+  }
   public record Evidence(Verdict verdict, String rule, double nearestHorizontalDistance, List<String> reasons) { public Evidence {reasons=List.copyOf(reasons);} }
   public static final class ReachabilityValidator implements Contracts.MovementValidator { @Override public Evidence compare(Player observed,Reachability reachable) { return validate(observed,reachable); } }
   public static Evidence validate(Player observed,Reachability reachable) { if(reachable.verdict()==Verdict.UNCERTAIN)return new Evidence(Verdict.UNCERTAIN,"MOVEMENT_REACHABILITY",Double.NaN,reachable.reasons()); if(reachable.candidates().stream().anyMatch(s->sameState(s,observed)))return new Evidence(Verdict.POSSIBLE,"MOVEMENT_REACHABILITY",0,List.of("observed position, velocity, and ground state are a simulated reachable state")); double d=reachable.candidates().stream().mapToDouble(s->Math.sqrt(s.position().horizontalDistanceSquared(observed.position()))).min().orElse(Double.POSITIVE_INFINITY);return new Evidence(Verdict.IMPOSSIBLE,"MOVEMENT_REACHABILITY",d,List.of("no candidate produced the observed position, velocity, and ground state in the declared input envelope")); }

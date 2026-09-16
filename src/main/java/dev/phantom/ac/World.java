@@ -204,65 +204,71 @@ public final class World {
     // Phase 4 world states
     // ----------------------------------------------------------------
 
-    private final Map<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> stateBlocks = new HashMap<>();
-    private final Map<dev.phantom.ac.world.Pos, Long> stateVisibleFrom = new HashMap<>();
-    private final Set<Chunk> stateChunks = new LinkedHashSet<>();
+    private final List<StateEvent> stateEvents = new ArrayList<>();
+    private long stateEventOrder;
 
-    /** The chunks currently visible in the Phase 4 model. */
+    /** The chunks currently visible in the Phase 4 model at the requested time. */
     public synchronized Set<Chunk> stateChunks() {
-      return Set.copyOf(stateChunks);
+      Set<Chunk> visible = new LinkedHashSet<>();
+      for (StateEvent event : orderedStateEvents()) if (event instanceof StateChunkChange change) {
+        if (change.visible()) visible.add(change.chunk()); else visible.remove(change.chunk());
+      }
+      return Set.copyOf(visible);
     }
 
     /** Records a full client-visible chunk carrying real 1.21.11 block states. */
     public synchronized void chunkStates(long clientTick, dev.phantom.ac.world.Chunk chunk, Map<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> states) {
-      stateChunks.add(new Chunk(chunk.x(), chunk.z()));
-      for (Map.Entry<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> entry : states.entrySet()) {
-        stateBlocks.put(entry.getKey(), entry.getValue());
-        stateVisibleFrom.put(entry.getKey(), clientTick);
-      }
+      stateChunkVisible(clientTick, new Chunk(chunk.x(), chunk.z()));
+      for (Map.Entry<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> entry : states.entrySet())
+        stateEvents.add(new StateBlockChange(clientTick, stateEventOrder++, entry.getKey(), entry.getValue()));
     }
 
-    /**
-     * Records a single block state becoming visible at a client tick. A change
-     * that arrives before its chunk is visible is dropped, because the client
-     * could not have known it; a later chunk payload is the authoritative
-     * baseline, exactly as for the legacy history.
-     */
+    /** Records a state delta only when its chunk was visible at that client tick. */
     public synchronized void blockStateChanged(long clientTick, dev.phantom.ac.world.Pos position, dev.phantom.ac.world.BlockState state) {
-      if (!stateChunks.contains(Chunk.containing(position.x(), position.z()))) return;
-      stateBlocks.put(position, state);
-      stateVisibleFrom.put(position, clientTick);
+      if (!stateVisibleAt(clientTick, Chunk.containing(position.x(), position.z()))) return;
+      stateEvents.add(new StateBlockChange(clientTick, stateEventOrder++, position, state));
     }
 
-    /** Declares a chunk visible to the client in the Phase 4 model. */
     public synchronized void stateChunkVisible(long clientTick, Chunk chunk) {
-      stateChunks.add(chunk);
+      stateEvents.add(new StateChunkChange(clientTick, stateEventOrder++, chunk, true));
     }
 
-    /** Unloads a chunk from the Phase 4 model, discarding its states. */
     public synchronized void stateChunkUnloaded(long clientTick, Chunk chunk) {
-      stateChunks.remove(chunk);
-      stateBlocks.keySet().removeIf(position -> Chunk.containing(position.x(), position.z()).equals(chunk));
+      stateEvents.add(new StateChunkChange(clientTick, stateEventOrder++, chunk, false));
     }
 
-    /**
-     * The Phase 4 snapshot of this client's world at a client tick.
-     *
-     * <p>Only chunks the client actually received are present. A position in an
-     * absent chunk reports {@link dev.phantom.ac.world.Coverage#UNLOADED}, never
-     * air.</p>
-     */
+    /** Rebuilds the Phase 4 snapshot from the recorded client-visible event log. */
     public synchronized dev.phantom.ac.world.WorldSnapshot statesAt(long clientTick) {
       var builder = dev.phantom.ac.world.WorldSnapshot.builder(Contracts.TARGET_VERSION);
-      for (Chunk chunk : stateChunks) builder.loadChunk(chunk.x(), chunk.z());
-      for (Map.Entry<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> entry : stateBlocks.entrySet()) {
-        Long visibleFrom = stateVisibleFrom.get(entry.getKey());
-        if (visibleFrom == null || visibleFrom > clientTick) continue;
-        dev.phantom.ac.world.Pos position = entry.getKey();
-        builder.setBlock(position.x(), position.y(), position.z(), entry.getValue());
+      Set<Chunk> visible = new LinkedHashSet<>();
+      Map<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> states = new HashMap<>();
+      for (StateEvent event : orderedStateEvents()) {
+        if (event.clientTick() > clientTick) break;
+        if (event instanceof StateChunkChange change) {
+          if (change.visible()) visible.add(change.chunk());
+          else {
+            visible.remove(change.chunk());
+            states.keySet().removeIf(position -> Chunk.containing(position.x(), position.z()).equals(change.chunk()));
+          }
+        } else if (event instanceof StateBlockChange change && visible.contains(Chunk.containing(change.position().x(), change.position().z()))) {
+          states.put(change.position(), change.state());
+        }
       }
+      for (Chunk chunk : visible) builder.loadChunk(chunk.x(), chunk.z());
+      for (var entry : states.entrySet()) builder.setBlock(entry.getKey().x(), entry.getKey().y(), entry.getKey().z(), entry.getValue());
       return builder.build();
     }
+
+    private boolean stateVisibleAt(long tick, Chunk sought) {
+      boolean visible = false;
+      for (StateEvent event : orderedStateEvents()) {
+        if (event.clientTick() > tick) break;
+        if (event instanceof StateChunkChange change && change.chunk().equals(sought)) visible = change.visible();
+      }
+      return visible;
+    }
+
+    private List<StateEvent> orderedStateEvents() { return stateEvents.stream().sorted(Comparator.comparingLong(StateEvent::clientTick).thenComparingLong(StateEvent::order)).toList(); }
 
     /**
      * The same client-visible world at a client tick, projected onto the Phase 4
@@ -281,6 +287,9 @@ public final class World {
       return chunks.stream().filter(change -> change.chunk().equals(sought) && change.visibleFromClientTick()<=clientTick).max(Comparator.comparingLong(ChunkChange::visibleFromClientTick)).map(ChunkChange::visible).orElse(visible);
     }
   }
+  private interface StateEvent { long clientTick(); long order(); }
+  private record StateChunkChange(long clientTick, long order, Chunk chunk, boolean visible) implements StateEvent {}
+  private record StateBlockChange(long clientTick, long order, dev.phantom.ac.world.Pos position, dev.phantom.ac.world.BlockState state) implements StateEvent {}
   public record ChunkChange(long visibleFromClientTick,Chunk chunk,boolean visible) implements Serializable {}
   /**
    * Rebuilds exactly the client-visible world represented by a recorded
