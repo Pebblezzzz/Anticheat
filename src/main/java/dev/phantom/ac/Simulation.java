@@ -35,22 +35,29 @@ public final class Simulation {
       else if(s.onGround() && inputMagnitude>1.0) inputAcceleration=DIAGONAL_ACCEL*effects.speedMultiplier()*(input.sprint()?1.3:1.0)*(input.sneak()?0.3:1.0);
       else inputAcceleration=s.onGround()?WALK_ACCEL*speed:AIR_ACCEL;
       Vec3 acceleration=new Vec3(inputScale*(input.strafe()*inputAcceleration*Math.cos(radians)-input.forward()*inputAcceleration*Math.sin(radians)),0,inputScale*(input.forward()*inputAcceleration*Math.cos(radians)+input.strafe()*inputAcceleration*Math.sin(radians)));
+
+      // Vanilla applies input to the current velocity, then moves using that
+      // velocity. Gravity/drag are applied after movement and therefore affect
+      // the velocity observed on the following tick rather than this tick's
+      // displacement.
       Vec3 velocity=s.velocity().add(acceleration);
       if(env.climbable()) velocity=new Vec3(velocity.x(),Math.max(-0.15,velocity.y()),velocity.z());
-      double gravity=GRAVITY*env.gravityMultiplier();
       boolean jumped=input.jump()&&s.onGround();
       if(jumped) velocity=new Vec3(velocity.x(),JUMP+effects.jumpVelocityAdd(),velocity.z());
-      else velocity=new Vec3(velocity.x(),velocity.y()-gravity,velocity.z());
+
       Aabb swept=new Aabb(Math.min(start.minX(),start.minX()+velocity.x()),Math.min(start.minY(),start.minY()+velocity.y()),Math.min(start.minZ(),start.minZ()+velocity.z()),Math.max(start.maxX(),start.maxX()+velocity.x()),Math.max(start.maxY(),start.maxY()+velocity.y()),Math.max(start.maxZ(),start.maxZ()+velocity.z()));
       if(world.hasUnsupported(swept) && environment==Environment.DRY) return new StepResult(tick,uncertain(s),false,priorPose,"swept collision volume is not fully known");
       World.CollisionResult collision=World.resolveWithStep(world,start,velocity,s.onGround()?STEP_HEIGHT:0);
-      Vec3 displacement=collision.resolved(); boolean grounded=collision.collidedY()&&velocity.y()<=0;
+      Vec3 displacement=collision.resolved();
+      boolean grounded=collision.collidedY()&&velocity.y()<=0;
+
       double horizontalFactor;
       if(fluid) horizontalFactor=env.fluidSpeedMultiplier()*env.fluidDrag();
       else horizontalFactor=s.onGround()?GROUND_FRICTION:AIR_HORIZONTAL_FRICTION;
+      double gravity=GRAVITY*env.gravityMultiplier();
       double postTickVerticalVelocity;
       if(fluid) postTickVerticalVelocity=velocity.y()*env.fluidDrag()-gravity;
-      else postTickVerticalVelocity=jumped?(velocity.y()-gravity)*AIR_VERTICAL_DRAG:velocity.y()*AIR_VERTICAL_DRAG;
+      else postTickVerticalVelocity=jumped?(velocity.y()-gravity)*AIR_VERTICAL_DRAG:velocity.y()*AIR_VERTICAL_DRAG-gravity*AIR_VERTICAL_DRAG;
       double groundedVerticalVelocity=fluid ? velocity.y()*env.fluidDrag()-gravity : -gravity*AIR_VERTICAL_DRAG;
       double nextY=grounded?groundedVerticalVelocity:postTickVerticalVelocity;
       Vec3 nextVelocity=new Vec3(collision.collidedX()?0:velocity.x()*horizontalFactor,nextY,collision.collidedZ()?0:velocity.z()*horizontalFactor);
