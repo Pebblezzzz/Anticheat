@@ -33,12 +33,6 @@ final class ElytraGlideActivationMixin {
             chest = player.getEquippedStack(EquipmentSlot.CHEST);
         }
 
-        if (player.getY() < 100.0D) {
-            System.err.println("[Phase5-Debug][ELYTRA-MIXIN] Refusing late activation below safety height: "
-                    + "y=" + player.getY() + " state=" + describe(player));
-            return;
-        }
-
         Vec3d velocity = player.getVelocity();
         player.setOnGround(false);
         player.setVelocity(velocity.x, Math.min(velocity.y, -0.08D), velocity.z);
