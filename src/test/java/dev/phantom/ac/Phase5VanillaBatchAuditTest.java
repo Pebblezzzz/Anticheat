@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Validates the deterministic 1.21.11 batch capture without inventing telemetry. */
 class Phase5VanillaBatchAuditTest {
     private static final String TRACE_PROPERTY = "phantom.phase5.trace";
+    private static final String RECORDER_PREFIX = "capture-post-tick:";
     private static final Set<String> REQUIRED_PHASES = Set.of(
             "all:setup", "all:walk", "all:sprint", "all:jump", "all:sneak", "all:diagonal",
             "all:collision", "all:water", "all:lava", "all:speed-effect", "all:slowness-effect",
@@ -39,7 +40,8 @@ class Phase5VanillaBatchAuditTest {
         assertTrue(trace.rows().stream().allMatch(r -> "1.21.11".equals(r.clientVersion())), "Capture contains a non-1.21.11 client version");
         assertTrue(trace.rows().stream().allMatch(r -> "survival".equals(r.gamemode())), "Capture contains non-Survival rows");
 
-        Map<String, List<Phase5VanillaTrace.Row>> phases = trace.rows().stream().collect(Collectors.groupingBy(Phase5VanillaTrace.Row::inputSource));
+        Map<String, List<Phase5VanillaTrace.Row>> phases = trace.rows().stream()
+                .collect(Collectors.groupingBy(r -> normalizePhase(r.inputSource())));
         assertTrue(phases.keySet().containsAll(REQUIRED_PHASES), () -> "Missing phases: " + REQUIRED_PHASES.stream().filter(Predicate.not(phases.keySet()::contains)).toList());
         for (String phase : REQUIRED_PHASES) assertTrue(phases.get(phase).size() >= 10, "Phase has too few rows: " + phase);
 
@@ -58,6 +60,9 @@ class Phase5VanillaBatchAuditTest {
         assertTrue(Long.parseLong(last.tick()) >= 1000, "batch capture ended too early: " + last.tick());
     }
 
+    private static String normalizePhase(String source) {
+        return source.startsWith(RECORDER_PREFIX) ? source.substring(RECORDER_PREFIX.length()) : source;
+    }
     private static void assertFluidPhase(List<Phase5VanillaTrace.Row> rows, String expectedFluid, String label) {
         assertTrue(rows.stream().anyMatch(r -> expectedFluid.equals(r.columns()[19])), "No " + label + " fluid observation was captured");
     }
