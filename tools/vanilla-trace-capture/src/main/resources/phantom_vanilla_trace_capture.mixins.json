@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.phantom.capture.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ClientPlayerEntityMixin",
+    "ClientPlayNetworkHandlerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
