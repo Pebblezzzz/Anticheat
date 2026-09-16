@@ -223,7 +223,7 @@ public final class ControlledPhase5ScenarioDriver {
     }
 
     private static void command(CommandManager m, ServerCommandSource s, String value) {
-        m.executeWithPrefix(s, value.startsWith("/") ? value.substring(1) : value);
+        m.parseAndExecute(s, value);
     }
 
     private static void finishIfDone(MinecraftClient client, long total) {
