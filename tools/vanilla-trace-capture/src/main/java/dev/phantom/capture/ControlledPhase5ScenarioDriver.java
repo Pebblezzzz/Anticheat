@@ -163,5 +163,5 @@ public final class ControlledPhase5ScenarioDriver {
     private static void command(CommandManager m, ServerCommandSource s, String c) { m.parseAndExecute(s, c); }
     private void finishIfDone(MinecraftClient client, int total) { if (scenarioTick++ >= total - 1) { finished = true; release(client.options); client.scheduleStop(); } }
     private static void apply(GameOptions o, boolean f, boolean b, boolean l, boolean r, boolean j, boolean sn, boolean sp) { o.forwardKey.setPressed(f); o.backKey.setPressed(b); o.leftKey.setPressed(l); o.rightKey.setPressed(r); o.jumpKey.setPressed(j); o.sneakKey.setPressed(sn); o.sprintKey.setPressed(sp); }
-    private static void release(GameOptions o) { apply(o, false, false, false, false, false, false); }
+    private static void release(GameOptions o) { apply(o, false, false, false, false, false, false, false); }
 }
