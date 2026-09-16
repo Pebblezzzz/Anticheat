@@ -29,6 +29,8 @@ public final class ControlledPhase5ScenarioDriver {
     private static final int START_Z = -40;
     private static final int SPACING = 180;
     private static final double FALL_CUTOFF_Y = 2.0D;
+    private static final double RESET_TOLERANCE = 0.75D;
+    private static final int RESET_TIMEOUT_TICKS = 100;
     private static volatile ControlledPhase5ScenarioDriver LAST;
 
     private String scenario = NONE;
@@ -36,10 +38,16 @@ public final class ControlledPhase5ScenarioDriver {
     private int startIndex;
     private int endIndex;
     private int elapsed;
+    private int resetWait;
+    private double resetX;
+    private double resetY;
+    private double resetZ;
+    private float resetYaw;
     private volatile boolean prepared;
     private volatile boolean done;
     private volatile boolean failureReported;
     private volatile boolean preparing;
+    private boolean phaseResetPending;
 
     public ControlledPhase5ScenarioDriver() { LAST = this; }
 
@@ -60,10 +68,12 @@ public final class ControlledPhase5ScenarioDriver {
             scenario = requested;
             phaseIndex = startIndex - 1;
             elapsed = 0;
+            resetWait = 0;
             prepared = false;
             done = false;
             failureReported = false;
             preparing = false;
+            phaseResetPending = false;
             release(client.options);
         }
         if (done) { release(client.options); return; }
@@ -73,6 +83,10 @@ public final class ControlledPhase5ScenarioDriver {
                 prepare(client);
             }
             release(client.options);
+            return;
+        }
+        if (phaseResetPending) {
+            waitForReset(client);
             return;
         }
         if (phaseIndex < startIndex) {
@@ -114,8 +128,8 @@ public final class ControlledPhase5ScenarioDriver {
         configureInput(client.options, phase, elapsed);
         if (phase.equals("glide")) driveGlide(client);
         if (phase.equals("correction")) {
-            if (elapsed == 8) reset(client, 2, 65, baseZ(phase) + 20, 90);
-            if (elapsed == 24) reset(client, -2, 65, baseZ(phase) + 24, 270);
+            if (elapsed == 8) requestReset(client, 2, 65, baseZ(phase) + 20, 90);
+            if (elapsed == 24) requestReset(client, -2, 65, baseZ(phase) + 24, 270);
         }
         Phase5CaptureDebug.tick(client, phase, elapsed, baseZ(phase) + 80);
         elapsed++;
@@ -138,15 +152,54 @@ public final class ControlledPhase5ScenarioDriver {
         phaseIndex = index;
         elapsed = 0;
         failureReported = false;
-        resetForPhase(client, PHASES[index]);
+        requestPhaseReset(client, PHASES[index]);
+    }
+
+    private void requestPhaseReset(MinecraftClient client, String phase) {
+        double y = phase.equals("glide") ? 90.0D : 64.0D;
+        requestReset(client, 0.0D, y, baseZ(phase) + 2.0D, 0.0D);
+    }
+
+    private void requestReset(MinecraftClient client, double x, double y, double z, double yaw) {
+        resetX = x;
+        resetY = y;
+        resetZ = z;
+        resetYaw = (float) yaw;
+        resetWait = 0;
+        phaseResetPending = true;
+        reset(client, x, y, z, yaw);
         release(client.options);
-        Phase5CaptureDebug.resetAndStart(client, PHASES[index], index, baseZ(PHASES[index]) + 80);
-        System.out.println("[Phase5] START " + scenario + " / " + PHASES[index] + " (" + (index - startIndex + 1) + "/" + (endIndex - startIndex + 1) + ")");
+    }
+
+    private void waitForReset(MinecraftClient client) {
+        if (client.player == null) return;
+        resetWait++;
+        if (resetWait == 1 || resetWait % 20 == 0) {
+            System.out.println("[Phase5] waiting reset phase=" + PHASES[phaseIndex] + " tick=" + resetWait + " state=" + describe(client));
+        }
+        boolean atTarget = client.player.getPos().squaredDistanceTo(new Vec3d(resetX, resetY, resetZ)) <= RESET_TOLERANCE * RESET_TOLERANCE;
+        boolean grounded = PHASES[phaseIndex].equals("glide") || client.player.isOnGround();
+        if (atTarget && grounded) {
+            phaseResetPending = false;
+            resetWait = 0;
+            resetForPhase(client, PHASES[phaseIndex]);
+            release(client.options);
+            Phase5CaptureDebug.resetAndStart(client, PHASES[phaseIndex], phaseIndex, baseZ(PHASES[phaseIndex]) + 80);
+            System.out.println("[Phase5] START " + scenario + " / " + PHASES[phaseIndex] + " (" + (phaseIndex - startIndex + 1) + "/" + (endIndex - startIndex + 1) + ")");
+            return;
+        }
+        if (resetWait >= RESET_TIMEOUT_TICKS) {
+            String message = "CAPTURE_STOPPED part=" + scenario + " phase=" + PHASES[phaseIndex] + " reason=reset_timeout target="
+                    + resetX + "," + resetY + "," + resetZ + " state=" + describe(client);
+            System.err.println("[Phase5] " + message);
+            Phase5CaptureDebug.failure(PHASES[phaseIndex], message);
+            done = true;
+            release(client.options);
+            client.scheduleStop();
+        }
     }
 
     private void resetForPhase(MinecraftClient client, String phase) {
-        double y = phase.equals("glide") ? 90.0D : 64.0D;
-        reset(client, 0.0D, y, baseZ(phase) + 2.0D, 0.0D);
         if (phase.equals("speed-effect")) effect(client, "minecraft:speed");
         if (phase.equals("slowness-effect")) effect(client, "minecraft:slowness");
         if (phase.equals("jump-boost")) effect(client, "minecraft:jump_boost");
@@ -176,7 +229,7 @@ public final class ControlledPhase5ScenarioDriver {
         if (server == null) throw new IllegalStateException("Integrated server required");
         server.executeSync(() -> {
             ServerPlayerEntity sp = server.getPlayerManager().getPlayer(client.player.getUuid());
-            if (sp == null) throw new IllegalStateException("Server player missing");
+            if (sp == null) return;
             sp.setVelocity(Vec3d.ZERO);
             sp.setOnGround(true);
             sp.fallDistance = 0.0F;
