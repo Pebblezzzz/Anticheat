@@ -11,9 +11,10 @@ final class Phase5CaptureEncoding {
     private Phase5CaptureEncoding() {}
 
     static String modifiers(EntityAttributeInstance instance) {
-        return instance.getModifiers().stream()
+        String encoded = instance.getModifiers().stream()
                 .map(Phase5CaptureEncoding::modifier)
                 .collect(Collectors.joining(";"));
+        return encoded.isEmpty() ? "-" : encoded;
     }
 
     private static String modifier(EntityAttributeModifier modifier) {
