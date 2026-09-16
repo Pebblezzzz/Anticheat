@@ -146,6 +146,39 @@ class Phase5ParityToolTest {
     assertEquals(0.33319999363422365,actual.velocity().y(),1e-6);
   }
 
+  @Test void stoneJumpLandingMatchesObservedVanillaTransition() {
+    var initial = new State.Player(
+      new Maths.Vec3(-22.882971729405668,72.1212968405392,26.46644782303221),
+      new Maths.Vec3(0.1668883408461789,-0.4448259643949201,-0.001992003038255156),
+      -90.75068664550781f,
+      0.0f,
+      false,
+      "survival",
+      Map.of(),
+      OptionalInt.empty(),
+      false
+    );
+    var world = World.Snapshot.emptyVisibleChunks(List.of(World.Chunk.containing(-23,26)));
+    var context = new Simulation.PhysicsContext(
+      108,
+      initial,
+      new Simulation.AdvancedInput(1,0,false,false,false),
+      world,
+      Simulation.Environment.DRY,
+      new Simulation.Attributes(0.10000000149011612)
+    );
+
+    var result = new Simulation.Vanilla12111Physics().step(context);
+    var actual = result.state();
+
+    // Measured from a real Minecraft Java 1.21.11 client jump2.tsv on a stone platform.
+    assertEquals(-22.696485054542087,actual.position().x(),1e-6);
+    assertEquals(72.0,actual.position().y(),1e-6);
+    assertEquals(26.464200266029426,actual.position().z(),1e-6);
+    assertTrue(actual.onGround());
+    assertEquals(-0.0784000015258789,actual.velocity().y(),1e-6);
+  }
+
   private static Phase5TraceTool.Row row(long tick,long client,long receive) {
     return new Phase5TraceTool.Row(tick,client,receive,0,0,0,0,0,0,0,0,true,0,0,false,false,false,
       Phase5Mechanics.Pose.STANDING,"survival",Phase5Mechanics.Fluid.NONE,false,false,false,1,List.of(),
