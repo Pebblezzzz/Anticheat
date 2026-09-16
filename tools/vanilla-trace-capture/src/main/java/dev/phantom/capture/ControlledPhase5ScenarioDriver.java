@@ -24,8 +24,8 @@ public final class ControlledPhase5ScenarioDriver {
     private static final int ARENA_SPACING = 140;
     private static final int ARENA_START_Z = -80;
     private static final int ARENA_LENGTH = 120;
-    private static final int COURSE_MIN_X = -128;
-    private static final int COURSE_MAX_X = 128;
+    private static final int ARENA_MIN_X = -32;
+    private static final int ARENA_MAX_X = 32;
     private static final int COURSE_MIN_Z = ARENA_START_Z - 8;
     private static final int COURSE_MAX_Z = ARENA_START_Z + 13 * ARENA_SPACING + ARENA_LENGTH + 8;
 
@@ -43,6 +43,11 @@ public final class ControlledPhase5ScenarioDriver {
     private static final int STEP_START = JUMP_BOOST_START + JUMP_BOOST;
     private static final int TAIL_START = STEP_START + STEP;
     private static final int ALL_TOTAL = TAIL_START + TAIL;
+
+    private static final String[] DRY_ARENAS = {
+            "walk", "sprint", "jump", "sneak", "diagonal", "collision",
+            "speed-effect", "slowness-effect", "jump-boost", "step", "tail"
+    };
 
     private long scenarioTick = -1;
     private String scenario = NONE;
@@ -173,8 +178,13 @@ public final class ControlledPhase5ScenarioDriver {
         server.executeSync(() -> {
             CommandManager m = server.getCommandManager(); ServerCommandSource s = server.getCommandSource();
             command(m, s, "difficulty peaceful"); command(m, s, "time set day"); command(m, s, "weather clear");
-            command(m, s, "fill " + COURSE_MIN_X + " 60 " + COURSE_MIN_Z + " " + COURSE_MAX_X + " 67 " + COURSE_MAX_Z + " air");
-            command(m, s, "fill " + COURSE_MIN_X + " 63 " + COURSE_MIN_Z + " " + COURSE_MAX_X + " 63 " + COURSE_MAX_Z + " minecraft:stone");
+
+            for (String arena : DRY_ARENAS) {
+                int z = arenaStartFor(arena);
+                command(m, s, "forceload add " + ARENA_MIN_X + " " + z + " " + ARENA_MAX_X + " " + (z + ARENA_LENGTH - 1));
+                command(m, s, "fill " + ARENA_MIN_X + " 64 " + z + " " + ARENA_MAX_X + " 67 " + (z + ARENA_LENGTH - 1) + " air");
+                command(m, s, "fill " + ARENA_MIN_X + " 63 " + z + " " + ARENA_MAX_X + " 63 " + (z + ARENA_LENGTH - 1) + " minecraft:stone");
+            }
 
             int collisionZ = arenaStartFor("collision");
             command(m, s, "fill -2 64 " + (collisionZ + 48) + " 2 66 " + (collisionZ + 52) + " minecraft:stone");
@@ -183,16 +193,20 @@ public final class ControlledPhase5ScenarioDriver {
             command(m, s, "fill -4 64 " + (stepZ + 32) + " 4 64 " + (stepZ + 35) + " minecraft:oak_slab[type=bottom]");
 
             int waterZ = arenaStartFor("water");
+            command(m, s, "forceload add -104 " + (waterZ + 4) + " 104 " + (waterZ + 116));
             command(m, s, "fill -100 62 " + (waterZ + 8) + " 100 62 " + (waterZ + 112) + " minecraft:stone");
-            command(m, s, "fill -100 63 " + (waterZ + 8) + " 100 65 " + (waterZ + 112) + " minecraft:water");
+            command(m, s, "fill -100 63 " + (waterZ + 8) + " 0 65 " + (waterZ + 112) + " minecraft:water");
+            command(m, s, "fill 1 63 " + (waterZ + 8) + " 100 65 " + (waterZ + 112) + " minecraft:water");
             command(m, s, "fill -104 63 " + (waterZ + 4) + " 104 66 " + (waterZ + 4) + " minecraft:stone");
             command(m, s, "fill -104 63 " + (waterZ + 116) + " 104 66 " + (waterZ + 116) + " minecraft:stone");
             command(m, s, "fill -104 63 " + (waterZ + 4) + " -101 66 " + (waterZ + 116) + " minecraft:stone");
             command(m, s, "fill 101 63 " + (waterZ + 4) + " 104 66 " + (waterZ + 116) + " minecraft:stone");
 
             int lavaZ = arenaStartFor("lava");
+            command(m, s, "forceload add -104 " + (lavaZ + 4) + " 104 " + (lavaZ + 72));
             command(m, s, "fill -100 62 " + (lavaZ + 8) + " 100 62 " + (lavaZ + 68) + " minecraft:stone");
-            command(m, s, "fill -100 63 " + (lavaZ + 8) + " 100 65 " + (lavaZ + 68) + " minecraft:lava");
+            command(m, s, "fill -100 63 " + (lavaZ + 8) + " 0 65 " + (lavaZ + 68) + " minecraft:lava");
+            command(m, s, "fill 1 63 " + (lavaZ + 8) + " 100 65 " + (lavaZ + 68) + " minecraft:lava");
             command(m, s, "fill -104 63 " + (lavaZ + 4) + " 104 66 " + (lavaZ + 4) + " minecraft:stone");
             command(m, s, "fill -104 63 " + (lavaZ + 72) + " 104 66 " + (lavaZ + 72) + " minecraft:stone");
             command(m, s, "fill -104 63 " + (lavaZ + 4) + " -101 66 " + (lavaZ + 72) + " minecraft:stone");
@@ -200,6 +214,7 @@ public final class ControlledPhase5ScenarioDriver {
 
             command(m, s, "gamemode survival @a"); command(m, s, "effect clear @a");
             command(m, s, "tp @a 0 64 " + (arenaStartFor("walk") + 12) + " 0 0");
+            command(m, s, "forceload remove all");
         });
     }
 
