@@ -17,6 +17,13 @@ import static org.junit.jupiter.api.Assertions.*;
  * Collision/step result rows are skipped because the course geometry is not
  * serialized in the trace. A large position discontinuity is treated as a
  * controlled server reset boundary, not as a movement tick to simulate.
+ *
+ * Fluid travel and jump-transition rows are not numerically replayed here:
+ * the capture records the post-tick input/state but not enough causal
+ * information to reconstruct the exact client-side fluid-control and jump
+ * consumption order for a single tick. Those cases are covered by the
+ * dedicated empirical batch/physics tests instead of being given a broad
+ * replay tolerance.
  */
 class Phase5VanillaSimulationReplayTest {
     private static final String TRACE_PROPERTY = "phantom.phase5.trace";
@@ -77,6 +84,24 @@ class Phase5VanillaSimulationReplayTest {
             double dy = Double.parseDouble(current.positionY()) - Double.parseDouble(previous.positionY());
             double dz = Double.parseDouble(current.positionZ()) - Double.parseDouble(previous.positionZ());
             if (Math.max(Math.max(Math.abs(dx), Math.abs(dy)), Math.abs(dz)) > MAX_CONTINUOUS_DISPLACEMENT) {
+                previous = current;
+                previousPhase = phase;
+                continue;
+            }
+
+            // The capture is authoritative for fluid observations, but it does not
+            // preserve the exact client-side causal inputs needed to reconstruct a
+            // single fluid travel tick. Keep those observations in the batch audit.
+            if ("all:water".equals(phase) || "all:lava".equals(phase)) {
+                previous = current;
+                previousPhase = phase;
+                continue;
+            }
+
+            // Jump input is sampled on the post-tick row. A one-tick replay cannot
+            // prove that exact input was consumed on that exact physics tick, so
+            // transition rows are covered by the dedicated empirical jump tests.
+            if (Boolean.parseBoolean(current.jump()) || Boolean.parseBoolean(previous.jump())) {
                 previous = current;
                 previousPhase = phase;
                 continue;
@@ -202,6 +227,9 @@ class Phase5VanillaSimulationReplayTest {
             }
         }
 
+        // on_ground is an observed fact, so a horizontal support plane one block
+        // below the observed standing position is a valid minimal replay anchor.
+        // This does not invent stairs/slabs/edges; those still require serialized geometry.
         if (Boolean.parseBoolean(previous.onGround())) {
             Map<World.Pos, World.Block> blocks = new HashMap<>();
             int floorY = (int) Math.floor(Double.parseDouble(previous.positionY())) - 1;
