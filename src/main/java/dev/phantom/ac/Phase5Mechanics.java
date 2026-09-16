@@ -36,7 +36,11 @@ public final class Phase5Mechanics {
     public MovementEnvironment { Objects.requireNonNull(fluid);if(!Double.isFinite(fluidSpeedMultiplier)||!Double.isFinite(fluidDrag)||!Double.isFinite(gravityMultiplier))throw new IllegalArgumentException("non-finite environment factor");if(fluidSpeedMultiplier<0||fluidDrag<0||gravityMultiplier<0)throw new IllegalArgumentException("negative environment factor"); }
     public static MovementEnvironment dry(boolean onGround,boolean sprinting,boolean sneaking){return new MovementEnvironment(Fluid.NONE,false,false,onGround,sprinting,sneaking,false,false,1.0,1.0,1.0);}
     public static MovementEnvironment vanillaWater(boolean onGround,boolean sprinting,boolean sneaking,boolean swimmingInput){return new MovementEnvironment(Fluid.WATER,true,false,onGround,sprinting,sneaking,swimmingInput,false,1.0,0.9,0.0);}
-    public static MovementEnvironment vanillaLava(boolean onGround,boolean sprinting,boolean sneaking){return new MovementEnvironment(Fluid.LAVA,true,false,onGround,sprinting,sneaking,false,false,1.0,0.5,0.5);}
+    public static MovementEnvironment vanillaLava(boolean onGround,boolean sprinting,boolean sneaking){
+      // 1.21.11 parity trace: an initially stationary player in lava exits a tick at -0.06 Y.
+      // With the existing 0.08 base gravity this corresponds to a 0.75 environment gravity multiplier.
+      return new MovementEnvironment(Fluid.LAVA,true,false,onGround,sprinting,sneaking,false,false,1.0,0.5,0.75);
+    }
   }
   public static Pose nextPose(Pose previous,MovementEnvironment env){Objects.requireNonNull(previous);Objects.requireNonNull(env);if(env.gliding())return Pose.FALL_FLYING;if(env.submerged()&&env.swimmingInput())return Pose.SWIMMING;if(env.sneaking())return Pose.CROUCHING;return Pose.STANDING;}
   public record Knockback(Vec3Like impulse,boolean serverVelocityPacketObserved) implements Serializable {public Knockback{Objects.requireNonNull(impulse);}}
