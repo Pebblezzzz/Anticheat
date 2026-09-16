@@ -2,6 +2,7 @@ package dev.phantom.capture;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.option.GameOptions;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.EntityPose;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
@@ -68,9 +69,11 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
             String fluid = player.isInLava() ? "LAVA" : player.isTouchingWater() ? "WATER" : "NONE";
             String gamemode = "UNKNOWN";
             if (client.interactionManager != null) { GameMode mode = client.interactionManager.getCurrentGameMode(); if (mode != null) gamemode = mode.name().toLowerCase(Locale.ROOT); }
+            // The controlled Phase 5 corpus is Survival-only. Do not contaminate it
+            // with pre-login or setup observations captured before the scenario applies gamemode.
+            if (!"survival".equals(gamemode)) return;
             List<String> missing = new ArrayList<>(List.of("knockback_x","knockback_y","knockback_z","velocity_packet","correction_id","correction_pending","step_attempted","step_succeeded","collision_x","collision_y","collision_z"));
             if (speed == null) missing.add("base_movement_speed");
-            if (gamemode.equals("UNKNOWN")) missing.add("gamemode");
             double baseSpeed = speed == null ? 0.0 : speed.getBaseValue();
             String modifiers = speed == null ? "-" : Phase5CaptureEncoding.modifiers(speed);
             int speedAmp = amplifier(player.getStatusEffect(StatusEffects.SPEED));
