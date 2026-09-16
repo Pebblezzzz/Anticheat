@@ -158,7 +158,11 @@ class Phase5ParityToolTest {
       OptionalInt.empty(),
       false
     );
-    var world = World.Snapshot.emptyVisibleChunks(List.of(World.Chunk.containing(-23,26)));
+    // The captured player is descending onto a known stone platform whose top is y=72.
+    var world = new World.Snapshot(
+      Map.of(new World.Pos(-23,71,26),World.Block.FULL),
+      Set.of(World.Chunk.containing(-23,26))
+    );
     var context = new Simulation.PhysicsContext(
       108,
       initial,
