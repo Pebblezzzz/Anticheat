@@ -9,8 +9,10 @@ public final class Simulation {
   private Simulation() {}
 
   public static final class Vanilla12111Physics implements Contracts.PhysicsEngine {
-    /** Empirical Phase 5 stone-ground baseline from a real 1.21.11 client trace. */
+    /** Empirical Phase 5 movement constants from real 1.21.11 client traces. */
     public static final double GRAVITY=.08, AIR_DRAG=.98, AIR_HORIZONTAL_FRICTION=.91, AIR_VERTICAL_DRAG=.98, AIR_ACCEL=.0196, GROUND_FRICTION=.546, WALK_ACCEL=.98, JUMP=.42, STEP_HEIGHT=.6;
+    /** Vanilla diagonal input is normalized to preserve the base movement magnitude. */
+    private static final double DIAGONAL_NORMALIZATION = 1.0 / Math.sqrt(2.0);
     public Player tick(Player s, Input input, World.Snapshot world) { return step(new TickContext(0,s,input,world),0).state(); }
     public StepResult step(PhysicsContext context) {
       Objects.requireNonNull(context,"context");
@@ -25,8 +27,10 @@ public final class Simulation {
       if(!s.gamemode().equals("survival")) return new StepResult(tick,new Player(s.position(),Vec3.ZERO,s.yaw(),s.pitch(),false,s.gamemode(),s.effects(),s.awaitingTeleport(),false),false,priorPose,"non-survival movement is not simulated");
       double radians=Math.toRadians(s.yaw());
       double speed=attributes.value()*effects.speedMultiplier()*(input.sprint()?1.3:1.0)*(input.sneak()?0.3:1.0);
+      double inputMagnitude=Math.hypot(input.forward(),input.strafe());
+      double inputScale=inputMagnitude>1.0?DIAGONAL_NORMALIZATION:1.0;
       double inputAcceleration=s.onGround()?WALK_ACCEL*speed:AIR_ACCEL;
-      Vec3 acceleration=new Vec3(input.strafe()*inputAcceleration*Math.cos(radians)-input.forward()*inputAcceleration*Math.sin(radians),0,input.forward()*inputAcceleration*Math.cos(radians)+input.strafe()*inputAcceleration*Math.sin(radians));
+      Vec3 acceleration=new Vec3(inputScale*(input.strafe()*inputAcceleration*Math.cos(radians)-input.forward()*inputAcceleration*Math.sin(radians)),0,inputScale*(input.forward()*inputAcceleration*Math.cos(radians)+input.strafe()*inputAcceleration*Math.sin(radians)));
       Vec3 velocity=s.velocity().add(acceleration);
       if(env.fluid()!=Phase5Mechanics.Fluid.NONE) velocity=new Vec3(velocity.x()*env.fluidSpeedMultiplier()*env.fluidDrag(),velocity.y()*env.fluidDrag(),velocity.z()*env.fluidSpeedMultiplier()*env.fluidDrag());
       if(env.climbable()) velocity=new Vec3(velocity.x(),Math.max(-0.15,velocity.y()),velocity.z());
@@ -40,13 +44,14 @@ public final class Simulation {
       Vec3 displacement=collision.resolved(); boolean grounded=collision.collidedY()&&velocity.y()<=0;
       double horizontalFactor=s.onGround()?GROUND_FRICTION:AIR_HORIZONTAL_FRICTION;
       if(env.fluid()!=Phase5Mechanics.Fluid.NONE) horizontalFactor*=env.fluidDrag();
-      double postTickVerticalVelocity=jumped?(velocity.y()-gravity)*AIR_VERTICAL_DRAG:velocity.y()*AIR_VERTICAL_DRAG;
-      double groundedVerticalVelocity=-gravity*AIR_VERTICAL_DRAG;
+      double postTickVerticalVelocity=jumped?(velocity.y()-gravity)*verticalDrag(env):velocity.y()*verticalDrag(env);
+      double groundedVerticalVelocity=env.fluid()!=Phase5Mechanics.Fluid.NONE ? velocity.y()*verticalDrag(env) : -gravity*AIR_VERTICAL_DRAG;
       Vec3 nextVelocity=new Vec3(collision.collidedX()?0:velocity.x()*horizontalFactor,grounded?groundedVerticalVelocity:postTickVerticalVelocity,collision.collidedZ()?0:velocity.z()*horizontalFactor);
       Phase5Mechanics.Pose nextPose=Phase5Mechanics.nextPose(priorPose,env);
       Player next=new Player(s.position().add(displacement),nextVelocity,s.yaw(),s.pitch(),grounded,s.gamemode(),s.effects(),s.awaitingTeleport(),false);
       return new StepResult(tick,next,collision.collidedHorizontally()||collision.collidedY(),nextPose,"deterministic collision-resolved movement step");
     }
+    private static double verticalDrag(Phase5Mechanics.MovementEnvironment env) { return env.fluid()!=Phase5Mechanics.Fluid.NONE ? env.fluidDrag() : AIR_VERTICAL_DRAG; }
     private static Player uncertain(Player state) { return new Player(state.position(),state.velocity(),state.yaw(),state.pitch(),state.onGround(),state.gamemode(),state.effects(),state.awaitingTeleport(),true); }
   }
 
