@@ -166,7 +166,8 @@ public final class ControlledPhase5ScenarioDriver {
 
     private void requestPhaseReset(MinecraftClient client, String phase) {
         double y = phase.equals("glide") ? 90.0D : 64.0D;
-        requestReset(client, 0.0D, y, laneZ(phase) + 2.0D, 0.0D);
+        double z = laneZ(phase) + (phase.equals("water") || phase.equals("swim-transition") ? 6.0D : 2.0D);
+        requestReset(client, 0.0D, y, z, 0.0D);
     }
 
     private void requestReset(MinecraftClient client, double x, double y, double z, double yaw) {
