@@ -46,12 +46,12 @@ public final class VanillaScenarioDriver {
     private boolean finished;
     private boolean worldPrepared;
 
+    private static volatile VanillaScenarioDriver LAST_INSTANCE;
+
     public static String phaseLabel() {
         VanillaScenarioDriver driver = LAST_INSTANCE;
         return driver == null ? "unknown" : driver.scenario + ":" + driver.phase;
     }
-
-    private static volatile VanillaScenarioDriver LAST_INSTANCE;
 
     public VanillaScenarioDriver() {
         LAST_INSTANCE = this;
@@ -104,7 +104,7 @@ public final class VanillaScenarioDriver {
 
         if (t < 20) {
             phase = "water-baseline";
-            teleport(client, 25.5, 64.0, 4.5, 0.0f);
+            if (t == 0) teleport(client, 25.5, 64.0, 4.5, 0.0f);
         } else if (t < 20 + WATER_MOVE) {
             phase = "water-straight";
             forward = true;
@@ -136,61 +136,61 @@ public final class VanillaScenarioDriver {
             phase = "setup";
         } else if (t < cursor + WALK) {
             phase = "walk";
-            teleport(client, -30.5, 64.0, -6.5, -90.0f);
+            teleportAtPhaseStart(client, -30.5, 64.0, -6.5, -90.0f);
             forward = true;
         } else if (t < (cursor += WALK) + SPRINT) {
             phase = "sprint";
-            teleport(client, -30.5, 64.0, 1.5, -90.0f);
+            teleportAtPhaseStart(client, -30.5, 64.0, 1.5, -90.0f);
             forward = true;
             sprint = true;
         } else if (t < (cursor += SPRINT) + JUMP) {
             phase = "jump";
-            teleport(client, -30.5, 64.0, 9.5, -90.0f);
+            teleportAtPhaseStart(client, -30.5, 64.0, 9.5, -90.0f);
             forward = true;
             jump = t == cursor || t == cursor + 1;
         } else if (t < (cursor += JUMP) + SNEAK) {
             phase = "sneak";
-            teleport(client, -30.5, 64.0, 17.5, -90.0f);
+            teleportAtPhaseStart(client, -30.5, 64.0, 17.5, -90.0f);
             forward = true;
             sneak = true;
         } else if (t < (cursor += SNEAK) + DIAGONAL) {
             phase = "diagonal";
-            teleport(client, -30.5, 64.0, 25.5, -90.0f);
+            teleportAtPhaseStart(client, -30.5, 64.0, 25.5, -90.0f);
             forward = true;
             left = true;
         } else if (t < (cursor += DIAGONAL) + COLLISION) {
             phase = "collision";
-            teleport(client, 0.5, 64.0, -18.5, -90.0f);
+            teleportAtPhaseStart(client, 0.5, 64.0, -18.5, -90.0f);
             forward = true;
         } else if (t < (cursor += COLLISION) + WATER_MOVE) {
             phase = "water";
-            teleport(client, 25.5, 64.0, 4.5, 0.0f);
+            teleportAtPhaseStart(client, 25.5, 64.0, 4.5, 0.0f);
             forward = true;
         } else if (t < (cursor += WATER_MOVE) + LAVA_MOVE) {
             phase = "lava";
-            teleport(client, 25.5, 64.0, 19.5, 0.0f);
+            teleportAtPhaseStart(client, 25.5, 64.0, 19.5, 0.0f);
             forward = true;
         } else if (t < (cursor += LAVA_MOVE) + SPEED_EFFECT) {
             phase = "speed-effect";
-            teleport(client, -4.5, 64.0, 33.5, -90.0f);
+            teleportAtPhaseStart(client, -4.5, 64.0, 33.5, -90.0f);
             giveEffect(client, "minecraft:speed", 0);
             forward = true;
         } else if (t < (cursor += SPEED_EFFECT) + SLOWNESS_EFFECT) {
             phase = "slowness-effect";
-            teleport(client, -4.5, 64.0, 40.5, -90.0f);
+            teleportAtPhaseStart(client, -4.5, 64.0, 40.5, -90.0f);
             clearEffects(client);
             giveEffect(client, "minecraft:slowness", 0);
             forward = true;
         } else if (t < (cursor += SLOWNESS_EFFECT) + JUMP_BOOST) {
             phase = "jump-boost";
-            teleport(client, -4.5, 64.0, 47.5, -90.0f);
+            teleportAtPhaseStart(client, -4.5, 64.0, 47.5, -90.0f);
             clearEffects(client);
             giveEffect(client, "minecraft:jump_boost", 0);
             forward = true;
             jump = t == cursor || t == cursor + 1;
         } else if (t < (cursor += JUMP_BOOST) + STEP) {
             phase = "step";
-            teleport(client, 12.5, 64.0, -18.5, -90.0f);
+            teleportAtPhaseStart(client, 12.5, 64.5, -18.5, -90.0f);
             clearEffects(client);
             forward = true;
         } else {
@@ -198,9 +198,7 @@ public final class VanillaScenarioDriver {
         }
 
         apply(client.options, forward, false, left, right, jump, sneak, sprint);
-        if (t >= ALL_TOTAL - TAIL) {
-            phase = "tail";
-        }
+        if (t >= ALL_TOTAL - TAIL) phase = "tail";
         finishIfDone(client, ALL_TOTAL);
     }
 
@@ -215,24 +213,22 @@ public final class VanillaScenarioDriver {
             command(commands, source, "fill -48 60 -8 48 72 55 air");
             command(commands, source, "fill -48 63 -8 48 63 55 minecraft:stone");
             command(commands, source, "fill 5 64 -21 5 67 -14 minecraft:stone");
-            command(commands, source, "fill 12 64 -21 16 64 -14 minecraft:stone_slab[type=top]");
+            command(commands, source, "fill 12 64 -21 16 64 -14 minecraft:stone_slab[type=bottom]");
             command(commands, source, "fill 17 64 -21 21 64 -14 minecraft:stone");
             command(commands, source, "fill 25 64 0 31 65 8 minecraft:water");
             command(commands, source, "fill 25 64 15 31 65 23 minecraft:lava");
-            command(commands, source, "fill 36 64 0 38 66 8 minecraft:stone");
-            command(commands, source, "fill 40 64 0 46 65 8 minecraft:air");
             command(commands, source, "gamemode survival @a");
             command(commands, source, "effect clear @a");
             command(commands, source, "tp @a -30.5 64 -6.5 -90 0");
         });
     }
 
+    private void teleportAtPhaseStart(MinecraftClient client, double x, double y, double z, float yaw) {
+        if (scenarioTick == phaseStartTick()) teleport(client, x, y, z, yaw);
+    }
+
     private void teleport(MinecraftClient client, double x, double y, double z, float yaw) {
-        // Teleports are server-authoritative setup transitions, not simulated movement.
-        // Only issue them when the phase changes to avoid generating a correction every tick.
-        if (scenarioTick == phaseStartTick()) {
-            issueCommand(client, "tp @a " + x + " " + y + " " + z + " " + yaw + " 0");
-        }
+        issueCommand(client, "tp @a " + x + " " + y + " " + z + " " + yaw + " 0");
     }
 
     private long phaseStartTick() {
@@ -277,7 +273,6 @@ public final class VanillaScenarioDriver {
         if (scenarioTick++ >= total - 1) {
             finished = true;
             release(client.options);
-            clearEffects(client);
             client.scheduleStop();
         }
     }
