@@ -13,13 +13,9 @@ import net.minecraft.util.math.Vec3d;
 
 import java.util.Locale;
 
-/**
- * Deterministic Phase 5 capture driver. Resets are synchronous and never depend on
- * waiting for an exact client/server round-trip before a phase can begin.
- */
+/** Deterministic Phase 5 capture driver with independent capture parts and isolated arenas. */
 public final class ControlledPhase5ScenarioDriver {
     private static final String PROP = "phantom.capture.scenario";
-    private static final String ALL = "all";
     private static final String NONE = "none";
     private static final String[] PHASES = {
             "walk","sprint","jump","sneak","diagonal","collision","water","lava",
@@ -30,14 +26,18 @@ public final class ControlledPhase5ScenarioDriver {
             100,100,100,100,100,100,120,30,80,80,100,110,70,90,100,100,120,120,40
     };
     private static final int START_Z = -40;
-    private static final int SPACING = 40;
+    private static final int SPACING = 180;
+    private static final double FALL_CUTOFF_Y = 2.0D;
     private static volatile ControlledPhase5ScenarioDriver LAST;
 
     private String scenario = NONE;
     private int phaseIndex = -1;
+    private int startIndex;
+    private int endIndex;
     private int elapsed;
     private boolean prepared;
     private boolean done;
+    private boolean failureReported;
 
     public ControlledPhase5ScenarioDriver() { LAST = this; }
 
@@ -50,70 +50,116 @@ public final class ControlledPhase5ScenarioDriver {
     }
 
     public void tick(MinecraftClient client) {
-        if (!Boolean.parseBoolean(System.getProperty("phantom.capture.enabled","false"))) return;
-        String requested = System.getProperty(PROP,NONE).trim().toLowerCase(Locale.ROOT);
+        if (!Boolean.parseBoolean(System.getProperty("phantom.capture.enabled", "false"))) return;
+        String requested = System.getProperty(PROP, NONE).trim().toLowerCase(Locale.ROOT);
         if (requested.equals(NONE) || client.player == null || client.world == null) { release(client.options); return; }
-        if (!requested.equals(ALL)) throw new IllegalArgumentException("Unsupported Phase 5 scenario: " + requested);
+        if (!configureRange(requested)) throw new IllegalArgumentException("Unsupported Phase 5 scenario: " + requested + " (use all, part1, part2, part3, part4, or part5)");
         if (!requested.equals(scenario)) {
-            scenario = requested; phaseIndex = -1; elapsed = 0; prepared = false; done = false;
+            scenario = requested;
+            phaseIndex = startIndex - 1;
+            elapsed = 0;
+            prepared = false;
+            done = false;
+            failureReported = false;
             release(client.options);
         }
         if (done) { release(client.options); return; }
-        if (!prepared) { prepare(client); prepared = true; beginPhase(client, 0); return; }
+        if (!prepared) {
+            prepare(client);
+            prepared = true;
+            beginPhase(client, startIndex);
+            return;
+        }
         runPhase(client);
     }
 
+    private boolean configureRange(String requested) {
+        switch (requested) {
+            case "all" -> { startIndex = 0; endIndex = PHASES.length - 1; }
+            case "part1" -> { startIndex = 0; endIndex = 5; }
+            case "part2" -> { startIndex = 6; endIndex = 9; }
+            case "part3" -> { startIndex = 10; endIndex = 13; }
+            case "part4" -> { startIndex = 14; endIndex = 16; }
+            case "part5" -> { startIndex = 17; endIndex = 18; }
+            default -> { return false; }
+        }
+        return true;
+    }
+
     private void runPhase(MinecraftClient client) {
+        if (client.player == null) return;
+        if ((client.player.isDead() || client.player.getHealth() <= 0.0F || client.player.getY() < FALL_CUTOFF_Y) && !failureReported) {
+            failureReported = true;
+            String message = "CAPTURE_STOPPED part=" + scenario + " phase=" + PHASES[phaseIndex] + " elapsed=" + elapsed
+                    + " reason=" + (client.player.isDead() || client.player.getHealth() <= 0.0F ? "player_dead" : "player_left_course")
+                    + " state=" + describe(client);
+            System.err.println("[Phase5] " + message);
+            Phase5CaptureDebug.failure(PHASES[phaseIndex], message);
+            done = true;
+            release(client.options);
+            client.scheduleStop();
+            return;
+        }
+
         String phase = PHASES[phaseIndex];
         configureInput(client.options, phase, elapsed);
         if (phase.equals("glide")) driveGlide(client);
         if (phase.equals("correction")) {
-            if (elapsed == 8) reset(client, 2, 65, baseZ(phase)+20, 90);
-            if (elapsed == 24) reset(client, -2, 65, baseZ(phase)+24, 270);
+            if (elapsed == 8) reset(client, 2, 65, baseZ(phase) + 20, 90);
+            if (elapsed == 24) reset(client, -2, 65, baseZ(phase) + 24, 270);
         }
-        Phase5CaptureDebug.tick(client, phase, elapsed, baseZ(phase)+20);
+        Phase5CaptureDebug.tick(client, phase, elapsed, baseZ(phase) + 80);
         elapsed++;
+
         if (elapsed >= DURATIONS[phaseIndex]) {
             Phase5CaptureDebug.end(phase);
             clearHazards(client, phase);
-            phaseIndex++;
-            if (phaseIndex >= PHASES.length) { done = true; release(client.options); client.scheduleStop(); }
-            else beginPhase(client, phaseIndex);
+            if (phaseIndex >= endIndex) {
+                done = true;
+                release(client.options);
+                System.out.println("[Phase5] COMPLETE " + scenario);
+                client.scheduleStop();
+            } else {
+                beginPhase(client, phaseIndex + 1);
+            }
         }
     }
 
     private void beginPhase(MinecraftClient client, int index) {
         phaseIndex = index;
         elapsed = 0;
+        failureReported = false;
         resetForPhase(client, PHASES[index]);
         release(client.options);
-        Phase5CaptureDebug.resetAndStart(client, PHASES[index], index, baseZ(PHASES[index])+20);
-        System.out.println("[Phase5] START " + PHASES[index] + " @ " + describe(client));
+        Phase5CaptureDebug.resetAndStart(client, PHASES[index], index, baseZ(PHASES[index]) + 80);
+        System.out.println("[Phase5] START " + scenario + " / " + PHASES[index] + " (" + (index - startIndex + 1) + "/" + (endIndex - startIndex + 1) + ")");
     }
 
     private void resetForPhase(MinecraftClient client, String phase) {
-        double y = (phase.equals("water") || phase.equals("lava")) ? 64.0 : phase.equals("glide") ? 90.0 : 64.0;
-        reset(client, 0.0, y, baseZ(phase)+2.0, 0.0);
-        if (phase.equals("speed-effect")) effect(client,"minecraft:speed");
-        if (phase.equals("slowness-effect")) effect(client,"minecraft:slowness");
-        if (phase.equals("jump-boost")) effect(client,"minecraft:jump_boost");
-        if (phase.equals("lava")) effect(client,"minecraft:fire_resistance");
+        double y = phase.equals("glide") ? 90.0D : 64.0D;
+        reset(client, 0.0D, y, baseZ(phase) + 2.0D, 0.0D);
+        if (phase.equals("speed-effect")) effect(client, "minecraft:speed");
+        if (phase.equals("slowness-effect")) effect(client, "minecraft:slowness");
+        if (phase.equals("jump-boost")) effect(client, "minecraft:jump_boost");
+        if (phase.equals("lava")) effect(client, "minecraft:fire_resistance");
         if (phase.equals("glide")) {
             client.player.equipStack(EquipmentSlot.CHEST, new ItemStack(Items.ELYTRA));
             client.player.setOnGround(false);
-            client.player.setVelocity(0.0,-0.15,0.0);
-            client.player.fallDistance = 2.0f;
+            client.player.setVelocity(0.0D, -0.12D, 0.0D);
+            client.player.fallDistance = 2.0F;
         }
     }
 
     private void driveGlide(MinecraftClient client) {
         var p = client.player;
-        if (!p.isGliding() && p.getEquippedStack(EquipmentSlot.CHEST).isOf(Items.ELYTRA)) {
-            p.setOnGround(false);
-            p.setVelocity(p.getVelocity().x, -0.2, p.getVelocity().z);
-            p.fallDistance = Math.max(p.fallDistance, 2.0f);
-            if (p.checkGliding()) p.startGliding();
+        if (p.isGliding()) return;
+        if (!p.getEquippedStack(EquipmentSlot.CHEST).isOf(Items.ELYTRA)) {
+            p.equipStack(EquipmentSlot.CHEST, new ItemStack(Items.ELYTRA));
         }
+        p.setOnGround(false);
+        p.fallDistance = Math.max(p.fallDistance, 2.0F);
+        if (p.checkGliding()) p.startGliding();
+        if (p.isGliding() && elapsed == 0) System.out.println("[Phase5] GLIDE activated");
     }
 
     private void reset(MinecraftClient client, double x, double y, double z, double yaw) {
@@ -124,61 +170,112 @@ public final class ControlledPhase5ScenarioDriver {
             if (sp == null) throw new IllegalStateException("Server player missing");
             sp.setVelocity(Vec3d.ZERO);
             sp.setOnGround(true);
-            sp.fallDistance = 0.0f;
+            sp.fallDistance = 0.0F;
             sp.extinguish();
-            sp.refreshPositionAndAngles(x,y,z,(float)yaw,0.0f);
-            sp.requestTeleport(x,y,z);
+            sp.refreshPositionAndAngles(x, y, z, (float) yaw, 0.0F);
+            sp.requestTeleport(x, y, z);
             cmd(server.getCommandManager(), server.getCommandSource(), "effect clear @a");
         });
-        client.player.requestTeleport(x,y,z);
+        client.player.requestTeleport(x, y, z);
         client.player.setVelocity(Vec3d.ZERO);
         client.player.setOnGround(true);
-        client.player.fallDistance = 0.0f;
+        client.player.fallDistance = 0.0F;
         client.player.extinguish();
-        client.player.setYaw((float)yaw);
-        client.player.setPitch(0.0f);
+        client.player.setYaw((float) yaw);
+        client.player.setPitch(0.0F);
     }
 
     private void clearHazards(MinecraftClient client, String previous) {
-        if (previous.equals("lava")) {
-            client.player.extinguish();
-            clearEffects(client.getServer());
-        }
+        client.player.extinguish();
+        if (previous.equals("lava")) clearEffects(client.getServer());
     }
+
     private void clearEffects(IntegratedServer server) {
         if (server != null) server.executeSync(() -> cmd(server.getCommandManager(), server.getCommandSource(), "effect clear @a"));
     }
+
     private void effect(MinecraftClient client, String id) {
         IntegratedServer server = client.getServer();
         if (server != null) server.executeSync(() -> cmd(server.getCommandManager(), server.getCommandSource(), "effect give @a " + id + " 600 0 true"));
     }
+
     private void prepare(MinecraftClient client) {
         IntegratedServer server = client.getServer();
         if (server == null) throw new IllegalStateException("Integrated server required");
+        int minPhase = startIndex;
+        int maxPhase = endIndex;
         server.executeSync(() -> {
-            CommandManager m=server.getCommandManager(); ServerCommandSource s=server.getCommandSource();
-            cmd(m,s,"difficulty peaceful"); cmd(m,s,"time set day"); cmd(m,s,"weather clear");
-            int min=START_Z-4, max=START_Z+SPACING*(PHASES.length-1)+36;
-            cmd(m,s,"fill -20 63 " + min + " 20 63 " + max + " minecraft:stone");
-            cmd(m,s,"fill -20 64 " + min + " 20 67 " + max + " air");
-            int water=baseZ("water"); cmd(m,s,"fill -8 64 " + (water+6) + " 8 65 " + (water+28) + " minecraft:water");
-            int lava=baseZ("lava"); cmd(m,s,"fill -8 64 " + (lava+6) + " 8 65 " + (lava+28) + " minecraft:lava");
-            int c=baseZ("collision"); cmd(m,s,"fill -2 64 " + (c+14) + " 2 66 " + (c+18) + " minecraft:stone");
-            int st=baseZ("step"); cmd(m,s,"fill -3 64 " + (st+10) + " 3 64 " + (st+12) + " minecraft:oak_slab[type=bottom]");
-            int stairs=baseZ("stairs");
-            cmd(m,s,"fill -2 64 " + (stairs+10) + " 2 64 " + (stairs+12) + " minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");
-            cmd(m,s,"fill -2 65 " + (stairs+13) + " 2 65 " + (stairs+15) + " minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");
-            int climb=baseZ("climbable"); cmd(m,s,"fill -1 64 " + (climb+15) + " 1 68 " + (climb+15) + " minecraft:stone"); cmd(m,s,"fill -1 64 " + (climb+14) + " 1 68 " + (climb+14) + " minecraft:ladder[facing=south]");
-            int edge=baseZ("edge-corner"); cmd(m,s,"fill 3 64 " + (edge+12) + " 3 67 " + (edge+28) + " minecraft:stone"); cmd(m,s,"fill 3 64 " + (edge+20) + " 7 67 " + (edge+20) + " minecraft:stone");
-            int swim=baseZ("swim-transition"); cmd(m,s,"fill -8 64 " + (swim+6) + " 8 65 " + (swim+24) + " minecraft:water");
-            int glide=baseZ("glide"); cmd(m,s,"fill -8 63 " + (glide+4) + " 8 63 " + (glide+55) + " minecraft:stone"); cmd(m,s,"fill -8 64 " + (glide+4) + " 8 120 " + (glide+55) + " air");
-            cmd(m,s,"gamemode survival @a"); cmd(m,s,"effect clear @a");
+            CommandManager m = server.getCommandManager();
+            ServerCommandSource s = server.getCommandSource();
+            cmd(m, s, "difficulty peaceful");
+            cmd(m, s, "time set day");
+            cmd(m, s, "weather clear");
+            int minZ = baseZ(PHASES[minPhase]) - 8;
+            int maxZ = baseZ(PHASES[maxPhase]) + 310;
+            cmd(m, s, "fill -24 63 " + minZ + " 24 63 " + maxZ + " minecraft:stone");
+            cmd(m, s, "fill -24 64 " + minZ + " 24 67 " + maxZ + " air");
+            cmd(m, s, "fill -24 64 " + minZ + " -23 72 " + maxZ + " minecraft:stone");
+            cmd(m, s, "fill 23 64 " + minZ + " 24 72 " + maxZ + " minecraft:stone");
+
+            int water = baseZ("water");
+            cmd(m, s, "fill -8 64 " + (water + 5) + " 8 65 " + (water + 135) + " minecraft:water");
+            int lava = baseZ("lava");
+            cmd(m, s, "fill -8 64 " + (lava + 5) + " 8 65 " + (lava + 135) + " minecraft:lava");
+            int collision = baseZ("collision");
+            cmd(m, s, "fill -3 64 " + (collision + 55) + " 3 66 " + (collision + 59) + " minecraft:stone");
+            int step = baseZ("step");
+            cmd(m, s, "fill -3 64 " + (step + 25) + " 3 64 " + (step + 29) + " minecraft:oak_slab[type=bottom]");
+            int stairs = baseZ("stairs");
+            cmd(m, s, "fill -3 64 " + (stairs + 30) + " 3 64 " + (stairs + 33) + " minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");
+            cmd(m, s, "fill -3 65 " + (stairs + 34) + " 3 65 " + (stairs + 37) + " minecraft:oak_stairs[facing=south,half=bottom,shape=straight]");
+            int climb = baseZ("climbable");
+            cmd(m, s, "fill -1 64 " + (climb + 25) + " 1 68 " + (climb + 25) + " minecraft:stone");
+            cmd(m, s, "fill -1 64 " + (climb + 24) + " 1 68 " + (climb + 24) + " minecraft:ladder[facing=south]");
+            int edge = baseZ("edge-corner");
+            cmd(m, s, "fill 4 64 " + (edge + 20) + " 4 68 " + (edge + 70) + " minecraft:stone");
+            cmd(m, s, "fill 4 64 " + (edge + 45) + " 8 68 " + (edge + 45) + " minecraft:stone");
+            int swim = baseZ("swim-transition");
+            cmd(m, s, "fill -8 64 " + (swim + 5) + " 8 65 " + (swim + 130) + " minecraft:water");
+            int glide = baseZ("glide");
+            cmd(m, s, "fill -10 63 " + (glide + 4) + " 10 63 " + (glide + 300) + " minecraft:stone");
+            cmd(m, s, "fill -10 64 " + (glide + 4) + " 10 120 " + (glide + 300) + " minecraft:air");
+            cmd(m, s, "gamemode survival @a");
+            cmd(m, s, "effect clear @a");
         });
     }
-    private static int baseZ(String phase){ for(int i=0;i<PHASES.length;i++) if(PHASES[i].equals(phase)) return START_Z+SPACING*i; throw new IllegalArgumentException(phase); }
-    private static void configureInput(GameOptions o,String phase,int t){ boolean f=true,l=false,r=false,j=false,sn=false,sp=false; switch(phase){case "sprint","water","lava","collision","step","stairs","glide"->sp=true; case "jump","jump-boost"->j=t<2; case "sneak"->sn=true; case "diagonal"->l=true; case "edge-corner"-> {l=t<50;r=!l;} case "swim-transition"-> {sp=true;j=t%24<6;sn=t%24>=12&&t%24<18;} case "correction","tail","walk","speed-effect","slowness-effect","climbable"->{} } apply(o,f,false,l,r,j,sn,sp); }
-    private static void apply(GameOptions o,boolean f,boolean b,boolean l,boolean r,boolean j,boolean sn,boolean sp){o.forwardKey.setPressed(f);o.backKey.setPressed(b);o.leftKey.setPressed(l);o.rightKey.setPressed(r);o.jumpKey.setPressed(j);o.sneakKey.setPressed(sn);o.sprintKey.setPressed(sp);}
-    private static void release(GameOptions o){apply(o,false,false,false,false,false,false,false);}
-    private static void cmd(CommandManager m,ServerCommandSource s,String c){m.parseAndExecute(s,c);}
-    private static String describe(MinecraftClient c){var p=c.player;return "x="+p.getX()+",y="+p.getY()+",z="+p.getZ()+",yaw="+p.getYaw()+",ground="+p.isOnGround()+",gliding="+p.isGliding();}
+
+    private static int baseZ(String phase) {
+        for (int i = 0; i < PHASES.length; i++) if (PHASES[i].equals(phase)) return START_Z + SPACING * i;
+        throw new IllegalArgumentException(phase);
+    }
+
+    private static void configureInput(GameOptions o, String phase, int t) {
+        boolean forward = true, left = false, right = false, jump = false, sneak = false, sprint = false;
+        switch (phase) {
+            case "sprint", "water", "lava", "collision", "step", "stairs", "glide" -> sprint = true;
+            case "jump", "jump-boost" -> jump = t < 2;
+            case "sneak" -> sneak = true;
+            case "diagonal" -> left = true;
+            case "edge-corner" -> { left = t < 50; right = !left; }
+            case "swim-transition" -> { sprint = true; jump = t % 24 < 6; sneak = t % 24 >= 12 && t % 24 < 18; }
+            case "correction", "tail", "walk", "speed-effect", "slowness-effect", "climbable" -> { }
+            default -> throw new IllegalStateException(phase);
+        }
+        apply(o, forward, false, left, right, jump, sneak, sprint);
+    }
+
+    private static void apply(GameOptions o, boolean f, boolean b, boolean l, boolean r, boolean j, boolean sn, boolean sp) {
+        o.forwardKey.setPressed(f); o.backKey.setPressed(b); o.leftKey.setPressed(l); o.rightKey.setPressed(r);
+        o.jumpKey.setPressed(j); o.sneakKey.setPressed(sn); o.sprintKey.setPressed(sp);
+    }
+
+    private static void release(GameOptions o) { apply(o, false, false, false, false, false, false, false); }
+
+    private static void cmd(CommandManager m, ServerCommandSource s, String command) { m.parseAndExecute(s, command); }
+
+    private static String describe(MinecraftClient client) {
+        var p = client.player;
+        return "x=" + p.getX() + ",y=" + p.getY() + ",z=" + p.getZ() + ",hp=" + p.getHealth()
+                + ",ground=" + p.isOnGround() + ",gliding=" + p.isGliding() + ",vel=" + p.getVelocity();
+    }
 }
