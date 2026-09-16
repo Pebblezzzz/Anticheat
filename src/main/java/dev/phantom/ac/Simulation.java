@@ -10,7 +10,7 @@ public final class Simulation {
 
   public static final class Vanilla12111Physics implements Contracts.PhysicsEngine {
     /** Empirical Phase 5 stone-ground baseline from a real 1.21.11 client trace. */
-    public static final double GRAVITY=.08, AIR_DRAG=.98, AIR_HORIZONTAL_FRICTION=.91, AIR_VERTICAL_DRAG=.98, AIR_ACCEL=.02, GROUND_FRICTION=.546, WALK_ACCEL=.98, JUMP=.42, STEP_HEIGHT=.6;
+    public static final double GRAVITY=.08, AIR_DRAG=.98, AIR_HORIZONTAL_FRICTION=.91, AIR_VERTICAL_DRAG=.98, AIR_ACCEL=.0196, GROUND_FRICTION=.546, WALK_ACCEL=.98, JUMP=.42, STEP_HEIGHT=.6;
     public Player tick(Player s, Input input, World.Snapshot world) { return step(new TickContext(0,s,input,world),0).state(); }
     public StepResult step(PhysicsContext context) {
       Objects.requireNonNull(context,"context");
