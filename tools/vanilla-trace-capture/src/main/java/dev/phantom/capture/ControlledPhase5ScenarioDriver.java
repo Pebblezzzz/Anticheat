@@ -307,34 +307,34 @@ public final class ControlledPhase5ScenarioDriver {
                 int lava = laneZ("lava");
                 setBlockBox(world, -8, 64, lava + 5, 8, 65, lava + 135, Blocks.LAVA);
             }
-            if (includes(5)) {
+            if (includes(5, 5)) {
                 int collision = laneZ("collision");
                 fillZ(m, s, -3, 64, collision + 55, 3, 66, collision + 59, "minecraft:stone", 32);
             }
-            if (includes(11)) {
+            if (includes(11, 11)) {
                 int step = laneZ("step");
                 fillZ(m, s, -3, 64, step + 25, 3, 64, step + 29, "minecraft:oak_slab[type=bottom]", 32);
             }
-            if (includes(13)) {
+            if (includes(13, 13)) {
                 int stairs = laneZ("stairs");
                 fillZ(m, s, -3, 64, stairs + 30, 3, 64, stairs + 33, "minecraft:oak_stairs[facing=south,half=bottom,shape=straight]", 32);
                 fillZ(m, s, -3, 65, stairs + 34, 3, 65, stairs + 37, "minecraft:oak_stairs[facing=south,half=bottom,shape=straight]", 32);
             }
-            if (includes(14)) {
+            if (includes(14, 14)) {
                 int climb = laneZ("climbable");
                 fillZ(m, s, -1, 64, climb + 25, 1, 68, climb + 25, "minecraft:stone", 32);
                 fillZ(m, s, -1, 64, climb + 24, 1, 68, climb + 24, "minecraft:ladder[facing=south]", 32);
             }
-            if (includes(15)) {
+            if (includes(15, 15)) {
                 int edge = laneZ("edge-corner");
                 fillZ(m, s, 4, 64, edge + 20, 4, 68, edge + 70, "minecraft:stone", 64);
                 fillZ(m, s, 4, 64, edge + 45, 8, 68, edge + 45, "minecraft:stone", 32);
             }
-            if (includes(16)) {
+            if (includes(16, 16)) {
                 int swim = laneZ("swim-transition");
                 setBlockBox(world, -8, 64, swim + 5, 8, 65, swim + 130, Blocks.WATER);
             }
-            if (includes(17)) {
+            if (includes(17, 17)) {
                 int glide = laneZ("glide");
                 fillZ(m, s, -10, 63, glide + 4, 10, 63, glide + 300, "minecraft:stone", 300);
                 fillZ(m, s, -10, 64, glide + 4, 10, 120, glide + 300, "air", 160);
@@ -378,6 +378,11 @@ public final class ControlledPhase5ScenarioDriver {
             int end = Math.min(z2, start + step - 1);
             cmd(m, s, "fill " + x1 + " " + y1 + " " + start + " " + x2 + " " + y2 + " " + end + " " + block);
         }
+    }
+
+    private static int baseZ(String phase) {
+        for (int i = 0; i < PHASES.length; i++) if (PHASES[i].equals(phase)) return START_Z + SPACING * i;
+        throw new IllegalArgumentException(phase);
     }
 
     private static void configureInput(GameOptions o, String phase, int t) {
