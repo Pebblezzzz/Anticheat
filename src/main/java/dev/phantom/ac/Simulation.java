@@ -40,7 +40,7 @@ public final class Simulation {
       double horizontalFactor=s.onGround()?GROUND_FRICTION:AIR_DRAG;
       if(env.fluid()!=Phase5Mechanics.Fluid.NONE) horizontalFactor*=env.fluidDrag();
       double postTickVerticalVelocity=jumped?(velocity.y()-gravity)*AIR_DRAG:velocity.y()*AIR_DRAG;
-      Vec3 nextVelocity=new Vec3(collision.collidedX()?0:velocity.x()*horizontalFactor,grounded?0:postTickVerticalVelocity,collision.collidedZ()?0:velocity.z()*horizontalFactor);
+      Vec3 nextVelocity=new Vec3(collision.collidedX()?0:velocity.x()*horizontalFactor,postTickVerticalVelocity,collision.collidedZ()?0:velocity.z()*horizontalFactor);
       Phase5Mechanics.Pose nextPose=Phase5Mechanics.nextPose(priorPose,env);
       Player next=new Player(s.position().add(displacement),nextVelocity,s.yaw(),s.pitch(),grounded,s.gamemode(),s.effects(),s.awaitingTeleport(),false);
       return new StepResult(tick,next,collision.collidedHorizontally()||collision.collidedY(),nextPose,"deterministic collision-resolved movement step");
