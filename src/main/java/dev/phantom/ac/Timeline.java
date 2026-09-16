@@ -77,6 +77,7 @@ public final class Timeline {
       else if(p instanceof ChunkUnload v){out.writeByte(9);writeChunk(out,v.chunk());}
       else if(p instanceof BlockChange v){out.writeByte(10);writePos(out,v.position());out.writeByte(v.block().ordinal());}
       else if(p instanceof BlockStateChange v){out.writeByte(11);writeWorldPos(out,v.position());writeBlockState(out,v.state());}
+      else if(p instanceof UnsupportedBlockStateChange v){out.writeByte(13);writeWorldPos(out,v.position());writeBlockState(out,v.state());}
       else if(p instanceof ChunkStates v){out.writeByte(12);writeWorldChunk(out,v.chunk());List<Map.Entry<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState>> entries=new ArrayList<>(v.states().entrySet());entries.sort(Comparator.comparingInt((Map.Entry<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> e)->e.getKey().x()).thenComparingInt(e->e.getKey().y()).thenComparingInt(e->e.getKey().z()));out.writeInt(entries.size());for(var entry:entries){writeWorldPos(out,entry.getKey());writeBlockState(out,entry.getValue());}}
       else throw new IllegalArgumentException("unsupported packet type: "+p.getClass());
     }
@@ -88,6 +89,7 @@ public final class Timeline {
       case 8->{World.Chunk chunk=readChunk(in);int count=readCount(in,"chunk block");Map<World.Pos,World.Block> blocks=new HashMap<>();for(int i=0;i<count;i++){World.Pos pos=readPos(in);if(blocks.put(pos,readBlock(in))!=null)throw new IllegalArgumentException("duplicate chunk block");}yield new ChunkData(chunk,blocks);}
       case 9->new ChunkUnload(readChunk(in));case 10->new BlockChange(readPos(in),readBlock(in));
       case 11->new BlockStateChange(readWorldPos(in),readBlockState(in));
+      case 13->new UnsupportedBlockStateChange(readWorldPos(in),readBlockState(in));
       case 12->{dev.phantom.ac.world.Chunk chunk=readWorldChunk(in);int count=readCount(in,"chunk state");Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> states=new HashMap<>();for(int i=0;i<count;i++){dev.phantom.ac.world.Pos pos=readWorldPos(in);if(states.put(pos,readBlockState(in))!=null)throw new IllegalArgumentException("duplicate chunk state");}yield new ChunkStates(chunk,states);}
       default->throw new IllegalArgumentException("unknown packet tag");};}
 

@@ -310,6 +310,7 @@ public final class World {
       else if(packet instanceof Packets.ChunkUnload unload) { history.chunkUnloaded(tick,unload.chunk()); history.stateChunkUnloaded(tick,unload.chunk()); }
       else if(packet instanceof Packets.BlockChange change) history.blockChanged(tick,change.position(),change.block());
       else if(packet instanceof Packets.BlockStateChange change) history.blockStateChanged(tick,change.position(),change.state());
+      else if(packet instanceof Packets.UnsupportedBlockStateChange change) history.blockStateChanged(tick,change.position(),change.state());
     }
     return history;
   }

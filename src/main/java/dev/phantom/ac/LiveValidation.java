@@ -15,7 +15,11 @@ import static dev.phantom.ac.Validation.*;
 public final class LiveValidation {
   private LiveValidation() {}
   public record Finding(long tick,Verdict verdict,int candidateCount,List<String> reasons) { public Finding { reasons=List.copyOf(reasons); } }
-  public record Report(List<Finding> findings,int movementObservations) { public Report { findings=List.copyOf(findings); } }
+  /** Bounded, replayable pipeline observability; it contains counts and reasons, not packet dumps. */
+  public record Report(List<Finding> findings,int movementObservations,int timelineEvents,int anchoredObservations,int possibleFindings,int uncertainFindings,int impossibleFindings) {
+    public Report { findings=List.copyOf(findings); if(movementObservations<0||timelineEvents<0||anchoredObservations<0||possibleFindings<0||uncertainFindings<0||impossibleFindings<0) throw new IllegalArgumentException("negative validation metric"); }
+    public Report(List<Finding> findings,int movementObservations) { this(findings,movementObservations,0,0,0,0,0); }
+  }
 
   public static Report analyze(Timeline.Snapshot timeline,int maximumCandidates) {
     if(maximumCandidates<1) throw new IllegalArgumentException("maximumCandidates must be positive");
@@ -56,7 +60,7 @@ public final class LiveValidation {
         if(next.size()>maximumCandidates) { findings.add(new Finding(event.serverTick(),Verdict.UNCERTAIN,next.size(),List.of("candidate budget exceeded; result is incomplete"))); candidates=Set.of(); anchored=false; continue; }
       }
       if(unsupported && next.isEmpty()) { findings.add(new Finding(event.serverTick(),Verdict.UNCERTAIN,0,List.of("client-visible world has unsupported or unknown space"))); candidates=Set.of(); anchored=false; continue; }
-      if(next.isEmpty()) { findings.add(new Finding(event.serverTick(),Verdict.UNCERTAIN,0,List.of("all simulated transitions are uncertain; no violation inferred"))); candidates=Set.of(); anchored=false; continue; }
+      if(next.isEmpty()) { findings.add(new Finding(event.serverTick(),Verdict.UNCERTAIN,0,List.of(uncertainTransition?"all simulated transitions are uncertain; no violation inferred":"no candidate transition was produced; no violation inferred"))); candidates=Set.of(); anchored=false; continue; }
       Set<Player> matches=next.stream().filter(candidate -> candidate.position().equals(observed.position()) && candidate.onGround()==observed.onGround()).collect(java.util.stream.Collectors.toUnmodifiableSet());
       if(matches.isEmpty()) {
         // Keep the simulated envelope after an impossible observation. Resetting
@@ -69,7 +73,11 @@ public final class LiveValidation {
         findings.add(new Finding(event.serverTick(),Verdict.POSSIBLE,candidates.size(),List.of("observed position and ground state remain reachable", "velocity is not present in movement packets and was not invented")));
       }
     }
-    return new Report(findings,movements);
+    int possible=(int)findings.stream().filter(f->f.verdict()==Verdict.POSSIBLE).count();
+    int uncertain=(int)findings.stream().filter(f->f.verdict()==Verdict.UNCERTAIN).count();
+    int impossible=(int)findings.stream().filter(f->f.verdict()==Verdict.IMPOSSIBLE).count();
+    int anchoredObservations=Math.max(0,movements-uncertain);
+    return new Report(findings,movements,timeline.events().size(),anchoredObservations,possible,uncertain,impossible);
   }
   private static int axis(boolean positive,boolean negative) { return positive==negative?0:positive?1:-1; }
 }

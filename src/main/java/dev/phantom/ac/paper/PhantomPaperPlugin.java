@@ -14,7 +14,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
-import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -99,10 +98,10 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
       } else if(event.getPacketType() == PacketType.Play.Server.BLOCK_CHANGE) {
         WrapperPlayServerBlockChange packet=new WrapperPlayServerBlockChange(event);
         var position=packet.getBlockPosition();
-        record(player,new Packets.BlockStateChange(new dev.phantom.ac.world.Pos(position.getX(),position.getY(),position.getZ()),toCoreState(packet.getBlockState())));
+        recordBlockState(player,new dev.phantom.ac.world.Pos(position.getX(),position.getY(),position.getZ()),toCoreState(packet.getBlockState()));
       } else if(event.getPacketType() == PacketType.Play.Server.MULTI_BLOCK_CHANGE) {
         WrapperPlayServerMultiBlockChange packet=new WrapperPlayServerMultiBlockChange(event);
-        for(var change:packet.getBlocks()) record(player,new Packets.BlockStateChange(new dev.phantom.ac.world.Pos(change.getX(),change.getY(),change.getZ()),toCoreState(change.getBlockState(event.getUser().getClientVersion()))));
+        for(var change:packet.getBlocks()) recordBlockState(player,new dev.phantom.ac.world.Pos(change.getX(),change.getY(),change.getZ()),toCoreState(change.getBlockState(event.getUser().getClientVersion())));
       } else if(event.getPacketType() == PacketType.Play.Server.UNLOAD_CHUNK) {
         WrapperPlayServerUnloadChunk packet=new WrapperPlayServerUnloadChunk(event);
         record(player,new Packets.ChunkUnload(new World.Chunk(packet.getChunkX(),packet.getChunkZ())));
@@ -147,54 +146,45 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
    * block states.
    * FIXED: Added a 10ms budget to prevent the main thread from stalling on massive map copies.
    */
+  /**
+   * Incremental client-world reconstruction. A complete chunk is never scanned
+   * in one server tick: Bukkit block reads are deliberately budgeted and the
+   * chunk remains absent from the deterministic world until the scan completes.
+   * This preserves UNKNOWN semantics while preventing watchdog stalls.
+   */
   private void drainChunkQueue() {
-    long startTime = System.nanoTime();
-    long maxNanosPerTick = 10_000_000L; // 10 milliseconds
-
-    for(Capture capture:captures.values()) {
-      PendingChunk pending;
-      while((pending=capture.chunkQueue.poll())!=null) {
-        Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> states=decodeColumn(pending);
-        Map<World.Pos,World.Block> legacy=new LinkedHashMap<>();
-        for (Map.Entry<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> entry : states.entrySet()) {
-          legacy.put(new World.Pos(entry.getKey().x(),entry.getKey().y(),entry.getKey().z()),toLegacyBlock(entry.getValue()));
+    final long deadline=System.nanoTime()+1_000_000L; // one millisecond total per tick
+    final int blocksPerSlice=512;
+    while(System.nanoTime()<deadline) {
+      Capture selected=null; PendingChunk pending=null;
+      for(Capture capture:captures.values()) { pending=capture.chunkQueue.peek(); if(pending!=null){selected=capture;break;} }
+      if(selected==null) return;
+      Player player=getServer().getPlayer(pending.playerId());
+      if(player==null){selected.chunkQueue.poll();continue;}
+      try {
+        org.bukkit.Chunk chunk=player.getWorld().getChunkAt(pending.chunkX(),pending.chunkZ());
+        if(!chunk.isLoaded()){selected.chunkQueue.poll();continue;}
+        int minY=player.getWorld().getMinHeight(), maxY=player.getWorld().getMaxHeight();
+        int processed=0;
+        while(processed++<blocksPerSlice && pending.nextIndex<pending.totalBlocks(minY,maxY)) {
+          int index=pending.nextIndex++;
+          int x=index/((maxY-minY)*16), remainder=index%((maxY-minY)*16);
+          int z=remainder/(maxY-minY), y=minY+(remainder%(maxY-minY));
+          dev.phantom.ac.world.BlockState state=toCoreBlockData(chunk.getBlock(x,y,z).getBlockData());
+          if(!state.isAir()) pending.states.put(new dev.phantom.ac.world.Pos(chunk.getX()*16+x,y,chunk.getZ()*16+z),state);
         }
-        World.Chunk legacyChunk=new World.Chunk(pending.chunkX(),pending.chunkZ());
-        record(capture,new Packets.ChunkData(legacyChunk,legacy));
-        record(capture,new Packets.ChunkStates(new dev.phantom.ac.world.Chunk(pending.chunkX(),pending.chunkZ()),states));
-
-        // Break out early if we've spent too much time decoding chunks this tick
-        if (System.nanoTime() - startTime > maxNanosPerTick) {
-            return;
+        if(pending.nextIndex>=pending.totalBlocks(minY,maxY)) {
+          selected.chunkQueue.poll();
+          Map<World.Pos,World.Block> legacy=new LinkedHashMap<>();
+          for(var entry:pending.states.entrySet()) legacy.put(new World.Pos(entry.getKey().x(),entry.getKey().y(),entry.getKey().z()),toLegacyBlock(entry.getValue()));
+          record(selected,new Packets.ChunkData(new World.Chunk(pending.chunkX(),pending.chunkZ()),legacy));
+          record(selected,new Packets.ChunkStates(new dev.phantom.ac.world.Chunk(pending.chunkX(),pending.chunkZ()),pending.states));
         }
+      } catch(RuntimeException malformed) {
+        selected.chunkQueue.poll();
+        getLogger().warning("chunk decode failed for "+pending.chunkX()+","+pending.chunkZ()+": "+malformed.getClass().getSimpleName());
       }
     }
-  }
-
-  private Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> decodeColumn(PendingChunk pending) {
-    Player player=getServer().getPlayer(pending.playerId());
-    if(player==null) return Map.of();
-    Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> states=new LinkedHashMap<>();
-    try {
-      org.bukkit.Chunk chunk=player.getWorld().getChunkAt(pending.chunkX(),pending.chunkZ());
-      if(!chunk.isLoaded()) return Map.of();
-      int minY=player.getWorld().getMinHeight();
-      int maxY=player.getWorld().getMaxHeight();
-      for(int x=0;x<16;x++) {
-        for(int z=0;z<16;z++) {
-          for(int y=minY;y<maxY;y++) {
-            org.bukkit.block.data.BlockData data=chunk.getBlock(x,y,z).getBlockData();
-            dev.phantom.ac.world.BlockState state=toCoreBlockData(data);
-            if(state.isAir()) continue;
-            states.put(new dev.phantom.ac.world.Pos(chunk.getX()*16+x,y,chunk.getZ()*16+z),state);
-          }
-        }
-      }
-    } catch(RuntimeException malformed) {
-      getLogger().warning("chunk decode failed for "+pending.chunkX()+","+pending.chunkZ()+": "+malformed.getClass().getSimpleName());
-      return Map.of();
-    }
-    return states;
   }
 
   private void evaluateCapturesAsync() {
@@ -265,6 +255,7 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
       long uncertain=report.findings().stream().filter(f -> f.verdict()==dev.phantom.ac.Validation.Verdict.UNCERTAIN).count();
       long impossible=report.findings().stream().filter(f -> f.verdict()==dev.phantom.ac.Validation.Verdict.IMPOSSIBLE).count();
       sender.sendMessage("Phantom movement diagnostic: "+report.movementObservations()+" observations; "+possible+" reachable, "+uncertain+" uncertain, "+impossible+" impossible.");
+      sender.sendMessage("Pipeline: packets="+report.timelineEvents()+" anchored="+report.anchoredObservations()+" possible="+report.possibleFindings()+" uncertain="+report.uncertainFindings()+" impossible="+report.impossibleFindings()+" evidence="+capture.aggregator.impossibleByRule().values().stream().mapToInt(Integer::intValue).sum());
       sender.sendMessage("Diagnostic only: no enforcement or punishment; independent 1.21.11 vanilla traces are still required before any cheat flag.");
       report.findings().stream().filter(f -> f.verdict()!=dev.phantom.ac.Validation.Verdict.POSSIBLE).limit(3).forEach(f -> sender.sendMessage("["+f.verdict()+"] tick "+f.tick()+": "+f.reasons().getFirst()));
       OperatorValidation.Aggregator aggregate=OperatorValidation.Aggregator.empty();
@@ -298,6 +289,10 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
 
   private void record(Player player, Packets.Packet packet) { record(captures.computeIfAbsent(player.getUniqueId(), ignored -> new Capture(System.nanoTime())), packet); }
   private void record(Capture capture, Packets.Packet packet) { capture.packets.add(new RawPacket(capture.sequence.incrementAndGet(), System.nanoTime(), packet)); }
+  private void recordBlockState(Player player, dev.phantom.ac.world.Pos position, dev.phantom.ac.world.BlockState state) {
+    Packets.Packet packet=state.isUnsupported()?new Packets.UnsupportedBlockStateChange(position,state):new Packets.BlockStateChange(position,state);
+    record(player,packet);
+  }
   private void sendOperatorAlert(String message, boolean broadcast) {
     if (broadcast) { getServer().broadcastMessage(message); return; }
     for (Player recipient : getServer().getOnlinePlayers())
@@ -413,7 +408,14 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     if(value instanceof Boolean flag) properties.put(key,Boolean.toString(flag));
   }
 
-  private record PendingChunk(UUID playerId,int chunkX,int chunkZ,com.github.retrooper.packetevents.protocol.player.ClientVersion clientVersion) {}
+  private static final class PendingChunk {
+    final UUID playerId; final int chunkX,chunkZ; final com.github.retrooper.packetevents.protocol.player.ClientVersion clientVersion;
+    final Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> states=new LinkedHashMap<>();
+    int nextIndex;
+    PendingChunk(UUID playerId,int chunkX,int chunkZ,com.github.retrooper.packetevents.protocol.player.ClientVersion clientVersion){this.playerId=playerId;this.chunkX=chunkX;this.chunkZ=chunkZ;this.clientVersion=clientVersion;}
+    int totalBlocks(int minY,int maxY){return 16*16*(maxY-minY);}
+    UUID playerId(){return playerId;} int chunkX(){return chunkX;} int chunkZ(){return chunkZ;}
+  }
 
   private static final class Capture {
     final long epochNanos; final AtomicLong sequence = new AtomicLong();

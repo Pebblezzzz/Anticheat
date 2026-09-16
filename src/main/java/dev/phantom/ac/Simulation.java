@@ -3,29 +3,70 @@ package dev.phantom.ac;
 import java.io.Serializable; import java.util.*; import static dev.phantom.ac.Maths.*; import static dev.phantom.ac.State.*;
 public final class Simulation {
   private Simulation() {}
-  /** Version boundary. Values are provisional until independent 1.21.11 traces validate them. */
+  /**
+   * Version-isolated movement model. Constants are named model inputs, not a
+   * claim of vanilla parity; independent 1.21.11 traces are required before
+   * enforcement. The important invariant here is that velocity is integrated
+   * independently from displacement and collision only clips displacement.
+   */
   public static final class Vanilla12111Physics implements Contracts.PhysicsEngine {
     public static final double GRAVITY=.08, AIR_DRAG=.98, GROUND_FRICTION=.91, WALK_ACCEL=.1, JUMP=.42;
-    /** Pending independent 1.21.11 trace verification. Kept here, not in collision. */
-    public static final double PROVISIONAL_STEP_HEIGHT=.6;
+    public static final double STEP_HEIGHT=.6;
     public Player tick(Player s, Input input, World.Snapshot world) {
+      return step(new TickContext(0,s,input,world),0).state();
+    }
+    /** Full Phase 5 entry point. All movement-affecting facts are explicit inputs. */
+    public StepResult step(PhysicsContext context) {
+      Objects.requireNonNull(context,"context");
+      return step(new TickContext(context.simulationTick(),context.state(),context.input().asBasic(),context.world()),context.simulationTick(),context.input(),context.environment(),context.attributes());
+    }
+    public StepResult step(TickContext context,long simulationTick) {
+      return step(context,simulationTick,AdvancedInput.basic(context.input()),Environment.DRY,Attributes.DEFAULT);
+    }
+    private StepResult step(TickContext context,long simulationTick,AdvancedInput input,Environment environment,Attributes attributes) {
+      Objects.requireNonNull(context,"context");
+      Player s=context.state(); World.Snapshot world=context.world();
       Aabb start=Aabb.playerAt(s.position());
-      if(world.hasUnsupported(start)) return uncertain(s);
-      if(!s.gamemode().equals("survival")) return new Player(s.position(),Vec3.ZERO,s.yaw(),s.pitch(),false,s.gamemode(),s.effects(),s.awaitingTeleport(),true);
-      double radians=Math.toRadians(s.yaw()); double forward=input.forward()*WALK_ACCEL, strafe=input.strafe()*WALK_ACCEL;
-      Vec3 v=s.velocity().add(new Vec3(strafe*Math.cos(radians)-forward*Math.sin(radians),0,forward*Math.cos(radians)+strafe*Math.sin(radians)));
-      if(input.jump()&&s.onGround())v=new Vec3(v.x(),JUMP,v.z());
-      if(!s.onGround())v=new Vec3(v.x(),v.y()-GRAVITY,v.z());
-      Aabb swept=new Aabb(Math.min(start.minX(),start.minX()+v.x()),Math.min(start.minY(),start.minY()+v.y()),Math.min(start.minZ(),start.minZ()+v.z()),Math.max(start.maxX(),start.maxX()+v.x()),Math.max(start.maxY(),start.maxY()+v.y()),Math.max(start.maxZ(),start.maxZ()+v.z()));
-      if(world.hasUnsupported(swept)) return uncertain(s);
-      World.CollisionResult collision=World.resolveWithStep(world,start,v,s.onGround()?PROVISIONAL_STEP_HEIGHT:0);
-      Vec3 actual=collision.resolved(); boolean grounded=v.y()<0&&actual.y()!=v.y();
-      double friction=grounded?GROUND_FRICTION:AIR_DRAG;
-      Vec3 nextVelocity=new Vec3(actual.x()*friction,actual.y()*AIR_DRAG,actual.z()*friction);
-      return new Player(s.position().add(actual),nextVelocity,s.yaw(),s.pitch(),grounded,s.gamemode(),s.effects(),s.awaitingTeleport(),s.uncertain());
+      if(world.hasUnsupported(start) && environment==Environment.DRY) return new StepResult(simulationTick,uncertain(s),false,"start collision volume is not fully known");
+      if(!s.gamemode().equals("survival")) return new StepResult(simulationTick,new Player(s.position(),Vec3.ZERO,s.yaw(),s.pitch(),false,s.gamemode(),s.effects(),s.awaitingTeleport(),false),false,"non-survival movement is not simulated");
+      double radians=Math.toRadians(s.yaw());
+      double speed=attributes.movementSpeed() * (input.sprint()?1.3:1.0) * (input.sneak()?0.3:1.0);
+      Vec3 acceleration=new Vec3(input.strafe()*WALK_ACCEL*speed*Math.cos(radians)-input.forward()*WALK_ACCEL*speed*Math.sin(radians),0,
+          input.forward()*WALK_ACCEL*speed*Math.cos(radians)+input.strafe()*WALK_ACCEL*speed*Math.sin(radians));
+      Vec3 velocity=s.velocity().add(acceleration);
+      if(environment==Environment.WATER) velocity=new Vec3(velocity.x()*0.8,velocity.y()*0.8,velocity.z()*0.8);
+      if(environment==Environment.LAVA) velocity=new Vec3(velocity.x()*0.5,velocity.y()*0.5,velocity.z()*0.5);
+      if(environment==Environment.CLIMBABLE) velocity=new Vec3(velocity.x(),Math.max(-0.15,velocity.y()),velocity.z());
+      if(input.jump()&&s.onGround()) velocity=new Vec3(velocity.x(),JUMP,velocity.z());
+      else velocity=new Vec3(velocity.x(),velocity.y()-GRAVITY,velocity.z());
+      Aabb swept=new Aabb(Math.min(start.minX(),start.minX()+velocity.x()),Math.min(start.minY(),start.minY()+velocity.y()),Math.min(start.minZ(),start.minZ()+velocity.z()),Math.max(start.maxX(),start.maxX()+velocity.x()),Math.max(start.maxY(),start.maxY()+velocity.y()),Math.max(start.maxZ(),start.maxZ()+velocity.z()));
+      if(world.hasUnsupported(swept) && environment==Environment.DRY) return new StepResult(simulationTick,uncertain(s),false,"swept collision volume is not fully known");
+      World.CollisionResult collision=World.resolveWithStep(world,start,velocity,s.onGround()?STEP_HEIGHT:0);
+      Vec3 displacement=collision.resolved();
+      boolean grounded=collision.collidedY()&&velocity.y()<=0;
+      double horizontalFactor=grounded?GROUND_FRICTION:AIR_DRAG;
+      if(environment==Environment.WATER) horizontalFactor*=0.8;
+      if(environment==Environment.LAVA) horizontalFactor*=0.5;
+      Vec3 nextVelocity=new Vec3(collision.collidedX()?0:velocity.x()*horizontalFactor,grounded?0:velocity.y()*AIR_DRAG,collision.collidedZ()?0:velocity.z()*horizontalFactor);
+      return new StepResult(simulationTick,new Player(s.position().add(displacement),nextVelocity,s.yaw(),s.pitch(),grounded,s.gamemode(),s.effects(),s.awaitingTeleport(),false),collision.collidedHorizontally()||collision.collidedY(),"deterministic collision-resolved movement step");
     }
     private static Player uncertain(Player state) { return new Player(state.position(),state.velocity(),state.yaw(),state.pitch(),state.onGround(),state.gamemode(),state.effects(),state.awaitingTeleport(),true); }
   }
+  public record TickContext(long simulationTick,Player state,Input input,World.Snapshot world) implements Serializable { public TickContext { Objects.requireNonNull(state); Objects.requireNonNull(input); Objects.requireNonNull(world); if(simulationTick<0) throw new IllegalArgumentException("simulationTick must be non-negative"); } }
+  public enum Environment { DRY, WATER, LAVA, CLIMBABLE, UNKNOWN }
+  public record Attributes(double movementSpeed) implements Serializable { public static final Attributes DEFAULT=new Attributes(1.0); public Attributes { if(!Double.isFinite(movementSpeed)||movementSpeed<0) throw new IllegalArgumentException("invalid movement speed"); } }
+  public record AdvancedInput(int forward,int strafe,boolean jump,boolean sprint,boolean sneak) implements Serializable {
+    public AdvancedInput(int forward,int strafe,boolean jump) { this(forward, strafe, jump, false, false); }
+    public AdvancedInput { if(Math.abs(forward)>1||Math.abs(strafe)>1) throw new IllegalArgumentException("input must be -1..1"); }
+    public static AdvancedInput basic(Input input){return new AdvancedInput(input.forward(),input.strafe(),input.jump(),false,false);}
+    public Input asBasic(){return new Input(forward,strafe,jump);}
+  }
+  public record PhysicsContext(long simulationTick,Player state,AdvancedInput input,World.Snapshot world,Environment environment,Attributes attributes) implements Serializable {
+    public PhysicsContext {Objects.requireNonNull(state);Objects.requireNonNull(input);Objects.requireNonNull(world);Objects.requireNonNull(environment);Objects.requireNonNull(attributes);if(simulationTick<0)throw new IllegalArgumentException("simulationTick must be non-negative");}
+  }
+  public record StepResult(long simulationTick,Player state,boolean collided,String diagnostic) implements Serializable { public StepResult { Objects.requireNonNull(state); Objects.requireNonNull(diagnostic); } }
+  public enum MovementMode { SURVIVAL_GROUND, SURVIVAL_AIR, NON_SURVIVAL, UNKNOWN }
+  public record SimulationFrame(long simulationTick,Player before,Input input,Player after,MovementMode mode,boolean collision,String diagnostic) implements Serializable {}
   public record Input(int forward,int strafe,boolean jump) implements Serializable { public Input {if(Math.abs(forward)>1||Math.abs(strafe)>1)throw new IllegalArgumentException("input must be -1..1");} }
   public record Frame(long tick, Player state, Input input, boolean collision) implements Serializable {}
   public record Trace(List<Frame> frames) implements Serializable { public Trace {frames=List.copyOf(frames);} }

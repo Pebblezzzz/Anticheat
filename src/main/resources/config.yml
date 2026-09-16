@@ -3,7 +3,7 @@ alerts:
   broadcast: false
 enforcement:
   # Disabled by default. Enable only in a controlled test server after reviewing evidence.
-  kick-enabled: true
+  kick-enabled: false
   minimum-confidence: 0.90
   permission-exempt: true
   permission: phantom.exempt

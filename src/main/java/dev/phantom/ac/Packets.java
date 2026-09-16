@@ -15,12 +15,12 @@ public final class Packets {
    * enumeration.</p>
    */
   public sealed interface Packet extends Serializable permits Move, ClientInput, Teleport, TeleportConfirm,
-      Velocity, Effect, Gamemode, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange {
+      Velocity, Effect, Gamemode, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange {
 
     /** True when this packet changes the client-visible world. */
     default boolean mutatesWorld() {
       return this instanceof ChunkData || this instanceof ChunkUnload
-          || this instanceof BlockChange || this instanceof ChunkStates || this instanceof BlockStateChange;
+          || this instanceof BlockChange || this instanceof ChunkStates || this instanceof BlockStateChange || this instanceof UnsupportedBlockStateChange;
     }
   }
 
@@ -51,6 +51,8 @@ public final class Packets {
   public record BlockChange(World.Pos position, World.Block block) implements Packet { public BlockChange { Objects.requireNonNull(position,"position"); Objects.requireNonNull(block,"block"); } }
   /** A single block changing state, addressed by block position, carrying a real 1.21.11 state. */
   public record BlockStateChange(dev.phantom.ac.world.Pos position, dev.phantom.ac.world.BlockState state) implements Packet { public BlockStateChange { Objects.requireNonNull(position,"position"); Objects.requireNonNull(state,"state"); if(state.isUnsupported()) throw new IllegalArgumentException("an unsupported state carries no verified shape and must not be recorded as a known world change"); } }
+  /** A client-visible state that this build cannot verify; it is preserved as unsupported evidence. */
+  public record UnsupportedBlockStateChange(dev.phantom.ac.world.Pos position, dev.phantom.ac.world.BlockState state) implements Packet { public UnsupportedBlockStateChange { Objects.requireNonNull(position,"position"); Objects.requireNonNull(state,"state"); if(!state.isUnsupported()) throw new IllegalArgumentException("unsupported state packet requires an unsupported state"); } }
   /** Legacy shape-key chunk payload, retained for already-recorded captures. */
   public record ChunkData(World.Chunk chunk, Map<World.Pos,World.Block> blocks) implements Packet { public ChunkData { Objects.requireNonNull(chunk,"chunk"); blocks=Map.copyOf(blocks); } }
   /** A full client-visible chunk payload carrying real 1.21.11 block states. */

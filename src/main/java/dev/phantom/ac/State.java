@@ -11,6 +11,7 @@ public final class State {
 
   public record Player(Vec3 position,Vec3 velocity,float yaw,float pitch,boolean onGround,String gamemode,Map<String,Integer> effects,OptionalInt awaitingTeleport,boolean uncertain) implements Serializable {
     public Player { Objects.requireNonNull(position,"position");Objects.requireNonNull(velocity,"velocity");if(gamemode==null||gamemode.isBlank())throw new IllegalArgumentException("gamemode is required");effects=Map.copyOf(effects);Objects.requireNonNull(awaitingTeleport,"awaitingTeleport"); }
+    public boolean isSurvival() { return gamemode.equals("survival"); }
     /** A test/replay fixture anchor. Production reconstruction should declare its known facts with Seed. */
     public static Player initial(Vec3 position){return new Player(position,Vec3.ZERO,0,0,true,"survival",Map.of(),OptionalInt.empty(),false);}
   }
