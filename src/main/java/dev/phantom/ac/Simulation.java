@@ -36,7 +36,7 @@ public final class Simulation {
       if(world.hasUnsupported(swept) && environment==Environment.DRY) return new StepResult(tick,uncertain(s),false,priorPose,"swept collision volume is not fully known");
       World.CollisionResult collision=World.resolveWithStep(world,start,velocity,s.onGround()?STEP_HEIGHT:0);
       Vec3 displacement=collision.resolved(); boolean grounded=collision.collidedY()&&velocity.y()<=0;
-      double horizontalFactor=grounded?GROUND_FRICTION:AIR_DRAG;
+      double horizontalFactor=s.onGround()?GROUND_FRICTION:AIR_DRAG;
       if(env.fluid()!=Phase5Mechanics.Fluid.NONE) horizontalFactor*=env.fluidDrag();
       Vec3 nextVelocity=new Vec3(collision.collidedX()?0:velocity.x()*horizontalFactor,grounded?0:velocity.y()*AIR_DRAG,collision.collidedZ()?0:velocity.z()*horizontalFactor);
       Phase5Mechanics.Pose nextPose=Phase5Mechanics.nextPose(priorPose,env);
