@@ -34,26 +34,292 @@ public final class Phase8LiveValidation {
   }
 
   public static Report analyze(String playerId,Timeline.Snapshot timeline,int maximumCandidates,Phase7Timing.Config timingConfig){
-    Objects.requireNonNull(playerId);Objects.requireNonNull(timeline);Objects.requireNonNull(timingConfig);Contracts.requireCandidateBudget(maximumCandidates);World.VisibilityHistory history=World.fromTimeline(timeline);Phase7Timing.Reconstruction timing=Phase7Timing.reconstruct(timeline,timingConfig);Phase6Reachability engine=new Phase6Reachability(new Vanilla12111RichPhysics());State.Reconstruction observedStates=reconstructObservedStates(timeline);Map<Long,State.StateFrame> observedBySequence=observedStatesBySequence(observedStates);Map<Long,List<ExternalTransition>> externalByClientTick=externalTransitions(timeline,timing);
-    Set<Candidate> candidates=Set.of();Continuation continuation=Continuation.UNANCHORED;Integer pendingTeleportId=null;InputConstraint currentInput=InputConstraint.any();long lastInputServerTick=-1;EntityCollisions currentEntityCollisions=EntityCollisions.NONE_TRACKED;List<Phase8MovementValidation.Result> results=new ArrayList<>();int movements=0;
+    Objects.requireNonNull(playerId);Objects.requireNonNull(timeline);Objects.requireNonNull(timingConfig);Contracts.requireCandidateBudget(maximumCandidates);
+
+    World.VisibilityHistory history=World.fromTimeline(timeline);
+    Phase7Timing.Reconstruction timing=Phase7Timing.reconstruct(timeline,timingConfig);
+    Phase6Reachability engine=new Phase6Reachability(new Vanilla12111RichPhysics());
+    State.Reconstruction observedStates=reconstructObservedStates(timeline);
+    Map<Long,State.StateFrame> observedBySequence=observedStatesBySequence(observedStates);
+    Map<Long,List<ExternalTransition>> externalByClientTick=externalTransitions(timeline,timing);
+
+    Set<Candidate> candidates=Set.of();
+    Continuation continuation=Continuation.UNANCHORED;
+    Integer pendingTeleportId=null;
+    InputConstraint currentInput=InputConstraint.any();
+    EntityCollisions currentEntityCollisions=EntityCollisions.NONE_TRACKED;
+    List<Phase8MovementValidation.Result> results=new ArrayList<>();
+    int movements=0;
+
     for(Timeline.Event event:timeline.events()){
-      Packets.NormalizedPacket normalized=event.packet();Packets.Packet packet=normalized.packet();
-      if(packet instanceof Packets.ClientInput input){if(!normalized.flags().contains(Packets.PacketFlag.DUPLICATE)){currentInput=InputConstraint.fromClientInput(input);lastInputServerTick=event.serverTick();}continue;}
-      if(packet instanceof Packets.PlayerContext context){if(!normalized.flags().contains(Packets.PacketFlag.DUPLICATE))currentEntityCollisions=EntityCollisions.of(context.entityBoxes());continue;}
-      if(packet instanceof Packets.Teleport teleport){pendingTeleportId=teleport.id();State.StateFrame frame=observedBySequence.get(normalized.sequence());Phase7Timing.EventTiming teleportTiming=timing.timingFor(normalized.sequence()).orElse(null);if(frame!=null&&teleportTiming!=null){Player anchored=teleportAnchorState(frame.after());WorldSnapshot world=history.statesAt(event.serverTick());Validation.SyncWindow sync=Phase7Timing.toPhase6Window(teleportTiming);Player safe=simulationSafe(anchored);if(!safe.uncertain()){candidates=Set.of(new Candidate(0,anchorContext(safe,world,currentInput,Math.max(0,sync.earliestClientTick()),currentEntityCollisions),new Phase6Reachability.Provenance(0,-1,event.serverTick(),"ROOT","ROOT","TeleportCorrection",List.of("authoritative server correction anchor"),1,List.of())));continuation=Continuation.ACTIVE;}else{candidates=Set.of();continuation=Continuation.UNANCHORED;}}else{candidates=Set.of();continuation=Continuation.UNANCHORED;}continue;}
-      if(packet instanceof Packets.TeleportConfirm confirm){if(pendingTeleportId!=null&&pendingTeleportId==confirm.id())pendingTeleportId=null;continue;}
-      if(!(packet instanceof Packets.Move move)||move.position()==null)continue;movements++;
-      Phase7Timing.EventTiming eventTiming=timing.timingFor(normalized.sequence()).orElse(null);State.StateFrame stateFrame=observedBySequence.get(normalized.sequence());WorldSnapshot world=history.statesAt(event.serverTick());if(eventTiming==null||stateFrame==null){results.add(anchorUncertain(playerId,event.serverTick(),stateFrame,world,"missing Phase 7 timing or Phase 2 state frame","live:phase8:"+normalized.sequence()));continue;}
-      Player prior=stateFrame.before(),observed=stateFrame.after();Validation.SyncWindow sync=Phase7Timing.toPhase6Window(eventTiming);String replayReference="live:phase8:"+playerId+":"+normalized.sequence();boolean freshInput=lastInputServerTick>=0&&event.serverTick()-lastInputServerTick<=1;if(!freshInput)currentInput=InputConstraint.any();List<String> inputAssumptions=List.of("client-input="+currentInput,"input-fresh="+freshInput,"input-constraint-candidates="+currentInput.enumerate().size(),"timing-offsets="+sync.earliestClientTick()+".."+sync.latestClientTick());String worldReference="timeline-world:tick="+event.serverTick()+":chunks="+world.loadedChunks().size();
-      boolean chronologyUncertain=normalized.flags().stream().anyMatch(flag->flag==Packets.PacketFlag.DUPLICATE||flag==Packets.PacketFlag.OUT_OF_ORDER||flag==Packets.PacketFlag.BEFORE_CAPTURE_EPOCH);if(chronologyUncertain){SearchResult uncertain=new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,Set.of(),0,candidates.size(),0,0,1,0,List.of("movement record chronology is not exhaustive: "+normalized.flags()));results.add(Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,worldReference,sync,inputAssumptions,uncertain,replayReference));continue;}
-      if(continuation==Continuation.UNANCHORED){SearchResult anchor=new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,Set.of(),0,0,0,0,0,0,List.of("first movement observation establishes the Phase 6 replay anchor"));results.add(Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,worldReference,sync,inputAssumptions,anchor,replayReference));Player safeObserved=simulationSafe(observed);if(safeObserved.uncertain())continue;candidates=Set.of(new Candidate(0,anchorContext(safeObserved,world,currentInput,Math.max(0,sync.earliestClientTick()),currentEntityCollisions),new Phase6Reachability.Provenance(0,-1,event.serverTick(),"ROOT","ROOT","None",List.of("live movement anchor"),1,List.of())));continuation=Continuation.ACTIVE;continue;}
-      if(continuation==Continuation.UNCERTAIN_EMPTY||continuation==Continuation.IMPOSSIBLE){Phase6Reachability.Verdict terminalVerdict=continuation==Continuation.IMPOSSIBLE?Phase6Reachability.Verdict.IMPOSSIBLE:Phase6Reachability.Verdict.UNCERTAIN;List<String> terminalReasons=continuation==Continuation.IMPOSSIBLE?List.of("existing Phase 6 reachable candidate set was exhaustively eliminated by an observed movement"):List.of("Phase 6 candidate chain is unavailable because prior validation was uncertain");SearchResult terminal=new SearchResult(terminalVerdict,Set.of(),0,0,0,0,terminalVerdict==Phase6Reachability.Verdict.UNCERTAIN?1:0,0,terminalReasons);results.add(Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,worldReference,sync,inputAssumptions,terminal,replayReference,terminalVerdict!=Phase6Reachability.Verdict.UNCERTAIN));continue;}
-      long earliest=Math.max(0,sync.earliestClientTick()),latest=Math.max(earliest,sync.latestClientTick()),timingSpan=latest-earliest+1;if(timingSpan>timingConfig.maxTimingCandidates()){SearchResult uncertain=new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,Set.of(),0,candidates.size(),0,0,1,0,List.of("Phase 7 timing window exceeds the configured exhaustive envelope"));continuation=Continuation.UNCERTAIN_EMPTY;results.add(Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,worldReference,sync,inputAssumptions,uncertain,replayReference));continue;}
-      List<Phase6Reachability.TimingSearchResult> parentSearches=new ArrayList<>();for(Candidate parent:candidates){Phase6Reachability.Context prepared=withObservedEnvironment(parent.context(),world,currentInput,earliest,currentEntityCollisions);boolean worldExhaustive=worldCoverageExhaustive(world,parent);parentSearches.add(engine.searchWithinTimingWindow(prepared,earliest,latest,false,List.of(currentInput),tick->List.of(new WorldBranch("client-visible-"+event.serverTick(),world,worldExhaustive,worldExhaustive?"historical client-visible world covers the parent collision volume":"Phase 4 visibility does not fully cover the parent collision volume; unknown cells remain unevaluable")),tick->externalByClientTick.getOrDefault(tick,List.of(new Phase6Reachability.None())),maximumCandidates));}
-      ParentAggregation aggregated=aggregateParentSearches(parentSearches,maximumCandidates,timingSpan);SearchResult reachable=aggregated.result();results.add(Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,worldReference,sync,inputAssumptions,reachable,replayReference,aggregated.timingOffsetsExhaustive()));
-      switch(reachable.verdict()){case POSSIBLE->{Set<Candidate> matching=new LinkedHashSet<>();for(Candidate candidate:aggregated.candidates())if(matchesObserved(candidate.context().player(),observed))matching.add(candidate);candidates=Set.copyOf(matching);continuation=matching.isEmpty()?Continuation.IMPOSSIBLE:Continuation.ACTIVE;}case UNCERTAIN->{candidates=aggregated.candidates();if(candidates.isEmpty()&&canReanchorAfterUncertainty(observed,world,reachable)){long anchorTick=Math.max(0,sync.earliestClientTick());Player safe=simulationSafe(observed);candidates=Set.of(new Candidate(0,anchorContext(safe,world,currentInput,anchorTick,currentEntityCollisions),new Phase6Reachability.Provenance(0,-1,event.serverTick(),"RECOVERY","UNCERTAIN_WORLD","None",List.of("re-anchored after previously incomplete client-visible world became exhaustive"),1,List.of())));continuation=Continuation.ACTIVE;}else continuation=candidates.isEmpty()?Continuation.UNCERTAIN_EMPTY:Continuation.ACTIVE;}case IMPOSSIBLE->{candidates=Set.of();continuation=Continuation.IMPOSSIBLE;}}
+      Packets.NormalizedPacket normalized=event.packet();
+      Packets.Packet packet=normalized.packet();
+
+      if(packet instanceof Packets.ClientInput input){
+        if(!normalized.flags().contains(Packets.PacketFlag.DUPLICATE)) {
+          // Minecraft input state is held until the client sends a replacement.
+          // Missing input packets are therefore not converted into "no input".
+          currentInput=InputConstraint.fromClientInput(input);
+        }
+        continue;
+      }
+
+      if(packet instanceof Packets.PlayerContext context){
+        if(!normalized.flags().contains(Packets.PacketFlag.DUPLICATE)) {
+          currentEntityCollisions=EntityCollisions.of(context.entityBoxes());
+        }
+        continue;
+      }
+
+      if(packet instanceof Packets.Teleport teleport){
+        pendingTeleportId=teleport.id();
+        State.StateFrame frame=observedBySequence.get(normalized.sequence());
+        Phase7Timing.EventTiming teleportTiming=timing.timingFor(normalized.sequence()).orElse(null);
+        if(frame!=null&&teleportTiming!=null){
+          Player anchored=teleportAnchorState(frame.after());
+          WorldSnapshot world=history.statesAt(event.serverTick());
+          Validation.SyncWindow sync=Phase7Timing.toPhase6Window(teleportTiming);
+          Player safe=simulationSafe(anchored);
+          if(!safe.uncertain()){
+            long anchorTick=Math.max(0,sync.earliestClientTick());
+            candidates=Set.of(new Candidate(0,anchorContext(safe,world,currentInput,anchorTick,currentEntityCollisions),
+                new Phase6Reachability.Provenance(0,-1,event.serverTick(),"ROOT","ROOT","TeleportCorrection",
+                    List.of("authoritative server correction anchor"),1,List.of())));
+            continuation=Continuation.ACTIVE;
+          } else {
+            candidates=Set.of();
+            continuation=Continuation.UNANCHORED;
+          }
+        } else {
+          candidates=Set.of();
+          continuation=Continuation.UNANCHORED;
+        }
+        continue;
+      }
+
+      if(packet instanceof Packets.TeleportConfirm confirm){
+        if(pendingTeleportId!=null&&pendingTeleportId==confirm.id()) pendingTeleportId=null;
+        continue;
+      }
+
+      if(!(packet instanceof Packets.Move move)||move.position()==null) continue;
+      movements++;
+
+      Phase7Timing.EventTiming eventTiming=timing.timingFor(normalized.sequence()).orElse(null);
+      State.StateFrame stateFrame=observedBySequence.get(normalized.sequence());
+      WorldSnapshot world=history.statesAt(event.serverTick());
+      if(eventTiming==null||stateFrame==null){
+        results.add(anchorUncertain(playerId,event.serverTick(),stateFrame,world,
+            "missing Phase 7 timing or Phase 2 state frame","live:phase8:"+normalized.sequence()));
+        continue;
+      }
+
+      Player prior=stateFrame.before();
+      Player observed=stateFrame.after();
+      Validation.SyncWindow sync=Phase7Timing.toPhase6Window(eventTiming);
+      String replayReference="live:phase8:"+playerId+":"+normalized.sequence();
+      String inputDescription="client-input="+currentInput
+          +", input-held-until-replacement=true"
+          +", timing-offsets="+sync.earliestClientTick()+".."+sync.latestClientTick();
+      List<String> inputAssumptions=List.of(inputDescription);
+
+      String worldReference="timeline-world:serverTick="+event.serverTick()+":chunks="+world.loadedChunks().size();
+      boolean chronologyUncertain=normalized.flags().stream().anyMatch(flag ->
+          flag==Packets.PacketFlag.DUPLICATE
+              ||flag==Packets.PacketFlag.OUT_OF_ORDER
+              ||flag==Packets.PacketFlag.BEFORE_CAPTURE_EPOCH);
+      if(chronologyUncertain){
+        SearchResult uncertain=new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,Set.of(),0,candidates.size(),
+            0,0,1,0,List.of("movement record chronology is not exhaustive: "+normalized.flags()));
+        results.add(Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
+            worldReference,sync,inputAssumptions,uncertain,replayReference));
+        continue;
+      }
+
+      if(continuation==Continuation.UNANCHORED){
+        // The first movement packet defines the observed replay anchor because there
+        // is no preceding client state in the capture from which to prove it.
+        SearchResult anchor=new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,Set.of(),0,0,
+            0,0,0,0,List.of("first movement observation establishes the Phase 6 replay anchor"));
+        results.add(Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
+            worldReference,sync,inputAssumptions,anchor,replayReference));
+        Player safeObserved=simulationSafe(observed);
+        if(safeObserved.uncertain()) {
+          continuation=Continuation.UNANCHORED;
+          continue;
+        }
+        long anchorTick=Math.max(0,sync.earliestClientTick());
+        candidates=Set.of(new Candidate(0,anchorContext(safeObserved,world,currentInput,anchorTick,currentEntityCollisions),
+            new Phase6Reachability.Provenance(0,-1,event.serverTick(),"ROOT","ROOT","None",
+                List.of("live movement anchor"),1,List.of())));
+        continuation=Continuation.ACTIVE;
+        continue;
+      }
+
+      if(continuation==Continuation.UNCERTAIN_EMPTY||continuation==Continuation.IMPOSSIBLE){
+        Phase6Reachability.Verdict terminalVerdict=
+            continuation==Continuation.IMPOSSIBLE?Phase6Reachability.Verdict.IMPOSSIBLE:Phase6Reachability.Verdict.UNCERTAIN;
+        List<String> terminalReasons=continuation==Continuation.IMPOSSIBLE
+            ?List.of("existing Phase 6 reachable candidate set was exhaustively eliminated by an observed movement")
+            :List.of("Phase 6 candidate chain is unavailable because prior validation was uncertain");
+        SearchResult terminal=new SearchResult(terminalVerdict,Set.of(),0,0,0,0,
+            terminalVerdict==Phase6Reachability.Verdict.UNCERTAIN?1:0,0,terminalReasons);
+        results.add(Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
+            worldReference,sync,inputAssumptions,terminal,replayReference,
+            terminalVerdict!=Phase6Reachability.Verdict.UNCERTAIN));
+        continue;
+      }
+
+      long earliest=Math.max(0,sync.earliestClientTick());
+      long latest=Math.max(earliest,sync.latestClientTick());
+      long timingSpan=latest-earliest+1;
+      if(timingSpan>timingConfig.maxTimingCandidates()){
+        SearchResult uncertain=new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,Set.of(),0,candidates.size(),
+            0,0,1,0,List.of("Phase 7 timing window exceeds the configured exhaustive envelope"));
+        continuation=Continuation.UNCERTAIN_EMPTY;
+        results.add(Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
+            worldReference,sync,inputAssumptions,uncertain,replayReference));
+        continue;
+      }
+
+      List<SearchResult> searches=new ArrayList<>();
+      boolean exhaustive=true;
+
+      for(Candidate parent:candidates){
+        long parentTick=parent.context().simulationTick();
+        boolean parentWorldComplete=worldCoverageExhaustive(world,parent);
+        for(long targetTick=earliest;targetTick<=latest;targetTick++){
+          if(targetTick<parentTick){
+            exhaustive=false;
+            searches.add(new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,Set.of(),0,1,0,0,1,0,
+                List.of("observed simulation tick precedes the current candidate tick; clocks cannot be inverted")));
+            continue;
+          }
+
+          if(!parentWorldComplete){
+            exhaustive=false;
+            searches.add(new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,Set.of(),0,1,0,1,1,0,
+                List.of("client-visible world does not fully cover the current candidate collision volume")));
+            continue;
+          }
+
+          long steps=targetTick-parentTick;
+          if(steps==0){
+            Candidate same=parent;
+            searches.add(new SearchResult(Phase6Reachability.Verdict.POSSIBLE,Set.of(same),0,1,0,0,0,0,
+                List.of("observed packet falls in the current simulation tick; no physics tick is advanced")));
+            continue;
+          }
+
+          if(steps>Phase6Reachability.MAX_HORIZON_TICKS){
+            exhaustive=false;
+            searches.add(new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,Set.of(),0,1,0,0,1,0,
+                List.of("movement gap exceeds the finite Phase 6 simulation horizon")));
+            continue;
+          }
+
+          List<InputConstraint> perTickInput=new ArrayList<>((int)steps);
+          for(long i=0;i<steps;i++) perTickInput.add(currentInput);
+
+          Phase6Reachability.Context prepared=withObservedEnvironment(parent.context(),world,currentInput,parentTick,currentEntityCollisions);
+          List<InputConstraint> inputs=List.copyOf(perTickInput);
+          SearchResult search=engine.search(prepared,inputs,
+              tick->List.of(new WorldBranch("client-visible-"+event.serverTick(),world,parentWorldComplete,
+                  parentWorldComplete
+                      ?"historical client-visible world covers the candidate start volume"
+                      :"Phase 4 visibility does not fully cover the candidate start volume; unknown cells remain unevaluable")),
+              tick->externalByClientTick.getOrDefault(tick,List.of(new Phase6Reachability.None())),
+              maximumCandidates);
+          searches.add(search);
+          if(search.verdict()==Phase6Reachability.Verdict.UNCERTAIN) exhaustive=false;
+        }
+      }
+
+      ParentAggregation aggregated=aggregateDirectSearches(searches,maximumCandidates,exhaustive);
+      SearchResult reachable=aggregated.result();
+      Phase8MovementValidation.Result validation=Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
+          worldReference,sync,inputAssumptions,reachable,replayReference,aggregated.timingOffsetsExhaustive());
+      results.add(validation);
+
+      if(reachable.verdict()==Phase6Reachability.Verdict.POSSIBLE){
+        Set<Candidate> matching=new LinkedHashSet<>();
+        for(Candidate candidate:aggregated.candidates()) {
+          if(matchesObserved(candidate.context().player(),observed)) matching.add(candidate);
+        }
+        if(matching.isEmpty()){
+          // The simulator exhausted every modeled path but none reached the observed state.
+          continuation=Continuation.IMPOSSIBLE;
+          candidates=Set.of();
+        } else {
+          candidates=Set.copyOf(matching);
+          continuation=Continuation.ACTIVE;
+        }
+      } else if(reachable.verdict()==Phase6Reachability.Verdict.UNCERTAIN){
+        candidates=aggregated.candidates();
+        if(candidates.isEmpty()&&canReanchorAfterUncertainty(observed,world,reachable)){
+          long anchorTick=Math.max(0,sync.earliestClientTick());
+          Player safe=simulationSafe(observed);
+          candidates=Set.of(new Candidate(0,anchorContext(safe,world,currentInput,anchorTick,currentEntityCollisions),
+              new Phase6Reachability.Provenance(0,-1,event.serverTick(),"RECOVERY","UNCERTAIN_WORLD","None",
+                  List.of("re-anchored after previously incomplete client-visible world became exhaustive"),1,List.of())));
+          continuation=Continuation.ACTIVE;
+        } else {
+          continuation=candidates.isEmpty()?Continuation.UNCERTAIN_EMPTY:Continuation.ACTIVE;
+        }
+      } else {
+        candidates=Set.of();
+        continuation=Continuation.IMPOSSIBLE;
+      }
     }
-    int possible=(int)results.stream().filter(r->r.verdict()==Phase8MovementValidation.Verdict.POSSIBLE).count(),uncertain=(int)results.stream().filter(r->r.verdict()==Phase8MovementValidation.Verdict.UNCERTAIN).count(),impossible=(int)results.stream().filter(r->r.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE).count();return new Report(results,movements,possible,uncertain,impossible);
+
+    int possible=(int)results.stream().filter(r->r.verdict()==Phase8MovementValidation.Verdict.POSSIBLE).count();
+    int uncertain=(int)results.stream().filter(r->r.verdict()==Phase8MovementValidation.Verdict.UNCERTAIN).count();
+    int impossible=(int)results.stream().filter(r->r.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE).count();
+    return new Report(results,movements,possible,uncertain,impossible);
+  }
+
+  static ParentAggregation aggregateDirectSearches(List<SearchResult> searches,int maximumCandidates,boolean timingOffsetsExhaustive){
+    Objects.requireNonNull(searches);Contracts.requireCandidateBudget(maximumCandidates);
+    LinkedHashSet<Candidate> candidates=new LinkedHashSet<>();
+    LinkedHashSet<String> reasons=new LinkedHashSet<>();
+    boolean hasPossible=false,hasImpossible=false,hasUncertain=!timingOffsetsExhaustive;
+    int simulatedTicks=0,peakCandidates=0,merged=0,nonExhaustiveWorldBranches=0,uncertainTransitions=0,provenanceMerges=0;
+    for(SearchResult result:searches){
+      simulatedTicks=Math.max(simulatedTicks,result.simulatedTicks());
+      peakCandidates=Math.max(peakCandidates,result.peakCandidates());
+      merged+=result.mergedStates();
+      nonExhaustiveWorldBranches+=result.nonExhaustiveWorldBranches();
+      uncertainTransitions+=result.uncertainTransitions();
+      provenanceMerges+=result.provenanceMerges();
+      reasons.addAll(result.reasons());
+      switch(result.verdict()){
+        case POSSIBLE->{hasPossible=true;candidates.addAll(result.candidates());}
+        case IMPOSSIBLE->{hasImpossible=true;}
+        case UNCERTAIN->{hasUncertain=true;candidates.addAll(result.candidates());}
+      }
+      if(candidates.size()>maximumCandidates){
+        return new ParentAggregation(
+            new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,Set.of(),simulatedTicks,
+                Math.max(peakCandidates,candidates.size()),merged,nonExhaustiveWorldBranches,
+                uncertainTransitions+1,provenanceMerges,
+                List.of("combined Phase 6 candidate budget exceeded; no provisional subset is exposed")),
+            Set.of(),false);
+      }
+    }
+    Phase6Reachability.Verdict verdict;
+    if(hasUncertain) verdict=Phase6Reachability.Verdict.UNCERTAIN;
+    else if(hasPossible&&!candidates.isEmpty()) verdict=Phase6Reachability.Verdict.POSSIBLE;
+    else if(hasImpossible) verdict=Phase6Reachability.Verdict.IMPOSSIBLE;
+    else {
+      verdict=Phase6Reachability.Verdict.UNCERTAIN;
+      timingOffsetsExhaustive=false;
+      reasons.add("no direct Phase 6 target search produced an evaluable result");
+    }
+    if(verdict==Phase6Reachability.Verdict.IMPOSSIBLE&&reasons.isEmpty())
+      reasons.add("all exhaustively modeled direct target searches were impossible");
+    SearchResult aggregate=new SearchResult(verdict,Set.copyOf(candidates),simulatedTicks,peakCandidates,merged,
+        nonExhaustiveWorldBranches,uncertainTransitions,provenanceMerges,List.copyOf(reasons));
+    return new ParentAggregation(aggregate,candidates,timingOffsetsExhaustive&&verdict!=Phase6Reachability.Verdict.UNCERTAIN);
   }
 
   private static boolean canReanchorAfterUncertainty(Player observed,WorldSnapshot world,SearchResult reachable){
