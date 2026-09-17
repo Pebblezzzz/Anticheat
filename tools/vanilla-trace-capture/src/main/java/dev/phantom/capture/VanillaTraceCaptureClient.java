@@ -65,14 +65,13 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
             try {
                 Path path = Path.of(output).toAbsolutePath(); if (path.getParent() != null) Files.createDirectories(path.getParent());
                 writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8);
-                Path eventPath = Path.of(events).toAbsolutePath(); if (eventPath.getParent() != null) Files.createDirectories(eventPath.getParent());
-                eventWriter = Files.newBufferedWriter(eventPath, StandardCharsets.UTF_8);
+                Path eventPath = Path.of(events).toAbsolutePath(); if (eventPath.getParent() != null) Files.createDirectories(eventPath.getParent()); eventWriter = Files.newBufferedWriter(eventPath, StandardCharsets.UTF_8);
                 writer.write(MAGIC); writer.newLine(); writer.write("# source_id=vanilla-client-1.21.11"); writer.newLine(); writer.write("# captured_at_utc=" + Instant.now()); writer.newLine(); writer.write(HEADER); writer.newLine();
                 eventWriter.write("# phantom-phase5-events version=1 protocol=minecraft-java-1.21.11 format=tsv"); eventWriter.newLine(); eventWriter.write("# captured_at_utc=" + Instant.now()); eventWriter.newLine(); eventWriter.write(EVENT_HEADER); eventWriter.newLine(); writer.flush(); eventWriter.flush();
             } catch (IOException e) { throw new IllegalStateException("Unable to open Phase 5 capture output", e); }
         }
 
-        public static synchronized void beginObservationTick(ClientPlayerEntity player) { resetMoveObservation(); }
+        public static synchronized void beginObservationTick(ClientPlayerEntity player) { captureClientTick++; resetMoveObservation(); }
         public static synchronized void observePreTickInput(ClientPlayerEntity player) {
             if (writer == null || player == null) return;
             observedPreTickInput = player.input.playerInput;
@@ -96,25 +95,17 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
         static synchronized void record(MinecraftClient client, ClientPlayerEntity player) {
             if (writer == null || client.world == null) return;
             PlayerInput input = observedPreTickInput != null ? observedPreTickInput : player.input.playerInput;
-            Vec3d velocity = player.getVelocity();
-            EntityAttributeInstance speed = player.getAttributeInstance(EntityAttributes.MOVEMENT_SPEED);
+            Vec3d velocity = player.getVelocity(); EntityAttributeInstance speed = player.getAttributeInstance(EntityAttributes.MOVEMENT_SPEED);
             String fluid = player.isInLava() ? "LAVA" : player.isTouchingWater() ? "WATER" : "NONE";
             String gamemode = "UNKNOWN";
             if (client.interactionManager != null) { GameMode mode = client.interactionManager.getCurrentGameMode(); if (mode != null) gamemode = mode.name().toLowerCase(Locale.ROOT); }
             if (!"survival".equals(gamemode)) return;
-            List<String> missing = new ArrayList<>();
-            if (speed == null) missing.add("base_movement_speed");
-            double baseSpeed = speed == null ? 0.0 : speed.getBaseValue();
-            String modifiers = speed == null ? "-" : Phase5CaptureEncoding.modifiers(speed);
-            int speedAmp = amplifier(player.getStatusEffect(StatusEffects.SPEED));
-            int slownessAmp = amplifier(player.getStatusEffect(StatusEffects.SLOWNESS));
-            int jumpAmp = amplifier(player.getStatusEffect(StatusEffects.JUMP_BOOST));
-            long clientTick = ++captureClientTick; long worldTick = client.world.getTime(); tick++;
+            List<String> missing = new ArrayList<>(); if (speed == null) missing.add("base_movement_speed");
+            double baseSpeed = speed == null ? 0.0 : speed.getBaseValue(); String modifiers = speed == null ? "-" : Phase5CaptureEncoding.modifiers(speed);
+            int speedAmp = amplifier(player.getStatusEffect(StatusEffects.SPEED)); int slownessAmp = amplifier(player.getStatusEffect(StatusEffects.SLOWNESS)); int jumpAmp = amplifier(player.getStatusEffect(StatusEffects.JUMP_BOOST));
+            long clientTick = captureClientTick; long worldTick = client.world.getTime(); tick++;
             boolean velocityPacket = observedVelocityPacketId >= 0; long correctionId = observedCorrectionId; boolean correctionPending = observedCorrectionPending;
-            if (!velocityPacket) { observedVelocityPacket = Vec3d.ZERO; }
             if (!correctionStateObserved) { missing.add("correction_id"); missing.add("correction_pending"); }
-            // The semantic cause "knockback" is not identical to an entity velocity packet.
-            // The packet event remains authoritative; the trace never labels it as knockback.
             missing.add("knockback_x"); missing.add("knockback_y"); missing.add("knockback_z");
             String inputSource = (observedPreTickInput != null ? "capture-pre-tick:" : "capture-fallback-post-tick:") + phaseLabel();
             String row = String.join("\t", Long.toString(tick), Long.toString(clientTick), Long.toString(System.nanoTime()), d(player.getX()), d(player.getY()), d(player.getZ()), d(velocity.x), d(velocity.y), d(velocity.z), d(player.getYaw()), d(player.getPitch()), Boolean.toString(player.isOnGround()), Integer.toString(input.forward() && !input.backward() ? 1 : input.backward() && !input.forward() ? -1 : 0), Integer.toString(input.right() && !input.left() ? 1 : input.left() && !input.right() ? -1 : 0), Boolean.toString(input.jump()), Boolean.toString(player.isSprinting()), Boolean.toString(input.sneak()), player.getPose().name(), gamemode, fluid, Boolean.toString(player.isSubmergedInWater()), Boolean.toString(player.isClimbing()), Boolean.toString(player.getPose() == EntityPose.GLIDING), d(baseSpeed), modifiers, Integer.toString(speedAmp), Integer.toString(slownessAmp), Integer.toString(jumpAmp), Boolean.toString(player.hasStatusEffect(StatusEffects.LEVITATION)), Boolean.toString(player.hasStatusEffect(StatusEffects.SLOW_FALLING)), d(observedVelocityPacket.x), d(observedVelocityPacket.y), d(observedVelocityPacket.z), Boolean.toString(velocityPacket), Long.toString(correctionId), Boolean.toString(correctionPending), Phase5CaptureEncoding.worldIdentity(client), Long.toString(worldTick), Boolean.toString(player.horizontalCollision || player.verticalCollision), Boolean.toString(observedStepAttempted), Boolean.toString(observedStepSucceeded), Boolean.toString(observedCollisionX), Boolean.toString(observedCollisionY), Boolean.toString(observedCollisionZ), inputSource, "1.21.11", String.join(",", missing));
@@ -127,15 +118,11 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
             observedVelocityPacket = packet.getVelocity(); observedVelocityPacketId = packet.getEntityId(); Vec3d velocity = packet.getVelocity(); writeEvent(System.nanoTime(), captureClientTick, "ENTITY_VELOCITY", 0, 0, 0, velocity.x, velocity.y, velocity.z, packet.getEntityId(), "server velocity packet");
         }
         public static synchronized void recordCorrectionPacket(PlayerPositionLookS2CPacket packet) {
-            if (writer == null) return;
-            observedCorrectionId = packet.teleportId(); observedCorrectionPending = true; correctionStateObserved = true; Vec3d position = packet.change().position();
+            if (writer == null) return; observedCorrectionId = packet.teleportId(); observedCorrectionPending = true; correctionStateObserved = true; Vec3d position = packet.change().position();
             writeEvent(System.nanoTime(), captureClientTick, "POSITION_CORRECTION", position.x, position.y, position.z, packet.change().yaw(), packet.change().pitch(), 0, packet.teleportId(), "relatives=" + packet.relatives());
         }
         public static synchronized void recordTeleportConfirmPacket(TeleportConfirmC2SPacket packet) {
-            if (writer == null) return;
-            int id = packet.getTeleportId();
-            if (observedCorrectionId == id) observedCorrectionPending = false;
-            correctionStateObserved = true;
+            if (writer == null) return; int id = packet.getTeleportId(); if (observedCorrectionId == id) observedCorrectionPending = false; correctionStateObserved = true;
             writeEvent(System.nanoTime(), captureClientTick, "TELEPORT_CONFIRM_C2S", 0, 0, 0, 0, 0, 0, id, "client confirm");
         }
         private static void writeEvent(long nanos, long clientTick, String type, double x, double y, double z, double auxX, double auxY, double auxZ, long auxId, String details) {
