@@ -15,6 +15,7 @@ import dev.phantom.ac.Packets.RawPacket;
 
 class LiveValidationTest {
   private static Timeline.Snapshot capture(List<RawPacket> packets){return Timeline.assign(new Normalizer().normalize(packets),0,50_000_000L);}
+  private static Phase7Timing.Config exactTiming(){return new Phase7Timing.Config(50_000_000L,50_000_000L,50_000_000L,new Phase7Timing.LatencyBounds(0,0),new Phase7Timing.LatencyBounds(0,0),new Phase7Timing.TickDelayBounds(0,0),new Phase7Timing.TickDelayBounds(0,0),250_000_000L,3,128);}
 
   @Test void incompleteLiveWorldCoverageCannotProduceImpossibleFindings(){
     List<RawPacket> packets=new ArrayList<>();
@@ -34,7 +35,7 @@ class LiveValidationTest {
     assertEquals(Validation.Verdict.UNCERTAIN,report.findings().getFirst().verdict());
   }
 
-  @Test void knownWorldMakesBlatantVerticalFlightImpossible(){
+  @Test void knownWorldMakesBlatantVerticalFlightImpossibleUnderExactSyntheticTiming(){
     var stone=dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone",Map.of());
     var chunk=new dev.phantom.ac.world.Chunk(0,0);
     List<RawPacket> packets=List.of(
@@ -43,7 +44,7 @@ class LiveValidationTest {
         new RawPacket(3,50_000_000L,new Move(new Vec3(.5,70,.5),0f,0f,false,null)),
         new RawPacket(4,100_000_000L,new Move(new Vec3(.5,76,.5),0f,0f,false,null)),
         new RawPacket(5,150_000_000L,new Move(new Vec3(.5,82,.5),0f,0f,false,null)));
-    var report=LiveValidation.analyze(capture(packets),4096);
+    var report=LiveValidation.analyze(capture(packets),4096,exactTiming());
     assertTrue(report.impossibleFindings()>=1,report.findings().toString());
   }
 }
