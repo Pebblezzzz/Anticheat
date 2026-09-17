@@ -56,6 +56,7 @@ public final class CompensatedClientWorld implements Serializable {
 
   /** Ordered transaction send history; ACKs retire entries from the front. */
   private final Deque<Short> sentOrder = new ArrayDeque<>();
+  private final Set<Short> openedBarriers = new HashSet<>();
   private final Set<Short> acknowledged = new HashSet<>();
 
   public CompensatedClientWorld(String version, int minY, int maxY) {
@@ -76,10 +77,8 @@ public final class CompensatedClientWorld implements Serializable {
    */
   public synchronized void openBarrier(short transactionId) {
     if (acknowledged.contains(transactionId)) return;
-    if (!pending.containsKey(transactionId)) {
-      pending.put(transactionId, new ArrayList<>());
-      sentOrder.addLast(transactionId);
-    }
+    if (openedBarriers.add(transactionId)) sentOrder.addLast(transactionId);
+    pending.computeIfAbsent(transactionId, ignored -> new ArrayList<>());
     if (!unassigned.isEmpty()) {
       pending.get(transactionId).addAll(unassigned);
       unassigned.clear();
