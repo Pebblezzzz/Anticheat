@@ -300,7 +300,7 @@ public final class ControlledPhase5ScenarioDriver {
             fillZ(m, s, -24, 63, minZ, 24, 63, maxZ, "minecraft:stone", 600);
             fillZ(m, s, -24, 64, minZ, 24, 67, maxZ, "air", 160);
             fillZ(m, s, -24, 64, minZ, -23, 72, maxZ, "minecraft:stone", 160);
-            fillZ(m, s, 23, 64, minZ, 24, 72, maxZ, "minecraft:stone", 160);
+            fillZ(m, s, -24, 64, minZ, 23, 72, maxZ, "minecraft:stone", 160);
 
             if (includes(6, 9)) {
                 int water = laneZ("water");
@@ -318,8 +318,8 @@ public final class ControlledPhase5ScenarioDriver {
             }
             if (includes(13, 13)) {
                 int stairs = laneZ("stairs");
-                fillZ(m, s, -3, 64, stairs + 30, 3, 64, stairs + 33, "minecraft:oak_stairs[facing=south,half=bottom,shape=straight]", 32);
-                fillZ(m, s, -3, 65, stairs + 34, 3, 65, stairs + 37, "minecraft:oak_stairs[facing=south,half=bottom,shape=straight]", 32);
+                fillZ(m, s, -3, 64, stairs + 12, 3, 64, stairs + 15, "minecraft:oak_stairs[facing=south,half=bottom,shape=straight]", 32);
+                fillZ(m, s, -3, 65, stairs + 16, 3, 65, stairs + 19, "minecraft:oak_stairs[facing=south,half=bottom,shape=straight]", 32);
             }
             if (includes(14, 14)) {
                 int climb = laneZ("climbable");
