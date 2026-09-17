@@ -33,7 +33,7 @@ class Vanilla12111RichPhysicsMovementFormulaTest {
   void stoneGroundUsesFrictionInfluencedMovementSpeed() {
     var result=step(Player.initial(new Vec3(.5,64,.5)),
         new AdvancedInput(1,0,false,false,false),floor("minecraft:stone"));
-    assertEquals(.1,result.state().position().z(),1e-8);
+    assertEquals(.6,result.state().position().z(),1e-8);
     assertEquals(.0546,result.state().velocity().z(),1e-8);
   }
 
@@ -41,7 +41,7 @@ class Vanilla12111RichPhysicsMovementFormulaTest {
   void sprintGroundUsesMovementSpeedSprintModifier() {
     var result=step(Player.initial(new Vec3(.5,64,.5)),
         new AdvancedInput(1,0,false,true,false),floor("minecraft:stone"));
-    assertEquals(.13,result.state().position().z(),1e-8);
+    assertEquals(.63,result.state().position().z(),1e-8);
     assertEquals(.07098,result.state().velocity().z(),1e-8);
   }
 
@@ -49,7 +49,7 @@ class Vanilla12111RichPhysicsMovementFormulaTest {
   void iceGroundChangesInputSpeedThroughSlipperiness() {
     var result=step(Player.initial(new Vec3(.5,64,.5)),
         new AdvancedInput(1,0,false,false,false),floor("minecraft:ice"));
-    assertEquals(.0229496234562,result.state().position().z(),1e-10);
+    assertEquals(.5229496234562,result.state().position().z(),1e-10);
     assertEquals(.0205481624564,result.state().velocity().z(),1e-10);
   }
 
@@ -60,7 +60,7 @@ class Vanilla12111RichPhysicsMovementFormulaTest {
         java.util.Optional.empty(),new Attributes(.1),Pose.STANDING,State.Environment.DRY,
         State.TickRange.exact(0),State.Provenance.UNKNOWN,java.util.Set.of());
     var result=step(player,new AdvancedInput(1,0,false,false,false),floor("minecraft:stone"));
-    assertEquals(.02,result.state().position().z(),1e-10);
+    assertEquals(.52,result.state().position().z(),1e-10);
     assertEquals(.0182,result.state().velocity().z(),1e-10);
   }
 
@@ -71,7 +71,7 @@ class Vanilla12111RichPhysicsMovementFormulaTest {
         java.util.Optional.empty(),new Attributes(.1),Pose.STANDING,State.Environment.DRY,
         State.TickRange.exact(0),State.Provenance.UNKNOWN,java.util.Set.of());
     var result=step(player,new AdvancedInput(1,0,false,true,false),floor("minecraft:stone"));
-    assertEquals(.026,result.state().position().z(),1e-10);
+    assertEquals(.526,result.state().position().z(),1e-10);
     assertEquals(.02366,result.state().velocity().z(),1e-10);
   }
 }
