@@ -86,16 +86,21 @@ public final class Phase8MovementValidation {
     public Result { Objects.requireNonNull(verdict); Objects.requireNonNull(evidence); if (evidence.verdict() != verdict) throw new IllegalArgumentException("evidence/result verdict mismatch"); }
   }
 
+  private static Set<ObservedField> allObservedFields() {
+    return EnumSet.allOf(ObservedField.class);
+  }
+
   /**
    * Compatibility entry point. A timing-uncertain window is conservative unless
    * the caller explicitly states that every possible timing offset was exhaustively modeled.
+   * This legacy overload treats all supplied state fields as observed facts.
    */
   public static Result validate(String playerId, long serverTick, Player prior, Player observed,
                                 WorldSnapshot world, String worldReference,
                                 Validation.SyncWindow timing, List<String> inputAssumptions,
                                 SearchResult reachable, String replayReference) {
     return validate(playerId, serverTick, prior, observed, world, worldReference, timing,
-        inputAssumptions, reachable, replayReference, !timing.uncertain());
+        inputAssumptions, reachable, replayReference, !timing.uncertain(), allObservedFields());
   }
 
   /** Pure comparison against an existing Phase 6 result, with an explicit timing-exhaustiveness proof. */
@@ -104,9 +109,24 @@ public final class Phase8MovementValidation {
                                 Validation.SyncWindow timing, List<String> inputAssumptions,
                                 SearchResult reachable, String replayReference,
                                 boolean timingExhaustivelyModeled) {
+    return validate(playerId, serverTick, prior, observed, world, worldReference, timing,
+        inputAssumptions, reachable, replayReference, timingExhaustivelyModeled, allObservedFields());
+  }
+
+  /**
+   * Live-packet comparison where {@code observedFields} is the exact subset of
+   * facts declared by the packet. Fields merely carried forward by Phase 2 state
+   * reconstruction are not treated as fresh observations.
+   */
+  public static Result validate(String playerId, long serverTick, Player prior, Player observed,
+                                WorldSnapshot world, String worldReference,
+                                Validation.SyncWindow timing, List<String> inputAssumptions,
+                                SearchResult reachable, String replayReference,
+                                boolean timingExhaustivelyModeled, Set<ObservedField> observedFields) {
     Objects.requireNonNull(playerId); Objects.requireNonNull(prior); Objects.requireNonNull(observed);
     Objects.requireNonNull(world); Objects.requireNonNull(timing); Objects.requireNonNull(inputAssumptions);
-    Objects.requireNonNull(reachable); Objects.requireNonNull(replayReference);
+    Objects.requireNonNull(reachable); Objects.requireNonNull(replayReference); Objects.requireNonNull(observedFields);
+    if (observedFields.isEmpty()) throw new IllegalArgumentException("observedFields must not be empty");
 
     List<String> uncertainty = new ArrayList<>();
     if (timing.uncertain()) uncertainty.addAll(timing.reasons());
@@ -124,10 +144,7 @@ public final class Phase8MovementValidation {
       return new Result(Verdict.UNCERTAIN, evidence);
     }
 
-    Observation observation = new Observation(observed, EnumSet.of(
-        ObservedField.POSITION, ObservedField.VELOCITY, ObservedField.ROTATION,
-        ObservedField.GROUND, ObservedField.GAMEMODE, ObservedField.EFFECTS,
-        ObservedField.TELEPORT_PENDING));
+    Observation observation = new Observation(observed, observedFields);
     Phase6Reachability.Evidence comparison = new Phase6Reachability(new Vanilla12111RichPhysics()).compare(reachable, observation);
     if (comparison.verdict() == Phase6Reachability.Verdict.POSSIBLE) {
       List<String> diagnostics = new ArrayList<>(comparison.reasons());
@@ -136,7 +153,7 @@ public final class Phase8MovementValidation {
           inputAssumptions, reachable.candidates().size(), comparison.matchingCandidates(),
           Math.max(0, reachable.candidates().size() - comparison.matchingCandidates()),
           "at least one complete legitimate candidate explains every declared observed field",
-          OptionalLong.empty(), bestMatchingCandidate(reachable.candidates(), observed), diagnostics, uncertainty, replayReference);
+          OptionalLong.empty(), bestMatchingCandidate(reachable.candidates(), observation), diagnostics, uncertainty, replayReference);
       return new Result(Verdict.POSSIBLE, evidence);
     }
 
@@ -161,8 +178,8 @@ public final class Phase8MovementValidation {
         "MOVEMENT_REACHABILITY");
   }
 
-  private static Optional<CandidateSummary> bestMatchingCandidate(Set<Candidate> candidates, Player observed) {
-    return candidates.stream().filter(c -> matchesPosition(c.context().player(), observed))
+  private static Optional<CandidateSummary> bestMatchingCandidate(Set<Candidate> candidates, Observation observation) {
+    return candidates.stream().filter(c -> matches(c.context().player(), observation))
         .sorted(Comparator.comparingLong(Candidate::id)).map(Phase8MovementValidation::summary).findFirst();
   }
 
@@ -171,7 +188,21 @@ public final class Phase8MovementValidation {
         .thenComparingLong(Candidate::id)).map(Phase8MovementValidation::summary).findFirst();
   }
 
-  private static boolean matchesPosition(Player a, Player b) { return a.position().equals(b.position()); }
+  private static boolean matches(Player candidate, Observation observation) {
+    Player observed = observation.observed();
+    for (ObservedField field : observation.known()) {
+      switch (field) {
+        case POSITION -> { if (!candidate.position().equals(observed.position())) return false; }
+        case VELOCITY -> { if (!candidate.velocity().equals(observed.velocity())) return false; }
+        case ROTATION -> { if (Float.compare(candidate.yaw(), observed.yaw()) != 0 || Float.compare(candidate.pitch(), observed.pitch()) != 0) return false; }
+        case GROUND -> { if (candidate.onGround() != observed.onGround()) return false; }
+        case GAMEMODE -> { if (!candidate.gamemode().equals(observed.gamemode())) return false; }
+        case EFFECTS -> { if (!candidate.effects().equals(observed.effects())) return false; }
+        case TELEPORT_PENDING -> { if (candidate.awaitingTeleport().isPresent() != observed.awaitingTeleport().isPresent()) return false; }
+      }
+    }
+    return true;
+  }
 
   private static double distance(Player a, Player b) {
     double dx = a.position().x() - b.position().x();
