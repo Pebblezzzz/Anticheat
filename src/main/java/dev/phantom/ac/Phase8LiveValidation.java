@@ -34,9 +34,21 @@ public final class Phase8LiveValidation {
   }
 
   public static Report analyze(String playerId,Timeline.Snapshot timeline,int maximumCandidates,Phase7Timing.Config timingConfig){
+    return analyze(playerId,timeline,maximumCandidates,timingConfig,null);
+  }
+
+  /**
+   * Live entry point. The optional liveWorld is used only for the newest movement
+   * observation, where it represents the persistent acknowledged client-visible
+   * world. Earlier observations continue to use the historical replay world.
+   */
+  public static Report analyze(String playerId,Timeline.Snapshot timeline,int maximumCandidates,Phase7Timing.Config timingConfig,WorldSnapshot liveWorld){
     Objects.requireNonNull(playerId);Objects.requireNonNull(timeline);Objects.requireNonNull(timingConfig);Contracts.requireCandidateBudget(maximumCandidates);
 
     World.VisibilityHistory history=World.fromTimeline(timeline);
+    long latestMovementSequence=timeline.events().stream()
+        .filter(e->e.packet().packet() instanceof Packets.Move m&&m.position()!=null)
+        .mapToLong(e->e.packet().sequence()).max().orElse(-1L);
     Phase7Timing.Reconstruction timing=Phase7Timing.reconstruct(timeline,timingConfig);
     Phase6Reachability engine=new Phase6Reachability(new Vanilla12111RichPhysics());
     State.Reconstruction observedStates=reconstructObservedStates(timeline);
@@ -77,7 +89,9 @@ public final class Phase8LiveValidation {
         Phase7Timing.EventTiming teleportTiming=timing.timingFor(normalized.sequence()).orElse(null);
         if(frame!=null&&teleportTiming!=null){
           Player anchored=teleportAnchorState(frame.after());
-          WorldSnapshot world=history.statesAt(event.serverTick());
+          WorldSnapshot world=(liveWorld!=null&&normalized.sequence()==latestMovementSequence)
+          ?liveWorld
+          :history.statesAt(event.serverTick());
           Validation.SyncWindow sync=Phase7Timing.toPhase6Window(teleportTiming);
           Player safe=simulationSafe(anchored);
           if(!safe.uncertain()){
