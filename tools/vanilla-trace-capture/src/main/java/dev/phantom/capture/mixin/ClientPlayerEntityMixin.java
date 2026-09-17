@@ -47,16 +47,16 @@ final class ClientPlayerEntityMixin {
                     + " onGround=" + player.isOnGround());
         }
 
-        if (phase.equals("part4:climbable") || phase.equals("part4:edge-corner")) {
+        if (phase.endsWith(":climbable") || phase.endsWith(":edge-corner")) {
             boolean settledAtPhaseStart = player.isOnGround()
                     && Math.abs(player.getY() - 64.0D) <= 0.75D;
 
-            if (!phantom$part4GeometryInjected && settledAtPhaseStart) {
+            if (!phantom$part4GeometryInjected && settledAtPhaseStart && phantom$phaseTicks <= 2) {
                 phantom$injectPart4Geometry(client, player, phase);
                 phantom$part4GeometryInjected = true;
             }
 
-            if (phase.equals("part4:edge-corner")) {
+            if (phase.endsWith(":edge-corner")) {
                 boolean right = phantom$phaseTicks >= 31 && phantom$phaseTicks < 56;
                 boolean left = phantom$phaseTicks >= 56 && phantom$phaseTicks < 81;
                 client.options.rightKey.setPressed(right);
@@ -84,7 +84,7 @@ final class ClientPlayerEntityMixin {
         server.executeSync(() -> {
             CommandManager m = server.getCommandManager();
             ServerCommandSource s = server.getCommandSource();
-            if (phase.equals("part4:climbable")) {
+            if (phase.endsWith(":climbable")) {
                 int ladderZ = z + 4;
                 int wallZ = ladderZ + 1;
                 cmd(m, s, "fill -1 64 " + ladderZ + " 1 68 " + ladderZ + " minecraft:ladder[facing=north]");
