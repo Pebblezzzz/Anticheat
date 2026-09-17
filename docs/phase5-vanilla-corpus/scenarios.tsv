@@ -1,38 +1,50 @@
 scenario_id	category	controlled_setup	primary_inputs	required_observations	status
-idle	baseline	flat non-fluid stone platform	no input	position velocity rotation ground pose	BLOCKED_BY_EXTERNAL_DATA
-walking	ground	flat stone platform	forward	position velocity acceleration friction	BLOCKED_BY_EXTERNAL_DATA
-sprinting	ground	flat stone platform	forward+sprint	position velocity sprint state	BLOCKED_BY_EXTERNAL_DATA
-sneaking	ground	flat stone platform	forward+sneak	pose speed input	BLOCKED_BY_EXTERNAL_DATA
-forward	input	flat stone platform	forward	position velocity input	BLOCKED_BY_EXTERNAL_DATA
-strafe	input	flat stone platform	left/right	position velocity input	BLOCKED_BY_EXTERNAL_DATA
-diagonal	input	flat stone platform	forward+left/right	position velocity input	BLOCKED_BY_EXTERNAL_DATA
-jumping	jump	flat stone platform	jump+forward	jump timing velocity ground transition	BLOCKED_BY_EXTERNAL_DATA
-sprint-jumping	jump	flat stone platform	jump+forward+sprint	jump timing sprint velocity	BLOCKED_BY_EXTERNAL_DATA
-falling	air	platform edge or raised start	no input	vertical velocity position ground	BLOCKED_BY_EXTERNAL_DATA
-landing	air	controlled drop onto flat platform	no input	collision ground vertical velocity	BLOCKED_BY_EXTERNAL_DATA
-slab-up	step	bottom slab to upper slab	forward	collision step geometry position	BLOCKED_BY_EXTERNAL_DATA
-stairs-up	step	straight stair run	forward	step sequence collision position	BLOCKED_BY_EXTERNAL_DATA
-step-up	step	single-block controlled ledge	forward	step attempt/result position	BLOCKED_BY_EXTERNAL_DATA
-corner	collision	inside-corner wall geometry	forward+strafe	per-axis collision clipping	BLOCKED_BY_EXTERNAL_DATA
-edge	collision	platform edge	forward	ground and horizontal collision	BLOCKED_BY_EXTERNAL_DATA
-water	fluid	still water volume	forward	fluid state drag velocity	BLOCKED_BY_EXTERNAL_DATA
-lava	fluid	still lava volume	forward	fluid state drag velocity	BLOCKED_BY_EXTERNAL_DATA
-swimming	pose	deep water volume	forward+jump	pose submerged velocity	BLOCKED_BY_EXTERNAL_DATA
-ladder	climbable	vertical ladder	forward	climbing velocity collision	BLOCKED_BY_EXTERNAL_DATA
-vines	climbable	vertical vine wall	forward	climbing velocity collision	BLOCKED_BY_EXTERNAL_DATA
-speed-effect	effect	flat stone platform	forward+speed effect	attribute/effect velocity	BLOCKED_BY_EXTERNAL_DATA
-slowness-effect	effect	flat stone platform	forward+slowness effect	attribute/effect velocity	BLOCKED_BY_EXTERNAL_DATA
-jump-boost-effect	effect	flat stone platform	jump+forward+jump boost	jump velocity effect	BLOCKED_BY_EXTERNAL_DATA
-slow-falling-effect	effect	controlled drop+slow falling	no input	fall velocity	BLOCKED_BY_EXTERNAL_DATA
-levitation-effect	effect	open air	no input	vertical velocity effect	BLOCKED_BY_EXTERNAL_DATA
-attribute-modifier	attribute	flat stone platform	forward	base/modifier/value velocity	BLOCKED_BY_EXTERNAL_DATA
-knockback	impulse	flat stone platform	no input plus server impulse	velocity packet impulse response	BLOCKED_BY_EXTERNAL_DATA
-teleport-correction	correction	flat stone platform	forward plus server correction	packet id correction recovery timing	BLOCKED_BY_EXTERNAL_DATA
-water-sprint	combination	water volume	forward+sprint	fluid+sprint interaction	BLOCKED_BY_EXTERNAL_DATA
-water-jump	combination	water volume	jump+forward	fluid+jump interaction	BLOCKED_BY_EXTERNAL_DATA
-water-swim-sprint	combination	deep water	forward+sprint+jump	fluid+swim+sprint interaction	BLOCKED_BY_EXTERNAL_DATA
-ladder-sprint	combination	ladder	forward+sprint	climb+sprint interaction	BLOCKED_BY_EXTERNAL_DATA
-step-sprint-jump	combination	single-block step	forward+sprint+jump	step+sprint+jump ordering	BLOCKED_BY_EXTERNAL_DATA
-knockback-in-air	combination	controlled airborne state	server impulse	airborne impulse+gravity	BLOCKED_BY_EXTERNAL_DATA
-teleport-water	combination	water volume	forward plus server correction	correction+fluid ordering	BLOCKED_BY_EXTERNAL_DATA
-corner-sprint	combination	corner geometry	forward+strafe+sprint	corner clipping+sprint	BLOCKED_BY_EXTERNAL_DATA
+idle	basic	flat stone platform	no input	position velocity ground input	IMPLEMENTED_PENDING_CAPTURE
+walk-forward	basic	flat stone platform	forward	position velocity ground input	IMPLEMENTED_PENDING_CAPTURE
+walk-backward	basic	flat stone platform	backward	position velocity ground input	IMPLEMENTED_PENDING_CAPTURE
+strafe-left	basic	flat stone platform	left	position velocity ground input	IMPLEMENTED_PENDING_CAPTURE
+strafe-right	basic	flat stone platform	right	position velocity ground input	IMPLEMENTED_PENDING_CAPTURE
+diagonal	basic	flat stone platform	forward+left	position velocity ground input	IMPLEMENTED_PENDING_CAPTURE
+sprint-forward	sprint	flat stone platform	forward+sprint	position velocity sprint input	IMPLEMENTED_PENDING_CAPTURE
+sprint-strafe	sprint	flat stone platform	left+sprint	position velocity sprint input	IMPLEMENTED_PENDING_CAPTURE
+sprint-diagonal	sprint	flat stone platform	forward+left+sprint	position velocity sprint input	IMPLEMENTED_PENDING_CAPTURE
+jump	jump	flat stone platform	jump+forward	launch ascent apex fall landing	IMPLEMENTED_PENDING_CAPTURE
+sprint-jump	jump	flat stone platform	jump+forward+sprint	launch ascent horizontal sprint	IMPLEMENTED_PENDING_CAPTURE
+repeated-jumps	jump	flat stone platform	repeated jump+forward	multiple launch/landing cycles	IMPLEMENTED_PENDING_CAPTURE
+controlled-ascent	jump	flat stone platform	jump+forward	ascending vertical velocity	IMPLEMENTED_PENDING_CAPTURE
+controlled-apex	jump	flat stone platform	forward	apex vertical velocity transition	IMPLEMENTED_PENDING_CAPTURE
+controlled-fall	air	raised start	no input	fall vertical velocity ground	IMPLEMENTED_PENDING_CAPTURE
+ascent-apex-fall	jump	flat stone platform	jump+forward	ascent apex descent	IMPLEMENTED_PENDING_CAPTURE
+landing	air	raised start over platform	no input	landing collision ground velocity	IMPLEMENTED_PENDING_CAPTURE
+sneak	pose	flat stone platform	forward+sneak	crouch pose speed input	IMPLEMENTED_PENDING_CAPTURE
+slab-up	collision	bottom slab run	forward	collision position pose	IMPLEMENTED_PENDING_CAPTURE
+stairs-up	collision	straight stair run	forward	step sequence collision position	IMPLEMENTED_PENDING_CAPTURE
+step-up	collision	single-block ledge	forward	step attempt/result collision	IMPLEMENTED_PENDING_CAPTURE
+partial-collision	collision	partial wall	forward	per-axis clipping	IMPLEMENTED_PENDING_CAPTURE
+edge	collision	platform edge	forward	ground horizontal collision	IMPLEMENTED_PENDING_CAPTURE
+corner	collision	inside corner	forward+left	per-axis collision clipping	IMPLEMENTED_PENDING_CAPTURE
+corner-sprint	collision	inside corner	forward+left+sprint	per-axis clipping sprint	IMPLEMENTED_PENDING_CAPTURE
+water-surface	fluid	water surface	forward	fluid state drag pose	IMPLEMENTED_PENDING_CAPTURE
+deep-swimming	fluid	fully submerged water	forward+jump	pose submerged velocity	IMPLEMENTED_PENDING_CAPTURE
+water-sprint	fluid	fully submerged water	forward+sprint	fluid+sprint movement	IMPLEMENTED_PENDING_CAPTURE
+swim-transition	fluid	water edge	forward+jump	air/water/swim transitions	IMPLEMENTED_PENDING_CAPTURE
+lava	fluid	lava volume	forward	lava drag gravity	IMPLEMENTED_PENDING_CAPTURE
+ladder	climbable	vertical ladder	forward	climbing velocity collision	IMPLEMENTED_PENDING_CAPTURE
+ladder-sprint	climbable	vertical ladder	forward+sprint	climb sprint interaction	IMPLEMENTED_PENDING_CAPTURE
+vines	climbable	vertical vine wall	forward	climbing velocity collision	IMPLEMENTED_PENDING_CAPTURE
+speed-effect	effect	flat stone platform	forward+speed II	speed amplifier velocity	IMPLEMENTED_PENDING_CAPTURE
+slowness-effect	effect	flat stone platform	forward+slowness II	slowness amplifier velocity	IMPLEMENTED_PENDING_CAPTURE
+jump-boost	effect	flat stone platform	jump+forward+jump boost III	jump launch velocity	IMPLEMENTED_PENDING_CAPTURE
+slow-falling	effect	raised start	no input+slow falling	fall velocity	IMPLEMENTED_PENDING_CAPTURE
+levitation	effect	raised start	no input+levitation	vertical velocity	IMPLEMENTED_PENDING_CAPTURE
+attribute-modifier	attribute	flat stone platform	forward+movement modifier	base modifier value velocity	IMPLEMENTED_PENDING_CAPTURE
+knockback-ground	impulse	flat stone platform	server velocity event	packet velocity response	IMPLEMENTED_PENDING_CAPTURE
+knockback-air	impulse	raised start	server velocity event	packet velocity gravity response	IMPLEMENTED_PENDING_CAPTURE
+teleport-correction	correction	flat stone platform	server correction	correction id pending confirm	IMPLEMENTED_PENDING_CAPTURE
+teleport-water	correction	water surface	server correction	correction plus fluid transition	IMPLEMENTED_PENDING_CAPTURE
+glide	flight	raised start with Elytra	forward+sprint	fall flying pose velocity	IMPLEMENTED_PENDING_CAPTURE
+sleeping	pose	bed	try sleep/wake	 sleeping pose ground	IMPLEMENTED_PENDING_CAPTURE
+step-sprint-jump	combination	single-block ledge	forward+sprint+jump	step sprint jump ordering	IMPLEMENTED_PENDING_CAPTURE
+water-jump	combination	water surface	forward+jump	fluid jump transition	IMPLEMENTED_PENDING_CAPTURE
+climb-jump	combination	ladder	forward+jump	climb jump transition	IMPLEMENTED_PENDING_CAPTURE
+correction-after-knockback	combination	flat ground	server velocity then correction	velocity packet correction pending	IMPLEMENTED_PENDING_CAPTURE
