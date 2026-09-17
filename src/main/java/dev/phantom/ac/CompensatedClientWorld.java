@@ -120,6 +120,13 @@ public final class CompensatedClientWorld implements Serializable {
     return true;
   }
 
+  /** Requeues a barrier's mutations when the synthetic transaction could not be sent. */
+  public synchronized void abortBarrier(short transactionId) {
+    List<Mutation> mutations = pending.remove(transactionId);
+    sentOrder.remove(transactionId);
+    if (mutations != null) unassigned.addAll(mutations);
+  }
+
   public synchronized boolean hasPendingTransaction(short transactionId) {
     return pending.containsKey(transactionId);
   }
