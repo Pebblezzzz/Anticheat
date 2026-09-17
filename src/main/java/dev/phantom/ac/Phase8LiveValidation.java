@@ -32,6 +32,99 @@ public final class Phase8LiveValidation {
     public Report { results = List.copyOf(results); }
   }
 
+  /** Pure parent-branch aggregation used by the live adapter and regression tests. */
+  record ParentAggregation(SearchResult result, Set<Candidate> candidates, boolean timingOffsetsExhaustive) {
+    ParentAggregation {
+      Objects.requireNonNull(result);
+      candidates = Set.copyOf(candidates);
+    }
+  }
+
+  /**
+   * Aggregates independently simulated parent/timing branches without collapsing
+   * IMPOSSIBLE into UNCERTAIN. A single possible branch wins over impossible
+   * branches; any unevaluable branch keeps the aggregate conservative.
+   */
+  static ParentAggregation aggregateParentSearches(List<Phase6Reachability.TimingSearchResult> searches,
+                                                   int maximumCandidates, long timingSpan) {
+    Objects.requireNonNull(searches);
+    Contracts.requireCandidateBudget(maximumCandidates);
+    if (timingSpan < 1) throw new IllegalArgumentException("timing span must be positive");
+
+    Set<Candidate> nextAll = new LinkedHashSet<>();
+    boolean hasPossible = false;
+    boolean hasImpossible = false;
+    boolean hasUncertain = false;
+    boolean timingExhaustive = true;
+    int simulatedTicks = 0;
+    int peakCandidates = 0;
+    int merged = 0;
+    int nonExhaustiveWorldBranches = 0;
+    int uncertainTransitions = 0;
+    int provenanceMerges = 0;
+    LinkedHashSet<String> reasons = new LinkedHashSet<>();
+
+    for (Phase6Reachability.TimingSearchResult search : searches) {
+      Objects.requireNonNull(search);
+      if (search.evaluatedOffsets() != timingSpan || search.skippedOffsets() != 0
+          || search.verdict() == Phase6Reachability.Verdict.UNCERTAIN) {
+        timingExhaustive = false;
+      }
+      for (SearchResult perOffset : search.byFirstTick().values()) {
+        simulatedTicks = Math.max(simulatedTicks, perOffset.simulatedTicks());
+        peakCandidates = Math.max(peakCandidates, perOffset.peakCandidates());
+        merged += perOffset.mergedStates();
+        nonExhaustiveWorldBranches += perOffset.nonExhaustiveWorldBranches();
+        uncertainTransitions += perOffset.uncertainTransitions();
+        provenanceMerges += perOffset.provenanceMerges();
+      }
+
+      switch (search.verdict()) {
+        case POSSIBLE -> {
+          hasPossible = true;
+          nextAll.addAll(search.candidates());
+          reasons.addAll(search.reasons());
+        }
+        case IMPOSSIBLE -> {
+          hasImpossible = true;
+          reasons.addAll(search.reasons());
+        }
+        case UNCERTAIN -> {
+          hasUncertain = true;
+          uncertainTransitions += search.skippedOffsets();
+          reasons.addAll(search.reasons());
+        }
+      }
+
+      if (nextAll.size() > maximumCandidates) {
+        timingExhaustive = false;
+        hasUncertain = true;
+        nextAll.clear();
+        reasons.add("combined Phase 6 timing candidate budget exceeded; no provisional subset retained");
+        break;
+      }
+    }
+
+    Phase6Reachability.Verdict verdict;
+    if (hasUncertain) {
+      verdict = Phase6Reachability.Verdict.UNCERTAIN;
+    } else if (hasPossible && !nextAll.isEmpty()) {
+      verdict = Phase6Reachability.Verdict.POSSIBLE;
+    } else if (hasImpossible) {
+      verdict = Phase6Reachability.Verdict.IMPOSSIBLE;
+      if (reasons.isEmpty()) reasons.add("all exhaustively modeled parent branches are impossible");
+    } else {
+      verdict = Phase6Reachability.Verdict.UNCERTAIN;
+      timingExhaustive = false;
+      reasons.add("no parent branch produced an evaluable result");
+    }
+
+    SearchResult aggregate = new SearchResult(verdict, Set.copyOf(nextAll), simulatedTicks,
+        peakCandidates, merged, nonExhaustiveWorldBranches, uncertainTransitions, provenanceMerges,
+        List.copyOf(reasons));
+    return new ParentAggregation(aggregate, nextAll, timingExhaustive);
+  }
+
   public static Report analyze(String playerId, Timeline.Snapshot timeline,
                                int maximumCandidates, Phase7Timing.Config timingConfig) {
     Objects.requireNonNull(playerId);
@@ -47,6 +140,8 @@ public final class Phase8LiveValidation {
     Map<Long, List<ExternalTransition>> externalByClientTick = externalTransitions(timeline, timing);
 
     Set<Candidate> candidates = Set.of();
+    Continuation continuation = Continuation.UNANCHORED;
+    Integer pendingTeleportId = null;
     InputConstraint currentInput = InputConstraint.any();
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     int movements = 0;
@@ -57,6 +152,20 @@ public final class Phase8LiveValidation {
 
       if (packet instanceof Packets.ClientInput input) {
         if (!normalized.flags().contains(Packets.PacketFlag.DUPLICATE)) currentInput = InputConstraint.fromClientInput(input);
+        continue;
+      }
+      if (packet instanceof Packets.Teleport teleport) {
+        pendingTeleportId = teleport.id();
+        candidates = Set.of();
+        continuation = Continuation.WAITING_FOR_TELEPORT_CONFIRM;
+        continue;
+      }
+      if (packet instanceof Packets.TeleportConfirm confirm) {
+        if (pendingTeleportId != null && pendingTeleportId == confirm.id()) {
+          pendingTeleportId = null;
+          candidates = Set.of();
+          continuation = Continuation.UNANCHORED;
+        }
         continue;
       }
       if (!(packet instanceof Packets.Move move) || move.position() == null) continue;
@@ -101,7 +210,16 @@ public final class Phase8LiveValidation {
         continue;
       }
 
-      if (candidates.isEmpty()) {
+      if (continuation == Continuation.WAITING_FOR_TELEPORT_CONFIRM) {
+        SearchResult uncertain = new SearchResult(Phase6Reachability.Verdict.UNCERTAIN, Set.of(), 0,
+            candidates.size(), 0, 0, 1, 0,
+            List.of("movement observed before the explicit teleport correction was confirmed"));
+        results.add(Phase8MovementValidation.validate(playerId, event.serverTick(), prior, observed,
+            world, worldReference, sync, inputAssumptions, uncertain, replayReference));
+        continue;
+      }
+
+      if (continuation == Continuation.UNANCHORED) {
         SearchResult anchor = new SearchResult(Phase6Reachability.Verdict.UNCERTAIN, Set.of(), 0, 0, 0, 0, 0, 0,
             List.of("first movement observation establishes the Phase 6 replay anchor"));
         results.add(Phase8MovementValidation.validate(playerId, event.serverTick(), prior, observed,
@@ -112,6 +230,22 @@ public final class Phase8LiveValidation {
             anchorContext(safeObserved, world, currentInput, Math.max(0, sync.earliestClientTick())),
             new Phase6Reachability.Provenance(0, -1, event.serverTick(), "ROOT", "ROOT", "None",
                 List.of("live movement anchor"), 1, List.of())));
+        continuation = Continuation.ACTIVE;
+        continue;
+      }
+
+      if (continuation == Continuation.UNCERTAIN_EMPTY || continuation == Continuation.IMPOSSIBLE) {
+        Phase6Reachability.Verdict terminalVerdict = continuation == Continuation.IMPOSSIBLE
+            ? Phase6Reachability.Verdict.IMPOSSIBLE
+            : Phase6Reachability.Verdict.UNCERTAIN;
+        List<String> terminalReasons = continuation == Continuation.IMPOSSIBLE
+            ? List.of("existing Phase 6 reachable candidate set was exhaustively eliminated by an observed movement")
+            : List.of("Phase 6 candidate chain is unavailable because prior validation was uncertain");
+        SearchResult terminal = new SearchResult(terminalVerdict, Set.of(), 0, 0, 0, 0,
+            terminalVerdict == Phase6Reachability.Verdict.UNCERTAIN ? 1 : 0, 0, terminalReasons);
+        results.add(Phase8MovementValidation.validate(playerId, event.serverTick(), prior, observed,
+            world, worldReference, sync, inputAssumptions, terminal, replayReference,
+            terminalVerdict != Phase6Reachability.Verdict.UNCERTAIN));
         continue;
       }
 
@@ -121,83 +255,80 @@ public final class Phase8LiveValidation {
       if (timingSpan > timingConfig.maxTimingCandidates()) {
         SearchResult uncertain = new SearchResult(Phase6Reachability.Verdict.UNCERTAIN, Set.of(), 0, candidates.size(), 0, 0, 1, 0,
             List.of("Phase 7 timing window exceeds the configured exhaustive envelope"));
+        continuation = Continuation.UNCERTAIN_EMPTY;
         results.add(Phase8MovementValidation.validate(playerId, event.serverTick(), prior, observed,
             world, worldReference, sync, inputAssumptions, uncertain, replayReference));
         continue;
       }
 
-      Set<Candidate> nextAll = new LinkedHashSet<>();
-      boolean uncertain = false;
-      boolean timingOffsetsExhaustive = true;
-      int simulatedTicks = 0;
-      int peakCandidates = candidates.size();
-      int merged = 0;
-      int nonExhaustiveWorldBranches = 0;
-      int uncertainTransitions = 0;
-      int provenanceMerges = 0;
-      LinkedHashSet<String> searchReasons = new LinkedHashSet<>(eventTiming.reasons());
-
-      // Phase 4 visibility history is authoritative; Phase 6 determines whether
-      // the represented client-visible cells are sufficient for exhaustive search.
-      boolean worldExhaustive = true;
-
+      List<Phase6Reachability.TimingSearchResult> parentSearches = new ArrayList<>();
       for (Candidate parent : candidates) {
         Phase6Reachability.Context prepared = withObservedEnvironment(
             parent.context(), world, currentInput, earliest);
-        Phase6Reachability.TimingSearchResult search = engine.searchWithinTimingWindow(
+        boolean worldExhaustive = worldCoverageExhaustive(world, parent);
+        parentSearches.add(engine.searchWithinTimingWindow(
             prepared, earliest, latest,
             false,
             List.of(currentInput),
             tick -> List.of(new WorldBranch(
                 "client-visible-" + event.serverTick(), world, worldExhaustive,
-                "historical client-visible world; unloaded/unsupported cells remain Phase 6 uncertainty")),
+                worldExhaustive
+                    ? "historical client-visible world covers the parent collision volume"
+                    : "Phase 4 visibility does not fully cover the parent collision volume; unknown cells remain unevaluable")),
             tick -> externalByClientTick.getOrDefault(tick, List.of(new Phase6Reachability.None())),
-            maximumCandidates);
-
-        simulatedTicks += search.byFirstTick().values().stream().mapToInt(SearchResult::simulatedTicks).max().orElse(0);
-        peakCandidates = Math.max(peakCandidates, search.candidates().size());
-        if (search.evaluatedOffsets() != timingSpan || search.skippedOffsets() != 0) timingOffsetsExhaustive = false;
-        if (search.verdict() != Phase6Reachability.Verdict.POSSIBLE) {
-          uncertain = true;
-          uncertainTransitions += search.skippedOffsets();
-          searchReasons.addAll(search.reasons());
-          continue;
-        }
-        nextAll.addAll(search.candidates());
-        if (nextAll.size() > maximumCandidates) {
-          uncertain = true;
-          nextAll.clear();
-          timingOffsetsExhaustive = false;
-          searchReasons.add("combined Phase 6 timing candidate budget exceeded; no provisional subset retained");
-          break;
-        }
-        for (SearchResult perOffset : search.byFirstTick().values()) {
-          merged += perOffset.mergedStates();
-          nonExhaustiveWorldBranches += perOffset.nonExhaustiveWorldBranches();
-          uncertainTransitions += perOffset.uncertainTransitions();
-          provenanceMerges += perOffset.provenanceMerges();
-          peakCandidates = Math.max(peakCandidates, perOffset.peakCandidates());
-        }
+            maximumCandidates));
       }
 
-      SearchResult reachable = uncertain
-          ? new SearchResult(Phase6Reachability.Verdict.UNCERTAIN, Set.copyOf(nextAll), simulatedTicks,
-              peakCandidates, merged, nonExhaustiveWorldBranches, uncertainTransitions, provenanceMerges,
-              List.copyOf(searchReasons))
-          : new SearchResult(Phase6Reachability.Verdict.POSSIBLE, Set.copyOf(nextAll), simulatedTicks,
-              peakCandidates, merged, nonExhaustiveWorldBranches, uncertainTransitions, provenanceMerges,
-              searchReasons.isEmpty() ? List.of("all Phase 7 timing offsets were exhaustively modeled") : List.copyOf(searchReasons));
+      ParentAggregation aggregated = aggregateParentSearches(parentSearches, maximumCandidates, timingSpan);
+      SearchResult reachable = aggregated.result();
 
       results.add(Phase8MovementValidation.validate(playerId, event.serverTick(), prior, observed,
-          world, worldReference, sync, inputAssumptions, reachable, replayReference, timingOffsetsExhaustive));
+          world, worldReference, sync, inputAssumptions, reachable, replayReference,
+          aggregated.timingOffsetsExhaustive()));
 
-      if (!nextAll.isEmpty()) candidates = Set.copyOf(nextAll);
+      switch (reachable.verdict()) {
+        case POSSIBLE -> {
+          Set<Candidate> matching = new LinkedHashSet<>();
+          for (Candidate candidate : aggregated.candidates()) {
+            if (matchesObserved(candidate.context().player(), observed)) matching.add(candidate);
+          }
+          candidates = Set.copyOf(matching);
+          continuation = matching.isEmpty() ? Continuation.UNCERTAIN_EMPTY : Continuation.ACTIVE;
+        }
+        case UNCERTAIN -> {
+          candidates = aggregated.candidates();
+          continuation = candidates.isEmpty() ? Continuation.UNCERTAIN_EMPTY : Continuation.ACTIVE;
+        }
+        case IMPOSSIBLE -> {
+          candidates = Set.of();
+          continuation = Continuation.IMPOSSIBLE;
+        }
+      }
     }
 
     int possible = (int) results.stream().filter(r -> r.verdict() == Phase8MovementValidation.Verdict.POSSIBLE).count();
     int uncertain = (int) results.stream().filter(r -> r.verdict() == Phase8MovementValidation.Verdict.UNCERTAIN).count();
     int impossible = (int) results.stream().filter(r -> r.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE).count();
     return new Report(results, movements, possible, uncertain, impossible);
+  }
+
+  private enum Continuation { UNANCHORED, ACTIVE, UNCERTAIN_EMPTY, IMPOSSIBLE, WAITING_FOR_TELEPORT_CONFIRM }
+
+  private static boolean worldCoverageExhaustive(WorldSnapshot world, Candidate parent) {
+    Maths.Aabb box = Maths.Aabb.playerAt(parent.context().player().position(), parent.context().pose());
+    return world.fullyKnown(new dev.phantom.ac.geometry.BlockBox(
+        box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()));
+  }
+
+  private static boolean matchesObserved(Player candidate, Player observed) {
+    return candidate.position().equals(observed.position())
+        && candidate.velocity().equals(observed.velocity())
+        && Float.compare(candidate.yaw(), observed.yaw()) == 0
+        && Float.compare(candidate.pitch(), observed.pitch()) == 0
+        && candidate.onGround() == observed.onGround()
+        && candidate.gamemode().equals(observed.gamemode())
+        && candidate.effects().equals(observed.effects())
+        && candidate.awaitingTeleport().isPresent() == observed.awaitingTeleport().isPresent();
   }
 
   private static Player simulationSafe(Player player) {
