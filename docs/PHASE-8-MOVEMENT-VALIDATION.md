@@ -46,7 +46,7 @@ Evidence is designed to explain exhaustion of the legitimate state space rather 
 
 ## Accumulation and alerts
 
-`Accumulator` tracks repeated impossible observations, recoveries, and uncertainty periods per player/rule. `POSSIBLE` and `UNCERTAIN` never increase impossible evidence. A single impossible observation is recorded but does not alert by default; the observation-only default requires repeated impossible observations and debounces operator alerts.
+`Accumulator` tracks repeated impossible observations, recoveries, and uncertainty periods per player/rule. `POSSIBLE` and `UNCERTAIN` never increase impossible evidence. A single impossible observation is recorded but does not alert under the default policy; the observation-only default requires repeated impossible observations and debounces operator alerts.
 
 Alerts are structured as:
 
@@ -54,7 +54,7 @@ Alerts are structured as:
 [AntiCheat] player=<id> type=MOVEMENT result=IMPOSSIBLE tick=<tick> first-inconsistent-tick=<tick> reason=<reason> confidence=<value> replay=<id>
 ```
 
-Phase 8 has **no punishment semantics**. It does not kick, ban, or otherwise punish players as part of the movement-validation contract. Operator alerts are evidence/observation output only.
+Phase 8 has **no punishment semantics**. The Phase 8 API cannot be configured for punishment; operator alerts are evidence/observation output only. The existing Paper adapter's legacy enforcement setting remains disabled by default and is outside the new Phase 8 core API.
 
 ## Replay
 
@@ -63,6 +63,46 @@ Phase 8 has **no punishment semantics**. It does not kick, ban, or otherwise pun
 ## False-positive protection
 
 Timing uncertainty, delayed/reordered/duplicated packets, incomplete input, incomplete world coverage, unsupported blocks, teleport/correction state, velocity transitions, and Phase 6 budget exhaustion must remain uncertainty. Phase 8 cannot turn these conditions into a violation.
+
+## Examples
+
+Legitimate evidence:
+
+```text
+verdict=POSSIBLE
+player=alice
+server-tick=120
+client-ticks=120..120
+reachable=18
+matching=1
+eliminated=17
+reason="at least one complete legitimate candidate explains every declared observed field"
+replay=replay:alice:120
+```
+
+Synthetic impossible evidence:
+
+```text
+verdict=IMPOSSIBLE
+player=alice
+server-tick=121
+reachable=1
+matching=0
+eliminated=1
+first-inconsistent-tick=121
+reason="all exhaustively modeled legitimate candidates disagree with the observed movement state"
+replay=replay:alice:121
+```
+
+Operator alert after repeated evidence:
+
+```text
+[AntiCheat] player=alice type=MOVEMENT result=IMPOSSIBLE tick=121 first-inconsistent-tick=121 reason=MOVEMENT_REACHABILITY confidence=1.00 replay=replay:alice:121
+```
+
+## Performance
+
+`Phase8PerformanceBenchmark` measures validation/evidence/accumulator cost without changing Phase 5 or Phase 6. It is a deterministic workload harness, not a claim about production latency. Production measurements must be taken on representative server captures.
 
 ## Validation boundary
 
