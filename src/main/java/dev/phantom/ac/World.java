@@ -285,7 +285,7 @@ public final class World {
 
     private void queueStateBlock(long tick, dev.phantom.ac.world.Pos position,
                                  dev.phantom.ac.world.BlockState state) {
-      if (!stateVisibleAtPendingAware(tick, dev.phantom.ac.world.Chunk.containing(position.x(), position.z()))) return;
+      if (!stateVisibleAtPendingAware(tick, Chunk.containing(position.x(), position.z()))) return;
       unassignedStateEvents.add(new StateBlockChange(tick, stateEventOrder++, position, state));
     }
 
@@ -392,7 +392,7 @@ public final class World {
       if(!hasTransactionEvidence) {
         // Backward-compatible captures that predate the transaction journal.
         if(packet instanceof Packets.ChunkData data) history.chunkData(tick,data.chunk(),data.blocks());
-        else if(packet instanceof Packets.ChunkStates states) history.chunkStates(tick,states.chunk(),states.states());
+        else if(packet instanceof Packets.ChunkStates states) history.chunkStates(tick,new Chunk(states.chunk().x(),states.chunk().z()),states.states());
         else if(packet instanceof Packets.ChunkUnload unload) { history.chunkUnloaded(tick,unload.chunk()); history.stateChunkUnloaded(tick,unload.chunk()); }
         else if(packet instanceof Packets.BlockChange change) history.blockChanged(tick,change.position(),change.block());
         else if(packet instanceof Packets.BlockStateChange change) history.blockStateChanged(tick,change.position(),change.state());
