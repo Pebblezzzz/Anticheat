@@ -117,7 +117,8 @@ public final class Phase8LiveValidation {
 
       long earliest = Math.max(0, sync.earliestClientTick());
       long latest = Math.max(earliest, sync.latestClientTick());
-      if (latest - earliest + 1 > timingConfig.maxTimingCandidates()) {
+      long timingSpan = latest - earliest + 1;
+      if (timingSpan > timingConfig.maxTimingCandidates()) {
         SearchResult uncertain = new SearchResult(Phase6Reachability.Verdict.UNCERTAIN, Set.of(), 0, candidates.size(), 0, 0, 1, 0,
             List.of("Phase 7 timing window exceeds the configured exhaustive envelope"));
         results.add(Phase8MovementValidation.validate(playerId, event.serverTick(), prior, observed,
@@ -127,6 +128,7 @@ public final class Phase8LiveValidation {
 
       Set<Candidate> nextAll = new LinkedHashSet<>();
       boolean uncertain = false;
+      boolean timingOffsetsExhaustive = true;
       int simulatedTicks = 0;
       int peakCandidates = candidates.size();
       int merged = 0;
@@ -154,6 +156,7 @@ public final class Phase8LiveValidation {
 
         simulatedTicks += search.byFirstTick().values().stream().mapToInt(SearchResult::simulatedTicks).max().orElse(0);
         peakCandidates = Math.max(peakCandidates, search.candidates().size());
+        if (search.evaluatedOffsets() != timingSpan || search.skippedOffsets() != 0) timingOffsetsExhaustive = false;
         if (search.verdict() != Phase6Reachability.Verdict.POSSIBLE) {
           uncertain = true;
           uncertainTransitions += search.skippedOffsets();
@@ -164,6 +167,7 @@ public final class Phase8LiveValidation {
         if (nextAll.size() > maximumCandidates) {
           uncertain = true;
           nextAll.clear();
+          timingOffsetsExhaustive = false;
           searchReasons.add("combined Phase 6 timing candidate budget exceeded; no provisional subset retained");
           break;
         }
@@ -184,9 +188,8 @@ public final class Phase8LiveValidation {
               peakCandidates, merged, nonExhaustiveWorldBranches, uncertainTransitions, provenanceMerges,
               searchReasons.isEmpty() ? List.of("all Phase 7 timing offsets were exhaustively modeled") : List.copyOf(searchReasons));
 
-      boolean timingExhaustive = timing.consistency() == Phase7Timing.Consistency.CONSISTENT;
       results.add(Phase8MovementValidation.validate(playerId, event.serverTick(), prior, observed,
-          world, worldReference, sync, inputAssumptions, reachable, replayReference, timingExhaustive));
+          world, worldReference, sync, inputAssumptions, reachable, replayReference, timingOffsetsExhaustive));
 
       if (!nextAll.isEmpty()) candidates = Set.copyOf(nextAll);
     }
