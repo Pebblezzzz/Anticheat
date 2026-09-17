@@ -41,12 +41,12 @@ public final class Vanilla12111RichPhysics {
         boolean fluid=context.movementEnvironment().fluid()!=Phase5Mechanics.Fluid.NONE;
         boolean climbing=context.movementEnvironment().climbable(),gliding=context.movementEnvironment().gliding();
         double inputMagnitude=Math.hypot(context.input().forward(),context.input().strafe());
-        double inputScale=inputMagnitude>1.0?1.0/Math.sqrt(2.0):1.0;
+        double inputScale=inputMagnitude>1.0?1.0/inputMagnitude:1.0;
 
         // Vanilla 1.21.11 normal travel: ground input speed is influenced by
         // supporting-block slipperiness; air input speed is fixed. The input
         // vector is normalized before acceleration is rotated by yaw.
-        double movementSpeed=context.attributes().value()*context.effects().speedMultiplier();
+        double movementSpeed=context.attributes().value()*(context.attributes().effectiveSnapshot()?1.0:context.effects().speedMultiplier());
         double inputAcceleration;
         if(fluid){
             // Fluid travel is a distinct movement path. Keep its established
@@ -67,14 +67,31 @@ public final class Vanilla12111RichPhysics {
             inputAcceleration=context.input().sprint()?AIR_SPRINT_ACCEL:AIR_ACCEL;
         }
 
-        double forward=context.input().forward()*INPUT_FRICTION;
-        double strafe=context.input().strafe()*INPUT_FRICTION;
+        double forward=context.input().forward();
+        double strafe=context.input().strafe();
+        double normalizedForward=forward*inputScale;
+        double normalizedStrafe=strafe*inputScale;
+        double moveX=normalizedStrafe*INPUT_FRICTION;
+        double moveZ=normalizedForward*INPUT_FRICTION;
+        if(context.input().sneak()){
+            moveX*=0.3;
+            moveZ*=0.3;
+        }
+        double moveLength=Math.hypot(moveX,moveZ);
+        if(moveLength>0.0){
+            double ux=moveX/moveLength,uz=moveZ/moveLength;
+            double ratio=Math.min(Math.abs(ux),Math.abs(uz))/Math.max(Math.abs(ux),Math.abs(uz));
+            double distance=Math.sqrt(1.0+ratio*ratio);
+            double magnitude=Math.min(moveLength*distance,1.0);
+            moveX=ux*magnitude;
+            moveZ=uz*magnitude;
+        }
         Vec3 acceleration=new Vec3(
-                inputScale*(strafe*inputAcceleration*Math.cos(radians)
-                        -forward*inputAcceleration*Math.sin(radians)),
+                moveX*inputAcceleration*Math.cos(radians)
+                        -moveZ*inputAcceleration*Math.sin(radians),
                 0,
-                inputScale*(forward*inputAcceleration*Math.cos(radians)
-                        +strafe*inputAcceleration*Math.sin(radians)));
+                moveZ*inputAcceleration*Math.cos(radians)
+                        +moveX*inputAcceleration*Math.sin(radians));
         Vec3 velocity=s.velocity().add(acceleration);
         if(climbing){if(context.input().forward()>0)velocity=new Vec3(velocity.x(),CLIMB_MAX_UP,velocity.z());else if(context.input().forward()<0)velocity=new Vec3(velocity.x(),-CLIMB_MAX_DOWN,velocity.z());else velocity=new Vec3(velocity.x(),Math.max(-CLIMB_MAX_DOWN,velocity.y()),velocity.z());}
         boolean jumped=context.input().jump()&&s.onGround()&&!fluid&&!climbing&&!gliding&&!context.sleeping();if(jumped)velocity=new Vec3(velocity.x(),JUMP+context.effects().jumpVelocityAdd(),velocity.z());if(context.effects().levitation())velocity=new Vec3(velocity.x(),context.effects().levitationVelocity(),velocity.z());
