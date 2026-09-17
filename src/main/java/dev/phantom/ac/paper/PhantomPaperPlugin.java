@@ -208,6 +208,12 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     }
   }
 
+  /**
+   * Decodes the PacketEvents palette directly for modern (1.21.11+) chunks.
+   * PacketEvents exposes the packed storage publicly; walking it avoids the
+   * expensive per-block DataPalette#get -> storage/palette indirection while
+   * preserving exactly the same global block-state ids.
+   */
   private void decodeChunk(Capture capture, PendingChunk pending) {
     long startedNanos = System.nanoTime();
     try {
@@ -224,6 +230,62 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
         int sectionY = minSection + sectionIndex;
         if (sectionY < minSection || sectionY >= maxSectionExclusive) continue;
         int baseY = sectionY * 16;
+
+        boolean packedDecoded = false;
+        if (section instanceof com.github.retrooper.packetevents.protocol.world.chunk.impl.v_1_18.Chunk_v1_18 modernSection) {
+          com.github.retrooper.packetevents.protocol.world.chunk.palette.DataPalette palette = modernSection.getChunkData();
+          if (palette.storage == null) {
+            int globalId = palette.palette.idToState(0);
+            dev.phantom.ac.world.BlockState core = stateCache.get(globalId);
+            if (core == null) {
+              WrappedBlockState state = globalId == 0 ? null : WrappedBlockState.getByGlobalId(pending.clientVersion, globalId, false);
+              core = state == null || state.getType().isAir() ? dev.phantom.ac.world.BlockState.air() : toCoreState(state);
+              dev.phantom.ac.world.BlockState existing = stateCache.putIfAbsent(globalId, core);
+              if (existing != null) core = existing;
+            }
+            if (!core.isAir()) {
+              for (int localY = 0; localY < 16; localY++) {
+                for (int localZ = 0; localZ < 16; localZ++) {
+                  for (int localX = 0; localX < 16; localX++) {
+                    states.put(new dev.phantom.ac.world.Pos(baseX + localX, baseY + localY, baseZ + localZ), core);
+                  }
+                }
+              }
+            }
+            packedDecoded = true;
+          } else if (palette.storage instanceof com.github.retrooper.packetevents.protocol.world.chunk.storage.BitStorage storage) {
+            long[] data = storage.getData();
+            int bits = storage.getBitsPerEntry();
+            int valuesPerLong = 64 / bits;
+            long mask = (1L << bits) - 1L;
+            int linearIndex = 0;
+            for (int cellIndex = 0; cellIndex < data.length && linearIndex < 4096; cellIndex++) {
+              long cell = data[cellIndex];
+              int values = Math.min(valuesPerLong, 4096 - linearIndex);
+              for (int slot = 0; slot < values; slot++, linearIndex++) {
+                int paletteId = (int) ((cell >>> (slot * bits)) & mask);
+                int globalId = palette.palette.idToState(paletteId);
+                if (globalId <= 0) continue;
+                dev.phantom.ac.world.BlockState core = stateCache.get(globalId);
+                if (core == null) {
+                  WrappedBlockState state = WrappedBlockState.getByGlobalId(pending.clientVersion, globalId, false);
+                  core = state == null || state.getType().isAir() ? dev.phantom.ac.world.BlockState.air() : toCoreState(state);
+                  dev.phantom.ac.world.BlockState existing = stateCache.putIfAbsent(globalId, core);
+                  if (existing != null) core = existing;
+                }
+                if (!core.isAir()) {
+                  int localY = linearIndex >>> 8;
+                  int localZ = (linearIndex >>> 4) & 15;
+                  int localX = linearIndex & 15;
+                  states.put(new dev.phantom.ac.world.Pos(baseX + localX, baseY + localY, baseZ + localZ), core);
+                }
+              }
+            }
+            packedDecoded = true;
+          }
+        }
+
+        if (packedDecoded) continue;
         for (int localX = 0; localX < 16; localX++) {
           for (int localY = 0; localY < 16; localY++) {
             for (int localZ = 0; localZ < 16; localZ++) {
