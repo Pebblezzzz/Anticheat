@@ -12,12 +12,17 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+/** Reads pre-tick input and records vanilla post-tick state. Scenario setup is kept separate from observation. */
 @Mixin(ClientPlayerEntity.class)
 final class ClientPlayerEntityMixin {
-    private boolean phantom$jumpBoostInjected;
     private boolean phantom$part4GeometryInjected;
     private String phantom$lastPhase = "";
     private int phantom$phaseTicks;
+
+    @Inject(method = "tick", at = @At("HEAD"))
+    private void phantom$observeBeforeTick(CallbackInfo ci) {
+        VanillaTraceCaptureClient.CaptureRuntime.observePreTickInput((ClientPlayerEntity) (Object) this);
+    }
 
     @Inject(method = "tick", at = @At("TAIL"))
     private void phantom$recordAfterTick(CallbackInfo ci) {
@@ -27,26 +32,13 @@ final class ClientPlayerEntityMixin {
 
         if (!phase.equals(phantom$lastPhase)) {
             phantom$lastPhase = phase;
-            phantom$jumpBoostInjected = false;
             phantom$part4GeometryInjected = false;
             phantom$phaseTicks = 0;
         }
 
-        if (phase.endsWith(":jump-boost")
-                && !phantom$jumpBoostInjected
-                && player.isOnGround()
-                && player.hasStatusEffect(net.minecraft.entity.effect.StatusEffects.JUMP_BOOST)) {
-            double beforeY = player.getY();
-            double beforeVy = player.getVelocity().y;
-            player.jump();
-            phantom$jumpBoostInjected = true;
-            System.out.println("[Phase5] jump-boost client jump applied phase=" + phase
-                    + " beforeY=" + beforeY
-                    + " beforeVy=" + beforeVy
-                    + " afterVy=" + player.getVelocity().y
-                    + " onGround=" + player.isOnGround());
-        }
-
+        // The recorder never calls player.jump()/setVelocity()/requestTeleport()
+        // to manufacture movement. All movement here remains vanilla-driven by
+        // the configured keyboard state or server packets.
         if (phase.endsWith(":climbable") || phase.endsWith(":edge-corner")) {
             boolean settledAtPhaseStart = player.isOnGround()
                     && Math.abs(player.getY() - 64.0D) <= 0.75D;
