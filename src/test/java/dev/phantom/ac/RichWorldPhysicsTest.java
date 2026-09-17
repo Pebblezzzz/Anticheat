@@ -18,6 +18,21 @@ class RichWorldPhysicsTest {
         assertFalse(world.hasUnknownOrUnsupported(new BlockBox(0.2,64.8,0.2,0.8,66.8,0.8)));
     }
     @Test
+    void groundedStationaryPlayerRemainsGroundedWithZeroVerticalVelocity() {
+        WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0, 0).setBlock(0,63,0,stone()).build();
+        var player = State.Player.initial(new Maths.Vec3(0.5,64.0,0.5));
+        var input = new Simulation.AdvancedInput(0, 0, false, false, false);
+        var env = Phase5Mechanics.MovementEnvironment.dry(true, false, false);
+        var context = new Vanilla12111RichPhysics.Context(0, player, input, world, Simulation.Environment.DRY,
+            Simulation.Attributes.DEFAULT, Phase5Mechanics.MovementEffects.NONE, Phase5Mechanics.Pose.STANDING,
+            env, false);
+        var result = new Vanilla12111RichPhysics().step(context);
+        assertFalse(result.state().uncertain());
+        assertTrue(result.state().onGround());
+        assertEquals(player.position(), result.state().position());
+        assertEquals(0.0, result.state().velocity().y(), 1.0e-12);
+    }
+    @Test
     void exactSnapshotCollisionRefusesAnUnloadedSweep() {
         WorldSnapshot world=WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0,0).setBlock(0,64,0,stone()).build();
         Maths.Aabb player=new Maths.Aabb(15.7,65,0.2,16.3,66.8,0.8);
