@@ -9,13 +9,11 @@ Closed internally:
 - `Simulation.Vanilla12111Physics` is only a compatibility adapter. The movement mechanics implementation is `Vanilla12111RichPhysics`.
 - Entity collision is an explicit deterministic provider; incomplete entity histories produce uncertainty, while complete recorded entity AABBs participate in axis clipping and stepping.
 - `PipelineReplay` is a single deterministic artifact that reconstructs player history, client-visible world history, timing/synchronization, simulation-input projection, and validation outputs from one capture.
-- Adversarial packet-ordering/provenance tests and packet/timeline benchmark coverage are committed.
+- Adversarial packet-ordering/provenance/replay/entity-collision regressions and packet/timeline benchmark coverage are committed.
 
-Still external by design:
+Validation boundary:
 
-- empirical Minecraft Java Edition 1.21.11 movement parity;
-- real client tick-generation timing, latency/jitter distributions, correction acknowledgement timing, and real packet-ordering behavior;
-- exhaustive validation of every required 1.21.11 scenario against an independently observed client;
-- any empirical performance claim for a real production server.
-
-No synthetic trace in this change is presented as vanilla evidence, and Phase 8 policy/enforcement is not implemented.
+- CI must pass against the current branch head before merge.
+- Empirical Minecraft Java Edition 1.21.11 validation remains external because the repository environment cannot launch/capture a licensed client.
+- No synthetic trace in this change is presented as vanilla evidence.
+- Phase 8 policy/enforcement is not implemented.
