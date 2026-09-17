@@ -1,0 +1,418 @@
+package dev.phantom.ac.paper;
+
+import com.github.retrooper.packetevents.PacketEvents;
+import com.github.retrooper.packetevents.event.PacketListenerAbstract;
+import com.github.retrooper.packetevents.event.PacketReceiveEvent;
+import com.github.retrooper.packetevents.event.PacketSendEvent;
+import com.github.retrooper.packetevents.protocol.packettype.PacketType;
+import com.github.retrooper.packetevents.protocol.player.ClientVersion;
+import com.github.retrooper.packetevents.protocol.teleport.RelativeFlag;
+import com.github.retrooper.packetevents.protocol.world.chunk.BaseChunk;
+import com.github.retrooper.packetevents.protocol.world.chunk.Column;
+import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
+import com.github.retrooper.packetevents.protocol.world.states.type.StateValue;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerInput;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientTeleportConfirm;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChunkData;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityVelocity;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerMultiBlockChange;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerPositionAndLook;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUnloadChunk;
+import dev.phantom.ac.Contracts;
+import dev.phantom.ac.Maths.Vec3;
+import dev.phantom.ac.Packets;
+import dev.phantom.ac.Packets.RawPacket;
+import dev.phantom.ac.Phase5Mechanics;
+import dev.phantom.ac.Phase8LiveValidation;
+import dev.phantom.ac.Phase8MovementValidation;
+import dev.phantom.ac.Phase7Timing;
+import dev.phantom.ac.Timeline;
+import dev.phantom.ac.World;
+import dev.phantom.ac.world.EntityCollisions;
+import org.bukkit.Material;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.potion.PotionEffect;
+
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+
+/** Hardened Paper boundary: Bukkit work is main-thread only; validation is pure and asynchronous. */
+public final class HardenedPhantomPaperPlugin extends JavaPlugin implements Listener {
+  private static final int MAX_CAPTURE_PACKETS = 12_000;
+  private static final int MAX_VALIDATION_PACKETS = 6_000;
+  private static final int MAX_CHUNK_QUEUE = 512;
+
+  private final Map<UUID, Capture> captures = new ConcurrentHashMap<>();
+  private final Map<UUID, Boolean> debugPlayers = new ConcurrentHashMap<>();
+  private final Map<ClientVersion, ConcurrentHashMap<Integer, dev.phantom.ac.world.BlockState>> stateCache = new ConcurrentHashMap<>();
+  private org.bukkit.scheduler.BukkitTask chunkDrainTask;
+  private org.bukkit.scheduler.BukkitTask stateTask;
+  private org.bukkit.scheduler.BukkitTask validationTask;
+  private ExecutorService decoder;
+  private int decoderThreads;
+  private int validationBudget;
+  private boolean alertsEnabled;
+  private boolean broadcastAlerts;
+
+  private final PacketListenerAbstract listener = new PacketListenerAbstract() {
+    @Override public void onPacketReceive(PacketReceiveEvent event) {
+      Object sender = event.getPlayer();
+      if (!(sender instanceof Player player)) return;
+      if (WrapperPlayClientPlayerFlying.isFlying(event.getPacketType())) {
+        WrapperPlayClientPlayerFlying packet = new WrapperPlayClientPlayerFlying(event);
+        var location = packet.getLocation();
+        record(player, new Packets.Move(
+            packet.hasPositionChanged() ? vector(location.getX(), location.getY(), location.getZ()) : null,
+            packet.hasRotationChanged() ? location.getYaw() : null,
+            packet.hasRotationChanged() ? location.getPitch() : null,
+            packet.isOnGround(), null));
+      } else if (event.getPacketType() == PacketType.Play.Client.PLAYER_INPUT) {
+        WrapperPlayClientPlayerInput input = new WrapperPlayClientPlayerInput(event);
+        record(player, new Packets.ClientInput(input.isForward(), input.isBackward(), input.isLeft(), input.isRight(),
+            input.isJump(), input.isShift(), input.isSprint()));
+      } else if (event.getPacketType() == PacketType.Play.Client.TELEPORT_CONFIRM) {
+        record(player, new Packets.TeleportConfirm(new WrapperPlayClientTeleportConfirm(event).getTeleportId()));
+      }
+    }
+
+    @Override public void onPacketSend(PacketSendEvent event) {
+      Object sender = event.getPlayer();
+      if (!(sender instanceof Player player)) return;
+      if (event.getPacketType() == PacketType.Play.Server.PLAYER_POSITION_AND_LOOK) {
+        WrapperPlayServerPlayerPositionAndLook packet = new WrapperPlayServerPlayerPositionAndLook(event);
+        RelativeFlag flags = packet.getRelativeFlags();
+        record(player, new Packets.Teleport(packet.getTeleportId(), vector(packet.getX(), packet.getY(), packet.getZ()), packet.getYaw(), packet.getPitch(),
+            flags.has(RelativeFlag.X), flags.has(RelativeFlag.Y), flags.has(RelativeFlag.Z), flags.has(RelativeFlag.YAW), flags.has(RelativeFlag.PITCH)));
+      } else if (event.getPacketType() == PacketType.Play.Server.ENTITY_VELOCITY) {
+        WrapperPlayServerEntityVelocity packet = new WrapperPlayServerEntityVelocity(event);
+        if (packet.getEntityId() == player.getEntityId()) {
+          var velocity = packet.getVelocity();
+          record(player, new Packets.Velocity(vector(velocity.getX(), velocity.getY(), velocity.getZ())));
+        }
+      } else if (event.getPacketType() == PacketType.Play.Server.BLOCK_CHANGE) {
+        WrapperPlayServerBlockChange packet = new WrapperPlayServerBlockChange(event);
+        var p = packet.getBlockPosition();
+        recordBlockState(player, new dev.phantom.ac.world.Pos(p.getX(), p.getY(), p.getZ()), toCoreState(packet.getBlockState()));
+      } else if (event.getPacketType() == PacketType.Play.Server.MULTI_BLOCK_CHANGE) {
+        WrapperPlayServerMultiBlockChange packet = new WrapperPlayServerMultiBlockChange(event);
+        for (var change : packet.getBlocks()) {
+          recordBlockState(player, new dev.phantom.ac.world.Pos(change.getX(), change.getY(), change.getZ()),
+              toCoreState(change.getBlockState(event.getUser().getClientVersion())));
+        }
+      } else if (event.getPacketType() == PacketType.Play.Server.UNLOAD_CHUNK) {
+        WrapperPlayServerUnloadChunk packet = new WrapperPlayServerUnloadChunk(event);
+        record(player, new Packets.ChunkUnload(new World.Chunk(packet.getChunkX(), packet.getChunkZ())));
+      } else if (event.getPacketType() == PacketType.Play.Server.CHUNK_DATA) {
+        WrapperPlayServerChunkData packet = new WrapperPlayServerChunkData(event);
+        Column column = packet.getColumn();
+        Capture capture = captures.computeIfAbsent(player.getUniqueId(), ignored -> new Capture(player.getUniqueId(), System.nanoTime()));
+        long sequence = capture.sequence.incrementAndGet();
+        PendingChunk pending = new PendingChunk(sequence, System.nanoTime(), column,
+            capture.minY, capture.maxY, event.getUser().getClientVersion());
+        capture.chunkPackets.incrementAndGet();
+        while (capture.chunkQueue.size() >= MAX_CHUNK_QUEUE) {
+          capture.chunkQueue.poll();
+          capture.droppedChunks.incrementAndGet();
+        }
+        capture.chunkQueue.offer(pending);
+      }
+    }
+  };
+
+  @Override public void onEnable() {
+    saveDefaultConfig();
+    alertsEnabled = getConfig().getBoolean("alerts.enabled", true);
+    broadcastAlerts = getConfig().getBoolean("alerts.broadcast", false);
+    validationBudget = Math.max(1, getConfig().getInt("validation.candidate-budget", 4096));
+    getServer().getPluginManager().registerEvents(this, this);
+    PacketEvents.getAPI().getEventManager().registerListener(listener);
+
+    int processors = Math.max(2, Runtime.getRuntime().availableProcessors());
+    decoderThreads = Math.max(1, Math.min(4, processors / 2));
+    decoder = Executors.newFixedThreadPool(decoderThreads, runnable -> {
+      Thread t = new Thread(runnable, "Phantom-ChunkDecoder");
+      t.setDaemon(true);
+      return t;
+    });
+
+    chunkDrainTask = getServer().getScheduler().runTaskTimer(this, this::drainChunkQueue, 1L, 1L);
+    stateTask = getServer().getScheduler().runTaskTimer(this, this::captureLiveContext, 1L, 1L);
+    int interval = Math.max(1, getConfig().getInt("validation.interval-ticks", 10));
+    validationTask = getServer().getScheduler().runTaskTimer(this, this::scheduleValidations, interval, interval);
+    getLogger().info("[PhantomAC] Hardened Phase 8 adapter enabled");
+  }
+
+  @Override public void onDisable() {
+    getServer().getScheduler().cancelTasks(this);
+    if (chunkDrainTask != null) chunkDrainTask.cancel();
+    if (stateTask != null) stateTask.cancel();
+    if (validationTask != null) validationTask.cancel();
+    PacketEvents.getAPI().getEventManager().unregisterListener(listener);
+    if (decoder != null) decoder.shutdownNow();
+    stateCache.clear(); captures.clear(); debugPlayers.clear();
+  }
+
+  @EventHandler public void onJoin(PlayerJoinEvent event) {
+    captures.put(event.getPlayer().getUniqueId(), new Capture(event.getPlayer().getUniqueId(), System.nanoTime()));
+  }
+
+  @EventHandler public void onWorldChange(PlayerChangedWorldEvent event) {
+    captures.put(event.getPlayer().getUniqueId(), new Capture(event.getPlayer().getUniqueId(), System.nanoTime()));
+  }
+
+  @EventHandler public void onQuit(PlayerQuitEvent event) {
+    captures.remove(event.getPlayer().getUniqueId());
+    debugPlayers.remove(event.getPlayer().getUniqueId());
+  }
+
+  @Override public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+    if (!command.getName().equalsIgnoreCase("phantom")) return false;
+    if (args.length == 0 || args[0].equalsIgnoreCase("status")) {
+      sender.sendMessage("PhantomAC captures=" + captures.size() + " decoderQueue=" + captures.values().stream().mapToInt(c -> c.chunkQueue.size()).sum());
+      return true;
+    }
+    if (args[0].equalsIgnoreCase("debug") && args.length >= 2) {
+      Player target = getServer().getPlayerExact(args[1]);
+      if (target == null) { sender.sendMessage("Player not found: " + args[1]); return true; }
+      if (args.length >= 3 && args[2].equalsIgnoreCase("off")) {
+        debugPlayers.remove(target.getUniqueId()); sender.sendMessage("Phase 8 debug disabled for " + target.getName());
+      } else {
+        debugPlayers.put(target.getUniqueId(), Boolean.TRUE); sender.sendMessage("Phase 8 debug enabled for " + target.getName());
+      }
+      return true;
+    }
+    sender.sendMessage("Usage: /phantom status | /phantom debug <player> [off]");
+    return true;
+  }
+
+  private void drainChunkQueue() {
+    if (decoder == null) return;
+    int submitted = 0;
+    while (submitted < decoderThreads) {
+      Capture selected = null;
+      PendingChunk pending = null;
+      for (Capture candidate : captures.values()) {
+        pending = candidate.chunkQueue.poll();
+        if (pending != null) { selected = candidate; break; }
+      }
+      if (selected == null) return;
+      if (!selected.chunkInFlight.compareAndSet(false, true)) {
+        selected.chunkQueue.offer(pending);
+        return;
+      }
+      Capture target = selected;
+      PendingChunk work = pending;
+      try {
+        decoder.execute(() -> {
+          try { decodeChunk(target, work); }
+          finally { target.chunkInFlight.set(false); }
+        });
+      } catch (RejectedExecutionException rejected) {
+        target.chunkInFlight.set(false);
+        target.chunkQueue.offer(work);
+        return;
+      }
+      submitted++;
+    }
+  }
+
+  private void decodeChunk(Capture capture, PendingChunk pending) {
+    try {
+      Map<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> states = new LinkedHashMap<>();
+      ConcurrentHashMap<Integer, dev.phantom.ac.world.BlockState> cache = stateCache.computeIfAbsent(pending.clientVersion, ignored -> new ConcurrentHashMap<>());
+      BaseChunk[] sections = pending.column.getChunks();
+      int minSection = Math.floorDiv(pending.minY, 16);
+      int maxSectionExclusive = Math.floorDiv(pending.maxY - 1, 16) + 1;
+      int baseX = pending.column.getX() * 16;
+      int baseZ = pending.column.getZ() * 16;
+      for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+        BaseChunk section = sections[sectionIndex];
+        if (section == null || section.isEmpty()) continue;
+        int sectionY = minSection + sectionIndex;
+        if (sectionY < minSection || sectionY >= maxSectionExclusive) continue;
+        int baseY = sectionY * 16;
+        for (int localY = 0; localY < 16; localY++) for (int localZ = 0; localZ < 16; localZ++) for (int localX = 0; localX < 16; localX++) {
+          int globalId = section.getBlockId(localX, localY, localZ);
+          if (globalId <= 0) continue;
+          dev.phantom.ac.world.BlockState core = cache.get(globalId);
+          if (core == null) {
+            WrappedBlockState state = WrappedBlockState.getByGlobalId(pending.clientVersion, globalId, false);
+            core = state == null || state.getType().isAir() ? dev.phantom.ac.world.BlockState.air() : toCoreState(state);
+            var existing = cache.putIfAbsent(globalId, core);
+            if (existing != null) core = existing;
+          }
+          if (!core.isAir()) states.put(new dev.phantom.ac.world.Pos(baseX + localX, baseY + localY, baseZ + localZ), core);
+        }
+      }
+      appendPacket(capture, new RawPacket(pending.sequence, pending.receivedNanos,
+          new Packets.ChunkStates(new dev.phantom.ac.world.Chunk(pending.column.getX(), pending.column.getZ()), states)));
+      capture.decodedChunks.incrementAndGet();
+    } catch (RuntimeException failure) {
+      capture.decodeFailures.incrementAndGet();
+      getLogger().log(java.util.logging.Level.WARNING, "[PhantomAC][CHUNK] decode failed for " + capture.playerId, failure);
+    }
+  }
+
+  /** Called synchronously so every Bukkit lookup is completed before core validation leaves the server thread. */
+  private void captureLiveContext() {
+    for (Capture capture : captures.values()) {
+      Player player = getServer().getPlayer(capture.playerId);
+      if (player == null) continue;
+      capture.minY = player.getWorld().getMinHeight();
+      capture.maxY = player.getWorld().getMaxHeight();
+
+      AttributeInstance movement = player.getAttribute(Attribute.MOVEMENT_SPEED);
+      double movementSpeed = movement == null ? 0.1 : movement.getValue();
+      Map<String, Integer> effects = new LinkedHashMap<>();
+      for (PotionEffect effect : player.getActivePotionEffects()) {
+        if (effect.getType().getKey() != null) effects.put(effect.getType().getKey().toString(), effect.getAmplifier());
+      }
+
+      Phase5Mechanics.Pose pose = player.isSleeping() ? Phase5Mechanics.Pose.SLEEPING
+          : player.isGliding() ? Phase5Mechanics.Pose.FALL_FLYING
+          : player.isSwimming() ? Phase5Mechanics.Pose.SWIMMING
+          : player.isSneaking() ? Phase5Mechanics.Pose.CROUCHING
+          : Phase5Mechanics.Pose.STANDING;
+      boolean sleeping = player.isSleeping();
+      boolean water = false, lava = false, climb = false;
+      org.bukkit.util.BoundingBox box = player.getBoundingBox();
+      int minX = (int)Math.floor(box.getMinX()), maxX = (int)Math.floor(Math.nextDown(box.getMaxX()));
+      int minY = (int)Math.floor(box.getMinY()), maxY = (int)Math.floor(Math.nextDown(box.getMaxY()));
+      int minZ = (int)Math.floor(box.getMinZ()), maxZ = (int)Math.floor(Math.nextDown(box.getMaxZ()));
+      for (int y=minY;y<=maxY;y++) for (int x=minX;x<=maxX;x++) for (int z=minZ;z<=maxZ;z++) {
+        Material material = player.getWorld().getBlockAt(x,y,z).getType();
+        if (material == Material.WATER || material == Material.BUBBLE_COLUMN) water = true;
+        if (material == Material.LAVA) lava = true;
+        if (material == Material.LADDER || material == Material.VINE || material == Material.SCAFFOLDING) climb = true;
+      }
+      boolean sprint = player.isSprinting(), sneak = player.isSneaking();
+      Phase5Mechanics.MovementEnvironment env = water
+          ? Phase5Mechanics.MovementEnvironment.vanillaWater(player.isOnGround(), sprint, sneak, player.isSwimming())
+          : lava
+          ? Phase5Mechanics.MovementEnvironment.vanillaLava(player.isOnGround(), sprint, sneak)
+          : climb
+          ? Phase5Mechanics.MovementEnvironment.vanillaClimbable(player.isOnGround(), sprint, sneak)
+          : Phase5Mechanics.MovementEnvironment.dry(player.isOnGround(), sprint, sneak);
+
+      List<EntityCollisions.EntityBox> entityBoxes = new ArrayList<>();
+      for (Entity entity : player.getWorld().getNearbyEntities(player.getLocation(), 4.0, 4.0, 4.0)) {
+        if (entity.getEntityId() == player.getEntityId() || !entity.isCollidable()) continue;
+        org.bukkit.util.BoundingBox eb = entity.getBoundingBox();
+        entityBoxes.add(new EntityCollisions.EntityBox(entity.getEntityId(), new dev.phantom.ac.geometry.BlockBox(
+            eb.getMinX(), eb.getMinY(), eb.getMinZ(), eb.getMaxX(), eb.getMaxY(), eb.getMaxZ())));
+      }
+      entityBoxes.sort(Comparator.comparingInt(EntityCollisions.EntityBox::entityId));
+
+      Packets.PlayerContext context = new Packets.PlayerContext(
+          player.getGameMode().name().toLowerCase(Locale.ROOT),
+          new dev.phantom.ac.Simulation.Attributes(movementSpeed), effects, pose, env, sleeping, entityBoxes);
+      appendPacket(capture, new RawPacket(capture.sequence.incrementAndGet(), System.nanoTime(), context,
+          Packets.CaptureProvenance.fromAdapter("paper-live", context, null)));
+    }
+  }
+
+  private void scheduleValidations() {
+    for (Capture capture : captures.values()) {
+      if (!capture.validationRunning.compareAndSet(false, true)) continue;
+      List<RawPacket> raw = capture.copy();
+      if (raw.isEmpty()) { capture.validationRunning.set(false); continue; }
+      Player player = getServer().getPlayer(capture.playerId);
+      if (player == null) { capture.validationRunning.set(false); continue; }
+      final String playerName = player.getName();
+      final long epoch = capture.epochNanos;
+      getServer().getScheduler().runTaskAsynchronously(this, () -> {
+        try {
+          Timeline.Snapshot timeline = Timeline.assign(new Packets.Normalizer().normalize(raw), epoch, 50_000_000L);
+          Phase8LiveValidation.Report report = Phase8LiveValidation.analyze(playerName, timeline, validationBudget, Phase7Timing.Config.defaultConfig());
+          getServer().getScheduler().runTask(this, () -> applyResult(capture.playerId, capture, report));
+        } catch (RuntimeException failure) {
+          capture.validationRunning.set(false);
+          getLogger().log(java.util.logging.Level.WARNING, "[PhantomAC][PHASE8] validation failed for " + capture.playerId, failure);
+        }
+      });
+    }
+  }
+
+  private void applyResult(UUID playerId, Capture capture, Phase8LiveValidation.Report report) {
+    for (Phase8MovementValidation.Result result : report.results()) {
+      var accumulated = capture.accumulator.accept(result.evidence(), new Phase8MovementValidation.Config(1, 20, alertsEnabled, true));
+      accumulated.alert().ifPresent(alert -> {
+        String message = alert.message();
+        getLogger().warning(message);
+        if (broadcastAlerts) getServer().broadcastMessage(message);
+        else for (Player recipient : getServer().getOnlinePlayers()) if (recipient.hasPermission("phantom.admin")) recipient.sendMessage(message);
+      });
+    }
+    capture.processedResults += report.results().size();
+    capture.validationRunning.set(false);
+  }
+
+  private void record(Player player, Packets.Packet packet) {
+    Capture capture = captures.computeIfAbsent(player.getUniqueId(), ignored -> new Capture(player.getUniqueId(), System.nanoTime()));
+    appendPacket(capture, new RawPacket(capture.sequence.incrementAndGet(), System.nanoTime(), packet));
+  }
+
+  private void recordBlockState(Player player, dev.phantom.ac.world.Pos position, dev.phantom.ac.world.BlockState state) {
+    record(player, state.isUnsupported() ? new Packets.UnsupportedBlockStateChange(position, state) : new Packets.BlockStateChange(position, state));
+  }
+
+  private static void appendPacket(Capture capture, RawPacket packet) {
+    synchronized (capture.packets) {
+      while (capture.packets.size() >= MAX_CAPTURE_PACKETS) capture.packets.remove(0);
+      capture.packets.add(packet);
+    }
+  }
+
+  private static Vec3 vector(double x,double y,double z) { return new Vec3(x,y,z); }
+
+  private static dev.phantom.ac.world.BlockState toCoreState(WrappedBlockState state) {
+    if (state == null || state.getType().isAir()) return dev.phantom.ac.world.BlockState.air();
+    String name = state.getType().getName();
+    Map<String,String> properties = new LinkedHashMap<>();
+    putEnum(properties,"type",state.getData(StateValue.TYPE)); putEnum(properties,"facing",state.getData(StateValue.FACING));
+    putEnum(properties,"half",state.getData(StateValue.HALF)); putEnum(properties,"shape",state.getData(StateValue.SHAPE));
+    putEnum(properties,"part",state.getData(StateValue.PART)); putEnum(properties,"hinge",state.getData(StateValue.HINGE));
+    putNumber(properties,"layers",state.getData(StateValue.LAYERS)); putNumber(properties,"level",state.getData(StateValue.LEVEL));
+    putNumber(properties,"candles",state.getData(StateValue.CANDLES)); putNumber(properties,"pickles",state.getData(StateValue.PICKLES));
+    putBoolean(properties,"waterlogged",state.getData(StateValue.WATERLOGGED)); putBoolean(properties,"open",state.getData(StateValue.OPEN));
+    putBoolean(properties,"powered",state.getData(StateValue.POWERED)); putBoolean(properties,"up",state.getData(StateValue.UP));
+    putBoolean(properties,"north",state.getData(StateValue.NORTH)); putBoolean(properties,"south",state.getData(StateValue.SOUTH));
+    putBoolean(properties,"west",state.getData(StateValue.WEST)); putBoolean(properties,"east",state.getData(StateValue.EAST));
+    putBoolean(properties,"lit",state.getData(StateValue.LIT));
+    return dev.phantom.ac.world.v12111.BlockCatalogue12111.decode(name, properties);
+  }
+
+  private static void putEnum(Map<String,String> properties,String key,Object value){if(value!=null)properties.put(key,value.toString().toLowerCase(Locale.ROOT));}
+  private static void putNumber(Map<String,String> properties,String key,Object value){if(value instanceof Number n)properties.put(key,Integer.toString(n.intValue()));}
+  private static void putBoolean(Map<String,String> properties,String key,Object value){if(value instanceof Boolean b)properties.put(key,Boolean.toString(b));}
+
+  private record PendingChunk(long sequence,long receivedNanos,Column column,int minY,int maxY,ClientVersion clientVersion) {}
+  private static final class Capture {
+    final UUID playerId; final long epochNanos; final AtomicLong sequence=new AtomicLong();
+    final AtomicLong chunkPackets=new AtomicLong(); final AtomicLong decodedChunks=new AtomicLong(); final AtomicLong decodeFailures=new AtomicLong(); final AtomicLong droppedChunks=new AtomicLong();
+    final Queue<PendingChunk> chunkQueue=new ConcurrentLinkedQueue<>(); final List<RawPacket> packets=new ArrayList<>();
+    final AtomicBoolean chunkInFlight=new AtomicBoolean(); final AtomicBoolean validationRunning=new AtomicBoolean();
+    Phase8MovementValidation.Accumulator accumulator=Phase8MovementValidation.Accumulator.empty(); int processedResults; volatile int minY=-64,maxY=319;
+    Capture(UUID playerId,long epochNanos){this.playerId=playerId;this.epochNanos=epochNanos;}
+    List<RawPacket> copy(){synchronized(packets){int start=Math.max(0,packets.size()-MAX_VALIDATION_PACKETS);return List.copyOf(packets.subList(start,packets.size()));}}
+  }
+}
