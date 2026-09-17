@@ -7,6 +7,7 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.server.world.ServerWorld;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -48,10 +49,8 @@ final class ClientPlayerEntityMixin {
         }
 
         if (phase.equals("part4:climbable") || phase.equals("part4:edge-corner")) {
-            double expectedStartZ = phase.equals("part4:climbable") ? -38.0D : 142.0D;
             boolean settledAtPhaseStart = player.isOnGround()
-                    && Math.abs(player.getY() - 64.0D) <= 0.75D
-                    && Math.abs(player.getZ() - expectedStartZ) <= 0.75D;
+                    && Math.abs(player.getY() - 64.0D) <= 0.75D;
 
             if (!phantom$part4GeometryInjected && settledAtPhaseStart) {
                 phantom$injectPart4Geometry(client, player, phase);
