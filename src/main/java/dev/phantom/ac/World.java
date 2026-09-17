@@ -255,7 +255,12 @@ public final class World {
         }
       }
       for (Chunk chunk : visible) builder.loadChunk(chunk.x(), chunk.z());
-      for (var entry : states.entrySet()) builder.setBlock(entry.getKey().x(), entry.getKey().y(), entry.getKey().z(), entry.getValue());
+      for (var entry : states.entrySet()) {
+        var position = entry.getKey();
+        var state = entry.getValue();
+        if (state.isUnsupported()) builder.setUnsupportedBlock(position.x(), position.y(), position.z(), state.blockId());
+        else builder.setBlock(position.x(), position.y(), position.z(), state);
+      }
       return builder.build();
     }
 
