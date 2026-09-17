@@ -51,11 +51,17 @@ The previous live path had two concrete faults. First, validation was only meani
 
 A flight client can still remain `UNCERTAIN` when the initial state is not anchored, the client-visible world is incomplete, timing is ambiguous, or the 1.21.11 simulator lacks the relevant mechanic. That behavior is required by the false-positive constraints, not a successful detection. The scheduled adapter is a test-server policy layer; Phase 8 core itself remains alert/evidence-only and does not own punishment.
 
+## Current compensated-world implementation
+
+The live adapter now mirrors Grim's core world-visibility idea without copying Grim source: each player owns a compensated client-world journal; outbound chunk/block/unload mutations are associated with a synthetic negative PING transaction; the mutation is not committed to the player's simulation world until the matching PONG is received. Replay carries the transaction send/ack records and applies committed world state at the acknowledgement tick. The deterministic core continues to expose immutable WorldSnapshot values to physics.
+
+This is intentionally a semantic reimplementation rather than a source-level copy. Grim uses the same transaction-backed client-world concept and its CompensatedWorld is advanced through LatencyUtils transaction barriers.
+
 ## Validation still missing
 Phantom still lacks equivalent validation in several areas:
 
 - independent vanilla 1.21.11 traces for acceleration, friction, collision ordering, step/slope behavior, fluids, poses, effects, attributes, knockback, and corrections;
-- complete client-visible chunk decoding from the packet payload rather than the current Paper-side server chunk reconstruction path;
+- client-visible world reconstruction now uses packet-derived chunk/block state plus transaction-gated visibility in the live/replay world journal; remaining work is broader packet coverage and validation against real client timing under load;
 - production-grade asynchronous scheduling and stress/throughput measurements;
 - complete entity/vehicle replication and collision;
 - a full live alert dispatch path driven by validated evidence rather than command-time diagnostics;
