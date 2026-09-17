@@ -31,7 +31,7 @@ public final class Phase8PerformanceBenchmark {
       Phase8MovementValidation.Result result = Phase8MovementValidation.validate("benchmark", i, player, player,
           world, "benchmark-world", timing, List.of("forward=0", "strafe=0", "jump=false"), reachable, "benchmark-replay");
       evidence++;
-      Phase8MovementValidation.Accumulated accumulated = accumulator.accept(result.evidence(), Phase8MovementValidation.Config.observationOnly());
+      Phase8MovementValidation.Accumulated accumulated = accumulator.accept(result.evidence(), Phase8MovementValidation.Config.defaults());
       accumulator = accumulated.state();
       if (accumulated.alert().isPresent()) alerts++;
     }
