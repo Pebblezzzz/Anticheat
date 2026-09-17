@@ -15,7 +15,8 @@ import static dev.phantom.ac.State.Player;
 public final class Vanilla12111RichPhysics {
     /** Version-specific 1.21.11 constants kept isolated from orchestration code. */
     public static final double GRAVITY=0.08,AIR_DRAG=0.98,AIR_HORIZONTAL_FRICTION=0.91,AIR_VERTICAL_DRAG=0.98,
-            AIR_ACCEL=0.02,AIR_SPRINT_ACCEL=0.026,GROUND_FRICTION=0.6,WALK_ACCEL=0.21600002,JUMP=0.42,STEP_HEIGHT=0.6;
+            INPUT_FRICTION=(double)0.98f,AIR_ACCEL=(double)0.02f,AIR_SPRINT_ACCEL=(double)0.026f,
+            GROUND_FRICTION=0.6,FRICTION_SPEED_FACTOR=(double)0.21600002f,JUMP=(double)0.42f,STEP_HEIGHT=0.6;
     private static final double WATER_ACCEL=0.0196,WATER_DRAG=0.9,LAVA_DRAG=0.5,CLIMB_MAX_DOWN=0.15,
             CLIMB_MAX_UP=0.15,GLIDE_GRAVITY=0.035,GROUND_PROBE=1.0E-4;
 
@@ -61,17 +62,19 @@ public final class Vanilla12111RichPhysics {
             double slipperiness=BlockCatalogue12111.slipperiness(support);
             if(!Double.isFinite(slipperiness)||slipperiness<=0.0)
                 return uncertain(context,"support block has an invalid slipperiness value");
-            inputAcceleration=movementSpeed*WALK_ACCEL/(slipperiness*slipperiness*slipperiness);
+            inputAcceleration=movementSpeed*FRICTION_SPEED_FACTOR/(slipperiness*slipperiness*slipperiness);
         }else{
             inputAcceleration=context.input().sprint()?AIR_SPRINT_ACCEL:AIR_ACCEL;
         }
 
+        double forward=context.input().forward()*INPUT_FRICTION;
+        double strafe=context.input().strafe()*INPUT_FRICTION;
         Vec3 acceleration=new Vec3(
-                inputScale*(context.input().strafe()*inputAcceleration*Math.cos(radians)
-                        -context.input().forward()*inputAcceleration*Math.sin(radians)),
+                inputScale*(strafe*inputAcceleration*Math.cos(radians)
+                        -forward*inputAcceleration*Math.sin(radians)),
                 0,
-                inputScale*(context.input().forward()*inputAcceleration*Math.cos(radians)
-                        +context.input().strafe()*inputAcceleration*Math.sin(radians)));
+                inputScale*(forward*inputAcceleration*Math.cos(radians)
+                        +strafe*inputAcceleration*Math.sin(radians)));
         Vec3 velocity=s.velocity().add(acceleration);
         if(climbing){if(context.input().forward()>0)velocity=new Vec3(velocity.x(),CLIMB_MAX_UP,velocity.z());else if(context.input().forward()<0)velocity=new Vec3(velocity.x(),-CLIMB_MAX_DOWN,velocity.z());else velocity=new Vec3(velocity.x(),Math.max(-CLIMB_MAX_DOWN,velocity.y()),velocity.z());}
         boolean jumped=context.input().jump()&&s.onGround()&&!fluid&&!climbing&&!gliding&&!context.sleeping();if(jumped)velocity=new Vec3(velocity.x(),JUMP+context.effects().jumpVelocityAdd(),velocity.z());if(context.effects().levitation())velocity=new Vec3(velocity.x(),context.effects().levitationVelocity(),velocity.z());
