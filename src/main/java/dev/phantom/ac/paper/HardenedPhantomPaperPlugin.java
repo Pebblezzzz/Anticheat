@@ -37,6 +37,7 @@ import dev.phantom.ac.Timeline;
 import dev.phantom.ac.ValidationResultGate;
 import dev.phantom.ac.World;
 import dev.phantom.ac.world.EntityCollisions;
+import dev.phantom.ac.world.WorldSnapshot;
 import org.bukkit.Material;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
