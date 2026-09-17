@@ -8,7 +8,7 @@ public final class Packets {
   private Packets() {}
 
   public sealed interface Packet extends Serializable permits Move, ClientInput, Teleport, TeleportConfirm,
-      Velocity, Effect, Gamemode, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange {
+      Velocity, Effect, Gamemode, PlayerContext, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange {
     default boolean mutatesWorld() {
       return this instanceof ChunkData || this instanceof ChunkUnload
           || this instanceof BlockChange || this instanceof ChunkStates || this instanceof BlockStateChange || this instanceof UnsupportedBlockStateChange;
@@ -24,6 +24,15 @@ public final class Packets {
   public record Velocity(Vec3 velocity) implements Packet { public Velocity { Objects.requireNonNull(velocity,"velocity"); } }
   public record Effect(String id, int amplifier, boolean removed) implements Packet { public Effect { Objects.requireNonNull(id,"id"); } }
   public record Gamemode(String value) implements Packet { public Gamemode { if(value==null||value.isBlank()) throw new IllegalArgumentException("gamemode is required"); } }
+  public record PlayerContext(String gamemode, Simulation.Attributes attributes, Map<String,Integer> effects,
+                              Phase5Mechanics.Pose pose, Phase5Mechanics.MovementEnvironment movementEnvironment,
+                              boolean sleeping, List<dev.phantom.ac.world.EntityCollisions.EntityBox> entityBoxes) implements Packet {
+    public PlayerContext {
+      if(gamemode==null||gamemode.isBlank()) throw new IllegalArgumentException("gamemode is required");
+      Objects.requireNonNull(attributes); effects=Map.copyOf(effects); Objects.requireNonNull(pose);
+      Objects.requireNonNull(movementEnvironment); entityBoxes=List.copyOf(entityBoxes);
+    }
+  }
   public record BlockChange(World.Pos position, World.Block block) implements Packet { public BlockChange { Objects.requireNonNull(position,"position"); Objects.requireNonNull(block,"block"); } }
   public record BlockStateChange(dev.phantom.ac.world.Pos position, dev.phantom.ac.world.BlockState state) implements Packet { public BlockStateChange { Objects.requireNonNull(position,"position"); Objects.requireNonNull(state,"state"); if(state.isUnsupported()) throw new IllegalArgumentException("an unsupported state carries no verified shape and must not be recorded as a known world change"); } }
   public record UnsupportedBlockStateChange(dev.phantom.ac.world.Pos position, dev.phantom.ac.world.BlockState state) implements Packet { public UnsupportedBlockStateChange { Objects.requireNonNull(position,"position"); Objects.requireNonNull(state,"state"); if(!state.isUnsupported()) throw new IllegalArgumentException("unsupported state packet requires an unsupported state"); } }
@@ -43,7 +52,7 @@ public final class Packets {
     public static CaptureProvenance fromAdapter(String sourceId,Packet packet,Long authoritativeServerTick){Objects.requireNonNull(packet);return new CaptureProvenance(sourceId,directionFor(packet),packet.getClass().getSimpleName(),authoritativeServerTick);}
     public static String directionFor(Packet packet){
       if(packet instanceof Move||packet instanceof ClientInput||packet instanceof TeleportConfirm)return "CLIENT_TO_SERVER";
-      if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof Effect||packet instanceof Gamemode||packet.mutatesWorld())return "SERVER_TO_CLIENT";
+      if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof Effect||packet instanceof Gamemode||packet instanceof PlayerContext||packet.mutatesWorld())return "SERVER_TO_CLIENT";
       return "UNKNOWN";
     }
   }
