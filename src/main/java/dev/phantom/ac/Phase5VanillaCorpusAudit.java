@@ -9,15 +9,10 @@ public final class Phase5VanillaCorpusAudit {
 
     public record Finding(String scenario, String field, String message) implements Serializable {}
     public record Result(boolean valid, List<Finding> findings, Map<String, Integer> observedRows) implements Serializable {
-        public Result {
-            findings = List.copyOf(findings);
-            observedRows = Map.copyOf(observedRows);
-        }
+        public Result { findings = List.copyOf(findings); observedRows = Map.copyOf(observedRows); }
     }
 
-    public static Result audit(Phase5VanillaTrace.Trace trace) {
-        return audit(trace, Phase5ScenarioCatalog.required());
-    }
+    public static Result audit(Phase5VanillaTrace.Trace trace) { return audit(trace, Phase5ScenarioCatalog.required()); }
 
     public static Result audit(Phase5VanillaTrace.Trace trace, Collection<Phase5ScenarioCatalog.Scenario> scenarios) {
         Objects.requireNonNull(trace, "trace");
@@ -27,18 +22,19 @@ public final class Phase5VanillaCorpusAudit {
         Map<String, Integer> counts = new LinkedHashMap<>();
 
         for (Phase5ScenarioCatalog.Scenario scenario : scenarios) {
-            List<Phase5VanillaTrace.Row> matches = rows.stream()
-                    .filter(row -> phaseMatches(row, scenario.id()))
-                    .toList();
+            List<Phase5VanillaTrace.Row> matches = rows.stream().filter(row -> phaseMatches(row, scenario.id())).toList();
             counts.put(scenario.id(), matches.size());
             if (matches.size() < scenario.minimumTicks()) {
                 findings.add(new Finding(scenario.id(), "rows", "expected at least " + scenario.minimumTicks() + " captured rows, got " + matches.size()));
                 continue;
             }
 
+            // A field may be unavailable before the event that makes it observable.
+            // Require at least one genuine observation rather than a fabricated value
+            // in every unrelated row.
             for (String field : scenario.requiredObservations()) {
-                boolean missing = matches.stream().anyMatch(row -> row.missingFields().contains(field));
-                if (missing) findings.add(new Finding(scenario.id(), field, "required observation is marked missing in at least one scenario row"));
+                long observed = matches.stream().filter(row -> !row.missingFields().contains(field)).count();
+                if (observed == 0) findings.add(new Finding(scenario.id(), field, "required observation never appears in the scenario trace"));
             }
 
             boolean causalInput = matches.stream().allMatch(row -> row.inputSource().startsWith("capture-pre-tick:"));
@@ -51,7 +47,6 @@ public final class Phase5VanillaCorpusAudit {
                 }
             }
         }
-
         return new Result(findings.isEmpty(), findings, counts);
     }
 
