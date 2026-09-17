@@ -1,6 +1,6 @@
 name: PhantomAC
 version: 0.1.0-SNAPSHOT
-main: dev.phantom.ac.paper.PhantomPaperPlugin
+main: dev.phantom.ac.paper.HardenedPhantomPaperPlugin
 api-version: '1.21'
 description: Deterministic movement-validation research adapter for Paper 1.21.11
 depend:
