@@ -15,35 +15,25 @@ import dev.phantom.ac.world.WorldSnapshot;
 
 import java.util.*;
 
-/**
- * Canonical live adapter for Phase 8. Phase 1-7 remain the source of timeline,
- * state, world, physics, reachable-state, and timing facts; this class only
- * orchestrates those existing engines and passes the resulting envelope to
- * Phase8MovementValidation.
- */
+/** Canonical live Phase 8 orchestration over the authoritative Phase 1-7 engines. */
 public final class Phase8LiveValidation {
   private Phase8LiveValidation() {}
 
-  public record Report(List<Phase8MovementValidation.Result> results,
-                       int movementObservations,
-                       int possible,
-                       int uncertain,
-                       int impossible) {
+  public record Report(List<Phase8MovementValidation.Result> results, int movementObservations,
+                       int possible, int uncertain, int impossible) {
     public Report { results = List.copyOf(results); }
   }
 
-  /** Pure parent-branch aggregation used by the live adapter and regression tests. */
   record ParentAggregation(SearchResult result, Set<Candidate> candidates, boolean timingOffsetsExhaustive) {
-    ParentAggregation {
-      Objects.requireNonNull(result);
-      candidates = Set.copyOf(candidates);
-    }
+    ParentAggregation { Objects.requireNonNull(result); candidates = Set.copyOf(candidates); }
   }
 
   /**
-   * Aggregates independently simulated parent/timing branches without collapsing
-   * IMPOSSIBLE into UNCERTAIN. A single possible branch wins over impossible
-   * branches; any unevaluable branch keeps the aggregate conservative.
+   * Aggregates timing/parent branches by their actual per-offset evidence. A
+   * TimingSearchResult may use UNCERTAIN as its internal aggregate when some
+   * offsets were impossible; that must not erase a proof that every offset was
+   * exhaustively evaluated. Only an actually unevaluable offset makes the Phase 8
+   * aggregate UNCERTAIN.
    */
   static ParentAggregation aggregateParentSearches(List<Phase6Reachability.TimingSearchResult> searches,
                                                    int maximumCandidates, long timingSpan) {
@@ -56,68 +46,67 @@ public final class Phase8LiveValidation {
     boolean hasImpossible = false;
     boolean hasUncertain = false;
     boolean timingExhaustive = true;
-    int simulatedTicks = 0;
-    int peakCandidates = 0;
-    int merged = 0;
-    int nonExhaustiveWorldBranches = 0;
-    int uncertainTransitions = 0;
-    int provenanceMerges = 0;
+    int simulatedTicks = 0, peakCandidates = 0, merged = 0;
+    int nonExhaustiveWorldBranches = 0, uncertainTransitions = 0, provenanceMerges = 0;
     LinkedHashSet<String> reasons = new LinkedHashSet<>();
 
     for (Phase6Reachability.TimingSearchResult search : searches) {
       Objects.requireNonNull(search);
-      if (search.evaluatedOffsets() != timingSpan || search.skippedOffsets() != 0
-          || search.verdict() == Phase6Reachability.Verdict.UNCERTAIN) {
-        timingExhaustive = false;
-      }
+      boolean offsetPossible = false;
+      boolean offsetUncertain = false;
+      boolean offsetImpossible = true;
+      int offsetResults = 0;
       for (SearchResult perOffset : search.byFirstTick().values()) {
+        offsetResults++;
         simulatedTicks = Math.max(simulatedTicks, perOffset.simulatedTicks());
         peakCandidates = Math.max(peakCandidates, perOffset.peakCandidates());
         merged += perOffset.mergedStates();
         nonExhaustiveWorldBranches += perOffset.nonExhaustiveWorldBranches();
         uncertainTransitions += perOffset.uncertainTransitions();
         provenanceMerges += perOffset.provenanceMerges();
+        switch (perOffset.verdict()) {
+          case POSSIBLE -> { offsetPossible = true; offsetImpossible = false; nextAll.addAll(perOffset.candidates()); }
+          case IMPOSSIBLE -> { /* this offset is deterministically exhausted */ }
+          case UNCERTAIN -> { offsetUncertain = true; offsetImpossible = false; nextAll.addAll(perOffset.candidates()); }
+        }
       }
 
-      switch (search.verdict()) {
-        case POSSIBLE -> {
-          hasPossible = true;
-          nextAll.addAll(search.candidates());
-          reasons.addAll(search.reasons());
-        }
-        case IMPOSSIBLE -> {
-          hasImpossible = true;
-          reasons.addAll(search.reasons());
-        }
-        case UNCERTAIN -> {
-          hasUncertain = true;
-          uncertainTransitions += search.skippedOffsets();
-          reasons.addAll(search.reasons());
-        }
+      boolean evaluatedAllOffsets = search.evaluatedOffsets() == timingSpan
+          && search.skippedOffsets() == 0 && offsetResults == timingSpan;
+      if (!evaluatedAllOffsets || offsetUncertain) timingExhaustive = false;
+
+      if (offsetUncertain) {
+        hasUncertain = true;
+      } else if (offsetPossible) {
+        hasPossible = true;
+      } else if (evaluatedAllOffsets && offsetImpossible) {
+        hasImpossible = true;
+      } else {
+        hasUncertain = true;
       }
+      reasons.addAll(search.reasons());
 
       if (nextAll.size() > maximumCandidates) {
         timingExhaustive = false;
         hasUncertain = true;
+        // Do not expose a partial subset as a complete legitimate state space.
         nextAll.clear();
-        reasons.add("combined Phase 6 timing candidate budget exceeded; no provisional subset retained");
+        reasons.add("combined Phase 6 timing candidate budget exceeded; provisional candidates are not safe to continue");
         break;
       }
     }
 
     Phase6Reachability.Verdict verdict;
-    if (hasUncertain) {
-      verdict = Phase6Reachability.Verdict.UNCERTAIN;
-    } else if (hasPossible && !nextAll.isEmpty()) {
-      verdict = Phase6Reachability.Verdict.POSSIBLE;
-    } else if (hasImpossible) {
-      verdict = Phase6Reachability.Verdict.IMPOSSIBLE;
-      if (reasons.isEmpty()) reasons.add("all exhaustively modeled parent branches are impossible");
-    } else {
+    if (hasUncertain) verdict = Phase6Reachability.Verdict.UNCERTAIN;
+    else if (hasPossible && !nextAll.isEmpty()) verdict = Phase6Reachability.Verdict.POSSIBLE;
+    else if (hasImpossible) verdict = Phase6Reachability.Verdict.IMPOSSIBLE;
+    else {
       verdict = Phase6Reachability.Verdict.UNCERTAIN;
       timingExhaustive = false;
       reasons.add("no parent branch produced an evaluable result");
     }
+    if (verdict == Phase6Reachability.Verdict.IMPOSSIBLE && reasons.isEmpty())
+      reasons.add("all exhaustively modeled parent branches are impossible");
 
     SearchResult aggregate = new SearchResult(verdict, Set.copyOf(nextAll), simulatedTicks,
         peakCandidates, merged, nonExhaustiveWorldBranches, uncertainTransitions, provenanceMerges,
@@ -127,11 +116,8 @@ public final class Phase8LiveValidation {
 
   public static Report analyze(String playerId, Timeline.Snapshot timeline,
                                int maximumCandidates, Phase7Timing.Config timingConfig) {
-    Objects.requireNonNull(playerId);
-    Objects.requireNonNull(timeline);
-    Objects.requireNonNull(timingConfig);
+    Objects.requireNonNull(playerId); Objects.requireNonNull(timeline); Objects.requireNonNull(timingConfig);
     Contracts.requireCandidateBudget(maximumCandidates);
-
     World.VisibilityHistory history = World.fromTimeline(timeline);
     Phase7Timing.Reconstruction timing = Phase7Timing.reconstruct(timeline, timingConfig);
     Phase6Reachability engine = new Phase6Reachability(new Vanilla12111RichPhysics());
@@ -149,22 +135,16 @@ public final class Phase8LiveValidation {
     for (Timeline.Event event : timeline.events()) {
       Packets.NormalizedPacket normalized = event.packet();
       Packets.Packet packet = normalized.packet();
-
       if (packet instanceof Packets.ClientInput input) {
         if (!normalized.flags().contains(Packets.PacketFlag.DUPLICATE)) currentInput = InputConstraint.fromClientInput(input);
         continue;
       }
       if (packet instanceof Packets.Teleport teleport) {
-        pendingTeleportId = teleport.id();
-        candidates = Set.of();
-        continuation = Continuation.WAITING_FOR_TELEPORT_CONFIRM;
-        continue;
+        pendingTeleportId = teleport.id(); candidates = Set.of(); continuation = Continuation.WAITING_FOR_TELEPORT_CONFIRM; continue;
       }
       if (packet instanceof Packets.TeleportConfirm confirm) {
         if (pendingTeleportId != null && pendingTeleportId == confirm.id()) {
-          pendingTeleportId = null;
-          candidates = Set.of();
-          continuation = Continuation.UNANCHORED;
+          pendingTeleportId = null; candidates = Set.of(); continuation = Continuation.UNANCHORED;
         }
         continue;
       }
@@ -179,25 +159,14 @@ public final class Phase8LiveValidation {
             "missing Phase 7 timing or Phase 2 state frame", "live:phase8:" + normalized.sequence()));
         continue;
       }
-
-      Player prior = stateFrame.before();
-      Player observed = stateFrame.after();
+      Player prior = stateFrame.before(), observed = stateFrame.after();
       Validation.SyncWindow sync = Phase7Timing.toPhase6Window(eventTiming);
       String replayReference = "live:phase8:" + playerId + ":" + normalized.sequence();
-      List<String> inputAssumptions = List.of(
-          "client-input=" + currentInput,
+      List<String> inputAssumptions = List.of("client-input=" + currentInput,
           "input-constraint-candidates=" + currentInput.enumerate().size(),
           "timing-offsets=" + sync.earliestClientTick() + ".." + sync.latestClientTick());
       String worldReference = "timeline-world:tick=" + event.serverTick() + ":chunks=" + world.loadedChunks().size();
 
-      /*
-       * Raw capture uses one global sequence across both directions. Server->client
-       * chunk/velocity/correction packets legitimately interleave with client->server
-       * movement packets, so a global SEQUENCE_GAP does NOT prove a missing movement
-       * record. Duplicate/out-of-order records remain hard chronology uncertainty.
-       * Phase 7 timing and the client-visible world provide the authoritative
-       * uncertainty envelope for actual missing/delayed observations.
-       */
       boolean chronologyUncertain = normalized.flags().stream().anyMatch(flag ->
           flag == Packets.PacketFlag.DUPLICATE || flag == Packets.PacketFlag.OUT_OF_ORDER
               || flag == Packets.PacketFlag.BEFORE_CAPTURE_EPOCH);
@@ -209,7 +178,6 @@ public final class Phase8LiveValidation {
             world, worldReference, sync, inputAssumptions, uncertain, replayReference));
         continue;
       }
-
       if (continuation == Continuation.WAITING_FOR_TELEPORT_CONFIRM) {
         SearchResult uncertain = new SearchResult(Phase6Reachability.Verdict.UNCERTAIN, Set.of(), 0,
             candidates.size(), 0, 0, 1, 0,
@@ -218,7 +186,6 @@ public final class Phase8LiveValidation {
             world, worldReference, sync, inputAssumptions, uncertain, replayReference));
         continue;
       }
-
       if (continuation == Continuation.UNANCHORED) {
         SearchResult anchor = new SearchResult(Phase6Reachability.Verdict.UNCERTAIN, Set.of(), 0, 0, 0, 0, 0, 0,
             List.of("first movement observation establishes the Phase 6 replay anchor"));
@@ -233,11 +200,9 @@ public final class Phase8LiveValidation {
         continuation = Continuation.ACTIVE;
         continue;
       }
-
       if (continuation == Continuation.UNCERTAIN_EMPTY || continuation == Continuation.IMPOSSIBLE) {
         Phase6Reachability.Verdict terminalVerdict = continuation == Continuation.IMPOSSIBLE
-            ? Phase6Reachability.Verdict.IMPOSSIBLE
-            : Phase6Reachability.Verdict.UNCERTAIN;
+            ? Phase6Reachability.Verdict.IMPOSSIBLE : Phase6Reachability.Verdict.UNCERTAIN;
         List<String> terminalReasons = continuation == Continuation.IMPOSSIBLE
             ? List.of("existing Phase 6 reachable candidate set was exhaustively eliminated by an observed movement")
             : List.of("Phase 6 candidate chain is unavailable because prior validation was uncertain");
@@ -263,35 +228,24 @@ public final class Phase8LiveValidation {
 
       List<Phase6Reachability.TimingSearchResult> parentSearches = new ArrayList<>();
       for (Candidate parent : candidates) {
-        Phase6Reachability.Context prepared = withObservedEnvironment(
-            parent.context(), world, currentInput, earliest);
+        Phase6Reachability.Context prepared = withObservedEnvironment(parent.context(), world, currentInput, earliest);
         boolean worldExhaustive = worldCoverageExhaustive(world, parent);
-        parentSearches.add(engine.searchWithinTimingWindow(
-            prepared, earliest, latest,
-            false,
+        parentSearches.add(engine.searchWithinTimingWindow(prepared, earliest, latest, false,
             List.of(currentInput),
-            tick -> List.of(new WorldBranch(
-                "client-visible-" + event.serverTick(), world, worldExhaustive,
-                worldExhaustive
-                    ? "historical client-visible world covers the parent collision volume"
+            tick -> List.of(new WorldBranch("client-visible-" + event.serverTick(), world, worldExhaustive,
+                worldExhaustive ? "historical client-visible world covers the parent collision volume"
                     : "Phase 4 visibility does not fully cover the parent collision volume; unknown cells remain unevaluable")),
-            tick -> externalByClientTick.getOrDefault(tick, List.of(new Phase6Reachability.None())),
-            maximumCandidates));
+            tick -> externalByClientTick.getOrDefault(tick, List.of(new Phase6Reachability.None())), maximumCandidates));
       }
-
       ParentAggregation aggregated = aggregateParentSearches(parentSearches, maximumCandidates, timingSpan);
       SearchResult reachable = aggregated.result();
-
-      results.add(Phase8MovementValidation.validate(playerId, event.serverTick(), prior, observed,
-          world, worldReference, sync, inputAssumptions, reachable, replayReference,
-          aggregated.timingOffsetsExhaustive()));
+      results.add(Phase8MovementValidation.validate(playerId, event.serverTick(), prior, observed, world, worldReference,
+          sync, inputAssumptions, reachable, replayReference, aggregated.timingOffsetsExhaustive()));
 
       switch (reachable.verdict()) {
         case POSSIBLE -> {
           Set<Candidate> matching = new LinkedHashSet<>();
-          for (Candidate candidate : aggregated.candidates()) {
-            if (matchesObserved(candidate.context().player(), observed)) matching.add(candidate);
-          }
+          for (Candidate candidate : aggregated.candidates()) if (matchesObserved(candidate.context().player(), observed)) matching.add(candidate);
           candidates = Set.copyOf(matching);
           continuation = matching.isEmpty() ? Continuation.IMPOSSIBLE : Continuation.ACTIVE;
         }
@@ -299,13 +253,9 @@ public final class Phase8LiveValidation {
           candidates = aggregated.candidates();
           continuation = candidates.isEmpty() ? Continuation.UNCERTAIN_EMPTY : Continuation.ACTIVE;
         }
-        case IMPOSSIBLE -> {
-          candidates = Set.of();
-          continuation = Continuation.IMPOSSIBLE;
-        }
+        case IMPOSSIBLE -> { candidates = Set.of(); continuation = Continuation.IMPOSSIBLE; }
       }
     }
-
     int possible = (int) results.stream().filter(r -> r.verdict() == Phase8MovementValidation.Verdict.POSSIBLE).count();
     int uncertain = (int) results.stream().filter(r -> r.verdict() == Phase8MovementValidation.Verdict.UNCERTAIN).count();
     int impossible = (int) results.stream().filter(r -> r.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE).count();
@@ -316,11 +266,9 @@ public final class Phase8LiveValidation {
 
   private static boolean worldCoverageExhaustive(WorldSnapshot world, Candidate parent) {
     Maths.Aabb box = Maths.Aabb.playerAt(parent.context().player().position(), parent.context().pose());
-    return world.fullyKnown(new dev.phantom.ac.geometry.BlockBox(
-        box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()));
+    return world.fullyKnown(new dev.phantom.ac.geometry.BlockBox(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()));
   }
 
-  /** Live movement packets declare position, rotation when present, and ground state when present. */
   private static boolean matchesObserved(Player candidate, Player observed) {
     return candidate.position().equals(observed.position())
         && Float.compare(candidate.yaw(), observed.yaw()) == 0
@@ -330,32 +278,27 @@ public final class Phase8LiveValidation {
 
   private static Player simulationSafe(Player player) {
     EnumSet<State.UncertaintyReason> reasons = EnumSet.noneOf(State.UncertaintyReason.class);
-    reasons.addAll(player.uncertaintyReasons());
-    reasons.remove(State.UncertaintyReason.UNKNOWN_CLIENT_TICK);
+    reasons.addAll(player.uncertaintyReasons()); reasons.remove(State.UncertaintyReason.UNKNOWN_CLIENT_TICK);
     boolean uncertain = !reasons.isEmpty();
     if (!uncertain && !player.uncertain()) return player;
-    return new Player(player.position(), player.velocity(), player.yaw(), player.pitch(), player.onGround(),
-        player.gamemode(), player.effects(), player.awaitingTeleport(), uncertain, player.input(),
-        player.attributes(), player.pose(), player.environment(), player.clientTickRange(), player.provenance(), reasons);
+    return new Player(player.position(), player.velocity(), player.yaw(), player.pitch(), player.onGround(), player.gamemode(),
+        player.effects(), player.awaitingTeleport(), uncertain, player.input(), player.attributes(), player.pose(), player.environment(),
+        player.clientTickRange(), player.provenance(), reasons);
   }
 
-  private static Phase8MovementValidation.Result anchorUncertain(String playerId, long serverTick,
-                                                                   State.StateFrame frame, WorldSnapshot world,
-                                                                   String reason, String replayReference) {
+  private static Phase8MovementValidation.Result anchorUncertain(String playerId, long serverTick, State.StateFrame frame,
+                                                                   WorldSnapshot world, String reason, String replayReference) {
     Player state = frame == null ? Player.initial(Maths.Vec3.ZERO) : frame.after();
     Player prior = frame == null ? state : frame.before();
     Validation.SyncWindow sync = new Validation.SyncWindow(Math.max(0, serverTick), Math.max(0, serverTick), true, List.of(reason));
     SearchResult uncertain = new SearchResult(Phase6Reachability.Verdict.UNCERTAIN, Set.of(), 0, 0, 0, 0, 1, 0, List.of(reason));
-    return Phase8MovementValidation.validate(playerId, serverTick, prior, state, world,
-        "timeline-world:tick=" + serverTick, sync, List.of("input unavailable"), uncertain, replayReference);
+    return Phase8MovementValidation.validate(playerId, serverTick, prior, state, world, "timeline-world:tick=" + serverTick,
+        sync, List.of("input unavailable"), uncertain, replayReference);
   }
 
   private static State.Reconstruction reconstructObservedStates(Timeline.Snapshot timeline) {
-    for (Timeline.Event event : timeline.events()) {
-      if (event.packet().packet() instanceof Packets.Move move && move.position() != null) {
-        return State.reconstruct(State.Seed.serverAnchor(Player.initial(move.position())), timeline);
-      }
-    }
+    for (Timeline.Event event : timeline.events()) if (event.packet().packet() instanceof Packets.Move move && move.position() != null)
+      return State.reconstruct(State.Seed.serverAnchor(Player.initial(move.position())), timeline);
     return new State.Reconstruction(List.of());
   }
 
@@ -365,19 +308,16 @@ public final class Phase8LiveValidation {
     return map;
   }
 
-  private static Phase6Reachability.Context anchorContext(Player player, WorldSnapshot world,
-                                                           InputConstraint input, long tick) {
+  private static Phase6Reachability.Context anchorContext(Player player, WorldSnapshot world, InputConstraint input, long tick) {
     MovementEnvironment env = inferEnvironment(world, player, input);
-    return new Phase6Reachability.Context(tick, player, environmentFor(env), Attributes.DEFAULT,
-        MovementEffects.NONE, Pose.STANDING, env, false);
+    return new Phase6Reachability.Context(tick, player, environmentFor(env), Attributes.DEFAULT, MovementEffects.NONE, Pose.STANDING, env, false);
   }
 
-  private static Phase6Reachability.Context withObservedEnvironment(Phase6Reachability.Context context,
-                                                                     WorldSnapshot world, InputConstraint input,
-                                                                     long tick) {
+  private static Phase6Reachability.Context withObservedEnvironment(Phase6Reachability.Context context, WorldSnapshot world,
+                                                                     InputConstraint input, long tick) {
     MovementEnvironment env = inferEnvironment(world, context.player(), input);
-    return new Phase6Reachability.Context(tick, context.player(), environmentFor(env), context.attributes(),
-        context.effects(), context.pose(), env, context.sleeping(), context.uncertainty());
+    return new Phase6Reachability.Context(tick, context.player(), environmentFor(env), context.attributes(), context.effects(),
+        context.pose(), env, context.sleeping(), context.uncertainty());
   }
 
   private static Simulation.Environment environmentFor(MovementEnvironment env) {
@@ -388,9 +328,7 @@ public final class Phase8LiveValidation {
   }
 
   private static MovementEnvironment inferEnvironment(WorldSnapshot world, Player player, InputConstraint input) {
-    int x = (int) Math.floor(player.position().x());
-    int y = (int) Math.floor(player.position().y());
-    int z = (int) Math.floor(player.position().z());
+    int x = (int) Math.floor(player.position().x()), y = (int) Math.floor(player.position().y()), z = (int) Math.floor(player.position().z());
     boolean water = false, lava = false, climb = false;
     for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
       BlockState state = world.blockAtOrNull(x + dx, y + dy, z + dz);
@@ -399,20 +337,16 @@ public final class Phase8LiveValidation {
       if (state.variant() == BlockState.Variant.FLUID && state.blockId().equals("minecraft:lava")) lava = true;
       if (state.variant() == BlockState.Variant.LADDER) climb = true;
     }
-    boolean sprint = input.sprint().orElse(false);
-    boolean sneak = input.sneak().orElse(false);
-    boolean swim = input.jump().orElse(false);
+    boolean sprint = input.sprint().orElse(false), sneak = input.sneak().orElse(false), swim = input.jump().orElse(false);
     if (water) return MovementEnvironment.vanillaWater(player.onGround(), sprint, sneak, swim);
     if (lava) return MovementEnvironment.vanillaLava(player.onGround(), sprint, sneak);
     if (climb) return MovementEnvironment.vanillaClimbable(player.onGround(), sprint, sneak);
     return MovementEnvironment.dry(player.onGround(), sprint, sneak);
   }
 
-  private static Map<Long, List<ExternalTransition>> externalTransitions(Timeline.Snapshot timeline,
-                                                                           Phase7Timing.Reconstruction timing) {
+  private static Map<Long, List<ExternalTransition>> externalTransitions(Timeline.Snapshot timeline, Phase7Timing.Reconstruction timing) {
     Map<Long, List<ExternalTransition>> out = new HashMap<>();
-    Set<Long> applied = new HashSet<>();
-    Player state = Player.initial(Maths.Vec3.ZERO);
+    Set<Long> applied = new HashSet<>(); Player state = Player.initial(Maths.Vec3.ZERO);
     for (Timeline.Event event : timeline.events()) {
       if (event.packet().flags().contains(Packets.PacketFlag.DUPLICATE) || !applied.add(event.packet().sequence())) continue;
       Packets.Packet packet = event.packet().packet();
@@ -422,24 +356,16 @@ public final class Phase8LiveValidation {
       long span = Math.max(0, range.max() - Math.max(0, range.min())) + 1;
       if (span > timing.config().maxTimingCandidates()) continue;
       ExternalTransition transition = null;
-      if (packet instanceof Packets.Velocity velocity) {
-        transition = new Phase6Reachability.VelocityImpulse(velocity.velocity(), "server velocity packet");
-      } else if (packet instanceof Packets.Teleport teleport) {
-        Maths.Vec3 target = new Maths.Vec3(
-            teleport.relativeX() ? state.position().x() + teleport.position().x() : teleport.position().x(),
+      if (packet instanceof Packets.Velocity velocity) transition = new Phase6Reachability.VelocityImpulse(velocity.velocity(), "server velocity packet");
+      else if (packet instanceof Packets.Teleport teleport) {
+        Maths.Vec3 target = new Maths.Vec3(teleport.relativeX() ? state.position().x() + teleport.position().x() : teleport.position().x(),
             teleport.relativeY() ? state.position().y() + teleport.position().y() : teleport.position().y(),
             teleport.relativeZ() ? state.position().z() + teleport.position().z() : teleport.position().z());
-        transition = new Phase6Reachability.TeleportCorrection(teleport.id(), target, Maths.Vec3.ZERO,
-            Pose.STANDING, true);
-      } else if (packet instanceof Packets.TeleportConfirm confirm) {
-        transition = new Phase6Reachability.TeleportConfirmation(confirm.id());
-      }
-      if (transition != null) {
-        for (long tick = Math.max(0, range.min()); tick <= Math.max(0, range.max()); tick++) {
-          out.computeIfAbsent(tick, ignored -> new ArrayList<>()).add(transition);
-        }
-      }
-      try { state = State.apply(state, event.packet()); } catch (RuntimeException ignored) {}
+        transition = new Phase6Reachability.TeleportCorrection(teleport.id(), target, Maths.Vec3.ZERO, Pose.STANDING, true);
+      } else if (packet instanceof Packets.TeleportConfirm confirm) transition = new Phase6Reachability.TeleportConfirmation(confirm.id());
+      if (transition != null) for (long tick = Math.max(0, range.min()); tick <= Math.max(0, range.max()); tick++)
+        out.computeIfAbsent(tick, ignored -> new ArrayList<>()).add(transition);
+      try { state = State.apply(state, event.packet()); } catch (RuntimeException ignored) { }
     }
     Map<Long, List<ExternalTransition>> frozen = new HashMap<>();
     for (Map.Entry<Long, List<ExternalTransition>> entry : out.entrySet()) frozen.put(entry.getKey(), List.copyOf(entry.getValue()));
