@@ -1,5 +1,6 @@
 package dev.phantom.ac;
 
+import dev.phantom.ac.Phase8MovementValidation.CandidateSummary;
 import dev.phantom.ac.Phase8MovementValidation.Evidence;
 import dev.phantom.ac.Phase8MovementValidation.Verdict;
 import dev.phantom.ac.State.Player;
@@ -12,7 +13,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -63,11 +63,11 @@ class HardeningRegressionTest {
   private static Evidence evidence(Verdict verdict, long tick) {
     Player p = Player.initial(Maths.Vec3.ZERO);
     Validation.SyncWindow timing = new Validation.SyncWindow(tick, tick, false, List.of());
-    Phase6Reachability.SearchResult search = new Phase6Reachability.SearchResult(
-        verdict == Verdict.UNCERTAIN ? Phase6Reachability.Verdict.UNCERTAIN :
-            verdict == Verdict.IMPOSSIBLE ? Phase6Reachability.Verdict.IMPOSSIBLE : Phase6Reachability.Verdict.POSSIBLE,
-        Set.of(), 1, 1, 0, 0, verdict == Verdict.UNCERTAIN ? 1 : 0, 0, List.of("test"));
-    return Phase8MovementValidation.validate("player", tick, p, p, WorldSnapshot.emptyOverworld12111(), "test-world",
-        timing, List.of("test-input"), search, "test-replay", true).evidence();
+    return new Evidence(Phase8MovementValidation.VERSION, verdict, "player", tick, tick, tick,
+        p, p, Contracts.TARGET_VERSION, "test-world", List.of("test-input"), timing.reasons(),
+        1, verdict == Verdict.POSSIBLE ? 1 : 0, verdict == Verdict.POSSIBLE ? 0 : 1,
+        verdict == Verdict.POSSIBLE ? "match" : "no match", verdict == Verdict.IMPOSSIBLE ? OptionalLong.of(tick) : OptionalLong.empty(),
+        Optional.<CandidateSummary>empty(), List.of("test"), List.of(), Phase8MovementValidation.PHASE5_VERSION,
+        Phase8MovementValidation.PHASE6_VERSION, Phase8MovementValidation.PHASE7_VERSION, "test-replay", "MOVEMENT_REACHABILITY");
   }
 }
