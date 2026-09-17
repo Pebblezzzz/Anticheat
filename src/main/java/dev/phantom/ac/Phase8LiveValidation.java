@@ -2,7 +2,6 @@ package dev.phantom.ac;
 
 import dev.phantom.ac.Phase5Mechanics.MovementEffects;
 import dev.phantom.ac.Phase5Mechanics.MovementEnvironment;
-import dev.phantom.ac.Phase5Mechanics.Pose;
 import dev.phantom.ac.Phase6Reachability.Candidate;
 import dev.phantom.ac.Phase6Reachability.ExternalTransition;
 import dev.phantom.ac.Phase6Reachability.InputConstraint;
@@ -29,9 +28,7 @@ public final class Phase8LiveValidation {
                        int possible,
                        int uncertain,
                        int impossible) {
-    public Report {
-      results = List.copyOf(results);
-    }
+    public Report { results = List.copyOf(results); }
   }
 
   public static Report analyze(String playerId, Timeline.Snapshot timeline,
@@ -56,13 +53,11 @@ public final class Phase8LiveValidation {
     for (Timeline.Event event : timeline.events()) {
       Packets.NormalizedPacket normalized = event.packet();
       Packets.Packet packet = normalized.packet();
-      boolean duplicate = normalized.flags().contains(Packets.PacketFlag.DUPLICATE);
 
       if (packet instanceof Packets.ClientInput input) {
-        if (!duplicate) currentInput = InputConstraint.fromClientInput(input);
+        if (!normalized.flags().contains(Packets.PacketFlag.DUPLICATE)) currentInput = InputConstraint.fromClientInput(input);
         continue;
       }
-
       if (!(packet instanceof Packets.Move move) || move.position() == null) continue;
       movements++;
 
@@ -79,17 +74,23 @@ public final class Phase8LiveValidation {
       Player observed = stateFrame.after();
       Validation.SyncWindow sync = Phase7Timing.toPhase6Window(eventTiming);
       String replayReference = "live:phase8:" + playerId + ":" + normalized.sequence();
-      List<String> inputAssumptions = List.of("client-input=" + currentInput,
+      List<String> inputAssumptions = List.of(
+          "client-input=" + currentInput,
           "input-constraint-candidates=" + currentInput.enumerate().size(),
           "timing-offsets=" + sync.earliestClientTick() + ".." + sync.latestClientTick());
       String worldReference = "timeline-world:tick=" + event.serverTick() + ":chunks=" + world.loadedChunks().size();
 
-      // A duplicate, reorder, capture gap, or pre-capture record cannot safely
-      // be made into an IMPOSSIBLE movement claim. Phase 7 remains authoritative
-      // for the chronology uncertainty instead.
+      /*
+       * Raw capture uses one global sequence across both directions. Server->client
+       * chunk/velocity/correction packets legitimately interleave with client->server
+       * movement packets, so a global SEQUENCE_GAP does NOT prove a missing movement
+       * record. Duplicate/out-of-order records remain hard chronology uncertainty.
+       * Phase 7 timing and the client-visible world provide the authoritative
+       * uncertainty envelope for actual missing/delayed observations.
+       */
       boolean chronologyUncertain = normalized.flags().stream().anyMatch(flag ->
           flag == Packets.PacketFlag.DUPLICATE || flag == Packets.PacketFlag.OUT_OF_ORDER
-              || flag == Packets.PacketFlag.SEQUENCE_GAP || flag == Packets.PacketFlag.BEFORE_CAPTURE_EPOCH);
+              || flag == Packets.PacketFlag.BEFORE_CAPTURE_EPOCH);
       if (chronologyUncertain) {
         SearchResult uncertain = new SearchResult(Phase6Reachability.Verdict.UNCERTAIN, Set.of(), 0,
             candidates.size(), 0, 0, 1, 0,
@@ -104,8 +105,10 @@ public final class Phase8LiveValidation {
             List.of("first movement observation establishes the Phase 6 replay anchor"));
         results.add(Phase8MovementValidation.validate(playerId, event.serverTick(), prior, observed,
             world, worldReference, sync, inputAssumptions, anchor, replayReference));
+        Player safeObserved = simulationSafe(observed);
+        if (safeObserved.uncertain()) continue;
         candidates = Set.of(new Candidate(0,
-            anchorContext(simulationSafe(observed), world, currentInput, Math.max(0, sync.earliestClientTick())),
+            anchorContext(safeObserved, world, currentInput, Math.max(0, sync.earliestClientTick())),
             new Phase6Reachability.Provenance(0, -1, event.serverTick(), "ROOT", "ROOT", "None",
                 List.of("live movement anchor"), 1, List.of())));
         continue;
@@ -131,8 +134,8 @@ public final class Phase8LiveValidation {
       int provenanceMerges = 0;
       LinkedHashSet<String> searchReasons = new LinkedHashSet<>(eventTiming.reasons());
 
-      // The World.VisibilityHistory snapshot is the canonical client-visible
-      // world. Unloaded or unsupported cells are still rejected by Phase 6.
+      // Phase 4 visibility history is authoritative; Phase 6 determines whether
+      // the represented client-visible cells are sufficient for exhaustive search.
       boolean worldExhaustive = true;
 
       for (Candidate parent : candidates) {
@@ -180,8 +183,7 @@ public final class Phase8LiveValidation {
               peakCandidates, merged, nonExhaustiveWorldBranches, uncertainTransitions, provenanceMerges,
               searchReasons.isEmpty() ? List.of("all Phase 7 timing offsets were exhaustively modeled") : List.copyOf(searchReasons));
 
-      boolean timingExhaustive = !chronologyUncertain
-          && timing.consistency() == Phase7Timing.Consistency.CONSISTENT;
+      boolean timingExhaustive = timing.consistency() == Phase7Timing.Consistency.CONSISTENT;
       results.add(Phase8MovementValidation.validate(playerId, event.serverTick(), prior, observed,
           world, worldReference, sync, inputAssumptions, reachable, replayReference, timingExhaustive));
 
