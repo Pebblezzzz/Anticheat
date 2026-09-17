@@ -12,7 +12,9 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.bukkit.command.Command;
@@ -67,6 +69,8 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
   private org.bukkit.scheduler.BukkitTask validationTask;
   private org.bukkit.scheduler.BukkitTask chunkTask;
   private ExecutorService chunkExecutor;
+  private volatile int chunkDecoderThreads;
+  private final AtomicInteger chunkInFlight = new AtomicInteger();
   private volatile boolean alertsEnabled;
   private volatile boolean broadcastAlerts;
   private volatile boolean phase8Debug;
@@ -140,7 +144,9 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     broadcastAlerts = getConfig().getBoolean("alerts.broadcast", false);
     phase8Debug = getConfig().getBoolean("debug.phase8", false);
     validationBudget = Math.max(1, getConfig().getInt("validation.candidate-budget", 4096));
-    chunkExecutor = Executors.newSingleThreadExecutor(r -> {
+    int processors = Runtime.getRuntime().availableProcessors();
+    chunkDecoderThreads = Math.max(1, Math.min(4, processors / 2));
+    chunkExecutor = Executors.newFixedThreadPool(chunkDecoderThreads, r -> {
       Thread thread = new Thread(r, "Phantom-ClientChunkDecoder");
       thread.setDaemon(true);
       return thread;
@@ -149,7 +155,8 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     int validationInterval = Math.max(1, getConfig().getInt("validation.interval-ticks", 10));
     validationTask = getServer().getScheduler().runTaskTimerAsynchronously(this, this::evaluateCapturesAsync, validationInterval, validationInterval);
     getLogger().info("Phase 8 live validation enabled: alerts=" + alertsEnabled + ", debug=" + phase8Debug
-        + ", intervalTicks=" + validationInterval + ", candidateBudget=" + validationBudget);
+        + ", intervalTicks=" + validationInterval + ", candidateBudget=" + validationBudget
+        + ", chunkDecoderThreads=" + chunkDecoderThreads);
   }
 
   @Override public void onDisable() {
@@ -161,14 +168,16 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
       try { chunkExecutor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS); }
       catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
     }
+    chunkInFlight.set(0);
     captures.clear();
   }
 
-  /** Submits a bounded number of client chunk decodes per tick; all expensive work runs off the Paper thread. */
+  /** Submits at most one task per decoder thread so expensive decoding cannot build a hidden executor backlog. */
   private void drainChunkQueue() {
     if (chunkExecutor == null) return;
     int submitted = 0;
-    while (submitted < 2) {
+    while (submitted < chunkDecoderThreads) {
+      if (chunkInFlight.get() >= chunkDecoderThreads) return;
       Capture selected = null;
       PendingChunk pending = null;
       for (Capture capture : captures.values()) {
@@ -178,14 +187,29 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
       if (selected == null) return;
       Capture target = selected;
       PendingChunk work = pending;
-      chunkExecutor.execute(() -> decodeChunk(target, work));
+      chunkInFlight.incrementAndGet();
+      try {
+        chunkExecutor.execute(() -> {
+          try {
+            decodeChunk(target, work);
+          } finally {
+            chunkInFlight.decrementAndGet();
+          }
+        });
+      } catch (RejectedExecutionException rejected) {
+        chunkInFlight.decrementAndGet();
+        target.chunkQueue.add(work);
+        return;
+      }
       submitted++;
     }
   }
 
   private void decodeChunk(Capture capture, PendingChunk pending) {
+    long startedNanos = System.nanoTime();
     try {
       Map<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> states = new LinkedHashMap<>();
+      Map<Integer, dev.phantom.ac.world.BlockState> stateCache = new LinkedHashMap<>();
       BaseChunk[] sections = pending.column.getChunks();
       int minSection = Math.floorDiv(pending.minY, 16);
       int maxSectionExclusive = Math.floorDiv(pending.maxY - 1, 16) + 1;
@@ -199,7 +223,13 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
           for (int localY = 0; localY < 16; localY++) {
             for (int localZ = 0; localZ < 16; localZ++) {
               WrappedBlockState state = section.get(pending.clientVersion, localX, localY, localZ, false);
-              dev.phantom.ac.world.BlockState core = toCoreState(state);
+              if (state == null || state.getType().isAir()) continue;
+              int globalId = state.getGlobalId();
+              dev.phantom.ac.world.BlockState core = stateCache.get(globalId);
+              if (core == null) {
+                core = toCoreState(state);
+                stateCache.put(globalId, core);
+              }
               if (!core.isAir()) {
                 states.put(new dev.phantom.ac.world.Pos(pending.column.getX() * 16 + localX, baseY + localY, pending.column.getZ() * 16 + localZ), core);
               }
@@ -209,11 +239,15 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
       }
       capture.packets.add(new RawPacket(pending.sequence(), pending.receivedNanos(),
           new Packets.ChunkStates(new dev.phantom.ac.world.Chunk(pending.column.getX(), pending.column.getZ()), states)));
+      long decoded = capture.decodedChunks.incrementAndGet();
       if (phase8Debug && capture.decodedChunkLogCounter.incrementAndGet() <= 8) {
+        long micros = (System.nanoTime() - startedNanos) / 1_000L;
         getLogger().info("[Phase8][CHUNK] seq=" + pending.sequence() + " chunk=" + pending.column.getX() + "," + pending.column.getZ()
-            + " nonAirStates=" + states.size() + " clientVersion=" + pending.clientVersion);
+            + " nonAirStates=" + states.size() + " clientVersion=" + pending.clientVersion
+            + " decodeMicros=" + micros + " decodedTotal=" + decoded);
       }
     } catch (RuntimeException failure) {
+      capture.chunkDecodeFailures.incrementAndGet();
       getLogger().warning("client chunk decode failed for " + pending.column.getX() + "," + pending.column.getZ() + ": " + failure.getClass().getSimpleName()
           + (failure.getMessage() == null ? "" : " - " + failure.getMessage()));
     }
@@ -345,8 +379,8 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     getLogger().info("[Phase8][RUN] source=" + source + " player=" + playerName + " raw=" + raw.size()
         + " timelineEvents=" + timeline.events().size() + " moves=" + report.movementObservations()
         + " possible=" + report.possible() + " uncertain=" + report.uncertain() + " impossible=" + report.impossible()
-        + " chunksSeen=" + capture.chunkPackets.get() + " chunksDecoded=" + capture.decodedChunkLogCounter.get()
-        + " chunkQueue=" + capture.chunkQueue.size()
+        + " chunksSeen=" + capture.chunkPackets.get() + " chunksDecoded=" + capture.decodedChunks.get()
+        + " chunkDecodeFailures=" + capture.chunkDecodeFailures.get() + " chunkQueue=" + capture.chunkQueue.size()
         + " flags{duplicate=" + duplicate + ",outOfOrder=" + outOfOrder + ",gaps=" + gaps + ",beforeEpoch=" + beforeEpoch + "}"
         + " packetTypes=" + packetTypes.entrySet().stream().map(e -> e.getKey().getSimpleName() + "=" + e.getValue()).toList());
 
@@ -448,6 +482,8 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     final long epochNanos;
     final AtomicLong sequence = new AtomicLong();
     final AtomicLong chunkPackets = new AtomicLong();
+    final AtomicLong decodedChunks = new AtomicLong();
+    final AtomicLong chunkDecodeFailures = new AtomicLong();
     final AtomicLong decodedChunkLogCounter = new AtomicLong();
     final Queue<PendingChunk> chunkQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
     final List<RawPacket> packets = Collections.synchronizedList(new ArrayList<>());
