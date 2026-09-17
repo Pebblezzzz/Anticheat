@@ -50,7 +50,7 @@ public final class Simulation {
     private static boolean legacyRequiresUncertainty(World.Snapshot world,Player state){
       int x=(int)Math.floor(state.position().x()),z=(int)Math.floor(state.position().z());
       if(!world.visibleChunks().contains(World.Chunk.containing(x,z)))return true;
-      return world.blocks().entrySet().stream().anyMatch(e->{World.Pos p=e.getKey();World.Block b=e.getValue();return p.x()==x&&p.z()==z&&(b==World.Block.UNKNOWN||b==World.Block.UNSUPPORTED);});
+      return world.blocks().entrySet().stream().anyMatch(e->{World.Pos p=e.getKey();World.Block b=e.getValue();return p.x()==x&&p.z()==z&&(b==World.Block.UNKNOWN||b==World.Block.UNSUPPORTED||b==World.Block.WATER||b==World.Block.LADDER);});
     }
   }
 
