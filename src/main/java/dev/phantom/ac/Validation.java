@@ -16,10 +16,10 @@ import static dev.phantom.ac.Maths.*;
 /**
  * Phase 6 reachability, synchronization, and explainable evidence.
  *
- * <p>The implementation is deliberately finite: every unknown input tick
- * enumerates the declared discrete client input envelope. Candidate budgets
- * turn an incomplete search into UNCERTAIN rather than silently converting
- * partial enumeration into IMPOSSIBLE evidence.</p>
+ * <p>The legacy API remains for downstream compatibility. New code should use
+ * {@link Phase6Reachability}, which carries the complete rich Phase 5 context.
+ * Both APIs preserve the same safety rule: an incomplete finite search is
+ * UNCERTAIN and never exposes a provisional candidate subset as evidence.</p>
  */
 public final class Validation {
   private Validation() {}
@@ -168,9 +168,7 @@ public final class Validation {
         }
         peak = Math.max(peak, next.size());
         if (next.size() > maximumCandidates) {
-          // Legacy callers historically consumed one representative candidate with the UNCERTAIN verdict.
-          Player representative = next.iterator().next();
-          return new SearchResult(Verdict.UNCERTAIN, Set.of(representative), offset + 1, peak,
+          return new SearchResult(Verdict.UNCERTAIN, Set.of(), offset + 1, peak,
               next.size() - maximumCandidates,
               List.of("reachable-state budget exceeded; exhaustive evidence is unavailable"));
         }
