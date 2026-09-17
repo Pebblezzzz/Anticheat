@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import dev.phantom.ac.Maths.Vec3;
 import dev.phantom.ac.Packets.ChunkStates;
-import dev.phantom.ac.Packets.ClientInput;
 import dev.phantom.ac.Packets.Move;
 import dev.phantom.ac.Packets.Normalizer;
 import dev.phantom.ac.Packets.RawPacket;
@@ -21,7 +20,6 @@ import dev.phantom.ac.Phase5Mechanics.MovementEnvironment;
 import dev.phantom.ac.Phase5Mechanics.Pose;
 import dev.phantom.ac.Simulation.Attributes;
 import dev.phantom.ac.State.Player;
-import dev.phantom.ac.Validation;
 import dev.phantom.ac.world.WorldSnapshot;
 import java.util.*;
 import org.junit.jupiter.api.Test;
@@ -136,14 +134,13 @@ class Phase8LiveValidationTest {
     List<RawPacket> packets = List.of(
         new RawPacket(1, 0, new ChunkStates(new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
         new RawPacket(2, 0, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
-        new RawPacket(3, 25_000_000L, new ClientInput(false, false, false, false, false, false, false)),
-        new RawPacket(4, 50_000_000L, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 1L)),
-        new RawPacket(5, 75_000_000L, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 2L)));
+        new RawPacket(3, 50_000_000L, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 1L)),
+        new RawPacket(4, 100_000_000L, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 2L)));
 
     Phase8LiveValidation.Report report = Phase8LiveValidation.analyze("phase8-possible", capture(packets), 256, exactTiming());
     assertEquals(3, report.movementObservations());
     assertEquals(1, report.uncertain());
-    assertEquals(2, report.possible());
+    assertEquals(2, report.possible(), report.results().toString());
     assertEquals(0, report.impossible(), report.results().toString());
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE, report.results().get(1).verdict());
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE, report.results().get(2).verdict());
