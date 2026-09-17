@@ -86,14 +86,15 @@ public final class Phase8MovementValidation {
     public Result { Objects.requireNonNull(verdict); Objects.requireNonNull(evidence); if (evidence.verdict() != verdict) throw new IllegalArgumentException("evidence/result verdict mismatch"); }
   }
 
+  /** Movement packets normally declare position, rotation, and ground state. */
   private static Set<ObservedField> allObservedFields() {
-    return EnumSet.allOf(ObservedField.class);
+    return EnumSet.of(ObservedField.POSITION, ObservedField.ROTATION, ObservedField.GROUND);
   }
 
   /**
    * Compatibility entry point. A timing-uncertain window is conservative unless
    * the caller explicitly states that every possible timing offset was exhaustively modeled.
-   * This legacy overload treats all supplied state fields as observed facts.
+   * This legacy overload treats the default movement-packet facts as observed.
    */
   public static Result validate(String playerId, long serverTick, Player prior, Player observed,
                                 WorldSnapshot world, String worldReference,
