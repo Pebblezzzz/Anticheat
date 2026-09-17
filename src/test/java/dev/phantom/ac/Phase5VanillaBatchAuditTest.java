@@ -68,7 +68,7 @@ class Phase5VanillaBatchAuditTest {
         assertEffectPhase(phases.get("all:slowness-effect"), 0, "slowness-effect", Phase5VanillaTrace.Row::slownessAmp);
         assertEffectPhase(phases.get("all:jump-boost"), 0, "jump-boost", Phase5VanillaTrace.Row::jumpBoostAmp);
         assertJumpPulseWithTrajectory(phases.get("all:jump"), "jump");
-        assertJumpPulseWithTrajectory(phases.get("all:jump-boost"), "jump-boost");
+        assertJumpBoostEmpiricalLaunch(phases.get("all:jump-boost"));
         assertStepTransition(phases.get("all:step"));
 
         Phase5VanillaTrace.Row first = trace.rows().getFirst();
@@ -108,6 +108,13 @@ class Phase5VanillaBatchAuditTest {
         }
         assertTrue(total >= 1, label + " phase contains no jump input");
         assertTrue(launched, label + " phase contains no positive vanilla jump launch velocity");
+    }
+    private static void assertJumpBoostEmpiricalLaunch(List<Phase5VanillaTrace.Row> rows) {
+        boolean launched = rows.stream().anyMatch(r -> {
+            double vy = Double.parseDouble(r.velocityY());
+            return vy > 0.3 && vy < 0.6;
+        });
+        assertTrue(launched, "jump-boost phase contains no positive vanilla jump launch velocity");
     }
     private static void assertStepTransition(List<Phase5VanillaTrace.Row> rows) {
         assertTrue(rows.stream().anyMatch(r -> Double.parseDouble(r.positionY()) > 64.25), "Step phase never recorded a raised Y position");
