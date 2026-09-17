@@ -33,7 +33,6 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.OptionalInt;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -89,3 +88,6 @@ class HardeningRegressionTest {
   }
 }
 ''', encoding="utf-8", newline="\n")
+
+# Trigger marker for the temporary repair runner.
+# hardening-runner-retrigger
