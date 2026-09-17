@@ -68,6 +68,7 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
                 Path eventPath = Path.of(events).toAbsolutePath(); if (eventPath.getParent() != null) Files.createDirectories(eventPath.getParent()); eventWriter = Files.newBufferedWriter(eventPath, StandardCharsets.UTF_8);
                 writer.write(MAGIC); writer.newLine(); writer.write("# source_id=vanilla-client-1.21.11"); writer.newLine(); writer.write("# captured_at_utc=" + Instant.now()); writer.newLine(); writer.write(HEADER); writer.newLine();
                 eventWriter.write("# phantom-phase5-events version=1 protocol=minecraft-java-1.21.11 format=tsv"); eventWriter.newLine(); eventWriter.write("# captured_at_utc=" + Instant.now()); eventWriter.newLine(); eventWriter.write(EVENT_HEADER); eventWriter.newLine(); writer.flush(); eventWriter.flush();
+                VanillaWorldObservation.initialize(output);
             } catch (IOException e) { throw new IllegalStateException("Unable to open Phase 5 capture output", e); }
         }
 
@@ -107,28 +108,17 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
             boolean velocityPacket = observedVelocityPacketId >= 0; long correctionId = observedCorrectionId; boolean correctionPending = observedCorrectionPending;
             if (!correctionStateObserved) { missing.add("correction_id"); missing.add("correction_pending"); }
             missing.add("knockback_x"); missing.add("knockback_y"); missing.add("knockback_z");
+            VanillaWorldObservation.capture(client, player, clientTick);
             String inputSource = (observedPreTickInput != null ? "capture-pre-tick:" : "capture-fallback-post-tick:") + phaseLabel();
             String row = String.join("\t", Long.toString(tick), Long.toString(clientTick), Long.toString(System.nanoTime()), d(player.getX()), d(player.getY()), d(player.getZ()), d(velocity.x), d(velocity.y), d(velocity.z), d(player.getYaw()), d(player.getPitch()), Boolean.toString(player.isOnGround()), Integer.toString(input.forward() && !input.backward() ? 1 : input.backward() && !input.forward() ? -1 : 0), Integer.toString(input.right() && !input.left() ? 1 : input.left() && !input.right() ? -1 : 0), Boolean.toString(input.jump()), Boolean.toString(player.isSprinting()), Boolean.toString(input.sneak()), player.getPose().name(), gamemode, fluid, Boolean.toString(player.isSubmergedInWater()), Boolean.toString(player.isClimbing()), Boolean.toString(player.getPose() == EntityPose.GLIDING), d(baseSpeed), modifiers, Integer.toString(speedAmp), Integer.toString(slownessAmp), Integer.toString(jumpAmp), Boolean.toString(player.hasStatusEffect(StatusEffects.LEVITATION)), Boolean.toString(player.hasStatusEffect(StatusEffects.SLOW_FALLING)), d(observedVelocityPacket.x), d(observedVelocityPacket.y), d(observedVelocityPacket.z), Boolean.toString(velocityPacket), Long.toString(correctionId), Boolean.toString(correctionPending), Phase5CaptureEncoding.worldIdentity(client), Long.toString(worldTick), Boolean.toString(player.horizontalCollision || player.verticalCollision), Boolean.toString(observedStepAttempted), Boolean.toString(observedStepSucceeded), Boolean.toString(observedCollisionX), Boolean.toString(observedCollisionY), Boolean.toString(observedCollisionZ), inputSource, "1.21.11", String.join(",", missing));
             try { writer.write(row); writer.newLine(); writer.flush(); } catch (IOException e) { throw new IllegalStateException("Unable to write Phase 5 capture row", e); }
             observedVelocityPacket = Vec3d.ZERO; observedVelocityPacketId = -1; observedCorrectionId = -1; observedCorrectionPending = false; observedPreTickInput = null; resetMoveObservation();
         }
 
-        public static synchronized void recordVelocityPacket(EntityVelocityUpdateS2CPacket packet) {
-            MinecraftClient client = MinecraftClient.getInstance(); if (writer == null || client.player == null || packet.getEntityId() != client.player.getId()) return;
-            observedVelocityPacket = packet.getVelocity(); observedVelocityPacketId = packet.getEntityId(); Vec3d velocity = packet.getVelocity(); writeEvent(System.nanoTime(), captureClientTick, "ENTITY_VELOCITY", 0, 0, 0, velocity.x, velocity.y, velocity.z, packet.getEntityId(), "server velocity packet");
-        }
-        public static synchronized void recordCorrectionPacket(PlayerPositionLookS2CPacket packet) {
-            if (writer == null) return; observedCorrectionId = packet.teleportId(); observedCorrectionPending = true; correctionStateObserved = true; Vec3d position = packet.change().position();
-            writeEvent(System.nanoTime(), captureClientTick, "POSITION_CORRECTION", position.x, position.y, position.z, packet.change().yaw(), packet.change().pitch(), 0, packet.teleportId(), "relatives=" + packet.relatives());
-        }
-        public static synchronized void recordTeleportConfirmPacket(TeleportConfirmC2SPacket packet) {
-            if (writer == null) return; int id = packet.getTeleportId(); if (observedCorrectionId == id) observedCorrectionPending = false; correctionStateObserved = true;
-            writeEvent(System.nanoTime(), captureClientTick, "TELEPORT_CONFIRM_C2S", 0, 0, 0, 0, 0, 0, id, "client confirm");
-        }
-        private static void writeEvent(long nanos, long clientTick, String type, double x, double y, double z, double auxX, double auxY, double auxZ, long auxId, String details) {
-            try { eventWriter.write(String.join("\t", Long.toString(nanos), Long.toString(clientTick), type, d(x), d(y), d(z), d(auxX), d(auxY), d(auxZ), Long.toString(auxId), Phase5CaptureEncoding.escape(details))); eventWriter.newLine(); eventWriter.flush(); }
-            catch (IOException e) { throw new IllegalStateException("Unable to write Phase 5 event", e); }
-        }
+        public static synchronized void recordVelocityPacket(EntityVelocityUpdateS2CPacket packet) { MinecraftClient client = MinecraftClient.getInstance(); if (writer == null || client.player == null || packet.getEntityId() != client.player.getId()) return; observedVelocityPacket = packet.getVelocity(); observedVelocityPacketId = packet.getEntityId(); Vec3d velocity = packet.getVelocity(); writeEvent(System.nanoTime(), captureClientTick, "ENTITY_VELOCITY", 0, 0, 0, velocity.x, velocity.y, velocity.z, packet.getEntityId(), "server velocity packet"); }
+        public static synchronized void recordCorrectionPacket(PlayerPositionLookS2CPacket packet) { if (writer == null) return; observedCorrectionId = packet.teleportId(); observedCorrectionPending = true; correctionStateObserved = true; Vec3d position = packet.change().position(); writeEvent(System.nanoTime(), captureClientTick, "POSITION_CORRECTION", position.x, position.y, position.z, packet.change().yaw(), packet.change().pitch(), 0, packet.teleportId(), "relatives=" + packet.relatives()); }
+        public static synchronized void recordTeleportConfirmPacket(TeleportConfirmC2SPacket packet) { if (writer == null) return; int id = packet.getTeleportId(); if (observedCorrectionId == id) observedCorrectionPending = false; correctionStateObserved = true; writeEvent(System.nanoTime(), captureClientTick, "TELEPORT_CONFIRM_C2S", 0, 0, 0, 0, 0, 0, id, "client confirm"); }
+        private static void writeEvent(long nanos, long clientTick, String type, double x, double y, double z, double auxX, double auxY, double auxZ, long auxId, String details) { try { eventWriter.write(String.join("\t", Long.toString(nanos), Long.toString(clientTick), type, d(x), d(y), d(z), d(auxX), d(auxY), d(auxZ), Long.toString(auxId), Phase5CaptureEncoding.escape(details))); eventWriter.newLine(); eventWriter.flush(); } catch (IOException e) { throw new IllegalStateException("Unable to write Phase 5 event", e); } }
         private static void resetMoveObservation() { observedCollisionX = false; observedCollisionY = false; observedCollisionZ = false; observedStepAttempted = false; observedStepSucceeded = false; }
         private static int amplifier(StatusEffectInstance effect) { return effect == null ? -1 : effect.getAmplifier(); }
         private static String d(double value) { return Double.toString(value); }
