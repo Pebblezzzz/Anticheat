@@ -122,19 +122,62 @@ public final class Validation {
           Simulation.Environment.DRY, Simulation.Attributes.DEFAULT));
       if (result.state().uncertain()) {
         return new Reachability(Verdict.UNCERTAIN, Set.of(), List.of(
-            "physics transition declared the resulting state uncertain"));
+            "physics transition declared the resulting state uncertain: " + result.diagnostic()));
       }
       return new Reachability(Verdict.POSSIBLE, Set.of(result.state()), List.of(
           "constrained by the complete declared advanced client input"));
     }
 
-    /** Multi-tick search over the basic 18-state input envelope. */
+    /** Multi-tick search over the original 18-state basic input envelope. */
     public SearchResult advance(Player start, long firstTick, List<Optional<Input>> inputs,
                                 LongFunction<World.Snapshot> worlds, int maximumCandidates) {
-      List<Optional<AdvancedInput>> advanced = inputs.stream()
-          .map(optional -> optional.map(AdvancedInput::basic))
-          .toList();
-      return advanceAdvanced(start, firstTick, advanced, worlds, maximumCandidates);
+      Contracts.requireCandidateBudget(maximumCandidates);
+      Objects.requireNonNull(start, "start");
+      Objects.requireNonNull(inputs, "inputs");
+      Objects.requireNonNull(worlds, "worlds");
+      if (start.uncertain()) {
+        return new SearchResult(Verdict.UNCERTAIN, Set.of(), 0, 0, 0,
+            List.of("initial state is uncertain"));
+      }
+
+      Set<Player> current = Set.of(start);
+      int peak = current.size();
+      for (int offset = 0; offset < inputs.size(); offset++) {
+        World.Snapshot world = Objects.requireNonNull(worlds.apply(firstTick + offset), "world snapshot");
+        Optional<Input> requested = Objects.requireNonNull(inputs.get(offset), "input slot");
+        Set<Player> next = new HashSet<>();
+        for (Player candidate : current) {
+          if (candidate.uncertain() || world.hasUnsupported(Aabb.playerAt(candidate.position()))) {
+            return new SearchResult(Verdict.UNCERTAIN, Set.of(), offset, peak, 0,
+                List.of("unsupported environment or uncertain state at tick " + (firstTick + offset)));
+          }
+          if (requested.isPresent()) {
+            next.add(physics.tick(candidate, requested.orElseThrow(), world));
+          } else {
+            for (int forward = -1; forward <= 1; forward++) {
+              for (int strafe = -1; strafe <= 1; strafe++) {
+                for (boolean jump : new boolean[]{false, true}) {
+                  Player result = physics.tick(candidate, new Input(forward, strafe, jump), world);
+                  if (result.uncertain()) {
+                    return new SearchResult(Verdict.UNCERTAIN, Set.of(), offset + 1, peak, 0,
+                        List.of("basic transition became uncertain at tick " + (firstTick + offset)));
+                  }
+                  next.add(result);
+                }
+              }
+            }
+          }
+        }
+        peak = Math.max(peak, next.size());
+        if (next.size() > maximumCandidates) {
+          return new SearchResult(Verdict.UNCERTAIN, Set.of(), offset + 1, peak,
+              next.size() - maximumCandidates,
+              List.of("reachable-state budget exceeded; exhaustive evidence is unavailable"));
+        }
+        current = Set.copyOf(next);
+      }
+      return new SearchResult(Verdict.POSSIBLE, current, inputs.size(), peak, 0,
+          List.of("searched " + inputs.size() + " ticks; identical exact states were merged"));
     }
 
     /**
@@ -185,7 +228,6 @@ public final class Validation {
 
         peak = Math.max(peak, next.size());
         if (next.size() > maximumCandidates) {
-          // Never expose a sampled subset as if it were the complete candidate set.
           return new SearchResult(Verdict.UNCERTAIN, Set.of(), offset + 1, peak,
               next.size() - maximumCandidates,
               List.of("reachable-state budget exceeded; exhaustive evidence is unavailable"));
