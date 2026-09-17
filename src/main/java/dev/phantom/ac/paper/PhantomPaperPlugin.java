@@ -71,6 +71,7 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
   private ExecutorService chunkExecutor;
   private volatile int chunkDecoderThreads;
   private final AtomicInteger chunkInFlight = new AtomicInteger();
+  private final Map<ClientVersion, ConcurrentHashMap<Integer, dev.phantom.ac.world.BlockState>> coreStateCache = new ConcurrentHashMap<>();
   private volatile boolean alertsEnabled;
   private volatile boolean broadcastAlerts;
   private volatile boolean phase8Debug;
@@ -160,6 +161,7 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
   }
 
   @Override public void onDisable() {
+    getServer().getScheduler().cancelTasks(this);
     if (chunkTask != null) chunkTask.cancel();
     if (validationTask != null) validationTask.cancel();
     PacketEvents.getAPI().getEventManager().unregisterListener(networkListener);
@@ -169,6 +171,7 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
       catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
     }
     chunkInFlight.set(0);
+    coreStateCache.clear();
     captures.clear();
   }
 
@@ -209,10 +212,12 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     long startedNanos = System.nanoTime();
     try {
       Map<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> states = new LinkedHashMap<>();
-      Map<Integer, dev.phantom.ac.world.BlockState> stateCache = new LinkedHashMap<>();
+      ConcurrentHashMap<Integer, dev.phantom.ac.world.BlockState> stateCache = coreStateCache.computeIfAbsent(pending.clientVersion, ignored -> new ConcurrentHashMap<>());
       BaseChunk[] sections = pending.column.getChunks();
       int minSection = Math.floorDiv(pending.minY, 16);
       int maxSectionExclusive = Math.floorDiv(pending.maxY - 1, 16) + 1;
+      int baseX = pending.column.getX() * 16;
+      int baseZ = pending.column.getZ() * 16;
       for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
         BaseChunk section = sections[sectionIndex];
         if (section == null || section.isEmpty()) continue;
@@ -222,16 +227,17 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
         for (int localX = 0; localX < 16; localX++) {
           for (int localY = 0; localY < 16; localY++) {
             for (int localZ = 0; localZ < 16; localZ++) {
-              WrappedBlockState state = section.get(pending.clientVersion, localX, localY, localZ, false);
-              if (state == null || state.getType().isAir()) continue;
-              int globalId = state.getGlobalId();
+              int globalId = section.getBlockId(localX, localY, localZ);
+              if (globalId <= 0) continue;
               dev.phantom.ac.world.BlockState core = stateCache.get(globalId);
               if (core == null) {
-                core = toCoreState(state);
-                stateCache.put(globalId, core);
+                WrappedBlockState state = WrappedBlockState.getByGlobalId(pending.clientVersion, globalId, false);
+                core = state == null || state.getType().isAir() ? dev.phantom.ac.world.BlockState.air() : toCoreState(state);
+                dev.phantom.ac.world.BlockState existing = stateCache.putIfAbsent(globalId, core);
+                if (existing != null) core = existing;
               }
               if (!core.isAir()) {
-                states.put(new dev.phantom.ac.world.Pos(pending.column.getX() * 16 + localX, baseY + localY, pending.column.getZ() * 16 + localZ), core);
+                states.put(new dev.phantom.ac.world.Pos(baseX + localX, baseY + localY, baseZ + localZ), core);
               }
             }
           }
