@@ -2,6 +2,7 @@ package dev.phantom.ac;
 
 import dev.phantom.ac.Phase5Mechanics.MovementEffects;
 import dev.phantom.ac.Phase5Mechanics.MovementEnvironment;
+import dev.phantom.ac.Phase5Mechanics.Pose;
 import dev.phantom.ac.Phase6Reachability.Candidate;
 import dev.phantom.ac.Phase6Reachability.ExternalTransition;
 import dev.phantom.ac.Phase6Reachability.InputConstraint;
