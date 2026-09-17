@@ -3,7 +3,6 @@ package dev.phantom.ac;
 import dev.phantom.ac.geometry.BlockBox;
 import dev.phantom.ac.geometry.Directions.Axis;
 import dev.phantom.ac.geometry.VoxelShape;
-import dev.phantom.ac.world.Coverage;
 import dev.phantom.ac.world.WorldSnapshot;
 
 import java.io.Serializable;
@@ -11,14 +10,7 @@ import java.util.Objects;
 
 import static dev.phantom.ac.Maths.*;
 
-/**
- * Collision resolver over the exact 1.21.11 world-snapshot layer.
- *
- * <p>This is intentionally separate from the legacy {@link World.Snapshot}
- * resolver: the rich world model preserves real block-state identity,
- * neighbour-dependent shapes and unloaded/unsupported coverage. A movement
- * result is therefore either shape-resolved or explicitly uncertain.</p>
- */
+/** Collision resolver over the exact 1.21.11 world-snapshot layer. */
 public final class RichWorldCollision {
     private RichWorldCollision() {}
 
@@ -44,28 +36,26 @@ public final class RichWorldCollision {
         AxisResult horizontalX = clipAxis(world, afterY, Axis.X, requested.x());
         BlockBox afterX = afterY.move(horizontalX.amount(), 0, 0);
         AxisResult horizontalZ = clipAxis(world, afterX, Axis.Z, requested.z());
-        BlockBox directBox = afterX.move(0, 0, horizontalZ.amount());
 
         Vec3 direct = new Vec3(horizontalX.amount(), vertical.amount(), horizontalZ.amount());
         boolean collided = vertical.collided() || horizontalX.collided() || horizontalZ.collided();
-
         if (stepHeight <= 0 || requested.y() > 0 || !(horizontalX.collided() || horizontalZ.collided())) {
             return new Result(direct, horizontalX.collided(), vertical.collided(), horizontalZ.collided(), false, false, false,
                     collided ? "rich voxel collision" : "rich voxel movement");
         }
 
-        // Deterministic step candidate: move up by the permitted step height,
-        // resolve horizontal axes, then resolve the downward return. This does
-        // not guess a block height; the candidate is accepted only when its final
-        // horizontal distance is greater than the direct path and the whole sweep
-        // was known.
+        // Step candidate: raise, resolve horizontal axes against exact voxel shapes,
+        // then resolve the return movement. The candidate is accepted only when it
+        // advances farther horizontally than the direct collision-resolved path.
         Aabb raised = start.move(new Vec3(0, stepHeight, 0));
-        if (world.hasUnknownOrUnsupported(box(raised).enclose(box(raised.move(requested.x(), requested.y(), requested.z()))))) {
+        BlockBox raisedBox = box(raised);
+        BlockBox raisedSweep = raisedBox.enclose(raisedBox.move(requested.x(), requested.y(), requested.z()));
+        if (world.hasUnknownOrUnsupported(raisedSweep)) {
             return new Result(direct, horizontalX.collided(), vertical.collided(), horizontalZ.collided(), true, false, true,
                     "step candidate crosses unknown or unsupported world coverage");
         }
-        AxisResult sx = clipAxis(world, box(raised), Axis.X, requested.x());
-        BlockBox bx = box(raised).move(sx.amount(), 0, 0);
+        AxisResult sx = clipAxis(world, raisedBox, Axis.X, requested.x());
+        BlockBox bx = raisedBox.move(sx.amount(), 0, 0);
         AxisResult sz = clipAxis(world, bx, Axis.Z, requested.z());
         BlockBox steppedHorizontal = bx.move(0, 0, sz.amount());
         AxisResult sy = clipAxis(world, steppedHorizontal, Axis.Y, -stepHeight + requested.y());
@@ -73,10 +63,8 @@ public final class RichWorldCollision {
         double directHorizontal = horizontalX.amount() * horizontalX.amount() + horizontalZ.amount() * horizontalZ.amount();
         double steppedHorizontalDistance = stepped.x() * stepped.x() + stepped.z() * stepped.z();
         boolean success = steppedHorizontalDistance > directHorizontal + 1.0E-12 && stepped.y() >= 0;
-        if (!success) {
-            return new Result(direct, horizontalX.collided(), vertical.collided(), horizontalZ.collided(), true, false, false,
-                    "rich voxel step candidate rejected; direct path retained");
-        }
+        if (!success) return new Result(direct, horizontalX.collided(), vertical.collided(), horizontalZ.collided(), true, false, false,
+                "rich voxel step candidate rejected; direct path retained");
         return new Result(stepped, sx.collided(), sy.collided(), sz.collided(), true, true, false,
                 "rich voxel step candidate accepted");
     }
@@ -86,20 +74,19 @@ public final class RichWorldCollision {
     private static AxisResult clipAxis(WorldSnapshot world, BlockBox moving, Axis axis, double requested) {
         if (requested == 0.0) return new AxisResult(0.0, false);
         double result = requested;
-        BlockBox sweep = moving.move(
-                axis == Axis.X ? requested : 0.0,
-                axis == Axis.Y ? requested : 0.0,
-                axis == Axis.Z ? requested : 0.0);
-        for (int x = (int) Math.floor(Math.min(moving.minX(), sweep.minX())); x <= (int) Math.floor(Math.max(moving.maxX(), sweep.maxX())); x++) {
-            for (int y = (int) Math.floor(Math.min(moving.minY(), sweep.minY())); y <= (int) Math.floor(Math.max(moving.maxY(), sweep.maxY())); y++) {
-                for (int z = (int) Math.floor(Math.min(moving.minZ(), sweep.minZ())); z <= (int) Math.floor(Math.max(moving.maxZ(), sweep.maxZ())); z++) {
-                    VoxelShape shape = world.collisionShapeAt(x, y, z);
-                    if (shape.isEmpty()) continue;
-                    double clipped = shape.clip(axis, moving, result);
-                    if (requested > 0) result = Math.min(result, clipped);
-                    else result = Math.max(result, clipped);
-                }
-            }
+        BlockBox sweep = moving.move(axis == Axis.X ? requested : 0.0, axis == Axis.Y ? requested : 0.0, axis == Axis.Z ? requested : 0.0);
+        int minX = (int) Math.floor(Math.min(moving.minX(), sweep.minX()));
+        int maxX = (int) Math.floor(Math.max(moving.maxX(), sweep.maxX()));
+        int minY = (int) Math.floor(Math.min(moving.minY(), sweep.minY()));
+        int maxY = (int) Math.floor(Math.max(moving.maxY(), sweep.maxY()));
+        int minZ = (int) Math.floor(Math.min(moving.minZ(), sweep.minZ()));
+        int maxZ = (int) Math.floor(Math.max(moving.maxZ(), sweep.maxZ()));
+        for (int x = minX; x <= maxX; x++) for (int y = minY; y <= maxY; y++) for (int z = minZ; z <= maxZ; z++) {
+            VoxelShape shape = world.collisionShapeAt(x, y, z);
+            if (shape.isEmpty()) continue;
+            double clipped = shape.clip(axis, moving, result);
+            if (requested > 0) result = Math.min(result, clipped);
+            else result = Math.max(result, clipped);
         }
         return new AxisResult(result, Math.abs(result - requested) > 1.0E-12);
     }
