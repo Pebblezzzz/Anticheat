@@ -47,20 +47,19 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUn
 
 import dev.phantom.ac.Contracts;
 import dev.phantom.ac.Diagnostics;
-import dev.phantom.ac.LiveValidation;
 import dev.phantom.ac.Maths.Vec3;
-import dev.phantom.ac.OperatorValidation;
 import dev.phantom.ac.Packets;
 import dev.phantom.ac.Packets.RawPacket;
-import dev.phantom.ac.State;
+import dev.phantom.ac.Phase8LiveValidation;
+import dev.phantom.ac.Phase8MovementValidation;
+import dev.phantom.ac.Phase7Timing;
 import dev.phantom.ac.Timeline;
-import dev.phantom.ac.Validation;
 import dev.phantom.ac.World;
 
 /**
  * Paper boundary only. No Bukkit type enters the deterministic core.
- * PlayerMoveEvent is server observation, not a client packet; protocol packets are
- * normalized into the deterministic core through PacketEvents.
+ * Protocol packets are normalized into the Phase 1-7 pipeline and Phase 8 is
+ * then run as the canonical observation-only movement validator.
  */
 public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
   private final Map<UUID, Capture> captures = new ConcurrentHashMap<>();
@@ -69,10 +68,6 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
   private ExecutorService chunkExecutor;
   private volatile boolean alertsEnabled;
   private volatile boolean broadcastAlerts;
-  private volatile boolean kicksEnabled;
-  private volatile boolean permissionExempt;
-  private volatile String exemptPermission;
-  private volatile double minimumConfidence;
   private volatile int validationBudget;
 
   private final PacketListenerAbstract networkListener = new PacketListenerAbstract() {
@@ -141,10 +136,6 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     saveDefaultConfig();
     alertsEnabled = getConfig().getBoolean("alerts.enabled", true);
     broadcastAlerts = getConfig().getBoolean("alerts.broadcast", false);
-    kicksEnabled = getConfig().getBoolean("enforcement.kick-enabled", false);
-    permissionExempt = getConfig().getBoolean("enforcement.permission-exempt", true);
-    exemptPermission = getConfig().getString("enforcement.permission", "phantom.exempt");
-    minimumConfidence = getConfig().getDouble("enforcement.minimum-confidence", 0.90);
     validationBudget = Math.max(1, getConfig().getInt("validation.candidate-budget", 4096));
     chunkExecutor = Executors.newSingleThreadExecutor(r -> {
       Thread thread = new Thread(r, "Phantom-ClientChunkDecoder");
@@ -211,73 +202,77 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
           }
         }
       }
-      Packets.ChunkStates packet = new Packets.ChunkStates(new dev.phantom.ac.world.Chunk(pending.column.getX(), pending.column.getZ()), states);
-      capture.packets.add(new RawPacket(pending.sequence(), pending.receivedNanos(), packet));
+      capture.packets.add(new RawPacket(pending.sequence(), pending.receivedNanos(),
+          new Packets.ChunkStates(new dev.phantom.ac.world.Chunk(pending.column.getX(), pending.column.getZ()), states)));
     } catch (RuntimeException failure) {
       getLogger().warning("client chunk decode failed for " + pending.column.getX() + "," + pending.column.getZ() + ": " + failure.getClass().getSimpleName());
     }
   }
 
   private void evaluateCapturesAsync() {
-    if (!alertsEnabled && !kicksEnabled) return;
+    if (!alertsEnabled) return;
     for (Map.Entry<UUID, Capture> entry : captures.entrySet()) {
       Capture capture = entry.getValue();
       if (!capture.validationRunning.compareAndSet(false, true)) continue;
       List<RawPacket> raw = capture.copy();
       if (raw.isEmpty()) { capture.validationRunning.set(false); continue; }
+      UUID playerId = entry.getKey();
+      Player player = getServer().getPlayer(playerId);
+      if (player == null) { capture.validationRunning.set(false); continue; }
+      String playerName = player.getName();
       try {
         Timeline.Snapshot timeline = Timeline.assign(new Packets.Normalizer().normalize(raw), capture.epochNanos, 50_000_000L);
-        LiveValidation.Report report = LiveValidation.analyze(timeline, validationBudget);
-        getServer().getScheduler().runTask(this, () -> applyValidationResult(entry.getKey(), capture, report));
+        Phase8LiveValidation.Report report = Phase8LiveValidation.analyze(playerName, timeline, validationBudget, Phase7Timing.Config.defaultConfig());
+        getServer().getScheduler().runTask(this, () -> applyPhase8Result(playerId, capture, report));
       } catch (RuntimeException failure) {
         capture.validationRunning.set(false);
-        getLogger().warning("validation skipped for " + entry.getKey() + ": " + failure.getClass().getSimpleName());
+        getLogger().warning("Phase 8 validation skipped for " + playerId + ": " + failure.getClass().getSimpleName()
+            + (failure.getMessage() == null ? "" : " - " + failure.getMessage()));
       }
     }
   }
 
-  private void applyValidationResult(UUID playerId, Capture capture, LiveValidation.Report report) {
+  private void applyPhase8Result(UUID playerId, Capture capture, Phase8LiveValidation.Report report) {
     try {
       Player player = getServer().getPlayer(playerId);
       if (player == null) return;
       synchronized (capture) {
-        int start = Math.min(capture.processedFindings, report.findings().size());
-        for (int i = start; i < report.findings().size(); i++) {
-          LiveValidation.Finding finding = report.findings().get(i);
-          Validation.Verdict verdict = finding.verdict();
-          Validation.Reachability reachability = new Validation.Reachability(verdict, java.util.Set.of(), finding.reasons());
-          Validation.Evidence evidence = new Validation.Evidence(verdict, "MOVEMENT_REACHABILITY", Double.NaN, finding.reasons());
-          boolean timingUncertain = verdict == Validation.Verdict.UNCERTAIN || finding.reasons().stream().anyMatch(reason -> reason.contains("unknown") || reason.contains("unsupported") || reason.contains("budget"));
-          Validation.SyncWindow sync = new Validation.SyncWindow(finding.tick(), finding.tick(), timingUncertain, finding.reasons());
-          State.Player anchor = State.Player.initial(Vec3.ZERO);
-          OperatorValidation.Observation observation = new OperatorValidation.Observation(player.getName(), finding.tick(), anchor, anchor, sync, Contracts.TARGET_VERSION, List.of(), reachability, evidence);
-          OperatorValidation.Result result = OperatorValidation.aggregate(capture.aggregator, observation);
-          capture.aggregator = result.state();
-          if (result.alert().isPresent()) {
-            OperatorValidation.Alert alert = result.alert().orElseThrow();
-            if (alertsEnabled) sendOperatorAlert(alert.message(), broadcastAlerts);
-            if (kicksEnabled && alert.confidence() >= minimumConfidence && !(permissionExempt && player.hasPermission(exemptPermission))) {
-              player.kickPlayer("Movement validation failed: " + alert.reason());
-            }
-          }
+        int start = Math.min(capture.processedPhase8Results, report.results().size());
+        Phase8MovementValidation.Config config = new Phase8MovementValidation.Config(2, 20, alertsEnabled, true);
+        for (int i = start; i < report.results().size(); i++) {
+          Phase8MovementValidation.Result result = report.results().get(i);
+          Phase8MovementValidation.Accumulated accumulated = capture.phase8Accumulator.accept(result.evidence(), config);
+          capture.phase8Accumulator = accumulated.state();
+          accumulated.alert().ifPresent(alert -> sendOperatorAlert(alert.message(), broadcastAlerts));
         }
-        capture.processedFindings = report.findings().size();
+        capture.processedPhase8Results = report.results().size();
       }
     } finally {
       capture.validationRunning.set(false);
     }
   }
 
-  @EventHandler public void joined(PlayerJoinEvent event) { captures.put(event.getPlayer().getUniqueId(), new Capture(System.nanoTime())); }
-  @EventHandler public void changedWorld(PlayerChangedWorldEvent event) { captures.put(event.getPlayer().getUniqueId(), new Capture(System.nanoTime())); }
-  @EventHandler public void quit(PlayerQuitEvent event) { captures.remove(event.getPlayer().getUniqueId()); }
+  @EventHandler public void joined(PlayerJoinEvent event) {
+    captures.put(event.getPlayer().getUniqueId(), new Capture(System.nanoTime()));
+  }
+
+  @EventHandler public void changedWorld(PlayerChangedWorldEvent event) {
+    captures.put(event.getPlayer().getUniqueId(), new Capture(System.nanoTime()));
+  }
+
+  @EventHandler public void quit(PlayerQuitEvent event) {
+    captures.remove(event.getPlayer().getUniqueId());
+  }
 
   @Override public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
     if (!command.getName().equalsIgnoreCase("phantom")) return false;
     boolean showAlerts = args.length == 2 && args[0].equalsIgnoreCase("alerts");
     boolean validate = args.length == 2 && args[0].equalsIgnoreCase("validate");
     String target = (showAlerts || validate) ? args[1] : args.length == 1 ? args[0] : null;
-    if (target == null) { sender.sendMessage("Usage: /phantom <player> | /phantom alerts <player> | /phantom validate <player>"); return true; }
+    if (target == null) {
+      sender.sendMessage("Usage: /phantom <player> | /phantom alerts <player> | /phantom validate <player>");
+      return true;
+    }
     Player player = getServer().getPlayerExact(target);
     if (player == null) { sender.sendMessage("Player not found."); return true; }
     Capture capture = captures.get(player.getUniqueId());
@@ -285,18 +280,17 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
 
     if (validate) {
       List<RawPacket> raw = capture.copy();
-      long capturedEvents = raw.size();
       String playerName = player.getName();
       long captureEpoch = capture.epochNanos;
-      sender.sendMessage("Phantom validation started asynchronously for " + playerName + " (" + capturedEvents + " captured packets).");
+      sender.sendMessage("Phase 8 validation started asynchronously for " + playerName + " (" + raw.size() + " captured packets).");
       getServer().getScheduler().runTaskAsynchronously(this, () -> {
         try {
           Timeline.Snapshot timeline = Timeline.assign(new Packets.Normalizer().normalize(raw), captureEpoch, 50_000_000L);
-          LiveValidation.Report report = LiveValidation.analyze(timeline, validationBudget);
-          getServer().getScheduler().runTask(this, () -> sendValidationDiagnostic(sender, playerName, capture, report));
+          Phase8LiveValidation.Report report = Phase8LiveValidation.analyze(playerName, timeline, validationBudget, Phase7Timing.Config.defaultConfig());
+          getServer().getScheduler().runTask(this, () -> sendPhase8Diagnostic(sender, playerName, capture, report));
         } catch (RuntimeException failure) {
           String detail = failure.getClass().getSimpleName() + (failure.getMessage() == null ? "" : ": " + failure.getMessage());
-          getServer().getScheduler().runTask(this, () -> sender.sendMessage("Phantom validation failed safely off-thread: " + detail));
+          getServer().getScheduler().runTask(this, () -> sender.sendMessage("Phase 8 validation failed safely off-thread: " + detail));
         }
       });
       return true;
@@ -306,7 +300,9 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     Timeline.Snapshot timeline = Timeline.assign(normalized, capture.epochNanos, 50_000_000L);
     Diagnostics.Report report = Diagnostics.audit(timeline);
     if (!showAlerts) {
-      sender.sendMessage("Phantom raw capture: " + report.movementPackets() + " moves, " + report.inputPackets() + " input changes, " + report.teleportConfirms() + " teleport confirms, " + capture.chunkPackets.get() + " chunk packets observed; " + timeline.events().size() + " timeline events; " + report.alerts().size() + " diagnostic alerts.");
+      sender.sendMessage("Phantom raw capture: " + report.movementPackets() + " moves, " + report.inputPackets() + " input changes, "
+          + report.teleportConfirms() + " teleport confirms, " + capture.chunkPackets.get() + " chunk packets observed; "
+          + timeline.events().size() + " timeline events; " + report.alerts().size() + " diagnostic alerts.");
       return true;
     }
     if (report.alerts().isEmpty()) {
@@ -319,38 +315,38 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     return true;
   }
 
-  private void sendValidationDiagnostic(CommandSender sender, String playerName, Capture capture, LiveValidation.Report report) {
-    long possible = report.findings().stream().filter(f -> f.verdict() == Validation.Verdict.POSSIBLE).count();
-    long uncertain = report.findings().stream().filter(f -> f.verdict() == Validation.Verdict.UNCERTAIN).count();
-    long impossible = report.findings().stream().filter(f -> f.verdict() == Validation.Verdict.IMPOSSIBLE).count();
-    sender.sendMessage("Phantom movement diagnostic: " + report.movementObservations() + " observations; " + possible + " reachable, " + uncertain + " uncertain, " + impossible + " impossible.");
-    sender.sendMessage("Pipeline: packets=" + report.timelineEvents() + " anchored=" + report.anchoredObservations() + " possible=" + report.possibleFindings() + " uncertain=" + report.uncertainFindings() + " impossible=" + report.impossibleFindings() + " evidence=" + capture.aggregator.impossibleByRule().values().stream().mapToInt(Integer::intValue).sum());
-    sender.sendMessage("Diagnostic only: no enforcement or punishment; independent 1.21.11 vanilla traces are still required before any cheat flag.");
-    report.findings().stream().filter(f -> f.verdict() != Validation.Verdict.POSSIBLE).limit(3).forEach(f -> sender.sendMessage("[" + f.verdict() + "] tick " + f.tick() + ": " + f.reasons().getFirst()));
-
-    OperatorValidation.Aggregator aggregate = OperatorValidation.Aggregator.empty();
-    State.Player anchor = State.Player.initial(Vec3.ZERO);
-    for (LiveValidation.Finding finding : report.findings()) {
-      Validation.Reachability reachability = new Validation.Reachability(finding.verdict(), java.util.Set.of(), finding.reasons());
-      Validation.Evidence evidence = new Validation.Evidence(finding.verdict(), "MOVEMENT_REACHABILITY", Double.NaN, finding.reasons());
-      OperatorValidation.Observation observation = new OperatorValidation.Observation(playerName, finding.tick(), anchor, anchor,
-          new Validation.SyncWindow(finding.tick(), finding.tick(), false, java.util.List.of("command-time replay has no measured RTT")),
-          Contracts.TARGET_VERSION, java.util.List.of(), reachability, evidence);
-      OperatorValidation.Result result = OperatorValidation.aggregate(aggregate, observation);
-      aggregate = result.state();
-      result.alert().ifPresent(alert -> sender.sendMessage(alert.message()));
-    }
+  private void sendPhase8Diagnostic(CommandSender sender, String playerName, Capture capture,
+                                    Phase8LiveValidation.Report report) {
+    sender.sendMessage("Phase 8 movement diagnostic for " + playerName + ": " + report.movementObservations()
+        + " observations; " + report.possible() + " possible, " + report.uncertain() + " uncertain, " + report.impossible() + " impossible.");
+    sender.sendMessage("Phase 8 accumulator: impossible-support="
+        + capture.phase8Accumulator.players().values().stream().mapToInt(Phase8MovementValidation.State::supportingImpossible).sum());
+    report.results().stream().filter(r -> r.verdict() != Phase8MovementValidation.Verdict.POSSIBLE).limit(5).forEach(result -> {
+      Phase8MovementValidation.Evidence evidence = result.evidence();
+      sender.sendMessage("[" + result.verdict() + "] tick " + evidence.serverTick() + ": " + evidence.eliminationReason()
+          + " candidates=" + evidence.reachableCandidateCount() + " eliminated=" + evidence.candidatesEliminated());
+    });
+    sender.sendMessage("Observation only: Phase 8 never kicks/bans/punishes. Replay references are included in the evidence.");
   }
 
-  private void record(Player player, Packets.Packet packet) { record(captures.computeIfAbsent(player.getUniqueId(), ignored -> new Capture(System.nanoTime())), packet); }
-  private void record(Capture capture, Packets.Packet packet) { capture.packets.add(new RawPacket(capture.sequence.incrementAndGet(), System.nanoTime(), packet)); }
+  private void record(Player player, Packets.Packet packet) {
+    record(captures.computeIfAbsent(player.getUniqueId(), ignored -> new Capture(System.nanoTime())), packet);
+  }
+
+  private void record(Capture capture, Packets.Packet packet) {
+    capture.packets.add(new RawPacket(capture.sequence.incrementAndGet(), System.nanoTime(), packet));
+  }
+
   private void recordBlockState(Player player, dev.phantom.ac.world.Pos position, dev.phantom.ac.world.BlockState state) {
     Packets.Packet packet = state.isUnsupported() ? new Packets.UnsupportedBlockStateChange(position, state) : new Packets.BlockStateChange(position, state);
     record(player, packet);
   }
+
   private void sendOperatorAlert(String message, boolean broadcast) {
     if (broadcast) { getServer().broadcastMessage(message); return; }
-    for (Player recipient : getServer().getOnlinePlayers()) if (recipient.hasPermission("phantom.admin")) recipient.sendMessage(message);
+    for (Player recipient : getServer().getOnlinePlayers()) {
+      if (recipient.hasPermission("phantom.admin")) recipient.sendMessage(message);
+    }
     getLogger().info(message);
   }
 
@@ -385,9 +381,11 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
   private static void putEnum(Map<String, String> properties, String key, Object value) {
     if (value != null) properties.put(key, value.toString().toLowerCase(Locale.ROOT));
   }
+
   private static void putNumber(Map<String, String> properties, String key, Object value) {
     if (value instanceof Number number) properties.put(key, Integer.toString(number.intValue()));
   }
+
   private static void putBoolean(Map<String, String> properties, String key, Object value) {
     if (value instanceof Boolean flag) properties.put(key, Boolean.toString(flag));
   }
@@ -400,9 +398,9 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     final AtomicLong chunkPackets = new AtomicLong();
     final Queue<PendingChunk> chunkQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
     final List<RawPacket> packets = Collections.synchronizedList(new ArrayList<>());
-    OperatorValidation.Aggregator aggregator = OperatorValidation.Aggregator.empty();
+    Phase8MovementValidation.Accumulator phase8Accumulator = Phase8MovementValidation.Accumulator.empty();
     final AtomicBoolean validationRunning = new AtomicBoolean();
-    int processedFindings;
+    int processedPhase8Results;
     Capture(long epochNanos) { this.epochNanos = epochNanos; }
     List<RawPacket> copy() { synchronized (packets) { return List.copyOf(packets); } }
   }
