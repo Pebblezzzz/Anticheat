@@ -228,7 +228,7 @@ public final class Phase8MovementValidation {
                       String evidence, double confidence, int supportingEvents, String replayReference) implements Serializable {
     public String message() {
       return "[PhantomAC][PHASE8] player=" + playerId + " type=MOVEMENT result=IMPOSSIBLE tick=" + serverTick
-          + " first-inconsistent-tick=" + firstInconsistentTick + " reason=" + reason
+          + " first-inconsistent-tick=" + firstInconsistentTick + " reason=" + evidence
           + " confidence=" + String.format(Locale.ROOT, "%.2f", confidence)
           + " replay=" + replayReference;
     }
