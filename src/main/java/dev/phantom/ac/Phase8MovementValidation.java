@@ -32,7 +32,7 @@ public final class Phase8MovementValidation {
       if (alertDebounceTicks < 0) throw new IllegalArgumentException("alertDebounceTicks must be non-negative");
       if (!observationOnly) throw new IllegalArgumentException("Phase 8 is observation-only; punishment is not part of this phase");
     }
-    public static Config defaults() { return new Config(2, 20, true, true); }
+    public static Config defaults() { return new Config(1, 20, true, true); }
   }
 
   public record Evidence(
@@ -202,7 +202,7 @@ public final class Phase8MovementValidation {
       Map<String, State> updated = new LinkedHashMap<>(players); updated.put(key, next);
       Optional<Alert> alert = Optional.empty();
       if (config.alertsEnabled() && evidence.verdict() == Verdict.IMPOSSIBLE
-          && next.consecutiveImpossible() >= config.minimumImpossibleObservations()
+          && next.supportingImpossible() >= config.minimumImpossibleObservations()
           && (next.lastAlertTick() < 0 || evidence.serverTick() - next.lastAlertTick() >= config.alertDebounceTicks())) {
         double confidence = Math.min(1.0, (double) next.supportingImpossible() / config.minimumImpossibleObservations());
         alert = Optional.of(new Alert(evidence.playerId(), evidence.serverTick(), evidence.firstInconsistentTick().orElse(evidence.serverTick()),
