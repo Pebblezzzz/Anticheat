@@ -136,6 +136,7 @@ public final class ControlledPhase5ScenarioDriver {
 
         String phase = PHASES[phaseIndex];
         configureInput(client.options, phase, elapsed);
+        if (phase.equals("jump-boost") && elapsed == 0) triggerJumpBoostJump(client);
         if (phase.equals("glide")) driveGlide(client);
         if (phase.equals("correction")) {
             if (elapsed == 8) requestReset(client, 2, 65, laneZ(phase) + 20, 90);
@@ -228,20 +229,7 @@ public final class ControlledPhase5ScenarioDriver {
     private void resetForPhase(MinecraftClient client, String phase) {
         if (phase.equals("speed-effect")) effect(client, "minecraft:speed");
         if (phase.equals("slowness-effect")) effect(client, "minecraft:slowness");
-        if (phase.equals("jump-boost")) {
-            effect(client, "minecraft:jump_boost");
-            IntegratedServer server = client.getServer();
-            if (server != null) {
-                server.executeSync(() -> {
-                    ServerPlayerEntity sp = server.getPlayerManager().getPlayer(client.player.getUuid());
-                    if (sp != null) {
-                        sp.setOnGround(true);
-                        sp.jump();
-                        System.out.println("[Phase5] jump-boost jump triggered");
-                    }
-                });
-            }
-        }
+        if (phase.equals("jump-boost")) effect(client, "minecraft:jump_boost");
         if (phase.equals("lava")) effect(client, "minecraft:fire_resistance");
         if (phase.equals("glide")) {
             client.player.equipStack(EquipmentSlot.CHEST, new ItemStack(Items.ELYTRA));
@@ -249,6 +237,18 @@ public final class ControlledPhase5ScenarioDriver {
             client.player.setVelocity(0.0D, -0.12D, 0.0D);
             client.player.fallDistance = 2.0F;
         }
+    }
+
+    private void triggerJumpBoostJump(MinecraftClient client) {
+        IntegratedServer server = client.getServer();
+        if (server == null) throw new IllegalStateException("Integrated server required");
+        server.executeSync(() -> {
+            ServerPlayerEntity sp = server.getPlayerManager().getPlayer(client.player.getUuid());
+            if (sp == null) return;
+            sp.setOnGround(true);
+            sp.jump();
+            System.out.println("[Phase5] jump-boost jump triggered t=0");
+        });
     }
 
     private void driveGlide(MinecraftClient client) {
