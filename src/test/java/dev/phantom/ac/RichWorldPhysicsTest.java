@@ -25,7 +25,7 @@ class RichWorldPhysicsTest {
         var env = Phase5Mechanics.MovementEnvironment.dry(true, false, false);
         var context = new Vanilla12111RichPhysics.Context(0, player, input, world, Simulation.Environment.DRY,
             Simulation.Attributes.DEFAULT, Phase5Mechanics.MovementEffects.NONE, Phase5Mechanics.Pose.STANDING,
-            env, false);
+            env, false, dev.phantom.ac.world.EntityCollisions.of(java.util.List.of()));
         var result = new Vanilla12111RichPhysics().step(context);
         assertFalse(result.state().uncertain());
         assertTrue(result.state().onGround());
