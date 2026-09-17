@@ -19,7 +19,7 @@ public final class Vanilla12111RichPhysics {
         if(s.awaitingTeleport().isPresent())return uncertain(context,"awaiting teleport confirmation; pre-correction motion is not integrated");
         if(context.environment()==Simulation.Environment.UNKNOWN)return uncertain(context,"movement environment is unknown");
         Phase5Mechanics.Pose pose=Phase5Mechanics.nextPose(context.pose(),context.movementEnvironment(),context.sleeping());
-        if(s.gamemode().equals("creative")||s.gamemode().equals("spectator"))return new StepResult(context.simulationTick(),richPlayer(s,Vec3.ZERO,false,pose,context,false),false,false,false,false,false,false,false,"non-physical gamemode");
+        if(s.gamemode().equals("creative")||s.gamemode().equals("spectator"))return new StepResult(context.simulationTick(),richPlayer(s,s.position(),Vec3.ZERO,false,pose,context,false),false,false,false,false,false,false,false,false,"non-physical gamemode");
         if(!s.gamemode().equals("survival")&&!s.gamemode().equals("adventure"))return uncertain(context,"unsupported gamemode movement model");
 
         Aabb start=Aabb.playerAt(s.position(),pose);var startEntities=context.entityCollisions().boxesIn(new dev.phantom.ac.geometry.BlockBox(start.minX(),start.minY(),start.minZ(),start.maxX(),start.maxY(),start.maxZ()));if(!startEntities.isDefinite())return uncertain(context,"entity collision history is incomplete");
