@@ -5,6 +5,7 @@ import dev.phantom.ac.Phase5Mechanics.MovementEnvironment;
 import dev.phantom.ac.Phase5Mechanics.Pose;
 import dev.phantom.ac.Simulation.AdvancedInput;
 import dev.phantom.ac.State.Player;
+import dev.phantom.ac.world.EntityCollisions;
 import dev.phantom.ac.world.WorldSnapshot;
 
 import java.io.Serializable;
@@ -19,11 +20,12 @@ public final class Phase6Reachability {
 
   public record Context(long simulationTick,Player player,Simulation.Environment environment,Simulation.Attributes attributes,
                         MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,
-                        Set<UncertainDimension> uncertainty) implements Serializable {
-    public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping){this(tick,player,env,attributes,effects,pose,movementEnvironment,sleeping,Set.of());}
-    public Context {if(simulationTick<0)throw new IllegalArgumentException("simulationTick must be non-negative");Objects.requireNonNull(player);Objects.requireNonNull(environment);Objects.requireNonNull(attributes);Objects.requireNonNull(effects);Objects.requireNonNull(pose);Objects.requireNonNull(movementEnvironment);uncertainty=Set.copyOf(uncertainty);}
-    public Context withTick(long tick){return new Context(tick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,uncertainty);}
-    public Context withUncertainty(UncertainDimension... dimensions){EnumSet<UncertainDimension> u=EnumSet.noneOf(UncertainDimension.class);u.addAll(uncertainty);u.addAll(List.of(dimensions));return new Context(simulationTick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,u);}
+                        EntityCollisions entityCollisions,Set<UncertainDimension> uncertainty) implements Serializable {
+    public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping){this(tick,player,env,attributes,effects,pose,movementEnvironment,sleeping,EntityCollisions.of(List.of()),Set.of());}
+    public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,EntityCollisions entityCollisions){this(tick,player,env,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,Set.of());}
+    public Context {if(simulationTick<0)throw new IllegalArgumentException("simulationTick must be non-negative");Objects.requireNonNull(player);Objects.requireNonNull(environment);Objects.requireNonNull(attributes);Objects.requireNonNull(effects);Objects.requireNonNull(pose);Objects.requireNonNull(movementEnvironment);Objects.requireNonNull(entityCollisions);uncertainty=Set.copyOf(uncertainty);}
+    public Context withTick(long tick){return new Context(tick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,uncertainty);}
+    public Context withUncertainty(UncertainDimension... dimensions){EnumSet<UncertainDimension> u=EnumSet.noneOf(UncertainDimension.class);u.addAll(uncertainty);u.addAll(List.of(dimensions));return new Context(simulationTick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,u);}
   }
 
   public record InputConstraint(OptionalInt forward,OptionalInt strafe,Optional<Boolean> jump,Optional<Boolean> sprint,Optional<Boolean> sneak) implements Serializable {
@@ -62,17 +64,19 @@ public final class Phase6Reachability {
     for(int offset=0;offset<inputs.size();offset++){
       long tick=start.simulationTick()+offset;List<AdvancedInput> allowed=inputs.get(offset).enumerate();if(allowed.isEmpty())return uncertain(offset,peak,"input constraint has no realizable advanced input");
       List<WorldBranch> branches=Objects.requireNonNull(worlds.apply(tick),"world branches");if(branches.isEmpty())return uncertain(offset,peak,"world hypothesis envelope is empty at tick "+tick);if(branches.stream().anyMatch(b->!b.exhaustive()))nonExhaustive++;
-      List<ExternalTransition> external=Objects.requireNonNull(externalTransitions.apply(tick),"external transitions");if(external.isEmpty())return uncertain(offset,peak,"external-transition envelope is empty at tick "+tick);
+      List<ExternalTransition> external=Objects.requireNonNull(externalTransitions.apply(tick),"external transitions");if(external.isEmpty())external=List.of(new None());
       Map<Context,Candidate> next=new LinkedHashMap<>();
       for(Candidate parent:current.values())for(WorldBranch branch:branches){Maths.Aabb pb=Maths.Aabb.playerAt(parent.context().player().position(),parent.context().pose());if(!branch.world().fullyKnown(new dev.phantom.ac.geometry.BlockBox(pb.minX(),pb.minY(),pb.minZ(),pb.maxX(),pb.maxY(),pb.maxZ()))){uncertainTransitions++;continue;}
-        for(ExternalTransition event:external){Context pre=applyExternal(parent.context(),event,tick);if(pre.player().uncertain()){uncertainTransitions++;continue;}
-          for(AdvancedInput input:allowed){MovementEnvironment env=adjustEnvironment(pre.movementEnvironment(),pre.player(),input);Vanilla12111RichPhysics.Context rc=new Vanilla12111RichPhysics.Context(tick,pre.player(),input,branch.world(),pre.environment(),pre.attributes(),pre.effects(),pre.pose(),env,pre.sleeping());Vanilla12111RichPhysics.StepResult stepped=physics.step(rc);if(stepped.state().uncertain()){uncertainTransitions++;continue;}
-            Pose nextPose=Phase5Mechanics.nextPose(pre.pose(),env,pre.sleeping());Context after=new Context(tick+1,stepped.state(),pre.environment(),pre.attributes(),pre.effects(),nextPose,adjustEnvironment(env,stepped.state(),input),pre.sleeping());Candidate existing=next.get(after);
-            if(existing==null){long id=nextId++;next.put(after,new Candidate(id,after,new Provenance(id,parent.id(),tick,input.toString(),branch.id(),event.getClass().getSimpleName(),List.of(stepped.diagnostic()),1,List.of(parent.id()))));}
+        Context pre=parent.context().withTick(tick);
+        boolean externalUncertain=false;
+        for(ExternalTransition event:external){pre=applyExternal(pre,event,tick);if(pre.player().uncertain()){externalUncertain=true;break;}}
+        if(externalUncertain){uncertainTransitions++;continue;}
+        for(AdvancedInput input:allowed){MovementEnvironment env=adjustEnvironment(pre.movementEnvironment(),pre.player(),input);Vanilla12111RichPhysics.Context rc=new Vanilla12111RichPhysics.Context(tick,pre.player(),input,branch.world(),pre.environment(),pre.attributes(),pre.effects(),pre.pose(),env,pre.sleeping(),pre.entityCollisions());Vanilla12111RichPhysics.StepResult stepped=physics.step(rc);if(stepped.state().uncertain()){uncertainTransitions++;continue;}
+            Pose nextPose=Phase5Mechanics.nextPose(pre.pose(),env,pre.sleeping());Context after=new Context(tick+1,stepped.state(),pre.environment(),pre.attributes(),pre.effects(),nextPose,adjustEnvironment(env,stepped.state(),input),pre.sleeping(),pre.entityCollisions(),pre.uncertainty());Candidate existing=next.get(after);
+            if(existing==null){long id=nextId++;next.put(after,new Candidate(id,after,new Provenance(id,parent.id(),tick,input.toString(),branch.id(),external.toString(),List.of(stepped.diagnostic()),1,List.of(parent.id()))));}
             else{merged++;provenanceMerges++;Provenance old=existing.provenance();List<Long> ps=new ArrayList<>(old.mergedParentIds());if(!ps.contains(parent.id())&&ps.size()<MAX_PROVENANCE_PARENTS)ps.add(parent.id());int paths=old.mergedPathCount()==Integer.MAX_VALUE?Integer.MAX_VALUE:old.mergedPathCount()+1;next.put(after,new Candidate(existing.id(),existing.context(),new Provenance(existing.id(),old.parentId(),old.tick(),old.input(),old.worldBranch(),old.externalTransition(),old.causes(),paths,ps)));}
             if(next.size()>maximumCandidates)return uncertain(offset+1,Math.max(peak,next.size()),"candidate budget exceeded; no provisional subset is exposed");
           }
-        }
       }
       if(next.isEmpty())return new SearchResult(Verdict.UNCERTAIN,Set.of(),offset+1,Math.max(peak,1),merged,nonExhaustive,uncertainTransitions,provenanceMerges,List.of("all transitions became uncertain or were eliminated by incomplete world coverage"));
       peak=Math.max(peak,next.size());current=next;if(nonExhaustive>0)return new SearchResult(Verdict.UNCERTAIN,Set.of(),offset+1,peak,merged,nonExhaustive,uncertainTransitions,provenanceMerges,List.of("world hypothesis envelope is not exhaustive at tick "+tick));
@@ -93,25 +97,18 @@ public final class Phase6Reachability {
       SearchResult r=search(start.withTick(tick),inputs,worlds,externalTransitions,maximumCandidates);
       results.put(tick,r);
       evaluated++;
-      if(r.verdict()!=Verdict.POSSIBLE){
-        incompleteOffset=true;
-        reasons.addAll(r.reasons());
-      } else {
-        for(Candidate c:r.candidates())union.put(c.context(),c);
-      }
+      if(r.verdict()!=Verdict.POSSIBLE){incompleteOffset=true;reasons.addAll(r.reasons());}
+      else for(Candidate c:r.candidates())union.put(c.context(),c);
       if(union.size()>maximumCandidates)return new TimingSearchResult(Verdict.UNCERTAIN,Set.of(),results,evaluated,(int)span-evaluated,List.of("combined candidate budget exceeded across timing offsets"));
     }
-    if(incompleteOffset){
-      reasons.add("at least one client-tick offset was not exhaustively representable; candidates from fully represented offsets were retained");
-      return new TimingSearchResult(Verdict.UNCERTAIN,Set.copyOf(union.values()),results,evaluated,0,List.copyOf(reasons));
-    }
+    if(incompleteOffset){reasons.add("at least one client-tick offset was not exhaustively representable; candidates from fully represented offsets were retained");return new TimingSearchResult(Verdict.UNCERTAIN,Set.copyOf(union.values()),results,evaluated,0,List.copyOf(reasons));}
     if(timingUncertain)return new TimingSearchResult(Verdict.UNCERTAIN,Set.copyOf(union.values()),results,evaluated,0,List.of("all timing offsets were simulated but synchronization remains ambiguous"));
     return new TimingSearchResult(Verdict.POSSIBLE,Set.copyOf(union.values()),results,evaluated,0,List.of("all client-tick offsets were exhaustively simulated"));
   }
 
   public Evidence compare(SearchResult result,Observation observation){if(result.verdict()==Verdict.UNCERTAIN)return new Evidence(Verdict.UNCERTAIN,0,List.of(),result.reasons());List<Provenance> matches=new ArrayList<>();for(Candidate c:result.candidates())if(matches(c.context().player(),observation))matches.add(c.provenance());if(!matches.isEmpty())return new Evidence(Verdict.POSSIBLE,matches.size(),matches,List.of("observed facts are reachable","candidate provenance is retained"));return new Evidence(Verdict.IMPOSSIBLE,0,List.of(),List.of("no exact candidate matches the declared observed facts","all declared branches were exhausted"));}
   private static boolean matches(Player c,Observation o){Player x=o.observed();for(ObservedField f:o.known())switch(f){case POSITION->{if(!c.position().equals(x.position()))return false;}case VELOCITY->{if(!c.velocity().equals(x.velocity()))return false;}case ROTATION->{if(Float.compare(c.yaw(),x.yaw())!=0||Float.compare(c.pitch(),x.pitch())!=0)return false;}case GROUND->{if(c.onGround()!=x.onGround())return false;}case GAMEMODE->{if(!c.gamemode().equals(x.gamemode()))return false;}case EFFECTS->{if(!c.effects().equals(x.effects()))return false;}case TELEPORT_PENDING->{if(c.awaitingTeleport().isPresent()!=x.awaitingTeleport().isPresent())return false;}}return true;}
-  private static Context applyExternal(Context c,ExternalTransition e,long tick){Player s=c.player();if(e instanceof None)return c.withTick(tick);if(e instanceof VelocityImpulse v){Player n=Phase5Mechanics.applyVelocityImpulse(s,new Phase5Mechanics.Vec3Like(v.impulse().x(),v.impulse().y(),v.impulse().z()));return new Context(tick,n,c.environment(),c.attributes(),c.effects(),c.pose(),c.movementEnvironment(),c.sleeping(),c.uncertainty());}if(e instanceof TeleportCorrection t){OptionalInt p=t.awaitingConfirmation()?OptionalInt.of(t.id()):OptionalInt.empty();Player n=new Player(t.position(),t.velocity(),s.yaw(),s.pitch(),false,s.gamemode(),s.effects(),p,false);return new Context(tick,n,c.environment(),c.attributes(),c.effects(),t.pose(),c.movementEnvironment(),c.sleeping(),c.uncertainty());}if(e instanceof TeleportConfirmation t){boolean ok=s.awaitingTeleport().isPresent()&&s.awaitingTeleport().getAsInt()==t.id();Player n=new Player(s.position(),s.velocity(),s.yaw(),s.pitch(),s.onGround(),s.gamemode(),s.effects(),ok?OptionalInt.empty():s.awaitingTeleport(),s.uncertain()||!ok);return new Context(tick,n,c.environment(),c.attributes(),c.effects(),c.pose(),c.movementEnvironment(),c.sleeping(),c.uncertainty());}throw new IllegalStateException("unhandled external transition "+e.getClass());}
+  private static Context applyExternal(Context c,ExternalTransition e,long tick){Player s=c.player();if(e instanceof None)return c.withTick(tick);if(e instanceof VelocityImpulse v){Player n=Phase5Mechanics.applyVelocityImpulse(s,new Phase5Mechanics.Vec3Like(v.impulse().x(),v.impulse().y(),v.impulse().z()));return new Context(tick,n,c.environment(),c.attributes(),c.effects(),c.pose(),c.movementEnvironment(),c.sleeping(),c.entityCollisions(),c.uncertainty());}if(e instanceof TeleportCorrection t){OptionalInt p=t.awaitingConfirmation()?OptionalInt.of(t.id()):OptionalInt.empty();Player n=new Player(t.position(),t.velocity(),s.yaw(),s.pitch(),false,s.gamemode(),s.effects(),p,false);return new Context(tick,n,c.environment(),c.attributes(),c.effects(),t.pose(),c.movementEnvironment(),c.sleeping(),c.entityCollisions(),c.uncertainty());}if(e instanceof TeleportConfirmation t){boolean ok=s.awaitingTeleport().isPresent()&&s.awaitingTeleport().getAsInt()==t.id();Player n=new Player(s.position(),s.velocity(),s.yaw(),s.pitch(),s.onGround(),s.gamemode(),s.effects(),ok?OptionalInt.empty():s.awaitingTeleport(),s.uncertain()||!ok);return new Context(tick,n,c.environment(),c.attributes(),c.effects(),c.pose(),c.movementEnvironment(),c.sleeping(),c.entityCollisions(),c.uncertainty());}throw new IllegalStateException("unhandled external transition "+e.getClass());}
   private static MovementEnvironment adjustEnvironment(MovementEnvironment e,Player p,AdvancedInput i){return new MovementEnvironment(e.fluid(),e.submerged(),e.climbable(),p.onGround(),i.sprint(),i.sneak(),e.swimmingInput(),e.gliding(),e.fluidSpeedMultiplier(),e.fluidDrag(),e.gravityMultiplier());}
   private static SearchResult uncertain(int ticks,int peak,String reason){return new SearchResult(Verdict.UNCERTAIN,Set.of(),ticks,peak,0,0,0,0,List.of(reason));}
 }
