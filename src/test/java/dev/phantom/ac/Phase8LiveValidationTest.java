@@ -51,6 +51,11 @@ class Phase8LiveValidationTest {
         MovementEffects.NONE, Pose.STANDING, environment, false);
   }
 
+  private static Packets.PlayerContext dryContext() {
+    return new Packets.PlayerContext("survival", Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false), false, List.of());
+  }
+
   private static TimingSearchResult timingPossible(Candidate candidate) {
     SearchResult result = new SearchResult(Verdict.POSSIBLE, Set.of(candidate), 1, 1, 0, 0, 0, 0,
         List.of("synthetic exhaustive possible parent"));
@@ -87,9 +92,10 @@ class Phase8LiveValidationTest {
 
     List<RawPacket> packets = List.of(
         new RawPacket(1, 0, new ChunkStates(new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
-        new RawPacket(2, 0, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
-        new RawPacket(3, 50_000_000L, new Move(new Vec3(100.5, 64, 100.5), 0f, 0f, true, 1L)),
-        new RawPacket(4, 100_000_000L, new Move(new Vec3(101.5, 64, 100.5), 0f, 0f, true, 2L)));
+        new RawPacket(2, 0, dryContext()),
+        new RawPacket(3, 0, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
+        new RawPacket(4, 50_000_000L, new Move(new Vec3(100.5, 64, 100.5), 0f, 0f, true, 1L)),
+        new RawPacket(5, 100_000_000L, new Move(new Vec3(101.5, 64, 100.5), 0f, 0f, true, 2L)));
     Phase8LiveValidation.Report report = Phase8LiveValidation.analyze("phase8-test", capture(packets), 256, exactTiming());
     assertEquals(3, report.movementObservations());
     assertEquals(1, report.uncertain());
@@ -121,9 +127,10 @@ class Phase8LiveValidationTest {
   void possibleParentBranchPreventsImpossibleAndIsChained() {
     List<RawPacket> packets = List.of(
         new RawPacket(1, 0, new ChunkStates(new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
-        new RawPacket(2, 0, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
-        new RawPacket(3, 50_000_000L, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 1L)),
-        new RawPacket(4, 100_000_000L, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 2L)));
+        new RawPacket(2, 0, dryContext()),
+        new RawPacket(3, 0, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
+        new RawPacket(4, 50_000_000L, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 1L)),
+        new RawPacket(5, 100_000_000L, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 2L)));
     Phase8LiveValidation.Report report = Phase8LiveValidation.analyze("phase8-possible", capture(packets), 256, exactTiming());
     assertEquals(3, report.movementObservations());
     assertEquals(1, report.uncertain());
