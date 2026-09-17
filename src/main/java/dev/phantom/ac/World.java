@@ -301,24 +301,36 @@ public final class World {
       }
     }
 
-    private void acknowledgeStateTransaction(short id) {
+    private void acknowledgeStateTransaction(short id, long visibleTick) {
       if (!pendingTransactions.containsKey(id)) return;
       while (!sentTransactions.isEmpty()) {
         short head=sentTransactions.removeFirst();
         List<StateEvent> mutations=pendingTransactions.remove(head);
-        if (mutations!=null) stateEvents.addAll(mutations);
+        if (mutations!=null) {
+          for (StateEvent mutation : mutations) {
+            if (mutation instanceof StateChunkChange change) {
+              stateEvents.add(new StateChunkChange(visibleTick, change.order(), change.chunk(), change.visible()));
+            } else if (mutation instanceof StateBlockChange change) {
+              stateEvents.add(new StateBlockChange(visibleTick, change.order(), change.position(), change.state()));
+            }
+          }
+        }
         acknowledgedTransactions.add(head);
         if (head==id) break;
       }
     }
 
-    private boolean stateVisibleAtPendingAware(long tick, dev.phantom.ac.Chunk sought) {
+    private boolean stateVisibleAtPendingAware(long tick, Chunk sought) {
       boolean visible=false;
       for(StateEvent event:stateEvents) {
         if(event.clientTick()>tick) break;
         if(event instanceof StateChunkChange change && change.chunk().equals(sought)) visible=change.visible();
       }
       for(List<StateEvent> mutations:pendingTransactions.values()) for(StateEvent event:mutations) {
+        if(event.clientTick()>tick) continue;
+        if(event instanceof StateChunkChange change && change.chunk().equals(sought)) visible=change.visible();
+      }
+      for(StateEvent event:unassignedStateEvents) {
         if(event.clientTick()>tick) continue;
         if(event instanceof StateChunkChange change && change.chunk().equals(sought)) visible=change.visible();
       }
@@ -391,7 +403,7 @@ public final class World {
       if(packet instanceof Packets.WorldTransactionSend send) {
         history.openStateTransaction(send.id());
       } else if(packet instanceof Packets.WorldTransactionAck ack) {
-        history.acknowledgeStateTransaction(ack.id());
+        history.acknowledgeStateTransaction(ack.id(), tick);
       } else if(packet instanceof Packets.ChunkStates states) {
         history.queueStateChunk(tick, states.chunk(), states.states());
       } else if(packet instanceof Packets.ChunkUnload unload) {
