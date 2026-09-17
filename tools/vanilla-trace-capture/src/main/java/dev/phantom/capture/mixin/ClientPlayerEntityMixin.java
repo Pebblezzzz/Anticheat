@@ -1,27 +1,49 @@
 package dev.phantom.capture.mixin;
 
 import dev.phantom.capture.ControlledPhase5ScenarioDriver;
+import dev.phantom.capture.VanillaCorpusScenarioDriver;
 import dev.phantom.capture.VanillaTraceCaptureClient;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.entity.MovementType;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.util.math.Vec3d;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Reads pre-tick input and records vanilla post-tick state. */
+/** Reads causal input and movement results while leaving vanilla movement itself untouched. */
 @Mixin(ClientPlayerEntity.class)
 final class ClientPlayerEntityMixin {
     private boolean phantom$part4GeometryInjected;
     private String phantom$lastPhase = "";
     private int phantom$phaseTicks;
+    private Vec3d phantom$moveStart = Vec3d.ZERO;
+    private Vec3d phantom$moveRequested = Vec3d.ZERO;
+    private boolean phantom$moveGroundBefore;
 
     @Inject(method = "tick", at = @At("HEAD"))
     private void phantom$observeBeforeTick(CallbackInfo ci) {
+        VanillaTraceCaptureClient.CaptureRuntime.beginObservationTick((ClientPlayerEntity) (Object) this);
         VanillaTraceCaptureClient.CaptureRuntime.observePreTickInput((ClientPlayerEntity) (Object) this);
+    }
+
+    @Inject(method = "move", at = @At("HEAD"))
+    private void phantom$observeMoveStart(MovementType type, Vec3d movement, CallbackInfo ci) {
+        ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
+        phantom$moveStart = player.getPos();
+        phantom$moveRequested = movement;
+        phantom$moveGroundBefore = player.isOnGround();
+    }
+
+    @Inject(method = "move", at = @At("RETURN"))
+    private void phantom$observeMoveEnd(MovementType type, Vec3d movement, CallbackInfo ci) {
+        ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
+        Vec3d actual = player.getPos().subtract(phantom$moveStart);
+        VanillaTraceCaptureClient.CaptureRuntime.observeMoveResult(type, phantom$moveRequested, actual, phantom$moveGroundBefore, player);
     }
 
     @Inject(method = "tick", at = @At("TAIL"))
@@ -29,6 +51,9 @@ final class ClientPlayerEntityMixin {
         ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
         MinecraftClient client = MinecraftClient.getInstance();
         String phase = ControlledPhase5ScenarioDriver.phaseLabel();
+        if ("corpus".equalsIgnoreCase(System.getProperty("phantom.capture.mode", "legacy"))) {
+            phase = VanillaCorpusScenarioDriver.phaseLabel();
+        }
 
         if (!phase.equals(phantom$lastPhase)) {
             phantom$lastPhase = phase;
@@ -36,12 +61,10 @@ final class ClientPlayerEntityMixin {
             phantom$phaseTicks = 0;
         }
 
-        // World setup for the legacy Part 4 controlled capture is performed here
-        // at phase start; movement input itself is set only before the client tick
-        // by MinecraftClientMixin so the recorder can sample it causally at HEAD.
+        // Legacy Part 4 geometry is setup, not movement simulation. Input is never
+        // changed here; it is driven before the tick by MinecraftClientMixin.
         if (phase.endsWith(":climbable") || phase.endsWith(":edge-corner")) {
-            boolean settledAtPhaseStart = player.isOnGround()
-                    && Math.abs(player.getY() - 64.0D) <= 0.75D;
+            boolean settledAtPhaseStart = player.isOnGround() && Math.abs(player.getY() - 64.0D) <= 0.75D;
             if (!phantom$part4GeometryInjected && settledAtPhaseStart && phantom$phaseTicks <= 2) {
                 phantom$injectPart4Geometry(client, player, phase);
                 phantom$part4GeometryInjected = true;
@@ -77,7 +100,5 @@ final class ClientPlayerEntityMixin {
         });
     }
 
-    private static void cmd(CommandManager m, ServerCommandSource s, String command) {
-        m.parseAndExecute(s, command);
-    }
+    private static void cmd(CommandManager m, ServerCommandSource s, String command) { m.parseAndExecute(s, command); }
 }
