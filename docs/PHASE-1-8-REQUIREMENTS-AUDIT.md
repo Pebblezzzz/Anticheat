@@ -46,9 +46,10 @@ Audit date: 2026-09-17. Phase 5 implementation is complete except for the extern
 |---|---|---|---|
 | Finite one-tick input reachability | IMPLEMENTED / INTERNALLY TESTED | `Validation.ReachableStates.next` | Validate against independent 1.21.11 traces |
 | Complete declared discrete input envelope | IMPLEMENTED / INTERNALLY TESTED | `Validation.allInputs`, 72 `AdvancedInput` combinations | Empirical client-input confirmation |
-| Sprint/sneak-aware observed-input reachability | IMPLEMENTED / INTERNALLY TESTED | `ReachableStates.next(...ClientInput)` and `nextAdvanced` | Empirical client-input confirmation |
+| Sprint/sneak-aware advanced reachability | IMPLEMENTED / INTERNALLY TESTED | `ReachableStates.nextAdvanced` and `advanceAdvanced` | Empirical client-input confirmation |
 | Multi-tick finite reachability | IMPLEMENTED / INTERNALLY TESTED | `advanceAdvanced` with exact-state merging | Larger real trace sequences |
-| Exhaustive candidate-budget discipline | IMPLEMENTED / INTERNALLY TESTED | budget overflow returns `UNCERTAIN` and never exposes a sampled subset | Operational tuning from real workloads |
+| Exhaustive candidate-budget discipline | IMPLEMENTED / INTERNALLY TESTED | advanced budget overflow returns `UNCERTAIN` with no candidate subset | Operational tuning from real workloads |
+| Legacy basic contract compatibility | IMPLEMENTED / INTERNALLY TESTED | `advance` retains 18-state envelope and representative metric with `UNCERTAIN` verdict | Migrate downstream callers when ready |
 | Timing-window enumeration | IMPLEMENTED / INTERNALLY TESTED | `advanceWithinWindow` | Derive windows from richer live timing observations |
 | Wide-window safety | IMPLEMENTED / INTERNALLY TESTED | bounded timing-search envelope returns `UNCERTAIN` | Tune envelope from production timing data |
 | Explainable POSSIBLE/UNCERTAIN/IMPOSSIBLE evidence | IMPLEMENTED / INTERNALLY TESTED | `Validation.validate` overloads and reasons | Feed complete real-client observations |
