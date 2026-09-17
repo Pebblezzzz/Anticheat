@@ -16,7 +16,7 @@ public final class State {
       if(uncertain&&uncertaintyReasons.isEmpty())uncertaintyReasons=Set.of(UncertaintyReason.EXPLICIT_UNCERTAINTY);
     }
     /** Source-compatible constructor used by legacy tests and APIs; rich fields receive explicit unknown/default values. */
-    public Player(Vec3 position,Vec3 velocity,float yaw,float pitch,boolean onGround,String gamemode,Map<String,Integer> effects,OptionalInt awaitingTeleport,boolean uncertain){this(position,velocity,yaw,pitch,onGround,gamemode,effects,awaitingTeleport,uncertain,Optional.empty(),new Simulation.Attributes(1.0),Phase5Mechanics.Pose.STANDING,Environment.UNKNOWN,TickRange.unknown(),Provenance.UNKNOWN,uncertain?Set.of(UncertaintyReason.EXPLICIT_UNCERTAINTY):Set.of());}
+    public Player(Vec3 position,Vec3 velocity,float yaw,float pitch,boolean onGround,String gamemode,Map<String,Integer> effects,OptionalInt awaitingTeleport,boolean uncertain){this(position,velocity,yaw,pitch,onGround,gamemode,effects,awaitingTeleport,uncertain,Optional.empty(),new Simulation.Attributes(0.1),Phase5Mechanics.Pose.STANDING,Environment.UNKNOWN,TickRange.unknown(),Provenance.UNKNOWN,uncertain?Set.of(UncertaintyReason.EXPLICIT_UNCERTAINTY):Set.of());}
     public boolean isSurvival(){return gamemode.equals("survival");}
     public static Player initial(Vec3 position){return new Player(position,Vec3.ZERO,0,0,true,"survival",Map.of(),OptionalInt.empty(),false);}
     public Player withServerProvenance(long serverTick,NormalizedPacket event){return new Player(position,velocity,yaw,pitch,onGround,gamemode,effects,awaitingTeleport,uncertain,input,attributes,pose,environment,clientTickRange,new Provenance(event.sequence(),serverTick,event.packet().getClass().getSimpleName()),uncertaintyReasons);}
