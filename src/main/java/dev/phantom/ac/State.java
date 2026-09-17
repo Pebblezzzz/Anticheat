@@ -8,32 +8,18 @@ import static dev.phantom.ac.Packets.*;
 /** Pure player-state reducer and provenance-aware timeline reconstruction. */
 public final class State {
   private State() {}
-
   public record Player(Vec3 position,Vec3 velocity,float yaw,float pitch,boolean onGround,String gamemode,Map<String,Integer> effects,OptionalInt awaitingTeleport,boolean uncertain) implements Serializable {
     public Player { Objects.requireNonNull(position,"position");Objects.requireNonNull(velocity,"velocity");if(gamemode==null||gamemode.isBlank())throw new IllegalArgumentException("gamemode is required");effects=Map.copyOf(effects);Objects.requireNonNull(awaitingTeleport,"awaitingTeleport"); }
-    public boolean isSurvival() { return gamemode.equals("survival"); }
-    /** A test/replay fixture anchor. Production reconstruction should declare its known facts with Seed. */
+    public boolean isSurvival(){return gamemode.equals("survival");}
     public static Player initial(Vec3 position){return new Player(position,Vec3.ZERO,0,0,true,"survival",Map.of(),OptionalInt.empty(),false);}
   }
-
-  /** Facts with independent provenance. Retaining an old value never implies it was refreshed this event. */
   public enum Fact { POSITION, ROTATION, VELOCITY, GROUND, INPUT, GAMEMODE, ENVIRONMENT, EFFECTS, TELEPORT }
-  /** Environment is deliberately explicit even though detailed evaluation belongs to the world/physics phases. */
   public enum Environment { UNKNOWN, DRY, WATER, CLIMBABLE }
-  public record Seed(Player player,Set<Fact> known,Environment environment) {
-    public Seed { Objects.requireNonNull(player,"player");known=Set.copyOf(known);Objects.requireNonNull(environment,"environment");if(environment!=Environment.UNKNOWN&&!known.contains(Fact.ENVIRONMENT))throw new IllegalArgumentException("known environment requires ENVIRONMENT fact"); }
-    public static Seed serverAnchor(Player player){return new Seed(player,EnumSet.of(Fact.POSITION,Fact.ROTATION,Fact.VELOCITY,Fact.GROUND,Fact.GAMEMODE,Fact.EFFECTS,Fact.TELEPORT),Environment.UNKNOWN);}
-  }
-  public record StateFrame(int index,Timeline.Event event,Player before,Player after,Set<Fact> knownAfter,Set<Fact> refreshedByEvent,Optional<ClientInput> currentInput,Environment environment) {
-    public StateFrame { if(index<0)throw new IllegalArgumentException("frame index must be non-negative");Objects.requireNonNull(event,"event");Objects.requireNonNull(before,"before");Objects.requireNonNull(after,"after");knownAfter=Set.copyOf(knownAfter);refreshedByEvent=Set.copyOf(refreshedByEvent);currentInput=Objects.requireNonNull(currentInput,"currentInput");Objects.requireNonNull(environment,"environment"); }
-  }
-  public record Reconstruction(List<StateFrame> frames) {
-    public Reconstruction { frames=List.copyOf(frames); }
-    public Optional<StateFrame> last(){return frames.isEmpty()?Optional.empty():Optional.of(frames.getLast());}
-  }
-
-  public static final class Reducer implements Contracts.PlayerStateReducer { @Override public Player apply(Player prior,NormalizedPacket event){return State.apply(prior,event);} }
-  public static final class Reconstructor implements Contracts.PlayerStateReconstructor { @Override public Reconstruction reconstruct(Seed seed,Timeline.Snapshot timeline){return State.reconstruct(seed,timeline);} }
+  public record Seed(Player player,Set<Fact> known,Environment environment){public Seed{Objects.requireNonNull(player);known=Set.copyOf(known);Objects.requireNonNull(environment);if(environment!=Environment.UNKNOWN&&!known.contains(Fact.ENVIRONMENT))throw new IllegalArgumentException("known environment requires ENVIRONMENT fact");}public static Seed serverAnchor(Player player){return new Seed(player,EnumSet.of(Fact.POSITION,Fact.ROTATION,Fact.VELOCITY,Fact.GROUND,Fact.GAMEMODE,Fact.EFFECTS,Fact.TELEPORT),Environment.UNKNOWN);}}
+  public record StateFrame(int index,Timeline.Event event,Player before,Player after,Set<Fact> knownAfter,Set<Fact> refreshedByEvent,Optional<ClientInput> currentInput,Environment environment){public StateFrame{if(index<0)throw new IllegalArgumentException("frame index must be non-negative");Objects.requireNonNull(event);Objects.requireNonNull(before);Objects.requireNonNull(after);knownAfter=Set.copyOf(knownAfter);refreshedByEvent=Set.copyOf(refreshedByEvent);currentInput=Objects.requireNonNull(currentInput);Objects.requireNonNull(environment);}}
+  public record Reconstruction(List<StateFrame> frames){public Reconstruction{frames=List.copyOf(frames);}public Optional<StateFrame> last(){return frames.isEmpty()?Optional.empty():Optional.of(frames.getLast());}}
+  public static final class Reducer implements Contracts.PlayerStateReducer{@Override public Player apply(Player prior,NormalizedPacket event){return State.apply(prior,event);}}
+  public static final class Reconstructor implements Contracts.PlayerStateReconstructor{@Override public Reconstruction reconstruct(Seed seed,Timeline.Snapshot timeline){return State.reconstruct(seed,timeline);}}
 
   public static Player apply(Player state,NormalizedPacket event){
     Objects.requireNonNull(state,"state");Objects.requireNonNull(event,"event");
@@ -49,28 +35,21 @@ public final class State {
     throw new IllegalStateException("unhandled packet: "+packet.getClass());
   }
 
-  /** Reconstructs every state transition and exposes both retained and refreshed facts. */
+  /** Reconstructs state exactly once per capture sequence. Duplicate records remain evidence but have no semantic effect. */
   public static Reconstruction reconstruct(Seed seed,Timeline.Snapshot timeline){
     Objects.requireNonNull(seed,"seed");Objects.requireNonNull(timeline,"timeline");
-    Player current=seed.player();Set<Fact> known=new HashSet<>(seed.known());Optional<ClientInput> input=Optional.empty();List<StateFrame> frames=new ArrayList<>();int index=0;
+    Player current=seed.player();Set<Fact> known=new HashSet<>(seed.known());Optional<ClientInput> input=Optional.empty();Set<Long> appliedSequences=new HashSet<>();List<StateFrame> frames=new ArrayList<>();int index=0;
     for(Timeline.Event event:timeline.events()){
-      Player before=current;Packet packet=event.packet().packet();Set<Fact> refreshed=refreshed(packet);
-      if(packet instanceof ClientInput clientInput)input=Optional.of(clientInput);
-      current=apply(current,event.packet());known.addAll(refreshed);
+      Player before=current;Packet packet=event.packet().packet();Set<Fact> refreshed=refreshed(packet);boolean duplicate=event.packet().flags().contains(PacketFlag.DUPLICATE);
+      if(!duplicate)current=apply(current,event.packet());
+      if(packet instanceof ClientInput clientInput&&!duplicate)input=Optional.of(clientInput);
+      if(!duplicate)known.addAll(refreshed);
+      else current=copy(current,true);
+      appliedSequences.add(event.packet().sequence());
       frames.add(new StateFrame(index++,event,before,current,known,refreshed,input,seed.environment()));
     }
     return new Reconstruction(frames);
   }
-  private static Set<Fact> refreshed(Packet packet){
-    EnumSet<Fact> facts=EnumSet.noneOf(Fact.class);
-    if(packet instanceof Move move){if(move.position()!=null)facts.add(Fact.POSITION);if(move.yaw()!=null||move.pitch()!=null)facts.add(Fact.ROTATION);if(move.onGround()!=null)facts.add(Fact.GROUND);}
-    else if(packet instanceof ClientInput)facts.add(Fact.INPUT);
-    else if(packet instanceof Teleport)facts.addAll(EnumSet.of(Fact.POSITION,Fact.ROTATION,Fact.VELOCITY,Fact.GROUND,Fact.TELEPORT));
-    else if(packet instanceof TeleportConfirm)facts.add(Fact.TELEPORT);
-    else if(packet instanceof Velocity)facts.add(Fact.VELOCITY);
-    else if(packet instanceof Effect)facts.add(Fact.EFFECTS);
-    else if(packet instanceof Gamemode)facts.add(Fact.GAMEMODE);
-    return facts;
-  }
+  private static Set<Fact> refreshed(Packet packet){EnumSet<Fact> facts=EnumSet.noneOf(Fact.class);if(packet instanceof Move move){if(move.position()!=null)facts.add(Fact.POSITION);if(move.yaw()!=null||move.pitch()!=null)facts.add(Fact.ROTATION);if(move.onGround()!=null)facts.add(Fact.GROUND);}else if(packet instanceof ClientInput)facts.add(Fact.INPUT);else if(packet instanceof Teleport)facts.addAll(EnumSet.of(Fact.POSITION,Fact.ROTATION,Fact.VELOCITY,Fact.GROUND,Fact.TELEPORT));else if(packet instanceof TeleportConfirm)facts.add(Fact.TELEPORT);else if(packet instanceof Velocity)facts.add(Fact.VELOCITY);else if(packet instanceof Effect)facts.add(Fact.EFFECTS);else if(packet instanceof Gamemode)facts.add(Fact.GAMEMODE);return facts;}
   private static Player copy(Player state,boolean uncertain){return new Player(state.position(),state.velocity(),state.yaw(),state.pitch(),state.onGround(),state.gamemode(),state.effects(),state.awaitingTeleport(),uncertain);}
 }

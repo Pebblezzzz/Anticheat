@@ -1,5 +1,5 @@
 # Phases 1–8 requirements audit
-Audit date: 2026-09-17. Phase 5 implementation is complete except for the external real-client corpus; this pass completes the Phase 6 implementation and regression layer.
+Audit date: 2026-09-17. Phase 5 implementation is complete except for the external real-client corpus; Phase 6 is code-complete and internally tested; Phase 7 now has its deterministic timing implementation and regression layer, with empirical validation still external.
 
 ## Summary
 | Phase | Status | Main limitation |
@@ -8,46 +8,25 @@ Audit date: 2026-09-17. Phase 5 implementation is complete except for the extern
 | 2 | PARTIAL | Attribute/pose provenance and correction metadata remain outside the immutable Player record |
 | 3 | PARTIAL | Downstream world/timing/validation result capture is not one complete replay artifact |
 | 4 | PARTIAL | Exact client-payload decoding and exhaustive 1.21.11 shapes remain incomplete |
-| 5 | PARTIAL / BLOCKED BY EXTERNAL DATA | Empirical capture workflow is implemented; no actual 1.21.11 vanilla corpus has been captured in this environment |
-| 6 | IMPLEMENTED / INTERNALLY TESTED / BLOCKED BY EXTERNAL DATA | Code-level finite reachability, uncertainty handling, timing search, provenance, rich-world integration, live integration, replay artifact, and regression coverage are implemented; only real-client empirical validation remains |
-| 7 | PARTIAL | Not advanced in this pass |
-| 8 | PARTIAL | Not advanced in this pass |
+| 5 | PARTIAL / BLOCKED BY EXTERNAL DATA | Empirical capture workflow exists, but no real 1.21.11 vanilla corpus is present in this environment |
+| 6 | IMPLEMENTED / INTERNALLY TESTED / BLOCKED BY EXTERNAL DATA | Deterministic rich reachable-state search is implemented; real-client numeric validation remains external |
+| 7 | IMPLEMENTED / INTERNALLY TESTED / BLOCKED BY EXTERNAL DATA | Client/server clock reconstruction, latency/jitter bounds, synchronization state/recovery, replay, Phase 6 timing integration, and synthetic timing regressions are implemented; real-client timing validation remains external |
+| 8 | PARTIAL | Policy/enforcement remains a later milestone and was not expanded by this Phase 7 work |
 
-## Phase 6 requirement-by-requirement audit
+## Phase 7 closure state
 
-| Requirement | Classification | Evidence | Remaining external dependency |
-|---|---|---|---|
-| Finite one-tick reachability | IMPLEMENTED / INTERNALLY TESTED | `Phase6Reachability.search` | Independent 1.21.11 trace comparison |
-| Complete 72-state declared input envelope | IMPLEMENTED / INTERNALLY TESTED | `Validation.allInputs`, `InputConstraint.enumerate` | Empirical input confirmation |
-| Sprint/sneak-aware reachability | IMPLEMENTED / INTERNALLY TESTED | `InputConstraint`, full `Context` | Empirical client confirmation |
-| Partial / unknown input branching | IMPLEMENTED / INTERNALLY TESTED | optional input dimensions + exhaustive enumeration | Empirical payload completeness |
-| Multi-tick finite search | IMPLEMENTED / INTERNALLY TESTED | `search` horizon and exact state propagation | Larger real traces |
-| Full future-affecting candidate context | IMPLEMENTED / INTERNALLY TESTED | `Phase6Reachability.Context` | Empirical field completeness |
-| First-class state uncertainty | IMPLEMENTED / INTERNALLY TESTED | `UncertainDimension` | Real capture field provenance |
-| Rich world/collision integration | IMPLEMENTED / INTERNALLY TESTED | `WorldBranch`, `WorldSnapshot`, `Vanilla12111RichPhysics` | Real client/world trace alignment |
-| Non-exhaustive world handling | IMPLEMENTED / INTERNALLY TESTED | `WorldBranch.exhaustive` => `UNCERTAIN` | Production world-envelope tuning |
-| Candidate merge soundness | IMPLEMENTED / INTERNALLY TESTED | exact full-context map keys | Workload tuning |
-| Candidate budget safety | IMPLEMENTED / INTERNALLY TESTED | overflow => `UNCERTAIN`, empty candidates | Production budget tuning |
-| No sampled-subset impossible claims | IMPLEMENTED / INTERNALLY TESTED | explicit budget regression | None beyond empirical load measurement |
-| Timing-window enumeration | IMPLEMENTED / INTERNALLY TESTED | `searchWithinTimingWindow` | Real RTT/jitter derivation |
-| Wide timing-window safety | IMPLEMENTED / INTERNALLY TESTED | >128 offsets => `UNCERTAIN`, zero sampling | Production envelope tuning |
-| Corrections / knockback | IMPLEMENTED / INTERNALLY TESTED | external transition types | Empirical packet/state ordering |
-| Teleport confirmation safety | IMPLEMENTED / INTERNALLY TESTED | correction + confirmation branch | Real packet sequence |
-| Explainable provenance | IMPLEMENTED / INTERNALLY TESTED | `Provenance`, `Evidence.witnesses` | None for code completeness |
-| Live engine integration | IMPLEMENTED / INTERNALLY TESTED | `LiveValidation.analyze` delegates to rich engine | Complete real client traces |
-| Strong IMPOSSIBLE semantics | IMPLEMENTED / INTERNALLY TESTED | only exhaustive search can return it | Empirical numeric parity |
-| Replay artifact | IMPLEMENTED / INTERNALLY TESTED | `Phase6Replay` / `phase6-replay-v1` | None for artifact format |
-| Candidate-explosion performance coverage | IMPLEMENTED / INTERNALLY TESTED | `Phase6PerformanceBenchmark` + regression test | Production benchmark corpus |
-| Direct ambiguity/impossible regression matrix | IMPLEMENTED / INTERNALLY TESTED | `Phase6SoundReachabilityTest` | Real client scenario matrix |
+`Phase7Timing` is now the authoritative client/server timing layer after canonical Phase 1/3 chronology. It models server capture time, client packet generation bounds, client processing bounds, explicit client movement ticks when supplied, relative client-tick reconstruction, asymmetric latency, jitter bounds, input-to-simulation delay, simulation-to-packet delay, packet gaps, server-tick gaps, corrections, teleport acknowledgements, velocity timing, world-update timing, synchronization windows, synchronization states, and deterministic recovery.
+
+`Phase7Replay` captures the canonical timeline plus the immutable Phase 7 configuration so the same recording reconstructs identical timing and synchronization results. `Phase7PerformanceBenchmark` provides a deterministic synthetic 10,000-event timing workload.
+
+The authoritative Phase 6 engine remains `Phase6Reachability`; Phase 7 does not duplicate it. `LiveValidation.analyze(...)` now reconstructs Phase 7 timing first, then passes the resulting client simulation-tick envelope into `Phase6Reachability.searchWithinTimingWindow(...)`. Velocity/correction acknowledgement transitions are mapped across all still-possible client ticks instead of being tied to server-arrival tick.
+
+Duplicate capture packets no longer advance player state twice. Duplicate, reordered, and missing capture records remain timeline evidence and propagate uncertainty.
 
 ## Empirical evidence rule
 
-`IMPLEMENTED` and `INTERNALLY TESTED` are not equivalent to `VANILLA VALIDATED`. A behavior becomes `VANILLA VALIDATED` only after a real Minecraft Java Edition 1.21.11 client trace is imported and compared. Simulator-generated traces, documentation, or inferred mappings are not substitutes for that evidence.
+`IMPLEMENTED` and `INTERNALLY TESTED` are not equivalent to `VANILLA VALIDATED`. A behavior becomes empirically validated only after a real Minecraft Java Edition 1.21.11 client trace is imported and compared. Synthetic timelines, inferred timing, documentation, or simulator-generated traces are not substitutes for that evidence.
 
-## Current external dependency
+## External limitation
 
-The development environment used for this implementation cannot launch a licensed Minecraft client or provide the required game-session capture. The observation-only 1.21.11 harness still builds successfully, but running it and importing representative real traces remains external.
-
-## Phase 6 closure state
-
-The implementation milestone is complete and the code paths are internally tested. The remaining gate is empirical 1.21.11 validation: execute the observation-only capture harness against the real client, preserve traces, compare first divergence, and add any numeric regressions found there. Phase 7–8 remain separate milestones.
+The development environment cannot launch a licensed Minecraft client or conduct a real network/session capture. The observation-only 1.21.11 harness still builds in CI, but representative real timing traces, packet-generation timing, real acknowledgement delays, real-world jitter distributions, and client tick alignment remain external validation work.

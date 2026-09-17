@@ -1,40 +1,46 @@
 # Validation report
 
-Phases 1–8 have deterministic implementations in `src/main/java/dev/phantom/ac`.
-**Phase 0's architecture contract is complete** and documented in
-[`ARCHITECTURE.md`](ARCHITECTURE.md). This document records verified behavior and
-explicit limitations; it does not claim vanilla parity where no independent trace exists.
+Phase 0 architecture and Phases 1–7 have deterministic code paths in `src/main/java/dev/phantom/ac`. Phase 8 policy/enforcement remains a separate milestone.
 
-* 0: immutable component contracts and deterministic data flow;
-* 1–2: normalized packet/timeline events and explicit uncertain state reconstruction;
-* 3: serializable timeline and deterministic replay;
-* 4: immutable block snapshots and independently exercised AABB collision;
-* 5: `Vanilla12111Physics`, with first-divergence trace comparison;
-* 6–8: finite input reachability, timing-window uncertainty, and explainable possible/uncertain/impossible evidence.
+The implementation records explicit limitations and does not claim vanilla parity where independent real-client traces are absent.
 
-The repository contains unit and integration coverage across the core. A clean Maven
-execution must be run in an environment with JDK 21 and Maven available; this audit
-must not claim a fresh pass when those tools are unavailable. It covers architecture boundary contracts and platform-leak guards,
- immutable value boundaries, replay round trips/determinism/invalid input,
- packet ordering/deduplication, timeline boundaries, state transitions, the Phase 4
- voxel/AABB geometry catalogue, block-state-dependent shapes, immutable chunk and
- snapshot coverage, unloaded-versus-air handling, deterministic collision/path/
- floor/ceiling queries, fluids/environment facts, entity-collision completeness,
- world-history-to-snapshot integration, and the existing diagnostic layers.
+- 0: immutable component contracts and deterministic data flow;
+- 1–2: normalized packet/timeline events and explicit uncertain state reconstruction;
+- 3: serializable timeline and deterministic replay;
+- 4: immutable block snapshots and independently exercised AABB collision;
+- 5: `Vanilla12111Physics` plus trace-comparison tooling;
+- 6: finite rich-context input reachability with explicit uncertainty and provenance;
+- 7: client/server timing reconstruction, latency/jitter bounds, synchronization state/recovery, deterministic timing replay, and Phase 6 timing integration;
+- 8: not advanced by this work.
 
-The simulator has **no independent vanilla-client traces in this repository**. Consequently: collision primitives and deterministic/replay properties are internally proven by tests; exact 1.21.11 movement fidelity is unverified. The trace comparator reports the first divergent tick once an independent trace is supplied. No automatic punishment/setback functionality exists.
+The repository contains unit and integration coverage across these layers. Current CI runs the Java 21 Maven suite and the observation-only 1.21.11 capture harness. A local fresh Maven run is only considered valid when Maven/JDK are available in the execution environment.
 
-Architecture review: collision has no dependency on physics, replay has no dependency on live time, and uncertain packets/timing/environments cannot become an `IMPOSSIBLE` result. Phase 4 world facts are provided through one `WorldView` seam; callers can distinguish KNOWN, UNLOADED and UNSUPPORTED coverage. Collision boxes are internally proven by the new regression suites, but exact 1.21.11 parity for every unlisted block still requires independent vanilla data/traces.
+The simulator has no independent real vanilla-client corpus in this repository. Consequently, deterministic code behavior, replay fidelity, and synthetic timing scenarios are internally testable, while exact 1.21.11 movement parity and empirical client/network timing remain unverified.
 
-Known limitations: the Phase 4 entity interface is complete, but live entity
- tracking is intentionally not implemented; the default provider reports an
- incomplete entity set. The 1.21.11 block catalogue is broad but not exhaustive:
- blocks whose state or shape is not verified are explicitly UNSUPPORTED rather
- than guessed. Fluid height is UNKNOWN when required neighbours are unavailable.
- Pose/sneaking, effects, speed modifiers, and actual vanilla movement response
- remain Phase 5 concerns and are deliberately not implemented here. Paper chunk
- capture uses the platform boundary and must still be validated against live
- PacketEvents/Paper capture traces.
+## Phase 7 implementation status
 
-GrimAC was reviewed as a serious technical reference. The comparison is recorded in
-[`GRIM-COMPARISON.md`](GRIM-COMPARISON.md). No Grim GPL source code is present.
+`Phase7Timing` is the authoritative client/server timing layer after canonical Phase 1/3 chronology. It explicitly represents:
+
+- server capture time and deterministic server-tick projection;
+- client packet-generation intervals;
+- client processing intervals for clientbound packets;
+- optional explicit client movement ticks;
+- bounded relative client-tick reconstruction when no explicit tick is present;
+- asymmetric client→server and server→client latency bounds;
+- input→simulation and simulation→packet timing bounds;
+- packet bursts, observation gaps, server-tick gaps, duplicates, reordering, and sequence gaps;
+- teleport/correction synchronization boundaries and delayed acknowledgements;
+- velocity timing windows;
+- client-visible world-update timing windows;
+- explicit synchronization states and recovery requirements;
+- deterministic Phase 7 replay and synthetic performance measurement.
+
+`LiveValidation.analyze(...)` reconstructs Phase 7 timing before invoking the existing authoritative Phase 6 reachability engine. Phase 7 does not duplicate candidate simulation.
+
+Duplicate capture records are preserved as evidence but are no longer allowed to advance semantic state twice during replay/history reconstruction.
+
+## External validation rule
+
+`IMPLEMENTED` and `INTERNALLY TESTED` do not mean `VANILLA VALIDATED`. Real Minecraft Java 1.21.11 client traces are required to validate numeric timing and movement behavior empirically. This environment cannot launch that client or produce those sessions.
+
+No automatic punishment/setback logic has been added as part of the Phase 7 work.

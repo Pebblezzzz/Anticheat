@@ -1,73 +1,25 @@
 # Phase 6 — Reachability and timing uncertainty
 
-Audit date: 2026-09-17.
+Phase 6 is the authoritative bounded reachable-state engine. It consumes the timing envelope supplied by Phase 7 and never implements a second synchronization model.
 
-Phase 6 code is implemented and internally regression-tested. The only remaining Phase 6 closure dependency is independent empirical validation against real Minecraft Java 1.21.11 client traces, which this development environment cannot capture or launch.
+## Timing handoff
 
-## Reachable-state engine
+`Phase7Timing.Reconstruction` derives possible client simulation ticks for each observed movement event. `Phase7Timing.toPhase6Window(...)` exposes the bounded interval in the existing `Validation.SyncWindow` compatibility form, while live validation calls `Phase6Reachability.searchWithinTimingWindow(...)` directly so the rich Phase 6 engine remains authoritative.
 
-`Phase6Reachability` is the authoritative Phase 6 search layer. It models the complete Phase 5 simulation context rather than only `State.Player` position/velocity:
+If Phase 7 reports ambiguity or inconsistency, Phase 6 is invoked with `timingUncertain=true`, preserving `UNCERTAIN` rather than promoting a timing problem to `IMPOSSIBLE`.
 
-- simulation tick
-- player position, velocity, rotation, ground, gamemode, effects, and teleport state
-- simulation environment and movement environment
-- movement effects and attributes
-- pose and sleeping state
-- explicit uncertainty dimensions
+## External transitions
 
-Candidates are merged only on exact full-context equality. Provenance records the parent candidate, simulation tick, input, world branch, external transition, diagnostic causes, and merged-path lineage.
+Velocity, teleport correction, and teleport confirmation events are mapped by LiveValidation across every still-possible client simulation tick. Their packet arrival server tick is therefore not treated as an exact client simulation tick.
 
-## Input uncertainty
+## World timing
 
-`InputConstraint` supports exact or partially observed input. Missing dimensions are exhaustively expanded through the deterministic 72-combination envelope:
+Historical client-visible world snapshots remain owned by `World.VisibilityHistory`. When a relevant world update has ambiguous Phase 7 timing, the live bridge marks the corresponding Phase 6 world hypothesis non-exhaustive. Phase 6 then returns `UNCERTAIN` instead of using the latest server world as an assumed historical client world.
 
-- forward: -1, 0, 1
-- strafe: -1, 0, 1
-- jump: false/true
-- sprint: false/true
-- sneak: false/true
+## Existing guarantees
 
-Opposing directional flags are normalized to zero. There is no sampled-input fallback.
-
-## World and collision uncertainty
-
-`WorldBranch` accepts rich immutable `WorldSnapshot` hypotheses and explicitly declares whether the branch set is exhaustive. The engine refuses to treat unknown or unsupported collision coverage as air. Rich Phase 5 collision is used through `Vanilla12111RichPhysics`.
-
-A non-exhaustive world envelope, unknown swept collision coverage, or an uncertain physics transition produces `UNCERTAIN` and never produces an `IMPOSSIBLE` result.
-
-## External movement transitions
-
-The engine explicitly branches authoritative external movement events:
-
-- `VelocityImpulse` for knockback / velocity packets
-- `TeleportCorrection` for server corrections
-- `TeleportConfirmation` for correction acknowledgement
-- `None` when no external transition occurs
-
-Callers can provide multiple alternatives when an event itself is uncertain.
-
-## Timing
-
-`searchWithinTimingWindow(...)` exhaustively evaluates every allowed first client tick up to `MAX_TIMING_OFFSETS` (128). Wider windows are rejected as `UNCERTAIN` without sampling. Even after every offset is evaluated, an explicitly uncertain timing envelope remains `UNCERTAIN`.
-
-## Verdict semantics
-
-`compare(...)` returns:
-
-- `POSSIBLE` when an exact candidate matches every declared observed field
-- `UNCERTAIN` whenever the search envelope is incomplete
-- `IMPOSSIBLE` only after exhaustive finite search has completed and no candidate matches
-
-The engine does not use an arbitrary positional tolerance as a substitute for state uncertainty.
-
-## Live integration
-
-`LiveValidation.analyze(...)` now uses the rich Phase 6 engine, rich `World.VisibilityHistory`, advanced sprint/sneak input observations, and captured velocity/teleport/confirmation packets. When the live trace lacks enough world or state information to construct an exhaustive envelope, the result is `UNCERTAIN` and the candidate envelope is not converted into a violation.
-
-## Explainability and regression infrastructure
-
-`Phase6Replay` defines a self-contained `phase6-replay-v1` artifact with a deterministic canonical text form. `Phase6PerformanceBenchmark` exercises the full one-tick 72-input envelope. `Phase6SoundReachabilityTest` covers candidate budgets, full-context merging, partial inputs, rich coverage uncertainty, non-exhaustive world hypotheses, knockback, teleport confirmation, timing ambiguity, impossible-state semantics, provenance, replay determinism, and performance.
+Phase 6 keeps its finite 72-input envelope, full-context candidate merging, explicit world uncertainty, provenance, candidate budgets, timing-window enumeration, explainable evidence, deterministic replay artifact, and performance regression benchmark. Timing/model uncertainty is never itself a violation.
 
 ## Explicit external limitation
 
-Independent vanilla parity is not claimed here. Real Minecraft Java 1.21.11 traces remain necessary to establish `VANILLA VALIDATED` numeric behavior and first-divergence agreement. No local code change can manufacture that evidence without running the real client.
+Phase 6 numeric movement behavior and Phase 7 timing assumptions still require independent real Minecraft Java 1.21.11 traces before any empirical vanilla-parity claim can be made. This environment cannot launch the licensed client or capture those sessions.

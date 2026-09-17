@@ -1,51 +1,34 @@
 # Phases 1 and 3: packet timeline and replay contracts
 
-## Packet normalization and timeline reconstruction
+Every raw packet retains its monotonic capture sequence and monotonic capture time. The capture sequence is a local observation sequence, not a claimed Minecraft protocol sequence number. Normalization orders events by `(captureNanos, sequence)` and never silently drops duplicate, delayed, or out-of-order records.
 
-Every raw packet has a monotonically assigned source sequence and a monotonic
-receive timestamp. Normalization orders events by `(receiveNanos, sequence)`;
-it never drops duplicate, delayed, or out-of-order packets.
+For serverbound packets the capture timestamp is the server receive observation. For clientbound packets the same field records the server-side send/capture observation. Phase 7 uses packet direction to interpret that field correctly rather than treating both as the same semantic time.
 
-The following facts stay attached to the packet as evidence:
+The facts retained on every packet include:
 
-- `DUPLICATE`: the same source sequence was observed more than once.
-- `OUT_OF_ORDER`: a lower source sequence arrived after a higher one.
-- `SEQUENCE_GAP`: a higher sequence exposed missing source sequence numbers.
-- `BEFORE_CAPTURE_EPOCH`: receive time precedes the declared capture epoch; it
-  is clamped to server tick zero and remains explicit.
+- `DUPLICATE`: the same capture sequence was observed more than once;
+- `OUT_OF_ORDER`: a lower capture sequence arrived after a higher one;
+- `SEQUENCE_GAP`: capture records are missing between observed sequence values;
+- `BEFORE_CAPTURE_EPOCH`: capture time predates the declared timeline epoch.
 
-Timeline events use a supplied epoch and server tick duration. They are
-canonically ordered by `(serverTick, receiveNanos, sequence)`. Multiple
-packets in one tick are preserved. A server tick is not asserted to equal a
-client simulation tick.
+Timeline events are canonically ordered by `(serverTick, captureNanos, sequence)`. Multiple packets in one server tick are preserved. No client tick is inferred or substituted by the Phase 1 timeline layer.
 
-`Timeline.inspect` reports timeline health counts only. It does not classify
-cheating.
+## Replay
 
-## Replay format
+`Timeline.Codec` is a fixed versioned binary `PHAC` format. It records target model version, capture epoch, server tick duration, every normalized packet, capture timing, sequence, flags, and supported world-history payloads. The codec is independent of Java object serialization and rejects malformed/truncated/trailing data.
 
-`Timeline.Codec` writes a versioned, fixed binary `PHAC` format. It includes:
+`Replay.replay` retains one frame per timeline event but applies each capture sequence at most once. A duplicate record remains visible as an uncertain replay frame and cannot advance movement, velocity, correction, or acknowledgement state twice.
 
-- target model version, capture epoch, and server-tick duration;
-- every normalized packet, its timing, sequence, and flags;
-- all currently modeled packet variants, including world-history events.
+`Replay.firstDivergence` reports the first differing event or player-state field rather than comparing only final state.
 
-There is no Java object deserialization. Decode rejects bad magic/version,
-truncation, invalid lengths/flags/tags, and trailing bytes. Encoding the same
-snapshot produces identical bytes.
+## Phase 7 boundary
 
-`Replay.replay` produces a frame before/after every event. `Replay.firstDivergence`
-reports the first event or exact player-state field that differs; it never
-only compares final state.
+Phase 1/3 intentionally own only canonical capture chronology. `Phase7Timing` consumes that chronology and reconstructs bounded client packet-generation, client-processing, simulation, and input timing. It does not create a second packet ordering system.
+
+`Phase7Replay` wraps the existing timeline replay with an immutable Phase 7 timing configuration so timing reconstruction is reproducible from the same capture. The Phase 7 artifact remains independent of wall-clock state at replay time.
 
 ## Verified scope
 
-The core has tests for normal ordering, same-timestamp ordering, gaps,
-duplicates, delayed packets, pre-epoch packets, multi-packet server ticks,
-all supported packet variants, byte-stable recording, corruption rejection,
-replay determinism, and first divergence.
+Tests cover normal ordering, same-timestamp ordering, capture gaps, duplicates, delayed/out-of-order records, pre-epoch packets, multiple packets per server tick, all supported packet variants, byte-stable recording, corruption rejection, replay determinism, duplicate semantic safety, and first-divergence reporting.
 
-These phases preserve information accurately within the adapter's captured
-packet set. They do not claim complete Minecraft protocol coverage or infer
-missing client-tick data; unavailable information remains absent/uncertain for
-the synchronization and validation phases.
+Complete Minecraft protocol coverage and empirical client tick/generation timing remain outside the information available in a generic capture. Those values are bounded explicitly by Phase 7 rather than invented.
