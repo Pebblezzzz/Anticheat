@@ -32,7 +32,7 @@ public final class Phase8MovementValidation {
       if (alertDebounceTicks < 0) throw new IllegalArgumentException("alertDebounceTicks must be non-negative");
       if (!observationOnly) throw new IllegalArgumentException("Phase 8 is observation-only; punishment is not part of this phase");
     }
-    public static Config observationOnly() { return new Config(2, 20, true, true); }
+    public static Config defaults() { return new Config(2, 20, true, true); }
   }
 
   /** Immutable, replayable evidence for one movement observation. */
