@@ -16,13 +16,15 @@ Packets
   -> Phase 8 movement validation
 ```
 
-`Phase8MovementValidation` is a pure comparison/evidence layer. It does not contain movement physics and does not perform threshold-based speed/fly/reach checks.
+`Phase8MovementValidation` is a pure comparison/evidence layer. It does not contain movement physics and does not perform threshold-based speed/fly/reach checks. `Phase8LiveValidation` is the Paper live orchestration layer and uses the authoritative Phase 6 engine rather than a second physics/reachability implementation.
 
 ## Verdict semantics
 
 - **POSSIBLE** — at least one exhaustively modeled Phase 6 candidate matches every declared observed field.
-- **UNCERTAIN** — Phase 6 was non-exhaustive, Phase 7 timing is ambiguous, world knowledge is incomplete, or a search budget/horizon prevents a safe conclusion.
-- **IMPOSSIBLE** — Phase 6 was exhaustive for the declared finite envelope and every legitimate candidate was eliminated.
+- **UNCERTAIN** — the legitimate state space or timing envelope was not exhaustively representable, world coverage is incomplete/unsupported, chronology contains unrecoverable gaps, or a search budget/horizon prevents a safe conclusion.
+- **IMPOSSIBLE** — Phase 6 was exhaustive for the declared finite envelope, including every bounded Phase 7 timing offset, and every legitimate candidate was eliminated.
+
+A timing window being ambiguous does **not by itself** force `UNCERTAIN`: when Phase 7 supplies a finite bounded window and Phase 8/Phase 6 exhaustively searches every offset, the union of those candidates is the legitimate timing-aware state space. Timing uncertainty remains recorded in evidence. An inconsistent or non-exhaustively represented timing situation remains `UNCERTAIN`.
 
 Candidate-budget exhaustion is never converted to `IMPOSSIBLE`.
 
@@ -54,15 +56,21 @@ Alerts are structured as:
 [AntiCheat] player=<id> type=MOVEMENT result=IMPOSSIBLE tick=<tick> first-inconsistent-tick=<tick> reason=<reason> confidence=<value> replay=<id>
 ```
 
-Phase 8 has **no punishment semantics**. The Phase 8 API cannot be configured for punishment; operator alerts are evidence/observation output only. The existing Paper adapter's legacy enforcement setting remains disabled by default and is outside the new Phase 8 core API.
+Phase 8 has **no punishment semantics**. The Phase 8 API cannot be configured for punishment; operator alerts are evidence/observation output only. The Paper live adapter now uses this Phase 8 alert path and does not kick/ban from Phase 8.
 
 ## Replay
 
 `Phase8Replay` wraps an existing Phase 6 search result and the Phase 7 timing window. Replaying the same artifact calls the same pure Phase 8 comparison and therefore reproduces the same verdict and evidence.
 
+## World knowledge and air
+
+A loaded chunk with no stored block state at a position means **known air**. An unloaded chunk is not substituted with air. If the player's collision query crosses an unloaded or unsupported region, Phase 6 cannot prove the state space exhaustively and Phase 8 returns `UNCERTAIN` instead of treating missing data as empty space.
+
 ## False-positive protection
 
-Timing uncertainty, delayed/reordered/duplicated packets, incomplete input, incomplete world coverage, unsupported blocks, teleport/correction state, velocity transitions, and Phase 6 budget exhaustion must remain uncertainty. Phase 8 cannot turn these conditions into a violation.
+Timing uncertainty, delayed/reordered/duplicated packets, incomplete input, incomplete world coverage, unsupported blocks, teleport/correction state, velocity transitions, chronology gaps, and Phase 6 budget exhaustion must remain uncertainty whenever they prevent exhaustive representation. A finite latency/jitter window may still produce `IMPOSSIBLE` only after every declared timing offset has been exhaustively modeled and no legitimate candidate matches.
+
+Normal movement packets without an explicit client tick are not treated as a physics-state failure: their client-tick ambiguity is represented through Phase 7's bounded timing window.
 
 ## Examples
 
@@ -80,24 +88,26 @@ reason="at least one complete legitimate candidate explains every declared obser
 replay=replay:alice:120
 ```
 
-Synthetic impossible evidence:
+Synthetic impossible evidence with a timing window:
 
 ```text
 verdict=IMPOSSIBLE
 player=alice
 server-tick=121
-reachable=1
+client-ticks=119..122
+reachable=4+
 matching=0
-eliminated=1
+eliminated=all modeled candidates
 first-inconsistent-tick=121
 reason="all exhaustively modeled legitimate candidates disagree with the observed movement state"
+uncertainty-sources=["latency bounded", "jitter"]
 replay=replay:alice:121
 ```
 
 Operator alert after repeated evidence:
 
 ```text
-[AntiCheat] player=alice type=MOVEMENT result=IMPOSSIBLE tick=121 first-inconsistent-tick=121 reason=MOVEMENT_REACHABILITY confidence=1.00 replay=replay:alice:121
+[AntiCheat] player=alice type=MOVEMENT result=IMPOSSIBLE tick=121 first-inconsistent-tick=121 reason=all exhaustively modeled legitimate candidates disagree with the observed movement state confidence=1.00 replay=replay:alice:121
 ```
 
 ## Performance
@@ -106,7 +116,7 @@ Operator alert after repeated evidence:
 
 ## Validation boundary
 
-Phase 5 empirical Minecraft Java Edition 1.21.11 validation is still ongoing. Phase 8 therefore starts as an observation/research system. A Phase 8 `IMPOSSIBLE` result means that the observation is outside the **currently modeled and exhaustively searched** legitimate state space; it is not an independent claim that a player cheated.
+Phase 5 empirical Minecraft Java Edition 1.21.11 validation is still ongoing. Phase 8 therefore remains an observation/research system. A Phase 8 `IMPOSSIBLE` result means that the observation is outside the **currently modeled and exhaustively searched** legitimate state space; it is not an independent claim that a player cheated.
 
 ## What Phase 8 does not enforce
 
