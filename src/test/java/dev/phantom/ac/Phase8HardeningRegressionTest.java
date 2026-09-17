@@ -23,6 +23,10 @@ class Phase8HardeningRegressionTest {
         250_000_000L, 3, 128);
   }
 
+  private static Timeline.Snapshot capture(List<RawPacket> packets) {
+    return Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L);
+  }
+
   private static WorldSnapshot floorWorld() {
     var stone = dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone", Map.of());
     var builder = WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0, 0);
