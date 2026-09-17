@@ -27,13 +27,13 @@ $capturedAt = $null
 foreach ($part in $parts) {
     $path = Join-Path $CaptureRoot "phase5-$part.tsv"
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        throw "Missing existing Phase 5 capture: $path"
+        throw "Missing existing Phase 5 capture: ${path}"
     }
 
     $lines = Get-Content -LiteralPath $path
-    if ($lines.Count -lt 5) { throw "Trace is too short: $path" }
-    if ($lines[0] -ne $magic) { throw "Unexpected trace magic in $path" }
-    if ($lines[3] -ne $header) { throw "Unexpected trace header in $path" }
+    if ($lines.Count -lt 5) { throw "Trace is too short: ${path}" }
+    if ($lines[0] -ne $magic) { throw "Unexpected trace magic in ${path}" }
+    if ($lines[3] -ne $header) { throw "Unexpected trace header in ${path}" }
 
     $partSource = Get-Metadata $lines 'source_id'
     $partCapturedAt = Get-Metadata $lines 'captured_at_utc'
@@ -41,11 +41,11 @@ foreach ($part in $parts) {
         $sourceId = $partSource
         $capturedAt = $partCapturedAt
     } elseif ($partSource -ne $sourceId) {
-        throw "source_id mismatch: $path has '$partSource', expected '$sourceId'"
+        throw "source_id mismatch: ${path} has '$partSource', expected '$sourceId'"
     }
 
     $rows = $lines | Select-Object -Skip 4 | Where-Object { $_ -and -not $_.StartsWith('#') }
-    if ($rows.Count -eq 0) { throw "No data rows found in $path" }
+    if ($rows.Count -eq 0) { throw "No data rows found in ${path}" }
 
     [long]$previousRawClientTick = -1
     [long]$previousRawReceive = -1
@@ -54,19 +54,19 @@ foreach ($part in $parts) {
 
     foreach ($line in $rows) {
         $c = $line -split "`t", -1
-        if ($c.Count -ne 47) { throw "Invalid row in $path: expected 47 columns, got $($c.Count)" }
+        if ($c.Count -ne 47) { throw "Invalid row in ${path}: expected 47 columns, got $($c.Count)" }
 
         [long]$rawClientTick = 0
         [long]$rawReceive = 0
-        if (-not [long]::TryParse($c[1], [ref]$rawClientTick)) { throw "Invalid client_tick in $path: $($c[1])" }
-        if (-not [long]::TryParse($c[2], [ref]$rawReceive)) { throw "Invalid receive_nanos in $path: $($c[2])" }
+        if (-not [long]::TryParse($c[1], [ref]$rawClientTick)) { throw "Invalid client_tick in ${path}: $($c[1])" }
+        if (-not [long]::TryParse($c[2], [ref]$rawReceive)) { throw "Invalid receive_nanos in ${path}: $($c[2])" }
 
         if ($partFirstClientTick -lt 0) {
             $partFirstClientTick = $rawClientTick
             $partFirstReceive = $rawReceive
         }
-        if ($previousRawClientTick -gt $rawClientTick) { throw "client_tick regressed inside $path" }
-        if ($previousRawReceive -gt $rawReceive) { throw "receive_nanos regressed inside $path" }
+        if ($previousRawClientTick -gt $rawClientTick) { throw "client_tick regressed inside ${path}" }
+        if ($previousRawReceive -gt $rawReceive) { throw "receive_nanos regressed inside ${path}" }
 
         [long]$clientDelta = $rawClientTick - $partFirstClientTick
         [long]$receiveDelta = $rawReceive - $partFirstReceive
@@ -77,7 +77,7 @@ foreach ($part in $parts) {
         if ($c[44] -match '^capture-post-tick:part[1-5]:(.+)$') {
             $c[44] = "capture-post-tick:all:$($Matches[1])"
         } elseif ($c[44] -notmatch '^capture-post-tick:all:') {
-            throw "Unexpected input_source in $path: $($c[44])"
+            throw "Unexpected input_source in ${path}: $($c[44])"
         }
 
         $allRows.Add(($c -join "`t"))
