@@ -106,7 +106,7 @@ class Phase8MovementValidationTest {
         new Validation.SyncWindow(30, 32, true, List.of("jitter")), List.of("timing unknown"), possible(p), "replay:31").evidence();
 
     var accumulator = Phase8MovementValidation.Accumulator.empty();
-    var config = Phase8MovementValidation.Config.defaults();
+    var config = new Phase8MovementValidation.Config(2, 0, true, true);
     var first = accumulator.accept(impossible, config);
     assertTrue(first.alert().isEmpty());
     var second = first.state().accept(impossible, config);
