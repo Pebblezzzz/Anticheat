@@ -300,7 +300,7 @@ public final class ControlledPhase5ScenarioDriver {
             fillZ(m, s, -24, 63, minZ, 24, 63, maxZ, "minecraft:stone", 600);
             fillZ(m, s, -24, 64, minZ, 24, 67, maxZ, "air", 160);
             fillZ(m, s, -24, 64, minZ, -23, 72, maxZ, "minecraft:stone", 160);
-            fillZ(m, s, -24, 64, minZ, 23, 72, maxZ, "minecraft:stone", 160);
+            fillZ(m, s, 23, 64, minZ, 24, 72, maxZ, "minecraft:stone", 160);
 
             if (includes(6, 9)) {
                 int water = laneZ("water");
