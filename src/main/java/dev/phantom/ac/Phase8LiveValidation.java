@@ -84,7 +84,21 @@ public final class Phase8LiveValidation {
           "timing-offsets=" + sync.earliestClientTick() + ".." + sync.latestClientTick());
       String worldReference = "timeline-world:tick=" + event.serverTick() + ":chunks=" + world.loadedChunks().size();
 
-      Player simulationPrior = simulationSafe(prior);
+      // A duplicate, reorder, capture gap, or pre-capture record cannot safely
+      // be made into an IMPOSSIBLE movement claim. Phase 7 remains authoritative
+      // for the chronology uncertainty instead.
+      boolean chronologyUncertain = normalized.flags().stream().anyMatch(flag ->
+          flag == Packets.PacketFlag.DUPLICATE || flag == Packets.PacketFlag.OUT_OF_ORDER
+              || flag == Packets.PacketFlag.SEQUENCE_GAP || flag == Packets.PacketFlag.BEFORE_CAPTURE_EPOCH);
+      if (chronologyUncertain) {
+        SearchResult uncertain = new SearchResult(Phase6Reachability.Verdict.UNCERTAIN, Set.of(), 0,
+            candidates.size(), 0, 0, 1, 0,
+            List.of("movement record chronology is not exhaustive: " + normalized.flags()));
+        results.add(Phase8MovementValidation.validate(playerId, event.serverTick(), prior, observed,
+            world, worldReference, sync, inputAssumptions, uncertain, replayReference));
+        continue;
+      }
+
       if (candidates.isEmpty()) {
         SearchResult anchor = new SearchResult(Phase6Reachability.Verdict.UNCERTAIN, Set.of(), 0, 0, 0, 0, 0, 0,
             List.of("first movement observation establishes the Phase 6 replay anchor"));
@@ -117,8 +131,8 @@ public final class Phase8LiveValidation {
       int provenanceMerges = 0;
       LinkedHashSet<String> searchReasons = new LinkedHashSet<>(eventTiming.reasons());
 
-      // The World.VisibilityHistory snapshot is already the client-visible world model.
-      // Coverage failures inside Phase 6 still force UNCERTAIN; we do not replace them with air.
+      // The World.VisibilityHistory snapshot is the canonical client-visible
+      // world. Unloaded or unsupported cells are still rejected by Phase 6.
       boolean worldExhaustive = true;
 
       for (Candidate parent : candidates) {
@@ -166,8 +180,10 @@ public final class Phase8LiveValidation {
               peakCandidates, merged, nonExhaustiveWorldBranches, uncertainTransitions, provenanceMerges,
               searchReasons.isEmpty() ? List.of("all Phase 7 timing offsets were exhaustively modeled") : List.copyOf(searchReasons));
 
+      boolean timingExhaustive = !chronologyUncertain
+          && timing.consistency() == Phase7Timing.Consistency.CONSISTENT;
       results.add(Phase8MovementValidation.validate(playerId, event.serverTick(), prior, observed,
-          world, worldReference, sync, inputAssumptions, reachable, replayReference, true));
+          world, worldReference, sync, inputAssumptions, reachable, replayReference, timingExhaustive));
 
       if (!nextAll.isEmpty()) candidates = Set.copyOf(nextAll);
     }
@@ -183,9 +199,7 @@ public final class Phase8LiveValidation {
     reasons.addAll(player.uncertaintyReasons());
     reasons.remove(State.UncertaintyReason.UNKNOWN_CLIENT_TICK);
     boolean uncertain = !reasons.isEmpty();
-    if (!uncertain && !player.uncertain()) {
-      return player;
-    }
+    if (!uncertain && !player.uncertain()) return player;
     return new Player(player.position(), player.velocity(), player.yaw(), player.pitch(), player.onGround(),
         player.gamemode(), player.effects(), player.awaitingTeleport(), uncertain, player.input(),
         player.attributes(), player.pose(), player.environment(), player.clientTickRange(), player.provenance(), reasons);
