@@ -4,45 +4,30 @@ import dev.phantom.ac.geometry.BlockBox;
 import dev.phantom.ac.world.Coverage;
 import dev.phantom.ac.world.WorldSnapshot;
 import org.junit.jupiter.api.Test;
-
 import java.util.Map;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 class RichWorldPhysicsTest {
-    private static dev.phantom.ac.world.BlockState stone() {
-        return dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone", Map.of());
-    }
-
+    private static dev.phantom.ac.world.BlockState stone() { return dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone", Map.of()); }
     @Test
     void exactSnapshotCollisionClipsVerticalMotionWithoutInventingUnloadedAir() {
-        WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
-                .loadChunk(-1, 0).loadChunk(0, 0)
-                .setBlock(0, 64, 0, stone()).build();
-
-        Maths.Aabb player = new Maths.Aabb(-0.3, 65.0, -0.3, 0.3, 66.8, 0.3);
-        RichWorldCollision.Result result = RichWorldCollision.resolve(world, player, new Maths.Vec3(0, -0.2, 0), 0);
-
-        assertFalse(result.uncertain());
-        assertTrue(result.collidedY());
-        assertEquals(0.0, result.displacement().y(), 1.0e-12);
-        assertFalse(world.hasUnknownOrUnsupported(new BlockBox(-0.3, 64.8, -0.3, 0.3, 66.8, 0.3)));
+        WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0, 0).setBlock(0,64,0,stone()).build();
+        Maths.Aabb player = new Maths.Aabb(-0.3,65.0,0.2,0.3,66.8,0.8);
+        RichWorldCollision.Result result = RichWorldCollision.resolve(world, player, new Maths.Vec3(0,-0.2,0), 0);
+        assertFalse(result.uncertain()); assertTrue(result.collidedY()); assertEquals(0.0,result.displacement().y(),1.0e-12);
+        assertFalse(world.hasUnknownOrUnsupported(new BlockBox(-0.3,64.8,0.2,0.3,66.8,0.8)));
     }
-
     @Test
     void exactSnapshotCollisionRefusesAnUnloadedSweep() {
-        WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
-                .loadChunk(0, 0).setBlock(0, 64, 0, stone()).build();
-        Maths.Aabb player = new Maths.Aabb(15.7, 65, 0.2, 16.3, 66.8, 0.8);
-        RichWorldCollision.Result result = RichWorldCollision.resolve(world, player, new Maths.Vec3(1.0, 0, 0), 0);
-        assertTrue(result.uncertain());
-        assertEquals(Coverage.UNLOADED, world.coverageAt(16, 64, 0));
+        WorldSnapshot world=WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0,0).setBlock(0,64,0,stone()).build();
+        Maths.Aabb player=new Maths.Aabb(15.7,65,0.2,16.3,66.8,0.8);
+        RichWorldCollision.Result result=RichWorldCollision.resolve(world,player,new Maths.Vec3(1.0,0,0),0);
+        assertTrue(result.uncertain()); assertEquals(Coverage.UNLOADED,world.coverageAt(16,64,0));
     }
-
     @Test
     void sleepingIsARealPoseTransitionRatherThanStanding() {
-        var env = Phase5Mechanics.MovementEnvironment.dry(true, false, false);
-        assertEquals(Phase5Mechanics.Pose.SLEEPING, Phase5Mechanics.nextPose(Phase5Mechanics.Pose.STANDING, env, true));
-        assertEquals(Phase5Mechanics.Pose.STANDING, Phase5Mechanics.nextPose(Phase5Mechanics.Pose.SLEEPING, env, false));
+        var env=Phase5Mechanics.MovementEnvironment.dry(true,false,false);
+        assertEquals(Phase5Mechanics.Pose.SLEEPING,Phase5Mechanics.nextPose(Phase5Mechanics.Pose.STANDING,env,true));
+        assertEquals(Phase5Mechanics.Pose.STANDING,Phase5Mechanics.nextPose(Phase5Mechanics.Pose.SLEEPING,env,false));
     }
 }
