@@ -86,8 +86,7 @@ foreach ($part in $parts) {
     foreach ($line in $rows) {
         $c = $line.Split([char]9)
         if ($c.Count -ne 47) {
-            $preview = $line.Substring(0, [Math]::Min(120, $line.Length)).Replace("`t", '<TAB>')
-            throw "Invalid row in ${path}: expected 47 columns, got $($c.Count). Row starts: $preview"
+            throw "Invalid row in ${path}: expected 47 columns, got $($c.Count)"
         }
 
         [long]$rawClientTick = 0
@@ -111,9 +110,6 @@ foreach ($part in $parts) {
             $phaseAccepted = ($phase -eq 'setup')
         }
 
-        # The harness can switch the phase label before the reset has visibly
-        # settled. Drop only leading rows that are still in the previous lane;
-        # preserve every row once the new phase reaches its expected lane.
         if (-not $phaseAccepted) {
             $expectedZ = Get-PartExpectedLaneZ $part $phase
             $z = [double]$c[5]
@@ -132,14 +128,10 @@ foreach ($part in $parts) {
         $emittedClientTick = $globalClientTick + $clientDelta
         $emittedReceiveNanos = $globalReceiveNanos + $receiveDelta
 
-        # Preserve monotonic timing across part files. Raw client ticks and
-        # receive timestamps are each independent per capture, and discarded
-        # boundary rows mean their absolute spans cannot be reconstructed by
-        # row count alone. Continue from the last emitted values instead.
-        if ($emittedClientTick <= $lastEmittedClientTick) {
+        if ($emittedClientTick -le $lastEmittedClientTick) {
             $emittedClientTick = $lastEmittedClientTick + 1L
         }
-        if ($emittedReceiveNanos < $lastEmittedReceiveNanos) {
+        if ($emittedReceiveNanos -lt $lastEmittedReceiveNanos) {
             $emittedReceiveNanos = $lastEmittedReceiveNanos
         }
 
