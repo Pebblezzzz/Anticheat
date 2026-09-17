@@ -34,14 +34,14 @@ class Phase6ReachabilityTest {
   }
 
   @Test
-  void observedSprintAndSneakAreReachableInputs() {
+  void advancedSprintAndSneakInputsAreReachable() {
     ReachableStates reachable = new ReachableStates(new Vanilla12111Physics());
     Player start = Player.initial(Vec3.ZERO);
 
-    Reachability sprint = reachable.next(start, ground(), false,
-        new ClientInput(true, false, false, false, false, false, true));
-    Reachability sneak = reachable.next(start, ground(), false,
-        new ClientInput(true, false, false, false, false, true, false));
+    Reachability sprint = reachable.nextAdvanced(start, ground(), false,
+        new AdvancedInput(1, 0, false, true, false));
+    Reachability sneak = reachable.nextAdvanced(start, ground(), false,
+        new AdvancedInput(1, 0, false, false, true));
 
     assertEquals(Verdict.POSSIBLE, sprint.verdict());
     assertEquals(Verdict.POSSIBLE, sneak.verdict());
