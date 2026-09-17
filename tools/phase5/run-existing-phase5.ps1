@@ -25,10 +25,9 @@ Push-Location $repo
 try {
     Write-Host '== Phase 5: reuse existing vanilla captures =='
     & $mergeScript -CaptureRoot $CaptureRoot -Output $trace
-    if ($LASTEXITCODE -ne 0) { throw "Existing Phase 5 capture merge failed with exit code $LASTEXITCODE" }
 
     if (-not (Test-Path -LiteralPath $trace -PathType Leaf)) {
-        throw "Merged Phase 5 trace was not produced: $trace"
+        throw "Merged Phase 5 trace was not produced: ${trace}"
     }
 
     Write-Host '== Phase 5: audit + vanilla-to-simulation replay =='
