@@ -42,13 +42,9 @@ public final class Simulation {
     private static Player uncertain(Player s){return new Player(s.position(),s.velocity(),s.yaw(),s.pitch(),s.onGround(),s.gamemode(),s.effects(),s.awaitingTeleport(),true).withUncertainty(State.UncertaintyReason.UNKNOWN_ENVIRONMENT);}
 
     private static boolean legacyRequiresUncertainty(World.Snapshot world,Player state){
-      Aabb box=Aabb.playerAt(state.position(),state.pose());
-      int minX=(int)Math.floor(box.minX())-1,maxX=(int)Math.ceil(box.maxX())+1;
-      int minY=(int)Math.floor(box.minY())-1,maxY=(int)Math.ceil(box.maxY())+1;
-      int minZ=(int)Math.floor(box.minZ())-1,maxZ=(int)Math.ceil(box.maxZ())+1;
-      int minChunkX=Math.floorDiv(minX,16),maxChunkX=Math.floorDiv(maxX,16),minChunkZ=Math.floorDiv(minZ,16),maxChunkZ=Math.floorDiv(maxZ,16);
-      for(int cx=minChunkX;cx<=maxChunkX;cx++)for(int cz=minChunkZ;cz<=maxChunkZ;cz++)if(!world.visibleChunks().contains(new World.Chunk(cx,cz)))return true;
-      return world.blocks().entrySet().stream().anyMatch(e->{World.Pos p=e.getKey();World.Block b=e.getValue();return p.x()>=minX&&p.x()<=maxX&&p.y()>=minY&&p.y()<=maxY&&p.z()>=minZ&&p.z()<=maxZ&&(b==World.Block.UNKNOWN||b==World.Block.UNSUPPORTED);});
+      int x=(int)Math.floor(state.position().x()),z=(int)Math.floor(state.position().z());
+      if(!world.visibleChunks().contains(World.Chunk.containing(x,z)))return true;
+      return world.blocks().entrySet().stream().anyMatch(e->{World.Pos p=e.getKey();World.Block b=e.getValue();return p.x()==x&&p.z()==z&&(b==World.Block.UNKNOWN||b==World.Block.UNSUPPORTED);});
     }
   }
 
