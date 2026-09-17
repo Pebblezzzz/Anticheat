@@ -228,11 +228,11 @@ public final class Validation {
         candidates.addAll(result.candidates());
         if (result.verdict() == Verdict.UNCERTAIN) {
           return new TimingSearchResult(Verdict.UNCERTAIN, Set.of(), results, evaluated,
-              span - evaluated, List.of("one or more timing offsets could not be exhaustively simulated"));
+              safeOffsetCount(span) - evaluated, List.of("one or more timing offsets could not be exhaustively simulated"));
         }
         if (candidates.size() > maximumCandidates) {
           return new TimingSearchResult(Verdict.UNCERTAIN, Set.of(), results, evaluated,
-              span - evaluated, List.of("combined reachable-state budget exceeded across timing offsets"));
+              safeOffsetCount(span) - evaluated, List.of("combined reachable-state budget exceeded across timing offsets"));
         }
       }
 
