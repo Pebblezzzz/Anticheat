@@ -12,10 +12,10 @@ class RichWorldPhysicsTest {
     @Test
     void exactSnapshotCollisionClipsVerticalMotionWithoutInventingUnloadedAir() {
         WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0, 0).setBlock(0,64,0,stone()).build();
-        Maths.Aabb player = new Maths.Aabb(-0.3,65.0,0.2,0.3,66.8,0.8);
+        Maths.Aabb player = new Maths.Aabb(0.2,65.0,0.2,0.8,66.8,0.8);
         RichWorldCollision.Result result = RichWorldCollision.resolve(world, player, new Maths.Vec3(0,-0.2,0), 0);
         assertFalse(result.uncertain()); assertTrue(result.collidedY()); assertEquals(0.0,result.displacement().y(),1.0e-12);
-        assertFalse(world.hasUnknownOrUnsupported(new BlockBox(-0.3,64.8,0.2,0.3,66.8,0.8)));
+        assertFalse(world.hasUnknownOrUnsupported(new BlockBox(0.2,64.8,0.2,0.8,66.8,0.8)));
     }
     @Test
     void exactSnapshotCollisionRefusesAnUnloadedSweep() {
