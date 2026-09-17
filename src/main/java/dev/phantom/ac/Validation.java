@@ -8,6 +8,7 @@ import dev.phantom.ac.Simulation.AdvancedInput;
 import dev.phantom.ac.Simulation.Input;
 import dev.phantom.ac.Simulation.PhysicsContext;
 import dev.phantom.ac.Simulation.StepResult;
+import dev.phantom.ac.Simulation.Vanilla12111Physics;
 import dev.phantom.ac.State.Player;
 
 import static dev.phantom.ac.Maths.*;
