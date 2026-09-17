@@ -53,13 +53,33 @@ class Phase8HardeningRegressionTest {
   void liveValidationAdvancesAcrossARealClientTickGapInsteadOfRebasing() {
     var packets=List.of(
         new RawPacket(1,0,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
-        new RawPacket(2,0,new Move(new Vec3(.5,64,.5),0f,0f,true,0L)),
-        new RawPacket(3,100_000_000L,new Move(new Vec3(.5,64,.5),0f,0f,true,2L)));
+        new RawPacket(2,0,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+            Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
+        new RawPacket(3,0,new Move(new Vec3(.5,64,.5),0f,0f,true,0L)),
+        new RawPacket(4,100_000_000L,new Move(new Vec3(.5,64,.5),0f,0f,true,2L)));
     var timeline=Timeline.assign(new Normalizer().normalize(packets),0,50_000_000L);
     var report=Phase8LiveValidation.analyze("gap-test",timeline,256,exactTiming());
     assertEquals(2,report.movementObservations(),report.results().toString());
     assertEquals(Verdict.UNCERTAIN,report.results().getFirst().verdict());
     assertEquals(Verdict.POSSIBLE,report.results().get(1).verdict(),report.results().toString());
+  }
+
+
+  @Test
+  void blatantTeleportLikeMovementIsExhaustivelyImpossibleOnKnownWorld() {
+    var packets=List.of(
+        new RawPacket(1,0,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
+        new RawPacket(2,0,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+            Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
+        new RawPacket(3,0,new Move(new Vec3(.5,64,.5),0f,0f,true,0L)),
+        new RawPacket(4,50_000_000L,new Move(new Vec3(5.5,64,.5),0f,0f,true,1L))
+    );
+    var report=Phase8LiveValidation.analyze("blatant",capture(packets),256,exactTiming());
+    assertEquals(2,report.movementObservations(),report.results().toString());
+    assertEquals(Verdict.UNCERTAIN,report.results().getFirst().verdict());
+    assertEquals(Verdict.IMPOSSIBLE,report.results().get(1).verdict(),report.results().toString());
+    assertEquals(0,report.results().get(1).evidence().matchingCandidateCount());
+    assertTrue(report.results().get(1).evidence().eliminationReason().startsWith("all exhaustively modeled legitimate candidates"));
   }
 
   @Test
