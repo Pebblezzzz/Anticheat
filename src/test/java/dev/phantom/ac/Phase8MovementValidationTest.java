@@ -12,7 +12,6 @@ import dev.phantom.ac.world.WorldSnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -83,13 +82,13 @@ class Phase8MovementValidationTest {
         new Validation.SyncWindow(30, 32, true, List.of("jitter")), List.of("timing unknown"), possible(p), "replay:31").evidence();
 
     var accumulator = Phase8MovementValidation.Accumulator.empty();
-    var first = accumulator.accept(impossible, Phase8MovementValidation.Config.observationOnly());
+    var config = Phase8MovementValidation.Config.defaults();
+    var first = accumulator.accept(impossible, config);
     assertTrue(first.alert().isEmpty());
-    var second = first.state().accept(impossible, Phase8MovementValidation.Config.observationOnly());
+    var second = first.state().accept(impossible, config);
     assertTrue(second.alert().isPresent());
-    var afterUncertain = second.state().accept(uncertain, Phase8MovementValidation.Config.observationOnly());
-    assertEquals(second.state().players(), afterUncertain.state().players().entrySet().stream()
-        .collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)));
+    var afterUncertain = second.state().accept(uncertain, config);
+    assertEquals(second.state().players(), afterUncertain.state().players());
   }
 
   @Test void replayReproducesSameResultAndEvidence() {
