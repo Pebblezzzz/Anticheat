@@ -68,7 +68,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private final Map<UUID,Boolean> debugPlayers=new ConcurrentHashMap<>();
   private final Map<ClientVersion,ConcurrentHashMap<Integer,dev.phantom.ac.world.BlockState>> stateCache=new ConcurrentHashMap<>();
   private org.bukkit.scheduler.BukkitTask chunkDrainTask,stateTask,validationTask;
-  private ExecutorService decoder; private int decoderThreads,validationBudget; private boolean alertsEnabled,broadcastAlerts;
+  private ExecutorService decoder; private int decoderThreads,validationBudget; private boolean alertsEnabled,broadcastAlerts,setbacksEnabled,setbacksOnlyExhaustive;
+  private final Map<UUID,Boolean> setbackOverrides=new ConcurrentHashMap<>();
 
   private final PacketListenerAbstract listener=new PacketListenerAbstract(){
     @Override public void onPacketReceive(PacketReceiveEvent event){
