@@ -228,7 +228,20 @@ public final class ControlledPhase5ScenarioDriver {
     private void resetForPhase(MinecraftClient client, String phase) {
         if (phase.equals("speed-effect")) effect(client, "minecraft:speed");
         if (phase.equals("slowness-effect")) effect(client, "minecraft:slowness");
-        if (phase.equals("jump-boost")) effect(client, "minecraft:jump_boost");
+        if (phase.equals("jump-boost")) {
+            effect(client, "minecraft:jump_boost");
+            IntegratedServer server = client.getServer();
+            if (server != null) {
+                server.executeSync(() -> {
+                    ServerPlayerEntity sp = server.getPlayerManager().getPlayer(client.player.getUuid());
+                    if (sp != null) {
+                        sp.setOnGround(true);
+                        sp.jump();
+                        System.out.println("[Phase5] jump-boost jump triggered");
+                    }
+                });
+            }
+        }
         if (phase.equals("lava")) effect(client, "minecraft:fire_resistance");
         if (phase.equals("glide")) {
             client.player.equipStack(EquipmentSlot.CHEST, new ItemStack(Items.ELYTRA));
