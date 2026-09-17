@@ -293,7 +293,7 @@ public final class Phase8LiveValidation {
             if (matchesObserved(candidate.context().player(), observed)) matching.add(candidate);
           }
           candidates = Set.copyOf(matching);
-          continuation = matching.isEmpty() ? Continuation.UNCERTAIN_EMPTY : Continuation.ACTIVE;
+          continuation = matching.isEmpty() ? Continuation.IMPOSSIBLE : Continuation.ACTIVE;
         }
         case UNCERTAIN -> {
           candidates = aggregated.candidates();
