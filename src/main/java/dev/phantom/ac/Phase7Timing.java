@@ -93,7 +93,19 @@ public final class Phase7Timing {
       NormalizedPacket normalized=event.packet(); Packet packet=normalized.packet(); Direction direction=direction(packet); EventKind kind=kind(packet); long capture=normalized.receivedNanos(); TimingBounds bounds=timingBounds(packet,capture,config); OptionalLong explicit=packet instanceof Move m&&m.clientTick()!=null?OptionalLong.of(m.clientTick()):OptionalLong.empty(); boolean duplicate=normalized.flags().contains(PacketFlag.DUPLICATE); SynchronizationState before=sync;
       if(!anchorSet&&direction==Direction.CLIENT_TO_SERVER&&!duplicate){anchorSet=true;anchorSequence=OptionalLong.of(normalized.sequence());anchorGeneration=bounds.packetGenerationNanos;anchorTick=explicit.isPresent()?Range.exact(explicit.getAsLong()):Range.exact(0);sync=new SynchronizationState(explicit.isPresent()?SyncStatus.SYNCHRONIZED:SyncStatus.PARTIALLY_SYNCHRONIZED,anchorTick,latencyRange(bounds.latency),OptionalInt.empty(),1,1,List.of(new SynchronizationWindow(WindowKind.STARTUP,event.serverTick(),event.serverTick(),anchorTick,"first client event anchors relative client chronology",normalized.sequence())),List.of(explicit.isPresent()?"explicit client movement tick establishes the clock anchor":"first client event anchors relative chronology; absolute client clock origin is unknown"));}
       Range packetTicks; TimingSource source;
-      if(explicit.isPresent()){packetTicks=Range.exact(explicit.getAsLong());source=TimingSource.EXPLICIT_CLIENT_TICK;if(anchorSet&&normalized.sequence()!=anchorSequence.orElse(-1)&&!isWithinDerivedWindow(packetTicks,bounds.clientEventNanos,anchorGeneration,anchorTick,config)){consistency=Consistency.INCONSISTENT;consistencyReasons.add("explicit client tick "+explicit.getAsLong()+" is outside timing bounds for sequence "+normalized.sequence());}}
+      if(explicit.isPresent()){packetTicks=Range.exact(explicit.getAsLong());source=TimingSource.EXPLICIT_CLIENT_TICK;
+        // An explicit CLIENT_TICK_END-derived movement tick is stronger chronology
+        // evidence than a wall-clock estimate derived from an independently bounded
+        // network delay. Only compare the two as a hard consistency check when the
+        // network and client tick clocks are both exact; otherwise retain the explicit
+        // tick and report any network uncertainty separately.
+        if(anchorSet&&normalized.sequence()!=anchorSequence.orElse(-1)
+            && bounds.latency.isExact()
+            && config.clientTickMinNanos()==config.clientTickMaxNanos()
+            && !isWithinDerivedWindow(packetTicks,bounds.clientEventNanos,anchorGeneration,anchorTick,config)){
+          consistency=Consistency.INCONSISTENT;
+          consistencyReasons.add("explicit client tick "+explicit.getAsLong()+" is outside exact wall-clock timing bounds for sequence "+normalized.sequence());
+        }}
       else if(anchorSet&&direction!=Direction.UNKNOWN){TimeRange clockTime=direction==Direction.CLIENT_TO_SERVER?bounds.packetGenerationNanos:bounds.clientProcessingNanos;packetTicks=relativeClientTicks(clockTime,anchorGeneration,anchorTick,config);source=TimingSource.RELATIVE_CLIENT_ANCHOR;}
       else{packetTicks=Range.empty();source=TimingSource.SERVER_CAPTURE_ONLY;}
       Range inputTicks=kind==EventKind.INPUT?nonNegative(packetTicks):Range.empty(); Range simulationTicks;
