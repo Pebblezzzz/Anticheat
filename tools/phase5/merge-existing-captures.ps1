@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 
 $parts = @('part1','part2','part3','part4','part5')
 $magic = '# phantom-phase5-trace version=2 protocol=minecraft-java-1.21.11 format=tsv'
-$header = "tick`tclient_tick`treceive_nanos`tx`ty`tz`tvx`tvy`tvz`tyaw`tppitch`ton_ground`tforward`tstrafe`tjump`tsprint`tsneak`tpose`tgamemode`tfluid`tsubmerged`tclimbable`tgliding`tbase_movement_speed`tmodifiers`tspeed_amp`tslowness_amp`tjump_boost_amp`tlevitation`tslow_falling`tknockback_x`tknockback_y`tknockback_z`tvelocity_packet`tcorrection_id`tcorrection_pending`tworld_identity`tworld_tick`tcollision`tstep_attempted`tstep_succeeded`tcollision_x`tcollision_y`tcollision_z`tinput_source`tclient_version`tmissing_fields"
+$header = "tick`tclient_tick`treceive_nanos`tx`ty`tz`tvx`tvy`tvz`tyaw`tpitch`ton_ground`tforward`tstrafe`tjump`tsprint`tsneak`tpose`tgamemode`tfluid`tsubmerged`tclimbable`tgliding`tbase_movement_speed`tmodifiers`tspeed_amp`tslowness_amp`tjump_boost_amp`tlevitation`tslow_falling`tknockback_x`tknockback_y`tknockback_z`tvelocity_packet`tcorrection_id`tcorrection_pending`tworld_identity`tworld_tick`tcollision`tstep_attempted`tstep_succeeded`tcollision_x`tcollision_y`tcollision_z`tinput_source`tclient_version`tmissing_fields"
 
 function Get-Metadata([string[]]$Lines, [string]$Key) {
     $prefix = "# $Key="
