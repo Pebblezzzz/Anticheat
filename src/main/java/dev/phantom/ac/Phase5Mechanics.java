@@ -43,10 +43,10 @@ public final class Phase5Mechanics {
   public static Pose nextPose(Pose previous,MovementEnvironment env){return nextPose(previous,env,false);}
   public static Pose nextPose(Pose previous,MovementEnvironment env,boolean sleeping){Objects.requireNonNull(previous);Objects.requireNonNull(env);if(sleeping)return Pose.SLEEPING;if(env.gliding())return Pose.FALL_FLYING;if(env.submerged()&&env.swimmingInput())return Pose.SWIMMING;if(env.sneaking())return Pose.CROUCHING;return Pose.STANDING;}
 
-  /** Applies an authoritative velocity/knockback impulse without inventing acceleration. */
+  /** Applies an authoritative server velocity packet; it replaces the tracked velocity. */
   public static State.Player applyVelocityImpulse(State.Player state, Vec3Like impulse) {
     Objects.requireNonNull(state); Objects.requireNonNull(impulse);
-    return new State.Player(state.position(), state.velocity().add(new Maths.Vec3(impulse.x(), impulse.y(), impulse.z())), state.yaw(), state.pitch(), state.onGround(), state.gamemode(), state.effects(), state.awaitingTeleport(), state.uncertain());
+    return new State.Player(state.position(), new Maths.Vec3(impulse.x(), impulse.y(), impulse.z()), state.yaw(), state.pitch(), state.onGround(), state.gamemode(), state.effects(), state.awaitingTeleport(), state.uncertain(), state.input(), state.attributes(), state.pose(), state.environment(), state.clientTickRange(), state.provenance(), state.uncertaintyReasons());
   }
   public static Knockback observedKnockback(Vec3Like impulse) { return new Knockback(impulse, true); }
   public record Knockback(Vec3Like impulse,boolean serverVelocityPacketObserved) implements Serializable {public Knockback{Objects.requireNonNull(impulse);}}
