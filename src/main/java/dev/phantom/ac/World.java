@@ -392,7 +392,7 @@ public final class World {
       if(!hasTransactionEvidence) {
         // Backward-compatible captures that predate the transaction journal.
         if(packet instanceof Packets.ChunkData data) history.chunkData(tick,data.chunk(),data.blocks());
-        else if(packet instanceof Packets.ChunkStates states) history.chunkStates(tick,new Chunk(states.chunk().x(),states.chunk().z()),states.states());
+        else if(packet instanceof Packets.ChunkStates states) history.chunkStates(tick,new dev.phantom.ac.world.Chunk(states.chunk().x(),states.chunk().z()),states.states());
         else if(packet instanceof Packets.ChunkUnload unload) { history.chunkUnloaded(tick,unload.chunk()); history.stateChunkUnloaded(tick,unload.chunk()); }
         else if(packet instanceof Packets.BlockChange change) history.blockChanged(tick,change.position(),change.block());
         else if(packet instanceof Packets.BlockStateChange change) history.blockStateChanged(tick,change.position(),change.state());
@@ -407,7 +407,7 @@ public final class World {
       } else if(packet instanceof Packets.ChunkStates states) {
         history.queueStateChunk(tick, states.chunk(), states.states());
       } else if(packet instanceof Packets.ChunkUnload unload) {
-        history.queueStateChunkUnload(tick, unload.chunk());
+        history.queueStateChunkUnload(tick, new dev.phantom.ac.world.Chunk(unload.chunk().x(),unload.chunk().z()));
       } else if(packet instanceof Packets.BlockStateChange change) {
         history.queueStateBlock(tick, change.position(), change.state());
       } else if(packet instanceof Packets.UnsupportedBlockStateChange change) {
