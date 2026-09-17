@@ -95,14 +95,17 @@ public final class Validation {
     }
 
     /**
-     * Observed client input now preserves sprint and sneak instead of declaring
-     * those inputs unsupported. The observed packet therefore narrows the
-     * reachable envelope without adding any arbitrary movement tolerance.
+     * Basic contract compatibility: sprint and sneak remain explicitly
+     * uncertain here. Callers that have declared the advanced input envelope
+     * use {@link #nextAdvanced(Player, World.Snapshot, boolean, AdvancedInput)}.
      */
     public Reachability next(Player state, World.Snapshot world, boolean timingUncertain, ClientInput observedInput) {
       Objects.requireNonNull(observedInput, "observedInput");
-      AdvancedInput input = toAdvancedInput(observedInput);
-      return nextAdvanced(state, world, timingUncertain, input);
+      if (observedInput.sneak() || observedInput.sprint()) {
+        return new Reachability(Verdict.UNCERTAIN, Set.of(), List.of(
+            "observed sneak or sprint input requires the Phase 6 advanced-input envelope"));
+      }
+      return nextAdvanced(state, world, timingUncertain, toAdvancedInput(observedInput));
     }
 
     public Reachability nextAdvanced(Player state, World.Snapshot world, boolean timingUncertain,
@@ -122,12 +125,10 @@ public final class Validation {
             "physics transition declared the resulting state uncertain"));
       }
       return new Reachability(Verdict.POSSIBLE, Set.of(result.state()), List.of(
-          "constrained by the complete observed client input packet"));
+          "constrained by the complete declared advanced client input"));
     }
 
-    /**
-     * Multi-tick search over the basic 18-state input envelope.
-     */
+    /** Multi-tick search over the basic 18-state input envelope. */
     public SearchResult advance(Player start, long firstTick, List<Optional<Input>> inputs,
                                 LongFunction<World.Snapshot> worlds, int maximumCandidates) {
       List<Optional<AdvancedInput>> advanced = inputs.stream()
@@ -207,11 +208,11 @@ public final class Validation {
                                                    int maximumCandidates) {
       Contracts.requireCandidateBudget(maximumCandidates);
       Objects.requireNonNull(window, "window");
-      if (window.earliestClientTick() > window.latestClientTick()) {
-        throw new IllegalArgumentException("invalid synchronization window");
-      }
 
       long span = window.latestClientTick() - window.earliestClientTick() + 1;
+      if (span <= 0) {
+        throw new IllegalArgumentException("invalid synchronization window");
+      }
       if (span > MAX_TIMING_OFFSETS) {
         return new TimingSearchResult(Verdict.UNCERTAIN, Set.of(), Map.of(), 0,
             safeOffsetCount(span), List.of("synchronization window exceeds the declared timing-search envelope"));
@@ -220,7 +221,6 @@ public final class Validation {
       Map<Long, SearchResult> results = new LinkedHashMap<>();
       Set<Player> candidates = new HashSet<>();
       int evaluated = 0;
-
       for (long firstTick = window.earliestClientTick(); firstTick <= window.latestClientTick(); firstTick++) {
         SearchResult result = advanceAdvanced(start, firstTick, inputs, worlds, maximumCandidates);
         results.put(firstTick, result);
