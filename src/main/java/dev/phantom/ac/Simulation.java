@@ -11,7 +11,7 @@ public final class Simulation {
 
   /** Compatibility adapter. All movement mechanics live in Vanilla12111RichPhysics. */
   public static final class Vanilla12111Physics implements Contracts.PhysicsEngine {
-    public static final double GRAVITY=Vanilla12111RichPhysics.GRAVITY,AIR_DRAG=Vanilla12111RichPhysics.AIR_DRAG,AIR_HORIZONTAL_FRICTION=Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION,AIR_VERTICAL_DRAG=Vanilla12111RichPhysics.AIR_VERTICAL_DRAG,AIR_ACCEL=Vanilla12111RichPhysics.AIR_ACCEL,GROUND_FRICTION=Vanilla12111RichPhysics.GROUND_FRICTION,WALK_ACCEL=Vanilla12111RichPhysics.WALK_ACCEL,JUMP=Vanilla12111RichPhysics.JUMP,STEP_HEIGHT=Vanilla12111RichPhysics.STEP_HEIGHT;
+    public static final double GRAVITY=Vanilla12111RichPhysics.GRAVITY,AIR_DRAG=Vanilla12111RichPhysics.AIR_DRAG,AIR_HORIZONTAL_FRICTION=Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION,AIR_VERTICAL_DRAG=Vanilla12111RichPhysics.AIR_VERTICAL_DRAG,AIR_ACCEL=Vanilla12111RichPhysics.AIR_ACCEL,GROUND_FRICTION=Vanilla12111RichPhysics.GROUND_FRICTION,WALK_ACCEL=Vanilla12111RichPhysics.FRICTION_SPEED_FACTOR,JUMP=Vanilla12111RichPhysics.JUMP,STEP_HEIGHT=Vanilla12111RichPhysics.STEP_HEIGHT;
     private final Vanilla12111RichPhysics rich=new Vanilla12111RichPhysics();
 
     public Player tick(Player state,Input input,World.Snapshot world){
