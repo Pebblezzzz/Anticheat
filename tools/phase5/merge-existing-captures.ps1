@@ -80,6 +80,8 @@ foreach ($part in $parts) {
     [long]$partFirstReceive = -1
     $activePhase = $null
     $phaseAccepted = $false
+    [long]$lastEmittedClientTick = $globalClientTick - 1L
+    [long]$lastEmittedReceiveNanos = $globalReceiveNanos
 
     foreach ($line in $rows) {
         $c = $line.Split([char]9)
@@ -127,13 +129,29 @@ foreach ($part in $parts) {
 
         [long]$clientDelta = $rawClientTick - $partFirstClientTick
         [long]$receiveDelta = $rawReceive - $partFirstReceive
+        $emittedClientTick = $globalClientTick + $clientDelta
+        $emittedReceiveNanos = $globalReceiveNanos + $receiveDelta
+
+        # Preserve monotonic timing across part files. Raw client ticks and
+        # receive timestamps are each independent per capture, and discarded
+        # boundary rows mean their absolute spans cannot be reconstructed by
+        # row count alone. Continue from the last emitted values instead.
+        if ($emittedClientTick <= $lastEmittedClientTick) {
+            $emittedClientTick = $lastEmittedClientTick + 1L
+        }
+        if ($emittedReceiveNanos < $lastEmittedReceiveNanos) {
+            $emittedReceiveNanos = $lastEmittedReceiveNanos
+        }
+
         $c[0] = [string]$globalTick
-        $c[1] = [string]($globalClientTick + $clientDelta)
-        $c[2] = [string]($globalReceiveNanos + $receiveDelta)
+        $c[1] = [string]$emittedClientTick
+        $c[2] = [string]$emittedReceiveNanos
         $c[44] = "capture-post-tick:all:$phase"
 
         $allRows.Add(($c -join "`t"))
         $globalTick++
+        $lastEmittedClientTick = $emittedClientTick
+        $lastEmittedReceiveNanos = $emittedReceiveNanos
         $previousRawClientTick = $rawClientTick
         $previousRawReceive = $rawReceive
     }
@@ -142,8 +160,8 @@ foreach ($part in $parts) {
         throw "No settled rows found for final phase '$activePhase' in ${path}"
     }
 
-    $globalClientTick = [long]$allRows.Count + 1L
-    $globalReceiveNanos = [long]($globalReceiveNanos + ($previousRawReceive - $partFirstReceive))
+    $globalClientTick = $lastEmittedClientTick + 1L
+    $globalReceiveNanos = $lastEmittedReceiveNanos
 }
 
 $linesOut = [System.Collections.Generic.List[string]]::new()
