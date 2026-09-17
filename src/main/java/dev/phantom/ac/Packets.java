@@ -8,7 +8,8 @@ public final class Packets {
   private Packets() {}
 
   public sealed interface Packet extends Serializable permits Move, ClientInput, Teleport, TeleportConfirm,
-      Velocity, Effect, Gamemode, PlayerContext, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange {
+      Velocity, Effect, Gamemode, PlayerContext, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange,
+      WorldTransactionSend, WorldTransactionAck {
     default boolean mutatesWorld() {
       return this instanceof ChunkData || this instanceof ChunkUnload
           || this instanceof BlockChange || this instanceof ChunkStates || this instanceof BlockStateChange || this instanceof UnsupportedBlockStateChange;
@@ -21,6 +22,10 @@ public final class Packets {
     public Teleport(int id, Vec3 position, float yaw, float pitch) { this(id,position,yaw,pitch,false,false,false,false,false); }
   }
   public record TeleportConfirm(int id) implements Packet {}
+  /** Server-side synthetic transaction barrier used to prove client receipt of world updates. */
+  public record WorldTransactionSend(short id) implements Packet {}
+  /** Client acknowledgement of a synthetic world transaction barrier. */
+  public record WorldTransactionAck(short id) implements Packet {}
   public record Velocity(Vec3 velocity) implements Packet { public Velocity { Objects.requireNonNull(velocity,"velocity"); } }
   public record Effect(String id, int amplifier, boolean removed) implements Packet { public Effect { Objects.requireNonNull(id,"id"); } }
   public record Gamemode(String value) implements Packet { public Gamemode { if(value==null||value.isBlank()) throw new IllegalArgumentException("gamemode is required"); } }
@@ -51,8 +56,8 @@ public final class Packets {
     public static CaptureProvenance forPacket(Packet packet){Objects.requireNonNull(packet);return new CaptureProvenance("unknown-capture-source",directionFor(packet),packet.getClass().getSimpleName(),null);}
     public static CaptureProvenance fromAdapter(String sourceId,Packet packet,Long authoritativeServerTick){Objects.requireNonNull(packet);return new CaptureProvenance(sourceId,directionFor(packet),packet.getClass().getSimpleName(),authoritativeServerTick);}
     public static String directionFor(Packet packet){
-      if(packet instanceof Move||packet instanceof ClientInput||packet instanceof TeleportConfirm)return "CLIENT_TO_SERVER";
-      if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof Effect||packet instanceof Gamemode||packet instanceof PlayerContext||packet.mutatesWorld())return "SERVER_TO_CLIENT";
+      if(packet instanceof Move||packet instanceof ClientInput||packet instanceof TeleportConfirm||packet instanceof WorldTransactionAck)return "CLIENT_TO_SERVER";
+      if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof Effect||packet instanceof Gamemode||packet instanceof PlayerContext||packet instanceof WorldTransactionSend||packet.mutatesWorld())return "SERVER_TO_CLIENT";
       return "UNKNOWN";
     }
   }
