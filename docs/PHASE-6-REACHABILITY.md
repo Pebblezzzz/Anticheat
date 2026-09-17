@@ -16,15 +16,17 @@ Unknown input ticks can be exhaustively enumerated over the declared discrete cl
 - sprint: false/true
 - sneak: false/true
 
-This produces 72 deterministic `AdvancedInput` combinations. The original 18-state basic envelope remains available for the existing contract and legacy traces.
+This produces 72 deterministic `AdvancedInput` combinations. The original 18-state basic envelope remains available for the existing `ReachabilityEngine` contract and legacy traces.
 
-Observed `ClientInput` packets now retain sprint and sneak instead of automatically becoming `UNCERTAIN`.
+The Phase 6 advanced-input path preserves sprint and sneak explicitly through `AdvancedInput`. The older `next(..., ClientInput)` compatibility overload remains conservative for sprint/sneak callers and directs them to the advanced envelope rather than silently widening the basic contract.
 
 ### Multi-tick search
 
 `Validation.ReachableStates.advanceAdvanced(...)` propagates exact `State.Player` candidates through a supplied sequence of worlds. Identical states are merged. A candidate budget is mandatory.
 
-A budget overflow returns `UNCERTAIN` with an empty candidate set. The engine never exposes a sampled subset as if it were exhaustive evidence.
+On the advanced path, a budget overflow returns `UNCERTAIN` with an empty candidate set. The advanced engine never exposes a sampled subset as if it were exhaustive evidence.
+
+The legacy `advance(...)` method retains its pre-Phase-6 representative-candidate metric for compatibility, but its verdict is still `UNCERTAIN` whenever the finite basic search exceeds its candidate budget.
 
 ### Timing-window search
 
