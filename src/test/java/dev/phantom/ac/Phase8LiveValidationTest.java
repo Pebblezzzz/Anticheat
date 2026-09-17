@@ -31,8 +31,7 @@ class Phase8LiveValidationTest {
   }
 
   private static Phase7Timing.Config exactTiming() {
-    return new Phase7Timing.Config(
-        50_000_000L, 50_000_000L, 50_000_000L,
+    return new Phase7Timing.Config(50_000_000L, 50_000_000L, 50_000_000L,
         new Phase7Timing.LatencyBounds(0, 0), new Phase7Timing.LatencyBounds(0, 0),
         new Phase7Timing.TickDelayBounds(0, 0), new Phase7Timing.TickDelayBounds(0, 0),
         250_000_000L, 3, 128);
@@ -41,9 +40,7 @@ class Phase8LiveValidationTest {
   private static WorldSnapshot floorWorld() {
     var stone = dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone", Map.of());
     var builder = WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0, 0);
-    for (int x = -4; x <= 4; x++) {
-      for (int z = -4; z <= 4; z++) builder.setBlock(x, 63, z, stone);
-    }
+    for (int x = -4; x <= 4; x++) for (int z = -4; z <= 4; z++) builder.setBlock(x, 63, z, stone);
     return builder.build();
   }
 
@@ -83,26 +80,20 @@ class Phase8LiveValidationTest {
     SearchResult search = engine.search(phase6Start(), List.of(noInput),
         ignored -> List.of(new WorldBranch("floor", world, true, "fully known floor")),
         ignored -> List.of(new Phase6Reachability.None()), 256);
-
     Phase6Reachability.Evidence phase6Evidence = engine.compare(search,
         new Observation(Player.initial(new Vec3(100.5, 64.0, 100.5)), EnumSet.of(ObservedField.POSITION)));
     assertEquals(Verdict.IMPOSSIBLE, phase6Evidence.verdict());
     assertEquals(0, phase6Evidence.matchingCandidates());
 
     List<RawPacket> packets = List.of(
-        new RawPacket(1, 0, new ChunkStates(new dev.phantom.ac.world.Chunk(0, 0),
-            floorStates())),
+        new RawPacket(1, 0, new ChunkStates(new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
         new RawPacket(2, 0, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
         new RawPacket(3, 50_000_000L, new Move(new Vec3(100.5, 64, 100.5), 0f, 0f, true, 1L)),
         new RawPacket(4, 100_000_000L, new Move(new Vec3(101.5, 64, 100.5), 0f, 0f, true, 2L)));
-
     Phase8LiveValidation.Report report = Phase8LiveValidation.analyze("phase8-test", capture(packets), 256, exactTiming());
-    System.out.printf("movementObservations=%d possible=%d uncertain=%d impossible=%d%n",
-        report.movementObservations(), report.possible(), report.uncertain(), report.impossible());
-
     assertEquals(3, report.movementObservations());
-    assertEquals(1, report.uncertain(), "only the bootstrap observation should be uncertain");
-    assertEquals(2, report.impossible(), "the proven divergence must remain impossible and must not re-anchor");
+    assertEquals(1, report.uncertain());
+    assertEquals(2, report.impossible());
     assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE, report.results().get(1).verdict());
     assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE, report.results().get(2).verdict());
 
@@ -113,10 +104,7 @@ class Phase8LiveValidationTest {
     for (var result : report.results()) {
       var accumulated = accumulator.accept(result.evidence(), config);
       accumulator = accumulated.state();
-      if (accumulated.alert().isPresent()) {
-        alerts++;
-        emitted = accumulated.alert().orElseThrow();
-      }
+      if (accumulated.alert().isPresent()) { alerts++; emitted = accumulated.alert().orElseThrow(); }
     }
     var state = accumulator.players().get("phase8-test/MOVEMENT_REACHABILITY");
     assertNotNull(state);
@@ -136,14 +124,11 @@ class Phase8LiveValidationTest {
         new RawPacket(2, 0, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
         new RawPacket(3, 50_000_000L, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 1L)),
         new RawPacket(4, 100_000_000L, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 2L)));
-
     Phase8LiveValidation.Report report = Phase8LiveValidation.analyze("phase8-possible", capture(packets), 256, exactTiming());
     assertEquals(3, report.movementObservations());
     assertEquals(1, report.uncertain());
     assertEquals(2, report.possible(), report.results().toString());
     assertEquals(0, report.impossible(), report.results().toString());
-    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE, report.results().get(1).verdict());
-    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE, report.results().get(2).verdict());
   }
 
   @Test
@@ -151,7 +136,6 @@ class Phase8LiveValidationTest {
     List<RawPacket> packets = List.of(
         new RawPacket(1, 0, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
         new RawPacket(2, 50_000_000L, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 1L)));
-
     Phase8LiveValidation.Report report = Phase8LiveValidation.analyze("phase8-unknown", capture(packets), 256, exactTiming());
     assertEquals(2, report.movementObservations());
     assertEquals(0, report.possible());
@@ -185,15 +169,27 @@ class Phase8LiveValidationTest {
     Phase8LiveValidation.ParentAggregation uncertain = Phase8LiveValidation.aggregateParentSearches(
         List.of(timingImpossible(), timingUncertain()), 64, 1);
     assertEquals(Verdict.UNCERTAIN, uncertain.result().verdict());
-    assertTrue(uncertain.candidates().isEmpty());
     assertFalse(uncertain.timingOffsetsExhaustive());
+  }
+
+  @Test
+  void timingAggregateDoesNotTurnExhaustiveImpossibleOffsetsIntoUncertain() {
+    SearchResult impossible = new SearchResult(Verdict.IMPOSSIBLE, Set.of(), 1, 1, 0, 0, 0, 0,
+        List.of("offset deterministically exhausted"));
+    TimingSearchResult phase6Aggregate = new TimingSearchResult(Verdict.UNCERTAIN, Set.of(),
+        Map.of(10L, impossible, 11L, impossible), 2, 0,
+        List.of("internal aggregate used conservative UNCERTAIN despite exhaustive impossible offsets"));
+
+    Phase8LiveValidation.ParentAggregation result = Phase8LiveValidation.aggregateParentSearches(
+        List.of(phase6Aggregate), 64, 2);
+    assertEquals(Verdict.IMPOSSIBLE, result.result().verdict());
+    assertTrue(result.timingOffsetsExhaustive());
   }
 
   private static Map<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> floorStates() {
     var stone = dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone", Map.of());
     Map<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> states = new LinkedHashMap<>();
-    for (int x = -4; x <= 4; x++) for (int z = -4; z <= 4; z++)
-      states.put(new dev.phantom.ac.world.Pos(x, 63, z), stone);
+    for (int x = -4; x <= 4; x++) for (int z = -4; z <= 4; z++) states.put(new dev.phantom.ac.world.Pos(x, 63, z), stone);
     return Map.copyOf(states);
   }
 }

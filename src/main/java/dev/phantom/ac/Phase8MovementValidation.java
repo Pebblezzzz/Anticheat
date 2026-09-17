@@ -35,34 +35,15 @@ public final class Phase8MovementValidation {
     public static Config defaults() { return new Config(2, 20, true, true); }
   }
 
-  /** Immutable, replayable evidence for one movement observation. */
   public record Evidence(
-      String schemaVersion,
-      Verdict verdict,
-      String playerId,
-      long serverTick,
-      long clientTickMin,
-      long clientTickMax,
-      Player priorState,
-      Player observedState,
-      String worldVersion,
-      String worldReference,
-      List<String> inputAssumptions,
-      List<String> timingAssumptions,
-      int reachableCandidateCount,
-      int matchingCandidateCount,
-      int candidatesEliminated,
-      String eliminationReason,
-      OptionalLong firstInconsistentTick,
-      Optional<CandidateSummary> closestCandidate,
-      List<String> simulationDiagnostics,
-      List<String> uncertaintySources,
-      String phase5Version,
-      String phase6Version,
-      String phase7Version,
-      String replayReference,
-      String rule
-  ) implements Serializable {
+      String schemaVersion, Verdict verdict, String playerId, long serverTick,
+      long clientTickMin, long clientTickMax, Player priorState, Player observedState,
+      String worldVersion, String worldReference, List<String> inputAssumptions,
+      List<String> timingAssumptions, int reachableCandidateCount, int matchingCandidateCount,
+      int candidatesEliminated, String eliminationReason, OptionalLong firstInconsistentTick,
+      Optional<CandidateSummary> closestCandidate, List<String> simulationDiagnostics,
+      List<String> uncertaintySources, String phase5Version, String phase6Version,
+      String phase7Version, String replayReference, String rule) implements Serializable {
     public Evidence {
       if (!VERSION.equals(schemaVersion)) throw new IllegalArgumentException("unsupported Phase 8 evidence schema");
       Objects.requireNonNull(verdict);
@@ -86,16 +67,10 @@ public final class Phase8MovementValidation {
     public Result { Objects.requireNonNull(verdict); Objects.requireNonNull(evidence); if (evidence.verdict() != verdict) throw new IllegalArgumentException("evidence/result verdict mismatch"); }
   }
 
-  /** Movement packets normally declare position, rotation, and ground state. */
   private static Set<ObservedField> allObservedFields() {
     return EnumSet.of(ObservedField.POSITION, ObservedField.ROTATION, ObservedField.GROUND);
   }
 
-  /**
-   * Compatibility entry point. A timing-uncertain window is conservative unless
-   * the caller explicitly states that every possible timing offset was exhaustively modeled.
-   * This legacy overload treats the default movement-packet facts as observed.
-   */
   public static Result validate(String playerId, long serverTick, Player prior, Player observed,
                                 WorldSnapshot world, String worldReference,
                                 Validation.SyncWindow timing, List<String> inputAssumptions,
@@ -104,7 +79,6 @@ public final class Phase8MovementValidation {
         inputAssumptions, reachable, replayReference, !timing.uncertain(), allObservedFields());
   }
 
-  /** Pure comparison against an existing Phase 6 result, with an explicit timing-exhaustiveness proof. */
   public static Result validate(String playerId, long serverTick, Player prior, Player observed,
                                 WorldSnapshot world, String worldReference,
                                 Validation.SyncWindow timing, List<String> inputAssumptions,
@@ -114,11 +88,6 @@ public final class Phase8MovementValidation {
         inputAssumptions, reachable, replayReference, timingExhaustivelyModeled, allObservedFields());
   }
 
-  /**
-   * Live-packet comparison where {@code observedFields} is the exact subset of
-   * facts declared by the packet. Fields merely carried forward by Phase 2 state
-   * reconstruction are not treated as fresh observations.
-   */
   public static Result validate(String playerId, long serverTick, Player prior, Player observed,
                                 WorldSnapshot world, String worldReference,
                                 Validation.SyncWindow timing, List<String> inputAssumptions,
@@ -135,7 +104,7 @@ public final class Phase8MovementValidation {
       uncertainty.addAll(reachable.reasons());
       Evidence evidence = evidence(Verdict.UNCERTAIN, playerId, serverTick, prior, observed, world, worldReference, timing,
           inputAssumptions, reachable.candidates().size(), 0, 0, "Phase 6 could not exhaustively represent the legitimate state space",
-          OptionalLong.empty(), Optional.empty(), reachable.reasons(), uncertainty, replayReference);
+          OptionalLong.empty(), bestCandidate(reachable.candidates(), observed), reachable.reasons(), uncertainty, replayReference);
       return new Result(Verdict.UNCERTAIN, evidence);
     }
     if (timing.uncertain() && !timingExhaustivelyModeled) {
@@ -173,10 +142,9 @@ public final class Phase8MovementValidation {
                                    String reason, OptionalLong first, Optional<CandidateSummary> closest,
                                    List<String> diagnostics, List<String> uncertainty, String replay) {
     return new Evidence(VERSION, verdict, playerId, serverTick, timing.earliestClientTick(), timing.latestClientTick(),
-        prior, observed, Contracts.TARGET_VERSION, worldReference, inputs,
-        timing.reasons(), candidates, matches, eliminated, reason, first, closest,
-        diagnostics, uncertainty, PHASE5_VERSION, PHASE6_VERSION, PHASE7_VERSION, replay,
-        "MOVEMENT_REACHABILITY");
+        prior, observed, Contracts.TARGET_VERSION, worldReference, inputs, timing.reasons(),
+        candidates, matches, eliminated, reason, first, closest, diagnostics, uncertainty,
+        PHASE5_VERSION, PHASE6_VERSION, PHASE7_VERSION, replay, "MOVEMENT_REACHABILITY");
   }
 
   private static Optional<CandidateSummary> bestMatchingCandidate(Set<Candidate> candidates, Observation observation) {
@@ -218,7 +186,6 @@ public final class Phase8MovementValidation {
         p.velocity().toString(), p.onGround(), c.context().pose().name(), c.provenance().toString());
   }
 
-  /** Deterministic evidence accumulator. UNCERTAIN and POSSIBLE never increase violation confidence. */
   public record Accumulator(Map<String, State> players) implements Serializable {
     public Accumulator { players = Map.copyOf(players); }
     public static Accumulator empty() { return new Accumulator(Map.of()); }
@@ -260,7 +227,7 @@ public final class Phase8MovementValidation {
   public record Alert(String playerId, long serverTick, long firstInconsistentTick, String reason,
                       String evidence, double confidence, int supportingEvents, String replayReference) implements Serializable {
     public String message() {
-      return "[AntiCheat] player=" + playerId + " type=MOVEMENT result=IMPOSSIBLE tick=" + serverTick
+      return "[PhantomAC][PHASE8] player=" + playerId + " type=MOVEMENT result=IMPOSSIBLE tick=" + serverTick
           + " first-inconsistent-tick=" + firstInconsistentTick + " reason=" + reason
           + " confidence=" + String.format(Locale.ROOT, "%.2f", confidence)
           + " replay=" + replayReference;

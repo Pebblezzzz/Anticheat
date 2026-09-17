@@ -1,9 +1,13 @@
 alerts:
   enabled: true
   broadcast: false
+
 debug:
-  # Temporary live Phase 8 diagnostics. Disable after the movement pipeline is verified.
-  phase8: true
+  # Targeted Phase 8 diagnostics are disabled by default. Use /phantom debug <player> at runtime.
+  phase8: false
+  # Maximum interval between repeated targeted diagnostics for one player.
+  summary-interval-seconds: 5
+
 enforcement:
   # Disabled by default. Enable only in a controlled test server after reviewing evidence.
   kick-enabled: false
