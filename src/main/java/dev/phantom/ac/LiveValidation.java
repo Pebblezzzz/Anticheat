@@ -27,13 +27,29 @@ public final class LiveValidation {
     Contracts.requireCandidateBudget(maximumCandidates);World.VisibilityHistory history=World.fromTimeline(timeline);Phase6Reachability engine=new Phase6Reachability(new Vanilla12111RichPhysics());Map<Long,List<ExternalTransition>> externalByTick=externalTransitions(timeline);
     Set<Candidate> candidates=Set.of();InputConstraint currentInput=InputConstraint.any();List<Finding> findings=new ArrayList<>();int movements=0,anchored=0;
     for(Timeline.Event event:timeline.events()){
-      Packets.Packet packet=event.packet().packet();if(packet instanceof Packets.ClientInput input){currentInput=InputConstraint.fromClientInput(input);continue;}if(!(packet instanceof Packets.Move move)||move.position()==null)continue;
-      movements++;long tick=event.serverTick();WorldSnapshot world=history.statesAt(tick);Player observed=anchored==0?Player.initial(move.position()):State.apply(candidates.iterator().next().context().player(),event.packet());
-      if(anchored==0){Phase6Reachability.Context root=anchor(observed,world,currentInput,tick);Candidate c=new Candidate(0,root,new Phase6Reachability.Provenance(0,-1,tick,"ROOT","ROOT","None",List.of("first movement observation establishes a replay anchor"),1,List.of()));candidates=Set.of(c);anchored++;findings.add(new Finding(tick,Validation.Verdict.UNCERTAIN,1,List.of("first movement packet establishes the observed-state anchor; no prior client state is available")));continue;}
-      if(candidates.isEmpty()){findings.add(new Finding(tick,Validation.Verdict.UNCERTAIN,0,List.of("prediction envelope was empty; observation re-anchors validation instead of producing a violation")));Phase6Reachability.Context root=anchor(observed,world,currentInput,tick);Candidate c=new Candidate(0,root,new Phase6Reachability.Provenance(0,-1,tick,"ROOT","ROOT","None",List.of("re-anchor after uncertain interval"),1,List.of()));candidates=Set.of(c);anchored++;continue;}
+      Packets.Packet packet=event.packet().packet();
+      if(packet instanceof Packets.ClientInput input){currentInput=InputConstraint.fromClientInput(input);continue;}
+      if(!(packet instanceof Packets.Move move)||move.position()==null)continue;
+      movements++;long tick=event.serverTick();WorldSnapshot world=history.statesAt(tick);
 
+      if(candidates.isEmpty()){
+        Player observed=Player.initial(move.position());
+        Phase6Reachability.Context root=anchor(observed,world,currentInput,tick);
+        Candidate c=new Candidate(0,root,new Phase6Reachability.Provenance(0,-1,tick,"ROOT","ROOT","None",List.of(anchored==0?"first movement observation establishes a replay anchor":"re-anchor after an uncertain interval"),1,List.of()));
+        candidates=Set.of(c);anchored++;
+        findings.add(new Finding(tick,Validation.Verdict.UNCERTAIN,1,List.of(anchored==1?"first movement packet establishes the observed-state anchor; no prior client state is available":"prediction envelope was empty; observation re-anchors validation instead of producing a violation")));
+        continue;
+      }
+
+      Player observed=State.apply(candidates.iterator().next().context().player(),event.packet());
       Set<Candidate> nextAll=new LinkedHashSet<>();Set<Candidate> matches=new LinkedHashSet<>();boolean uncertain=false;LinkedHashSet<String> reasons=new LinkedHashSet<>();
-      for(Candidate parent:candidates){Phase6Reachability.Context prepared=withObservedEnvironment(parent.context(),world,currentInput,tick);SearchResult result=engine.search(prepared,List.of(currentInput),t->List.of(new WorldBranch("client-visible-"+t,world,true,"World.VisibilityHistory at observed client tick")),t->externalByTick.getOrDefault(t,List.of(new Phase6Reachability.None())),maximumCandidates);if(result.verdict()==Phase6Reachability.Verdict.UNCERTAIN){uncertain=true;reasons.addAll(result.reasons());}else nextAll.addAll(result.candidates());}
+      for(Candidate parent:candidates){
+        Phase6Reachability.Context prepared=withObservedEnvironment(parent.context(),world,currentInput,tick);
+        SearchResult result=engine.search(prepared,List.of(currentInput),t->List.of(new WorldBranch("client-visible-"+t,world,true,"World.VisibilityHistory at observed client tick")),t->externalByTick.getOrDefault(t,List.of(new Phase6Reachability.None())),maximumCandidates);
+        if(result.verdict()==Phase6Reachability.Verdict.UNCERTAIN){uncertain=true;reasons.addAll(result.reasons());continue;}
+        nextAll.addAll(result.candidates());
+        if(nextAll.size()>maximumCandidates){uncertain=true;reasons.add("combined live candidate budget exceeded; no provisional subset is retained");nextAll.clear();break;}
+      }
       if(!uncertain){Observation projection=new Observation(observed,EnumSet.of(ObservedField.POSITION,ObservedField.GROUND));for(Candidate candidate:nextAll){SearchResult singleton=new SearchResult(Phase6Reachability.Verdict.POSSIBLE,Set.of(candidate),1,1,0,0,0,0,List.of());if(engine.compare(singleton,projection).verdict()==Phase6Reachability.Verdict.POSSIBLE)matches.add(candidate);}}
       if(uncertain){findings.add(new Finding(tick,Validation.Verdict.UNCERTAIN,0,reasons.isEmpty()?List.of("one or more branches became uncertain"):List.copyOf(reasons)));candidates=nextAll.isEmpty()?Set.of():Set.copyOf(nextAll);}
       else if(matches.isEmpty()){candidates=Set.copyOf(nextAll);findings.add(new Finding(tick,Validation.Verdict.IMPOSSIBLE,0,List.of("no exact reachable candidate matches the observed position and ground state","the complete candidate envelope is retained after divergence")));}
