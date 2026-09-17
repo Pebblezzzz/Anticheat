@@ -121,7 +121,9 @@ public final class Phase8LiveValidation {
 
       Phase7Timing.EventTiming eventTiming=timing.timingFor(normalized.sequence()).orElse(null);
       State.StateFrame stateFrame=observedBySequence.get(normalized.sequence());
-      WorldSnapshot world=history.statesAt(event.serverTick());
+      WorldSnapshot world=(liveWorld!=null&&normalized.sequence()==latestMovementSequence)
+          ?liveWorld
+          :history.statesAt(event.serverTick());
       if(eventTiming==null||stateFrame==null){
         results.add(anchorUncertain(playerId,event.serverTick(),stateFrame,world,
             "missing Phase 7 timing or Phase 2 state frame","live:phase8:"+normalized.sequence()));
