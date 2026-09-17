@@ -1,11 +1,13 @@
 # Phase 5 trace validation contract
 
-Audit date: 2026-09-16.
+Audit date: 2026-09-17.
 
 ## Status
-Phase 5 remains **PARTIAL / BLOCKED BY EXTERNAL DATA** for empirical vanilla validation. The repository contains the deterministic simulator primitives, the original 46-column trace validator, an extended version-2 capture format with explicit missing-field provenance, and an observation-only Fabric capture harness pinned to Minecraft Java 1.21.11.
+The **automated controlled Phase 5 batch is now captured, structurally audited, and replayed through the simulator successfully** using the existing Minecraft Java 1.21.11 Part 1–5 captures. The existing captures were merged into `C:\phase5\phase5-all.tsv` with measurements preserved; only pre-settle phase-boundary rows were omitted and tick/timing metadata was reindexed for unified validation. The merged trace contains 1,917 accepted rows after 301 pre-settle boundary rows were discarded.
 
-The harness now includes a deterministic integrated-server course builder and a batch scenario driver. This removes the need to manually place the test geometry or hold movement keys. The exact vanilla client still has to be run locally, because that executable is the external reference.
+The broader Phase 5 empirical corpus remains **PARTIAL / BLOCKED BY EXTERNAL DATA** because the manifest contains scenarios and telemetry requirements beyond this automated controlled batch. In particular, scenarios that require packet reconstruction, per-axis clipping, serialized geometry, or other currently missing telemetry are not silently treated as validated.
+
+The repository contains the deterministic simulator primitives, the version-2 capture format with explicit missing-field provenance, an observation-only Fabric capture harness pinned to Minecraft Java 1.21.11, and an existing-capture replay path for reusing completed vanilla evidence without recapturing the client.
 
 ## Exact target client
 
@@ -34,28 +36,29 @@ Unknown knockback decomposition, correction-pending state, step attempt/result, 
 
 ## Empirical baselines captured so far
 
-The external 1.21.11 captures supplied for Phase 5 have established controlled **stone-ground** walking, sprinting, jumping/landing, sneaking, diagonal input, height-transition, and collision behavior. Those observations are covered by the existing regression tests and were used to correct the simulator's sprint multiplier, air acceleration, jump lifecycle, landing velocity, step/height handling, and collision fixtures.
+The existing 1.21.11 captures establish controlled **stone-ground** walking, sprinting, jumping/landing, sneaking, diagonal input, height-transition, collision behavior, water, lava, movement effects, jump boost, stair/step behavior, climbable interaction, edge/corner movement, swimming transition, gliding, and correction behavior across the five capture parts. These observations are covered by the automated batch audit where the available telemetry supports deterministic checks.
 
-The exploratory water trace previously captured was **not** accepted as a controlled calibration run because the old scenario held jump and depended on the existing world geometry. The batch harness replaces that flow with a self-built course and a two-tick jump pulse.
+The jump-boost capture uses a direct vanilla `player.jump()` trigger after the Jump Boost effect is present. The batch audit verifies the observed positive launch trajectory, while one-tick numerical replay does not treat the post-tick jump-key observation as proof of the exact causal input consumption order.
 
-## One-command batch capture
+## Existing-capture batch replay
 
 From the repository root, run:
 
-`powershell -ExecutionPolicy Bypass -File .\tools\vanilla-trace-capture\run-phase5.ps1`
+`pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\phase5\run-existing-phase5.ps1`
 
-The runner:
+The existing-capture runner:
 
-1. executes the complete Maven regression suite;
-2. builds the 1.21.11 Fabric capture harness;
-3. launches one local singleplayer 1.21.11 client with `phantom.capture.scenario=all`;
-4. lets the harness build a clean test course and drive the controlled phases automatically;
-5. waits for the harness to stop the client after the batch; and
-6. runs `Phase5VanillaBatchAuditTest` against `C:\phase5\phase5-all.tsv`.
+1. reads `C:\phase5\phase5-part1.tsv` through `C:\phase5\phase5-part5.tsv`;
+2. validates the version-2 headers and 47-column shape;
+3. removes only leading pre-settle rows at phase boundaries where the row is still in the prior lane;
+4. normalizes the part phase labels to `capture-post-tick:all:<phase>`;
+5. reindexes batch tick/timing metadata without changing observed movement/effect/pose/state fields;
+6. writes `C:\phase5\phase5-all.tsv`; and
+7. runs both `Phase5VanillaBatchAuditTest` and `Phase5VanillaSimulationReplayTest`.
 
-The current batch covers setup, walking, sprinting, one-pulse jumping, sneaking, diagonal input, straight collision, water, lava, speed, slowness, jump boost, and step geometry. Each phase is labeled in `input_source` and begins from a server-authoritative teleport so prior phase momentum does not silently contaminate the next phase.
+The completed run on 2026-09-17 produced 1,917 merged rows and passed both tests with zero failures and zero errors. The replay therefore verified the current simulator against the stable, replayable subset of the captured vanilla observations without requiring another Minecraft capture.
 
-The final audit is intentionally empirical: it requires actual rows from a real 1.21.11 run, verifies the structural validator, checks phase coverage, requires observed water/lava/effect states, and rejects the old “hold jump for 100 ticks” failure mode.
+The original one-command live batch-capture path remains available for obtaining a fresh unified capture when needed, but it is not required merely to consume the already completed Part 1–5 evidence.
 
 ## Controlled-corpus procedure
 
@@ -75,6 +78,8 @@ For parity, use the order:
 
 **vanilla capture → structural validation → missing-field review → simulation replay → first divergence → source/cause investigation → simulator fix → regression test → repeat capture**.
 
+The completed controlled batch has now gone through this loop for the replayable subset: the vanilla evidence was inspected, the simulator replay produced no remaining divergences in the calibrated phases, and the regression tests pass.
+
 The existing `Phase5VanillaComparison.firstDivergence()` remains the detailed state comparator for captures whose required fields are available. It reports the first mismatching tick and field rather than only a final displacement error.
 
 ## Required empirical corpus
@@ -91,4 +96,4 @@ The automated batch does not silently claim empirical coverage for manifest rows
 - **PARTIAL:** some machinery exists but an empirical requirement remains.
 - **BLOCKED BY EXTERNAL DATA:** the missing evidence must come from running the exact client outside this execution environment.
 
-Phase 5 remains **PARTIAL / BLOCKED BY EXTERNAL DATA** until the new batch capture has been executed and the resulting trace has been inspected for first divergences. No simulator-generated row is valid empirical evidence and no tolerance/fudge factor is accepted as a substitute for fixing the first actual divergence.
+The automated controlled Phase 5 batch is **VANILLA VALIDATED for the replayable, audited subset represented by the existing Part 1–5 captures**. Phase 5 as a whole remains **PARTIAL / BLOCKED BY EXTERNAL DATA** until the remaining corpus-manifest scenarios and their required telemetry are independently captured and validated.
