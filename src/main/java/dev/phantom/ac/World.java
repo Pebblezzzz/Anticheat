@@ -207,6 +207,12 @@ public final class World {
     private final List<StateEvent> stateEvents = new ArrayList<>();
     private long stateEventOrder;
 
+    /** Rich world mutations observed from packets but not yet proven client-visible. */
+    private final List<StateEvent> unassignedStateEvents = new ArrayList<>();
+    private final Map<Short, List<StateEvent>> pendingTransactions = new LinkedHashMap<>();
+    private final Deque<Short> sentTransactions = new ArrayDeque<>();
+    private final Set<Short> acknowledgedTransactions = new HashSet<>();
+
     /** The chunks currently visible in the Phase 4 model at the requested time. */
     public synchronized Set<Chunk> stateChunks() {
       Set<Chunk> visible = new LinkedHashSet<>();
@@ -264,6 +270,61 @@ public final class World {
       return builder.build();
     }
 
+    private void queueStateChunk(long tick, dev.phantom.ac.world.Chunk chunk,
+                                 Map<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> states) {
+      // A full chunk packet establishes client visibility, then supplies its
+      // block states. Both are held behind the same transaction barrier.
+      unassignedStateEvents.add(new StateChunkChange(tick, stateEventOrder++, new Chunk(chunk.x(), chunk.z()), true));
+      for (Map.Entry<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> entry : states.entrySet())
+        unassignedStateEvents.add(new StateBlockChange(tick, stateEventOrder++, entry.getKey(), entry.getValue()));
+    }
+
+    private void queueStateChunkUnload(long tick, dev.phantom.ac.world.Chunk chunk) {
+      unassignedStateEvents.add(new StateChunkChange(tick, stateEventOrder++, new Chunk(chunk.x(), chunk.z()), false));
+    }
+
+    private void queueStateBlock(long tick, dev.phantom.ac.world.Pos position,
+                                 dev.phantom.ac.world.BlockState state) {
+      if (!stateVisibleAtPendingAware(tick, dev.phantom.ac.world.Chunk.containing(position.x(), position.z()))) return;
+      unassignedStateEvents.add(new StateBlockChange(tick, stateEventOrder++, position, state));
+    }
+
+    private void openStateTransaction(short id) {
+      if (acknowledgedTransactions.contains(id)) return;
+      if (!pendingTransactions.containsKey(id)) {
+        pendingTransactions.put(id, new ArrayList<>());
+        sentTransactions.addLast(id);
+      }
+      if (!unassignedStateEvents.isEmpty()) {
+        pendingTransactions.get(id).addAll(unassignedStateEvents);
+        unassignedStateEvents.clear();
+      }
+    }
+
+    private void acknowledgeStateTransaction(short id) {
+      if (!pendingTransactions.containsKey(id)) return;
+      while (!sentTransactions.isEmpty()) {
+        short head=sentTransactions.removeFirst();
+        List<StateEvent> mutations=pendingTransactions.remove(head);
+        if (mutations!=null) stateEvents.addAll(mutations);
+        acknowledgedTransactions.add(head);
+        if (head==id) break;
+      }
+    }
+
+    private boolean stateVisibleAtPendingAware(long tick, dev.phantom.ac.Chunk sought) {
+      boolean visible=false;
+      for(StateEvent event:stateEvents) {
+        if(event.clientTick()>tick) break;
+        if(event instanceof StateChunkChange change && change.chunk().equals(sought)) visible=change.visible();
+      }
+      for(List<StateEvent> mutations:pendingTransactions.values()) for(StateEvent event:mutations) {
+        if(event.clientTick()>tick) continue;
+        if(event instanceof StateChunkChange change && change.chunk().equals(sought)) visible=change.visible();
+      }
+      return visible;
+    }
+
     private boolean stateVisibleAt(long tick, Chunk sought) {
       boolean visible = false;
       for (StateEvent event : orderedStateEvents()) {
@@ -307,15 +368,50 @@ public final class World {
    */
   public static VisibilityHistory fromTimeline(Timeline.Snapshot timeline) {
     VisibilityHistory history=new VisibilityHistory();
+
+    boolean hasTransactionEvidence=timeline.events().stream().anyMatch(event ->
+        event.packet().packet() instanceof Packets.WorldTransactionSend
+            || event.packet().packet() instanceof Packets.WorldTransactionAck);
+
     for(Timeline.Event event:timeline.events()) {
       var packet=event.packet().packet();
       long tick=event.serverTick();
-      if(packet instanceof Packets.ChunkData data) history.chunkData(tick,data.chunk(),data.blocks());
-      else if(packet instanceof Packets.ChunkStates states) history.chunkStates(tick,states.chunk(),states.states());
-      else if(packet instanceof Packets.ChunkUnload unload) { history.chunkUnloaded(tick,unload.chunk()); history.stateChunkUnloaded(tick,unload.chunk()); }
-      else if(packet instanceof Packets.BlockChange change) history.blockChanged(tick,change.position(),change.block());
-      else if(packet instanceof Packets.BlockStateChange change) history.blockStateChanged(tick,change.position(),change.state());
-      else if(packet instanceof Packets.UnsupportedBlockStateChange change) history.blockStateChanged(tick,change.position(),change.state());
+
+      if(!hasTransactionEvidence) {
+        // Backward-compatible captures that predate the transaction journal.
+        if(packet instanceof Packets.ChunkData data) history.chunkData(tick,data.chunk(),data.blocks());
+        else if(packet instanceof Packets.ChunkStates states) history.chunkStates(tick,states.chunk(),states.states());
+        else if(packet instanceof Packets.ChunkUnload unload) { history.chunkUnloaded(tick,unload.chunk()); history.stateChunkUnloaded(tick,unload.chunk()); }
+        else if(packet instanceof Packets.BlockChange change) history.blockChanged(tick,change.position(),change.block());
+        else if(packet instanceof Packets.BlockStateChange change) history.blockStateChanged(tick,change.position(),change.state());
+        else if(packet instanceof Packets.UnsupportedBlockStateChange change) history.blockStateChanged(tick,change.position(),change.state());
+        continue;
+      }
+
+      if(packet instanceof Packets.WorldTransactionSend send) {
+        history.openStateTransaction(send.id());
+      } else if(packet instanceof Packets.WorldTransactionAck ack) {
+        history.acknowledgeStateTransaction(ack.id());
+      } else if(packet instanceof Packets.ChunkStates states) {
+        history.queueStateChunk(tick, states.chunk(), states.states());
+      } else if(packet instanceof Packets.ChunkUnload unload) {
+        history.queueStateChunkUnload(tick, unload.chunk());
+      } else if(packet instanceof Packets.BlockStateChange change) {
+        history.queueStateBlock(tick, change.position(), change.state());
+      } else if(packet instanceof Packets.UnsupportedBlockStateChange change) {
+        history.queueStateBlock(tick, change.position(), change.state());
+      } else if(packet instanceof Packets.ChunkData data) {
+        Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> states=new HashMap<>();
+        for(Map.Entry<World.Pos,World.Block> entry:data.blocks().entrySet()) {
+          states.put(new dev.phantom.ac.world.Pos(entry.getKey().x(),entry.getKey().y(),entry.getKey().z()),
+              World.legacyBlockState(entry.getValue()));
+        }
+        history.queueStateChunk(tick,new dev.phantom.ac.world.Chunk(data.chunk().x(),data.chunk().z()),states);
+      } else if(packet instanceof Packets.BlockChange change) {
+        history.queueStateBlock(tick,
+            new dev.phantom.ac.world.Pos(change.position().x(),change.position().y(),change.position().z()),
+            World.legacyBlockState(change.block()));
+      }
     }
     return history;
   }
