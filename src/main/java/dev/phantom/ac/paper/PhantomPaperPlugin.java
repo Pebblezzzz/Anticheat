@@ -2,6 +2,7 @@ package dev.phantom.ac.paper;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -68,6 +69,7 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
   private ExecutorService chunkExecutor;
   private volatile boolean alertsEnabled;
   private volatile boolean broadcastAlerts;
+  private volatile boolean phase8Debug;
   private volatile int validationBudget;
 
   private final PacketListenerAbstract networkListener = new PacketListenerAbstract() {
@@ -136,6 +138,7 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     saveDefaultConfig();
     alertsEnabled = getConfig().getBoolean("alerts.enabled", true);
     broadcastAlerts = getConfig().getBoolean("alerts.broadcast", false);
+    phase8Debug = getConfig().getBoolean("debug.phase8", false);
     validationBudget = Math.max(1, getConfig().getInt("validation.candidate-budget", 4096));
     chunkExecutor = Executors.newSingleThreadExecutor(r -> {
       Thread thread = new Thread(r, "Phantom-ClientChunkDecoder");
@@ -145,6 +148,8 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     chunkTask = getServer().getScheduler().runTaskTimer(this, this::drainChunkQueue, 1L, 1L);
     int validationInterval = Math.max(1, getConfig().getInt("validation.interval-ticks", 10));
     validationTask = getServer().getScheduler().runTaskTimerAsynchronously(this, this::evaluateCapturesAsync, validationInterval, validationInterval);
+    getLogger().info("Phase 8 live validation enabled: alerts=" + alertsEnabled + ", debug=" + phase8Debug
+        + ", intervalTicks=" + validationInterval + ", candidateBudget=" + validationBudget);
   }
 
   @Override public void onDisable() {
@@ -204,13 +209,17 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
       }
       capture.packets.add(new RawPacket(pending.sequence(), pending.receivedNanos(),
           new Packets.ChunkStates(new dev.phantom.ac.world.Chunk(pending.column.getX(), pending.column.getZ()), states)));
+      if (phase8Debug && capture.decodedChunkLogCounter.incrementAndGet() <= 8) {
+        getLogger().info("[Phase8][CHUNK] seq=" + pending.sequence() + " chunk=" + pending.column.getX() + "," + pending.column.getZ()
+            + " nonAirStates=" + states.size() + " clientVersion=" + pending.clientVersion);
+      }
     } catch (RuntimeException failure) {
-      getLogger().warning("client chunk decode failed for " + pending.column.getX() + "," + pending.column.getZ() + ": " + failure.getClass().getSimpleName());
+      getLogger().warning("client chunk decode failed for " + pending.column.getX() + "," + pending.column.getZ() + ": " + failure.getClass().getSimpleName()
+          + (failure.getMessage() == null ? "" : " - " + failure.getMessage()));
     }
   }
 
   private void evaluateCapturesAsync() {
-    if (!alertsEnabled) return;
     for (Map.Entry<UUID, Capture> entry : captures.entrySet()) {
       Capture capture = entry.getValue();
       if (!capture.validationRunning.compareAndSet(false, true)) continue;
@@ -223,6 +232,7 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
       try {
         Timeline.Snapshot timeline = Timeline.assign(new Packets.Normalizer().normalize(raw), capture.epochNanos, 50_000_000L);
         Phase8LiveValidation.Report report = Phase8LiveValidation.analyze(playerName, timeline, validationBudget, Phase7Timing.Config.defaultConfig());
+        if (phase8Debug) logPhase8Run(playerName, capture, raw, timeline, report, "scheduled");
         getServer().getScheduler().runTask(this, () -> applyPhase8Result(playerId, capture, report));
       } catch (RuntimeException failure) {
         capture.validationRunning.set(false);
@@ -246,6 +256,14 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
           accumulated.alert().ifPresent(alert -> sendOperatorAlert(alert.message(), broadcastAlerts));
         }
         capture.processedPhase8Results = report.results().size();
+        if (phase8Debug) {
+          Phase8MovementValidation.State state = capture.phase8Accumulator.players().get(player.getName() + "/MOVEMENT_REACHABILITY");
+          getLogger().info("[Phase8][ACCUM] player=" + player.getName() + " processed=" + capture.processedPhase8Results
+              + " consecutiveImpossible=" + (state == null ? 0 : state.consecutiveImpossible())
+              + " supportingImpossible=" + (state == null ? 0 : state.supportingImpossible())
+              + " uncertaintyPeriods=" + (state == null ? 0 : state.uncertaintyPeriods())
+              + " recoveries=" + (state == null ? 0 : state.recoveries()));
+        }
       }
     } finally {
       capture.validationRunning.set(false);
@@ -287,6 +305,7 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
         try {
           Timeline.Snapshot timeline = Timeline.assign(new Packets.Normalizer().normalize(raw), captureEpoch, 50_000_000L);
           Phase8LiveValidation.Report report = Phase8LiveValidation.analyze(playerName, timeline, validationBudget, Phase7Timing.Config.defaultConfig());
+          logPhase8Run(playerName, capture, raw, timeline, report, "manual");
           getServer().getScheduler().runTask(this, () -> sendPhase8Diagnostic(sender, playerName, capture, report));
         } catch (RuntimeException failure) {
           String detail = failure.getClass().getSimpleName() + (failure.getMessage() == null ? "" : ": " + failure.getMessage());
@@ -313,6 +332,39 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     report.alerts().stream().limit(8).forEach(alert -> sender.sendMessage("[" + alert.severity() + "/" + alert.category() + "] tick " + alert.serverTick() + ": " + alert.message()));
     if (report.alerts().size() > 8) sender.sendMessage("… " + (report.alerts().size() - 8) + " more alerts omitted.");
     return true;
+  }
+
+  private void logPhase8Run(String playerName, Capture capture, List<RawPacket> raw,
+                            Timeline.Snapshot timeline, Phase8LiveValidation.Report report, String source) {
+    long duplicate = timeline.events().stream().filter(e -> e.packet().flags().contains(Packets.PacketFlag.DUPLICATE)).count();
+    long outOfOrder = timeline.events().stream().filter(e -> e.packet().flags().contains(Packets.PacketFlag.OUT_OF_ORDER)).count();
+    long gaps = timeline.events().stream().filter(e -> e.packet().flags().contains(Packets.PacketFlag.SEQUENCE_GAP)).count();
+    long beforeEpoch = timeline.events().stream().filter(e -> e.packet().flags().contains(Packets.PacketFlag.BEFORE_CAPTURE_EPOCH)).count();
+    Map<Class<?>, Integer> packetTypes = new LinkedHashMap<>();
+    for (Timeline.Event event : timeline.events()) packetTypes.merge(event.packet().packet().getClass(), 1, Integer::sum);
+    getLogger().info("[Phase8][RUN] source=" + source + " player=" + playerName + " raw=" + raw.size()
+        + " timelineEvents=" + timeline.events().size() + " moves=" + report.movementObservations()
+        + " possible=" + report.possible() + " uncertain=" + report.uncertain() + " impossible=" + report.impossible()
+        + " chunksSeen=" + capture.chunkPackets.get() + " chunksDecoded=" + capture.decodedChunkLogCounter.get()
+        + " chunkQueue=" + capture.chunkQueue.size()
+        + " flags{duplicate=" + duplicate + ",outOfOrder=" + outOfOrder + ",gaps=" + gaps + ",beforeEpoch=" + beforeEpoch + "}"
+        + " packetTypes=" + packetTypes.entrySet().stream().map(e -> e.getKey().getSimpleName() + "=" + e.getValue()).toList());
+
+    int logged = 0;
+    for (Phase8MovementValidation.Result result : report.results()) {
+      if (result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE && logged >= 1) continue;
+      Phase8MovementValidation.Evidence evidence = result.evidence();
+      getLogger().info("[Phase8][OBS] verdict=" + result.verdict()
+          + " tick=" + evidence.serverTick()
+          + " clientTicks=" + evidence.clientTickMin() + ".." + evidence.clientTickMax()
+          + " candidates=" + evidence.reachableCandidateCount()
+          + " matches=" + evidence.matchingCandidateCount()
+          + " eliminated=" + evidence.candidatesEliminated()
+          + " reason=" + evidence.eliminationReason()
+          + " uncertainty=" + evidence.uncertaintySources()
+          + " diagnostics=" + evidence.simulationDiagnostics());
+      if (++logged >= 6) break;
+    }
   }
 
   private void sendPhase8Diagnostic(CommandSender sender, String playerName, Capture capture,
@@ -396,6 +448,7 @@ public final class PhantomPaperPlugin extends JavaPlugin implements Listener {
     final long epochNanos;
     final AtomicLong sequence = new AtomicLong();
     final AtomicLong chunkPackets = new AtomicLong();
+    final AtomicLong decodedChunkLogCounter = new AtomicLong();
     final Queue<PendingChunk> chunkQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
     final List<RawPacket> packets = Collections.synchronizedList(new ArrayList<>());
     Phase8MovementValidation.Accumulator phase8Accumulator = Phase8MovementValidation.Accumulator.empty();
