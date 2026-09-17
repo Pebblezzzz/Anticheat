@@ -1,8 +1,7 @@
 name: Temporary repair runner for PR 13
 
 on:
-  pull_request_target:
-    types: [opened, synchronize, reopened]
+  push:
     branches: [ main ]
 
 permissions:
@@ -10,13 +9,13 @@ permissions:
 
 jobs:
   repair:
-    if: github.event.pull_request.number == 13 && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.head_commit.message != 'Fix Phase 8 under-detection and live-state correctness' && github.event.head_commit.message != 'Remove temporary repair runner'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: main
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
@@ -25,32 +24,21 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+      - name: Get repair scripts from PR branch
+        run: |
+          git fetch origin phase8-hardening-2026-09-17
+          git checkout origin/phase8-hardening-2026-09-17 -- tools/apply-hardening.py tools/fix-hardening-output.py
       - name: Apply repair
         run: |
           python3 tools/apply-hardening.py
           python3 tools/fix-hardening-output.py
-      - name: Verify repaired sources
+      - name: Verify repaired main
         run: mvn -B test package
-      - name: Commit repaired sources to PR branch
-        env:
-          BRANCH: ${{ github.event.pull_request.head.ref }}
+      - name: Commit repaired main
         run: |
+          rm -f tools/apply-hardening.py tools/fix-hardening-output.py .github/workflows/repair-hardening.yml .github/workflows/temporary-repair-pr13.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          rm -f tools/apply-hardening.py tools/fix-hardening-output.py .github/workflows/repair-hardening.yml
           git add -A
-          if git diff --cached --quiet; then
-            echo 'No repair changes generated.'
-          else
-            git commit -m 'Fix Phase 8 under-detection and live-state correctness'
-            git push origin HEAD:"$BRANCH"
-          fi
-      - name: Remove temporary runner from main
-        run: |
-          git fetch origin main
-          git checkout main
-          git pull --ff-only origin main
-          rm -f .github/workflows/temporary-repair-pr13.yml
-          git add -A
-          git commit -m 'Remove temporary repair runner' || true
+          git commit -m 'Fix Phase 8 under-detection and live-state correctness'
           git push origin main
