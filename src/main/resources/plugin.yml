@@ -7,8 +7,9 @@ depend:
   - packetevents
 commands:
   phantom:
-    description: Inspect a capture or its non-enforcing diagnostic alerts
+    description: Inspect captures and targeted Phase 8 diagnostics
     permission: phantom.admin
 permissions:
   phantom.admin:
+    description: Inspect captures and control Phantom debug diagnostics
     default: op
