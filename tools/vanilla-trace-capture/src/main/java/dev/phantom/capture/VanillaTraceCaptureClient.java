@@ -1,9 +1,10 @@
 package dev.phantom.capture;
 
-import net.fabricmc.api.ClientModInitializer;
+import net.minecraft.client.ClientModInitializer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.EntityPose;
+import net.minecraft.entity.MovementType;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.effect.StatusEffectInstance;
@@ -24,10 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-/**
- * Recorder for a real 1.21.11 client. It only observes vanilla state; scenario
- * setup/input driving lives in the separate controlled driver.
- */
+/** Recorder for a real 1.21.11 client; all movement values are read from vanilla. */
 public final class VanillaTraceCaptureClient implements ClientModInitializer {
     public static final String MAGIC = "# phantom-phase5-trace version=2 protocol=minecraft-java-1.21.11 format=tsv";
     public static final String HEADER = "tick\tclient_tick\treceive_nanos\tx\ty\tz\tvx\tvy\tvz\tyaw\tpitch\ton_ground\tforward\tstrafe\tjump\tsprint\tsneak\tpose\tgamemode\tfluid\tsubmerged\tclimbable\tgliding\tbase_movement_speed\tmodifiers\tspeed_amp\tslowness_amp\tjump_boost_amp\tlevitation\tslow_falling\tknockback_x\tknockback_y\tknockback_z\tvelocity_packet\tcorrection_id\tcorrection_pending\tworld_identity\tworld_tick\tcollision\tstep_attempted\tstep_succeeded\tcollision_x\tcollision_y\tcollision_z\tinput_source\tclient_version\tmissing_fields";
@@ -44,6 +42,11 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
     private static long observedCorrectionId = -1;
     private static boolean observedCorrectionPending;
     private static PlayerInput observedPreTickInput;
+    private static boolean observedCollisionX;
+    private static boolean observedCollisionY;
+    private static boolean observedCollisionZ;
+    private static boolean observedStepAttempted;
+    private static boolean observedStepSucceeded;
 
     public VanillaTraceCaptureClient() {}
 
@@ -55,19 +58,16 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
     public static final class CaptureRuntime {
         private CaptureRuntime() {}
         private static String phaseLabel() {
-            if ("corpus".equalsIgnoreCase(System.getProperty("phantom.capture.mode", "legacy"))) return VanillaCorpusScenarioDriver.phaseLabel();
-            return ControlledPhase5ScenarioDriver.phaseLabel();
+            return "corpus".equalsIgnoreCase(System.getProperty("phantom.capture.mode", "legacy"))
+                    ? VanillaCorpusScenarioDriver.phaseLabel()
+                    : ControlledPhase5ScenarioDriver.phaseLabel();
         }
 
         static synchronized void initialize() {
             if (writer != null) return;
-            tick = 0;
-            captureClientTick = 0;
-            observedVelocityPacket = Vec3d.ZERO;
-            observedVelocityPacketId = -1;
-            observedCorrectionId = -1;
-            observedCorrectionPending = false;
-            observedPreTickInput = null;
+            tick = 0; captureClientTick = 0; observedVelocityPacket = Vec3d.ZERO; observedVelocityPacketId = -1;
+            observedCorrectionId = -1; observedCorrectionPending = false; observedPreTickInput = null;
+            resetMoveObservation();
             String output = System.getProperty(PROP_OUTPUT, "phase5-vanilla-capture-" + Instant.now().toString().replace(':', '-') + ".tsv");
             String events = System.getProperty(PROP_EVENTS, output.replaceFirst("(?i)\\.tsv$", "-events.tsv"));
             try {
@@ -77,18 +77,20 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
                 Path eventPath = Path.of(events).toAbsolutePath();
                 if (eventPath.getParent() != null) Files.createDirectories(eventPath.getParent());
                 eventWriter = Files.newBufferedWriter(eventPath, StandardCharsets.UTF_8);
-                writer.write(MAGIC); writer.newLine();
-                writer.write("# source_id=vanilla-client-1.21.11"); writer.newLine();
-                writer.write("# captured_at_utc=" + Instant.now()); writer.newLine();
-                writer.write(HEADER); writer.newLine();
+                writer.write(MAGIC); writer.newLine(); writer.write("# source_id=vanilla-client-1.21.11"); writer.newLine();
+                writer.write("# captured_at_utc=" + Instant.now()); writer.newLine(); writer.write(HEADER); writer.newLine();
                 eventWriter.write("# phantom-phase5-events version=1 protocol=minecraft-java-1.21.11 format=tsv"); eventWriter.newLine();
-                eventWriter.write("# captured_at_utc=" + Instant.now()); eventWriter.newLine();
-                eventWriter.write(EVENT_HEADER); eventWriter.newLine();
+                eventWriter.write("# captured_at_utc=" + Instant.now()); eventWriter.newLine(); eventWriter.write(EVENT_HEADER); eventWriter.newLine();
                 writer.flush(); eventWriter.flush();
             } catch (IOException e) { throw new IllegalStateException("Unable to open Phase 5 capture output", e); }
         }
 
-        /** Called at the HEAD of ClientPlayerEntity.tick, before vanilla consumes the input. */
+        /** Start a new measured player tick. */
+        public static synchronized void beginObservationTick(ClientPlayerEntity player) {
+            resetMoveObservation();
+        }
+
+        /** Input is sampled at the HEAD of the same vanilla player tick being measured. */
         public static synchronized void observePreTickInput(ClientPlayerEntity player) {
             if (writer == null || player == null) return;
             observedPreTickInput = player.input.playerInput;
@@ -99,7 +101,32 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
                     "sneak=" + observedPreTickInput.sneak());
         }
 
+        /** Records the exact vanilla move request and resulting displacement for this player. */
+        public static synchronized void observeMoveResult(MovementType type, Vec3d requested, Vec3d actual, boolean groundBefore, ClientPlayerEntity player) {
+            if (writer == null) return;
+            boolean significantX = Math.abs(actual.x - requested.x) > 1.0E-7;
+            boolean significantY = Math.abs(actual.y - requested.y) > 1.0E-7;
+            boolean significantZ = Math.abs(actual.z - requested.z) > 1.0E-7;
+            observedCollisionX |= significantX && Math.abs(requested.x) > 1.0E-7;
+            observedCollisionZ |= significantZ && Math.abs(requested.z) > 1.0E-7;
+            observedCollisionY |= significantY && Math.abs(requested.y) > 1.0E-7;
+
+            // Entity.move performs the step retry internally. A move from a grounded
+            // state with horizontal demand and positive Y displacement beyond the
+            // requested Y component is directly observable evidence of a successful
+            // step candidate. We retain the exact requested/result pair in events.
+            boolean horizontalDemand = Math.abs(requested.x) > 1.0E-7 || Math.abs(requested.z) > 1.0E-7;
+            if (type == MovementType.SELF && groundBefore && horizontalDemand && actual.y > requested.y + 1.0E-7) {
+                observedStepAttempted = true;
+                observedStepSucceeded = true;
+            }
+            writeEvent(System.nanoTime(), captureClientTick, "MOVE_COLLISION_OBSERVATION",
+                    requested.x, requested.y, requested.z, actual.x, actual.y, actual.z, type.ordinal(),
+                    "ground_before=" + groundBefore + ",ground_after=" + player.isOnGround());
+        }
+
         public static synchronized void recordForMixin(MinecraftClient client, ClientPlayerEntity player) { record(client, player); }
+
         static synchronized void record(MinecraftClient client, ClientPlayerEntity player) {
             if (writer == null || client.world == null) return;
             PlayerInput input = observedPreTickInput != null ? observedPreTickInput : player.input.playerInput;
@@ -120,29 +147,18 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
             int slownessAmp = amplifier(player.getStatusEffect(StatusEffects.SLOWNESS));
             int jumpAmp = amplifier(player.getStatusEffect(StatusEffects.JUMP_BOOST));
             long clientTick = ++captureClientTick;
-            long worldTick = client.world.getTime();
-            tick++;
+            long worldTick = client.world.getTime(); tick++;
             boolean velocityPacket = observedVelocityPacketId >= 0;
             long correctionId = observedCorrectionId;
             boolean correctionPending = observedCorrectionPending;
-            boolean collision = player.horizontalCollision || player.verticalCollision;
-
-            // These internals are not exposed as a stable observation through the
-            // current mixin surface. Parseable sentinel values remain explicit via
-            // missing_fields rather than being presented as observed false/zero.
-            missing.add("step_attempted");
-            missing.add("step_succeeded");
-            missing.add("collision_x");
-            missing.add("collision_y");
-            missing.add("collision_z");
-            // A velocity packet is observed, but it is not automatically semantic
-            // "knockback". Keep the ambiguity explicit until a knockback-specific
-            // observation point is added.
-            missing.add("knockback_x");
-            missing.add("knockback_y");
-            missing.add("knockback_z");
             if (!velocityPacket) missing.add("correction_id");
+            // Pending state is not represented by an existing authoritative client
+            // hook; events remain the source of truth until a C2S confirm hook is
+            // added. Do not manufacture its value in the row.
             missing.add("correction_pending");
+            missing.remove("step_attempted"); missing.remove("step_succeeded");
+            missing.remove("collision_x"); missing.remove("collision_y"); missing.remove("collision_z");
+            missing.add("knockback_x"); missing.add("knockback_y"); missing.add("knockback_z");
 
             String inputSource = (observedPreTickInput != null ? "capture-pre-tick:" : "capture-fallback-post-tick:") + phaseLabel();
             String row = String.join("\t",
@@ -152,49 +168,42 @@ public final class VanillaTraceCaptureClient implements ClientModInitializer {
                     Integer.toString(input.forward() && !input.backward() ? 1 : input.backward() && !input.forward() ? -1 : 0),
                     Integer.toString(input.right() && !input.left() ? 1 : input.left() && !input.right() ? -1 : 0),
                     Boolean.toString(input.jump()), Boolean.toString(player.isSprinting()), Boolean.toString(input.sneak()),
-                    player.getPose().name(), gamemode, fluid, Boolean.toString(player.isSubmergedInWater()),
-                    Boolean.toString(player.isClimbing()), Boolean.toString(player.getPose() == EntityPose.GLIDING),
-                    d(baseSpeed), modifiers, Integer.toString(speedAmp), Integer.toString(slownessAmp), Integer.toString(jumpAmp),
+                    player.getPose().name(), gamemode, fluid, Boolean.toString(player.isSubmergedInWater()), Boolean.toString(player.isClimbing()),
+                    Boolean.toString(player.getPose() == EntityPose.GLIDING), d(baseSpeed), modifiers,
+                    Integer.toString(speedAmp), Integer.toString(slownessAmp), Integer.toString(jumpAmp),
                     Boolean.toString(player.hasStatusEffect(StatusEffects.LEVITATION)), Boolean.toString(player.hasStatusEffect(StatusEffects.SLOW_FALLING)),
                     d(observedVelocityPacket.x), d(observedVelocityPacket.y), d(observedVelocityPacket.z), Boolean.toString(velocityPacket),
                     Long.toString(correctionId), Boolean.toString(correctionPending), Phase5CaptureEncoding.worldIdentity(client), Long.toString(worldTick),
-                    Boolean.toString(collision), "false", "false", "false", "false", "false", inputSource, "1.21.11", String.join(",", missing));
+                    Boolean.toString(player.horizontalCollision || player.verticalCollision), Boolean.toString(observedStepAttempted), Boolean.toString(observedStepSucceeded),
+                    Boolean.toString(observedCollisionX), Boolean.toString(observedCollisionY), Boolean.toString(observedCollisionZ), inputSource, "1.21.11", String.join(",", missing));
             try { writer.write(row); writer.newLine(); writer.flush(); }
             catch (IOException e) { throw new IllegalStateException("Unable to write Phase 5 capture row", e); }
+            observedVelocityPacket = Vec3d.ZERO; observedVelocityPacketId = -1; observedCorrectionId = -1; observedCorrectionPending = false; observedPreTickInput = null; resetMoveObservation();
+        }
 
-            observedVelocityPacket = Vec3d.ZERO;
-            observedVelocityPacketId = -1;
-            observedCorrectionId = -1;
-            observedCorrectionPending = false;
-            observedPreTickInput = null;
+        private static void resetMoveObservation() {
+            observedCollisionX = false; observedCollisionY = false; observedCollisionZ = false; observedStepAttempted = false; observedStepSucceeded = false;
         }
 
         public static synchronized void recordVelocityPacket(EntityVelocityUpdateS2CPacket packet) {
             MinecraftClient client = MinecraftClient.getInstance();
             if (writer == null || client.player == null || packet.getEntityId() != client.player.getId()) return;
-            observedVelocityPacket = packet.getVelocity();
-            observedVelocityPacketId = packet.getEntityId();
+            observedVelocityPacket = packet.getVelocity(); observedVelocityPacketId = packet.getEntityId();
             Vec3d velocity = packet.getVelocity();
             writeEvent(System.nanoTime(), captureClientTick, "ENTITY_VELOCITY", 0, 0, 0, velocity.x, velocity.y, velocity.z, packet.getEntityId(), "server velocity packet");
         }
 
         public static synchronized void recordCorrectionPacket(PlayerPositionLookS2CPacket packet) {
             if (writer == null) return;
-            observedCorrectionId = packet.teleportId();
-            observedCorrectionPending = true;
+            observedCorrectionId = packet.teleportId(); observedCorrectionPending = true;
             Vec3d position = packet.change().position();
-            writeEvent(System.nanoTime(), captureClientTick, "POSITION_CORRECTION", position.x, position.y, position.z,
-                    packet.change().yaw(), packet.change().pitch(), 0, packet.teleportId(), "relatives=" + packet.relatives());
+            writeEvent(System.nanoTime(), captureClientTick, "POSITION_CORRECTION", position.x, position.y, position.z, packet.change().yaw(), packet.change().pitch(), 0, packet.teleportId(), "relatives=" + packet.relatives());
         }
 
-        private static void writeEvent(long nanos, long clientTick, String type, double x, double y, double z,
-                                       double auxX, double auxY, double auxZ, long auxId, String details) {
-            try {
-                eventWriter.write(String.join("\t", Long.toString(nanos), Long.toString(clientTick), type, d(x), d(y), d(z), d(auxX), d(auxY), d(auxZ), Long.toString(auxId), Phase5CaptureEncoding.escape(details)));
-                eventWriter.newLine(); eventWriter.flush();
-            } catch (IOException e) { throw new IllegalStateException("Unable to write Phase 5 event", e); }
+        private static void writeEvent(long nanos, long clientTick, String type, double x, double y, double z, double auxX, double auxY, double auxZ, long auxId, String details) {
+            try { eventWriter.write(String.join("\t", Long.toString(nanos), Long.toString(clientTick), type, d(x), d(y), d(z), d(auxX), d(auxY), d(auxZ), Long.toString(auxId), Phase5CaptureEncoding.escape(details))); eventWriter.newLine(); eventWriter.flush(); }
+            catch (IOException e) { throw new IllegalStateException("Unable to write Phase 5 event", e); }
         }
-
         private static int amplifier(StatusEffectInstance effect) { return effect == null ? -1 : effect.getAmplifier(); }
         private static String d(double value) { return Double.toString(value); }
     }
