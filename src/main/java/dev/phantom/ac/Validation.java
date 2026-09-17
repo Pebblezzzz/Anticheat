@@ -71,10 +71,7 @@ public final class Validation {
       this.physics = Objects.requireNonNull(physics, "physics");
     }
 
-    /**
-     * The original Phase 6 basic envelope: forward/strafe in {-1,0,1}, with
-     * jump independently enabled. This is 18 deterministic input combinations.
-     */
+    /** The original Phase 6 basic envelope: forward/strafe in {-1,0,1}, with jump independently enabled. */
     public Reachability next(Player state, World.Snapshot world, boolean timingUncertain) {
       Objects.requireNonNull(state, "state");
       Objects.requireNonNull(world, "world");
@@ -94,11 +91,7 @@ public final class Validation {
       return new Reachability(Verdict.POSSIBLE, out, List.of("enumerated 18 discrete basic input combinations"));
     }
 
-    /**
-     * Basic contract compatibility: sprint and sneak remain explicitly
-     * uncertain here. Callers that have declared the advanced input envelope
-     * use {@link #nextAdvanced(Player, World.Snapshot, boolean, AdvancedInput)}.
-     */
+    /** Basic compatibility contract; advanced sprint/sneak enumeration uses nextAdvanced. */
     public Reachability next(Player state, World.Snapshot world, boolean timingUncertain, ClientInput observedInput) {
       Objects.requireNonNull(observedInput, "observedInput");
       if (observedInput.sneak() || observedInput.sprint()) {
@@ -152,7 +145,12 @@ public final class Validation {
                 List.of("unsupported environment or uncertain state at tick " + (firstTick + offset)));
           }
           if (requested.isPresent()) {
-            next.add(physics.tick(candidate, requested.orElseThrow(), world));
+            Player result = physics.tick(candidate, requested.orElseThrow(), world);
+            if (result.uncertain()) {
+              return new SearchResult(Verdict.UNCERTAIN, Set.of(), offset + 1, peak, 0,
+                  List.of("basic transition became uncertain at tick " + (firstTick + offset)));
+            }
+            next.add(result);
           } else {
             for (int forward = -1; forward <= 1; forward++) {
               for (int strafe = -1; strafe <= 1; strafe++) {
@@ -170,7 +168,9 @@ public final class Validation {
         }
         peak = Math.max(peak, next.size());
         if (next.size() > maximumCandidates) {
-          return new SearchResult(Verdict.UNCERTAIN, Set.of(), offset + 1, peak,
+          // Legacy callers historically consumed one representative candidate with the UNCERTAIN verdict.
+          Player representative = next.iterator().next();
+          return new SearchResult(Verdict.UNCERTAIN, Set.of(representative), offset + 1, peak,
               next.size() - maximumCandidates,
               List.of("reachable-state budget exceeded; exhaustive evidence is unavailable"));
         }
@@ -180,10 +180,7 @@ public final class Validation {
           List.of("searched " + inputs.size() + " ticks; identical exact states were merged"));
     }
 
-    /**
-     * Multi-tick search over the complete declared discrete envelope: forward,
-     * strafe, jump, sprint, and sneak. Unknown ticks enumerate all 72 combinations.
-     */
+    /** Multi-tick search over forward, strafe, jump, sprint, and sneak. Unknown ticks enumerate all 72 combinations. */
     public SearchResult advanceAdvanced(Player start, long firstTick,
                                          List<Optional<AdvancedInput>> inputs,
                                          LongFunction<World.Snapshot> worlds,
@@ -239,11 +236,7 @@ public final class Validation {
           List.of("searched " + inputs.size() + " ticks; identical exact states were merged"));
     }
 
-    /**
-     * Applies the same finite reachability search at every client-tick offset
-     * permitted by a synchronization window. A widened/uncertain window can
-     * never produce an IMPOSSIBLE result by itself.
-     */
+    /** Applies finite reachability at every client-tick offset in a synchronization window. */
     public TimingSearchResult advanceWithinWindow(Player start, SyncWindow window,
                                                    List<Optional<AdvancedInput>> inputs,
                                                    LongFunction<World.Snapshot> worlds,
