@@ -320,15 +320,12 @@ public final class Phase8LiveValidation {
         box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()));
   }
 
+  /** Live movement packets declare position, rotation when present, and ground state when present. */
   private static boolean matchesObserved(Player candidate, Player observed) {
     return candidate.position().equals(observed.position())
-        && candidate.velocity().equals(observed.velocity())
         && Float.compare(candidate.yaw(), observed.yaw()) == 0
         && Float.compare(candidate.pitch(), observed.pitch()) == 0
-        && candidate.onGround() == observed.onGround()
-        && candidate.gamemode().equals(observed.gamemode())
-        && candidate.effects().equals(observed.effects())
-        && candidate.awaitingTeleport().isPresent() == observed.awaitingTeleport().isPresent();
+        && candidate.onGround() == observed.onGround();
   }
 
   private static Player simulationSafe(Player player) {
