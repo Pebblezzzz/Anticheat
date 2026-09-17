@@ -1,11 +1,9 @@
 package dev.phantom.ac;
 
 import dev.phantom.ac.Phase6Reachability.Candidate;
-import dev.phantom.ac.Phase6Reachability.InputConstraint;
 import dev.phantom.ac.Phase6Reachability.Observation;
 import dev.phantom.ac.Phase6Reachability.ObservedField;
 import dev.phantom.ac.Phase6Reachability.SearchResult;
-import dev.phantom.ac.Phase6Reachability.Context;
 import dev.phantom.ac.State.Player;
 import dev.phantom.ac.world.WorldSnapshot;
 
@@ -13,10 +11,9 @@ import java.io.Serializable;
 import java.util.*;
 
 /**
- * Phase 8 movement validation. This class is deliberately policy-light: it
- * interprets the Phase 6 reachable set, records deterministic evidence, and
- * emits observation-only operator alerts. It never simulates movement itself
- * and never performs punishment.
+ * Phase 8 movement validation. Interprets the Phase 6 reachable set, records
+ * deterministic evidence, and emits observation-only operator alerts. It never
+ * simulates movement itself and never performs punishment.
  */
 public final class Phase8MovementValidation {
   public static final String VERSION = "phase8-movement-validation-v1";
@@ -41,6 +38,7 @@ public final class Phase8MovementValidation {
   /** Immutable, replayable evidence for one movement observation. */
   public record Evidence(
       String schemaVersion,
+      Verdict verdict,
       String playerId,
       long serverTick,
       long clientTickMin,
@@ -67,6 +65,7 @@ public final class Phase8MovementValidation {
   ) implements Serializable {
     public Evidence {
       if (!VERSION.equals(schemaVersion)) throw new IllegalArgumentException("unsupported Phase 8 evidence schema");
+      Objects.requireNonNull(verdict);
       if (serverTick < 0 || clientTickMin < 0 || clientTickMax < clientTickMin) throw new IllegalArgumentException("invalid evidence ticks");
       Objects.requireNonNull(priorState); Objects.requireNonNull(observedState);
       Objects.requireNonNull(worldVersion); Objects.requireNonNull(worldReference);
@@ -79,7 +78,6 @@ public final class Phase8MovementValidation {
     }
   }
 
-  /** Compact deterministic witness retained in evidence rather than dumping every candidate. */
   public record CandidateSummary(long candidateId, long simulationTick, String position,
                                  String velocity, boolean onGround, String pose,
                                  String provenance) implements Serializable {}
@@ -97,18 +95,17 @@ public final class Phase8MovementValidation {
     Objects.requireNonNull(world); Objects.requireNonNull(timing); Objects.requireNonNull(inputAssumptions);
     Objects.requireNonNull(reachable); Objects.requireNonNull(replayReference);
 
-    List<String> timingReasons = new ArrayList<>(timing.reasons());
     List<String> uncertainty = new ArrayList<>();
-    if (timing.uncertain()) uncertainty.addAll(timingReasons);
+    if (timing.uncertain()) uncertainty.addAll(timing.reasons());
     if (reachable.verdict() == Phase6Reachability.Verdict.UNCERTAIN) {
       uncertainty.addAll(reachable.reasons());
-      Evidence evidence = evidence(playerId, serverTick, prior, observed, world, worldReference, timing,
+      Evidence evidence = evidence(Verdict.UNCERTAIN, playerId, serverTick, prior, observed, world, worldReference, timing,
           inputAssumptions, reachable.candidates().size(), 0, 0, "Phase 6 could not exhaustively represent the legitimate state space",
           OptionalLong.empty(), Optional.empty(), reachable.reasons(), uncertainty, replayReference);
       return new Result(Verdict.UNCERTAIN, evidence);
     }
     if (timing.uncertain()) {
-      Evidence evidence = evidence(playerId, serverTick, prior, observed, world, worldReference, timing,
+      Evidence evidence = evidence(Verdict.UNCERTAIN, playerId, serverTick, prior, observed, world, worldReference, timing,
           inputAssumptions, reachable.candidates().size(), 0, 0, "Phase 7 synchronization remains uncertain",
           OptionalLong.empty(), bestCandidate(reachable.candidates(), observed), reachable.reasons(), uncertainty, replayReference);
       return new Result(Verdict.UNCERTAIN, evidence);
@@ -120,7 +117,7 @@ public final class Phase8MovementValidation {
         ObservedField.TELEPORT_PENDING));
     Phase6Reachability.Evidence comparison = new Phase6Reachability(new Vanilla12111RichPhysics()).compare(reachable, observation);
     if (comparison.verdict() == Phase6Reachability.Verdict.POSSIBLE) {
-      Evidence evidence = evidence(playerId, serverTick, prior, observed, world, worldReference, timing,
+      Evidence evidence = evidence(Verdict.POSSIBLE, playerId, serverTick, prior, observed, world, worldReference, timing,
           inputAssumptions, reachable.candidates().size(), comparison.matchingCandidates(),
           Math.max(0, reachable.candidates().size() - comparison.matchingCandidates()),
           "at least one complete legitimate candidate explains every declared observed field",
@@ -128,21 +125,19 @@ public final class Phase8MovementValidation {
       return new Result(Verdict.POSSIBLE, evidence);
     }
 
-    long first = serverTick;
-    CandidateSummary closest = bestCandidate(reachable.candidates(), observed).orElse(null);
-    Evidence evidence = evidence(playerId, serverTick, prior, observed, world, worldReference, timing,
+    Evidence evidence = evidence(Verdict.IMPOSSIBLE, playerId, serverTick, prior, observed, world, worldReference, timing,
         inputAssumptions, reachable.candidates().size(), 0, reachable.candidates().size(),
         "all exhaustively modeled legitimate candidates disagree with the observed movement state",
-        OptionalLong.of(first), Optional.ofNullable(closest), comparison.reasons(), List.of(), replayReference);
+        OptionalLong.of(serverTick), bestCandidate(reachable.candidates(), observed), comparison.reasons(), List.of(), replayReference);
     return new Result(Verdict.IMPOSSIBLE, evidence);
   }
 
-  private static Evidence evidence(String playerId, long serverTick, Player prior, Player observed,
+  private static Evidence evidence(Verdict verdict, String playerId, long serverTick, Player prior, Player observed,
                                    WorldSnapshot world, String worldReference, Validation.SyncWindow timing,
                                    List<String> inputs, int candidates, int matches, int eliminated,
                                    String reason, OptionalLong first, Optional<CandidateSummary> closest,
                                    List<String> diagnostics, List<String> uncertainty, String replay) {
-    return new Evidence(VERSION, playerId, serverTick, timing.earliestClientTick(), timing.latestClientTick(),
+    return new Evidence(VERSION, verdict, playerId, serverTick, timing.earliestClientTick(), timing.latestClientTick(),
         prior, observed, Contracts.TARGET_VERSION, worldReference, inputs,
         timing.reasons(), candidates, matches, eliminated, reason, first, closest,
         diagnostics, uncertainty, PHASE5_VERSION, PHASE6_VERSION, PHASE7_VERSION, replay,
@@ -183,17 +178,14 @@ public final class Phase8MovementValidation {
       Objects.requireNonNull(evidence); Objects.requireNonNull(config);
       String key = evidence.playerId() + "/" + evidence.rule();
       State old = players.getOrDefault(key, State.empty());
-      State next;
-      if (evidence == null) throw new IllegalArgumentException("evidence required");
-      switch (verdict(evidence)) {
-        case IMPOSSIBLE -> next = old.impossible(evidence.serverTick());
-        case POSSIBLE -> next = old.recovered(evidence.serverTick());
-        case UNCERTAIN -> next = old.uncertain();
-        default -> throw new AssertionError();
-      }
+      State next = switch (evidence.verdict()) {
+        case IMPOSSIBLE -> old.impossible(evidence.serverTick());
+        case POSSIBLE -> old.recovered(evidence.serverTick());
+        case UNCERTAIN -> old.uncertain();
+      };
       Map<String, State> updated = new LinkedHashMap<>(players); updated.put(key, next);
       Optional<Alert> alert = Optional.empty();
-      if (config.alertsEnabled() && verdict(evidence) == Verdict.IMPOSSIBLE
+      if (config.alertsEnabled() && evidence.verdict() == Verdict.IMPOSSIBLE
           && next.consecutiveImpossible() >= config.minimumImpossibleObservations()
           && (next.lastAlertTick() < 0 || evidence.serverTick() - next.lastAlertTick() >= config.alertDebounceTicks())) {
         double confidence = Math.min(1.0, (double) next.supportingImpossible() / config.minimumImpossibleObservations());
@@ -203,11 +195,6 @@ public final class Phase8MovementValidation {
       }
       return new Accumulated(new Accumulator(updated), alert);
     }
-
-    private static Verdict verdict(Evidence evidence) { return evidence == null ? Verdict.UNCERTAIN : switch (evidence.eliminationReason()) {
-      case String s when s.startsWith("Phase 7 synchronization") || s.startsWith("Phase 6 could not") -> Verdict.UNCERTAIN;
-      default -> evidence.candidatesEliminated() > 0 && evidence.matchingCandidateCount() == 0 ? Verdict.IMPOSSIBLE : Verdict.POSSIBLE;
-    }; }
   }
 
   public record State(int consecutiveImpossible, int supportingImpossible, int uncertaintyPeriods,
