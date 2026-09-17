@@ -19,7 +19,6 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.Locale;
-import java.util.UUID;
 
 /** Full Phase 5 scenario fixture/driver. It prepares state and drives input; the recorder observes vanilla results. */
 public final class VanillaCorpusScenarioDriver {
@@ -37,7 +36,7 @@ public final class VanillaCorpusScenarioDriver {
             "knockback-ground","knockback-air","teleport-correction","teleport-water","glide","sleeping",
             "step-sprint-jump","water-jump","climb-jump","correction-after-knockback"
     };
-    private static final UUID ATTRIBUTE_MODIFIER_ID = UUID.fromString("6e4f7f83-7f7f-4f89-95a0-0cf36f5b2f51");
+    private static final Identifier ATTRIBUTE_MODIFIER_ID = Identifier.of("phantom", "phase5-movement");
     private static VanillaCorpusScenarioDriver INSTANCE;
     private String requestedScenario = NONE;
     private int index = -1;
@@ -125,7 +124,7 @@ public final class VanillaCorpusScenarioDriver {
         if (movement == null) return;
         movement.removeModifier(ATTRIBUTE_MODIFIER_ID);
         if (!id.equals("attribute-modifier")) return;
-        EntityAttributeModifier modifier = new EntityAttributeModifier(Identifier.of("phantom", "phase5-movement"), 0.035D, EntityAttributeModifier.Operation.ADD_VALUE);
+        EntityAttributeModifier modifier = new EntityAttributeModifier(ATTRIBUTE_MODIFIER_ID, 0.035D, EntityAttributeModifier.Operation.ADD_VALUE);
         movement.addTemporaryModifier(modifier);
     }
 
@@ -188,41 +187,25 @@ public final class VanillaCorpusScenarioDriver {
     }
 
     private static void configureInput(GameOptions o, String id, int t) {
-        boolean f = false, b = false, l = false, r = false, j = false, sneak = false, sprint = false;
-        switch (id) {
-            case "idle", "controlled-fall", "landing", "sleeping" -> { }
-            case "walk-forward", "water-surface", "deep-swimming", "water-sprint", "swim-transition", "lava", "speed-effect", "slowness-effect", "attribute-modifier", "teleport-correction", "teleport-water" -> f = true;
-            case "walk-backward" -> b = true;
-            case "strafe-left" -> l = true;
-            case "strafe-right" -> r = true;
-            case "diagonal" -> { f = true; l = true; }
-            case "sprint-forward" -> { f = true; sprint = true; }
-            case "sprint-strafe" -> { l = true; sprint = true; }
-            case "sprint-diagonal", "corner-sprint" -> { f = true; l = true; sprint = true; }
-            case "jump", "jump-boost", "water-jump" -> { f = true; j = t < 3; }
-            case "sprint-jump", "step-sprint-jump" -> { f = true; sprint = true; j = t < 3; }
-            case "repeated-jumps" -> { f = true; j = t % 32 < 3; }
-            case "controlled-ascent" -> { f = true; j = t < 3; }
-            case "controlled-apex", "ascent-apex-fall" -> f = true;
-            case "sneak" -> { f = true; sneak = true; }
-            case "slab-up", "stairs-up", "step-up", "partial-collision", "edge", "corner" -> f = true;
-            case "ladder", "ladder-sprint", "vines", "climb-jump" -> { f = true; sprint = id.equals("ladder-sprint"); j = id.equals("climb-jump") && t < 3; }
-            case "slow-falling", "levitation" -> f = true;
-            case "glide" -> { f = true; sprint = true; }
-            case "knockback-ground", "knockback-air", "correction-after-knockback" -> f = true;
+        boolean f=false,b=false,l=false,r=false,j=false,sneak=false,sprint=false;
+        switch(id){
+            case "idle","controlled-fall","landing","sleeping" -> { }
+            case "walk-forward","water-surface","deep-swimming","water-sprint","swim-transition","lava","speed-effect","slowness-effect","attribute-modifier","teleport-correction","teleport-water" -> f=true;
+            case "walk-backward" -> b=true; case "strafe-left" -> l=true; case "strafe-right" -> r=true; case "diagonal" -> {f=true;l=true;}
+            case "sprint-forward" -> {f=true;sprint=true;} case "sprint-strafe" -> {l=true;sprint=true;} case "sprint-diagonal","corner-sprint" -> {f=true;l=true;sprint=true;}
+            case "jump","jump-boost","water-jump" -> {f=true;j=t<3;} case "sprint-jump","step-sprint-jump" -> {f=true;sprint=true;j=t<3;} case "repeated-jumps" -> {f=true;j=t%32<3;}
+            case "controlled-ascent" -> {f=true;j=t<3;} case "controlled-apex","ascent-apex-fall" -> f=true;
+            case "sneak" -> {f=true;sneak=true;} case "slab-up","stairs-up","step-up","partial-collision","edge","corner" -> f=true;
+            case "ladder","ladder-sprint","vines","climb-jump" -> {f=true;sprint=id.equals("ladder-sprint");j=id.equals("climb-jump")&&t<3;}
+            case "slow-falling","levitation" -> f=true; case "glide" -> {f=true;sprint=true;} case "knockback-ground","knockback-air","correction-after-knockback" -> f=true;
             default -> { }
         }
-        apply(o, f, b, l, r, j, sneak, sprint);
+        apply(o,f,b,l,r,j,sneak,sprint);
     }
-
-    private static void fillFluid(ServerWorld world, net.minecraft.block.Block block, int z1, int z2, int y1, int y2) {
-        for (int z = z1; z <= z2; z++) for (int y = y1; y <= y2; y++) for (int x = -2; x <= 2; x++) world.setBlockState(new BlockPos(x, y, z), block.getDefaultState());
-    }
-    private static void apply(GameOptions o, boolean f, boolean b, boolean l, boolean r, boolean j, boolean sn, boolean sp) {
-        o.forwardKey.setPressed(f); o.backKey.setPressed(b); o.leftKey.setPressed(l); o.rightKey.setPressed(r); o.jumpKey.setPressed(j); o.sneakKey.setPressed(sn); o.sprintKey.setPressed(sp);
-    }
-    private static void release(GameOptions o) { apply(o, false, false, false, false, false, false, false); }
-    private static void cmd(IntegratedServer server, String command) { server.getCommandManager().executeWithPrefix(server.getCommandSource(), command); }
-    private static void cmd(CommandManager m, ServerCommandSource s, String command) { m.executeWithPrefix(s, command); }
-    private static int position(String id) { for (int i = 0; i < SCENARIOS.length; i++) if (SCENARIOS[i].equals(id)) return i; return -1; }
+    private static void fillFluid(ServerWorld world, net.minecraft.block.Block block, int z1,int z2,int y1,int y2){for(int z=z1;z<=z2;z++)for(int y=y1;y<=y2;y++)for(int x=-2;x<=2;x++)world.setBlockState(new BlockPos(x,y,z),block.getDefaultState());}
+    private static void apply(GameOptions o,boolean f,boolean b,boolean l,boolean r,boolean j,boolean sn,boolean sp){o.forwardKey.setPressed(f);o.backKey.setPressed(b);o.leftKey.setPressed(l);o.rightKey.setPressed(r);o.jumpKey.setPressed(j);o.sneakKey.setPressed(sn);o.sprintKey.setPressed(sp);}
+    private static void release(GameOptions o){apply(o,false,false,false,false,false,false,false);}
+    private static void cmd(IntegratedServer server,String command){server.getCommandManager().parseAndExecute(server.getCommandSource(),command);}
+    private static void cmd(CommandManager m,ServerCommandSource s,String command){m.parseAndExecute(s,command);}
+    private static int position(String id){for(int i=0;i<SCENARIOS.length;i++)if(SCENARIOS[i].equals(id))return i;return -1;}
 }
