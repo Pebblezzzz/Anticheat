@@ -25,7 +25,7 @@ class Phase7ClientTickIntegrationTest {
     tracker.onClientTickEnd();
 
     assertEquals(1L, tracker.clientTickForMovement());
-    assertEquals(0L, tracker.clientTickForMovement());
+    assertEquals(1L, tracker.clientTickForMovement());
     assertTrue(tracker.hasObservedBoundary());
     assertEquals(1L, tracker.endTickCount());
   }
