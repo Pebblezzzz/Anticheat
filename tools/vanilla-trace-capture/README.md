@@ -2,62 +2,79 @@
 
 This directory is the empirical Phase 5 capture harness. It targets exactly Minecraft Java Edition `1.21.11`, Java 21, Fabric Loader `0.18.2`, Yarn `1.21.11+build.4`, and Fabric Loom `1.14.10`.
 
-The harness is observation-only: it reads the real client's post-tick player state and observes inbound velocity/correction packets. It does not replace `travel`, alter input, alter collision, alter world state, or inject a substitute movement implementation.
+The **recorder** is observation-only: it reads the real client's causal pre-tick input, vanilla `move()` request/result, post-tick state, and packet traffic. The separate **corpus driver** prepares deterministic test fixtures and key state; it never substitutes for vanilla movement calculations.
 
 ## Exact-client procedure
 
-1. Install the official Minecraft Launcher and use the release installation for **Java Edition 1.21.11**. The official 1.21.11 release page states that the release is launched from the Minecraft Launcher; do not use a snapshot or release candidate for the corpus.
-2. Use a separate test game directory/world so the reference run cannot be contaminated by unrelated saves or mods.
-3. Build this capture harness from this directory with Java 21:
+1. Use the official Minecraft Launcher with the Java Edition `1.21.11` release. Do not use a snapshot or release candidate for the empirical reference.
+2. Use a separate test directory/world so reference runs are isolated from unrelated saves or gameplay mods.
+3. Build this capture project with Java 21:
 
 ```powershell
 .\gradlew.bat clean build
 ```
 
-4. Run the Loom client with capture explicitly enabled. **On Windows PowerShell, use Gradle's long-form project-property syntax**. This avoids the parsing behavior seen with short `-P...` arguments.
+4. Run one scenario in corpus mode:
 
 ```powershell
-.\gradlew.bat --project-prop=phantom.capture.enabled=true --project-prop=phantom.capture.output=C:\phase5\capture.tsv --project-prop=phantom.capture.events=C:\phase5\events.tsv runClient
+.\gradlew.bat --project-prop=phantom.capture.enabled=true --project-prop=phantom.capture.mode=corpus --project-prop=phantom.capture.scenario=walk-forward --project-prop=phantom.capture.output=C:\phase5\corpus\walk-forward\trace.tsv --project-prop=phantom.capture.events=C:\phase5\corpus\walk-forward\events.tsv runClient
 ```
 
-5. For an empirical corpus, each scenario must begin from a documented initial state. Record the exact Minecraft version, seed/world identity, player coordinates, rotation, gamemode, attributes/effects, relevant block/fluid geometry, and the scenario identifier.
-6. Exercise exactly one scenario at a time, holding the documented input for a fixed number of client ticks. Avoid resource packs, optimization mods, replay mods, shaders, or gameplay-changing client modifications.
-7. Stop the run only after the scenario's terminal tick has been captured. Preserve the TSV and event TSV together.
-8. Import and validate the trace using `Phase5VanillaTrace.read()` / `validate()`. Any unknown field must remain listed in `missing_fields`; do not replace it with guessed zero/false values.
+5. Or use the repository automation to run the complete manifest:
 
-## JAR and generated files
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File ..\phase5\run-vanilla-corpus.ps1
+```
 
-A successful build creates the capture mod JAR under:
+6. Each scenario must be isolated and start from its documented setup. Preserve the trace, packet-event TSV and generated metadata together.
+7. Import with `Phase5VanillaTrace.read()` / `validate()` and reject malformed or missing evidence. Unknown fields remain in `missing_fields`; they are never converted into guessed zero/false observations.
+
+## Observation points
+
+The recorder samples the same client player tick at three causal points:
+
+- `ClientPlayerEntity.tick` HEAD: player input before vanilla consumes it.
+- `ClientPlayerEntity.move` HEAD/RETURN: requested movement vector and the resulting vanilla displacement.
+- `ClientPlayerEntity.tick` TAIL: final player state after vanilla movement.
+
+Packet observers separately capture inbound `ENTITY_VELOCITY` and `POSITION_CORRECTION`, plus outgoing `TELEPORT_CONFIRM_C2S`. This preserves packet ordering/timing instead of pretending packet arrival and player state are the same instant.
+
+The move request/result evidence is retained as raw events. Collision and step columns are derived only from that observed vanilla movement call; the event stream makes the derivation inspectable.
+
+A velocity packet is not automatically labeled as semantic knockback. `knockback_x/y/z` remain explicitly missing until the corpus can associate a packet with a known knockback cause without guessing.
+
+## Corpus mode
+
+`phantom.capture.mode=corpus` activates `VanillaCorpusScenarioDriver`. The driver contains the complete Phase 5 scenario manifest, including:
+
+- idle, forward/backward/strafe/diagonal and sprint variants;
+- single, repeated, controlled-ascent/apex/fall and sprint jumps;
+- slabs, stairs, steps, partial collisions, edges, corners and sprint corners;
+- water surface/deep swimming/water sprint/transition and lava;
+- ladder, ladder sprint and vines;
+- speed, slowness, jump boost, slow falling, levitation and movement-speed attributes;
+- ground/air knockback and correction combinations;
+- teleport/correction, correction into water, gliding, sleeping;
+- step+sprint+jump, water+jump and climb+jump combinations.
+
+The driver performs only test-fixture preparation and input scheduling. Actual physics remains the Minecraft 1.21.11 client.
+
+## Generated files
+
+The corpus runner creates:
 
 ```text
-build\libs\
+C:\phase5\corpus\<scenario>\trace.tsv
+C:\phase5\corpus\<scenario>\events.tsv
+C:\phase5\corpus\<scenario>\metadata.json
 ```
 
-For the recommended Gradle `runClient` procedure, do **not** manually copy this JAR into your normal Minecraft `mods` directory. Loom starts the pinned development client and loads the project automatically.
+No generated trace is considered empirical unless the real Minecraft client actually produced it.
 
-The capture command above writes:
+## World/collision parity
 
-```text
-C:\phase5\capture.tsv
-C:\phase5\events.tsv
-```
+For replay, use `dev.phantom.ac.world.WorldSnapshot` and `Vanilla12111RichPhysics`. The rich path preserves block-state identity, neighbour-dependent voxel shapes and unloaded/unsupported coverage instead of reducing everything to the legacy block enum.
 
-These are the empirical reference files needed for Phase 5 parity validation.
+## Important boundary
 
-## What is captured
-
-The main TSV contains position, velocity, rotation, ground state, discrete keyboard input, sprint/sneak/jump state, resolved client pose, fluid state, submerged/climbing/gliding state, movement-speed base/modifiers, movement effects, world identity/tick, collision flags, input provenance, and client version.
-
-The companion event TSV records inbound `ENTITY_VELOCITY` and `POSITION_CORRECTION` packets with receive time and packet payload. These events are intentionally separate because packet arrival is not the same observation point as the post-player-tick state.
-
-`missing_fields` is mandatory for fields that cannot be reconstructed from observation alone. The current capture harness therefore does **not** claim that its placeholder values are real vanilla values for knockback, correction pending state, per-axis clipping, or step outcome.
-
-## Scenario corpus manifest
-
-Use `docs/phase5-vanilla-corpus/scenarios.tsv` as the required capture checklist. A scenario moves from `BLOCKED_BY_EXTERNAL_DATA` to `CAPTURED` only after an actual 1.21.11 run has produced a preserved trace.
-
-No repository-generated row is considered empirical evidence.
-
-## Why 1.21.11 is pinned
-
-Minecraft's official 1.21.11 release is the target release for this phase. Fabric documents that 1.21.11 is the last obfuscated release before the 26.1 versioning/unobfuscation transition, and the capture project consequently pins the exact 1.21.11 Minecraft artifact and mappings rather than following `latest`.
+The repository now contains the code and automation for the complete Phase 5 corpus. The only step that must happen outside this execution environment is launching a real Minecraft Java 1.21.11 client and generating the independent reference artifacts.
