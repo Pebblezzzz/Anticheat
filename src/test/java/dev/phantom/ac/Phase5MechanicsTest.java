@@ -17,9 +17,9 @@ import dev.phantom.ac.State.Player;
 class Phase5MechanicsTest {
   private static World.Snapshot air() {
     var stone=dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone",java.util.Map.of());
-    var b=World.Snapshot.builder(Contracts.TARGET_VERSION).loadChunk(-1,-1).loadChunk(-1,0).loadChunk(0,-1).loadChunk(0,0);
-    for(int x=-8;x<=8;x++)for(int z=-8;z<=8;z++)b.setBlock(x,-1,z,stone);
-    return b.build();
+    Map<World.Pos,World.Block> blocks=new java.util.LinkedHashMap<>();
+    for(int x=-8;x<=8;x++)for(int z=-8;z<=8;z++) blocks.put(new World.Pos(x,-1,z),World.Block.FULL);
+    return new World.Snapshot(blocks,Set.of(new World.Chunk(-1,-1),new World.Chunk(-1,0),new World.Chunk(0,-1),new World.Chunk(0,0)));
   }
   @Test void sprintAndSneakAreExplicitInputs() {
     var physics=new Vanilla12111Physics();
