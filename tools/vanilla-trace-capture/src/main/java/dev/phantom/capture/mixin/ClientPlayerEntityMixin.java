@@ -48,14 +48,19 @@ final class ClientPlayerEntityMixin {
         }
 
         if (phase.equals("part4:climbable") || phase.equals("part4:edge-corner")) {
-            if (!phantom$part4GeometryInjected) {
+            double expectedStartZ = phase.equals("part4:climbable") ? -38.0D : 142.0D;
+            boolean settledAtPhaseStart = player.isOnGround()
+                    && Math.abs(player.getY() - 64.0D) <= 0.75D
+                    && Math.abs(player.getZ() - expectedStartZ) <= 0.75D;
+
+            if (!phantom$part4GeometryInjected && settledAtPhaseStart) {
                 phantom$injectPart4Geometry(client, player, phase);
                 phantom$part4GeometryInjected = true;
             }
 
             if (phase.equals("part4:edge-corner")) {
-                boolean right = phantom$phaseTicks >= 25 && phantom$phaseTicks < 55;
-                boolean left = phantom$phaseTicks >= 55 && phantom$phaseTicks < 80;
+                boolean right = phantom$phaseTicks >= 31 && phantom$phaseTicks < 56;
+                boolean left = phantom$phaseTicks >= 56 && phantom$phaseTicks < 81;
                 client.options.rightKey.setPressed(right);
                 client.options.leftKey.setPressed(left);
                 client.options.forwardKey.setPressed(true);
@@ -83,16 +88,13 @@ final class ClientPlayerEntityMixin {
             ServerCommandSource s = server.getCommandSource();
             if (phase.equals("part4:climbable")) {
                 int ladderZ = z + 4;
-                int wallZ = ladderZ + 1;
-                cmd(m, s, "fill -1 64 " + (z + 20) + " 1 68 " + (z + 26) + " minecraft:air");
+                int wallZ = ladderZ - 1;
                 cmd(m, s, "fill -1 64 " + ladderZ + " 1 68 " + ladderZ + " minecraft:ladder[facing=south]");
                 cmd(m, s, "fill -1 64 " + wallZ + " 1 68 " + wallZ + " minecraft:stone");
                 System.out.println("[Phase5] climbable geometry injected ladder_z=" + ladderZ + " wall_z=" + wallZ);
             } else {
                 int startZ = z + 5;
                 int cornerZ = startZ + 13;
-                cmd(m, s, "fill 4 64 " + (z + 20) + " 4 68 " + (z + 70) + " minecraft:air");
-                cmd(m, s, "fill 4 64 " + (z + 45) + " 8 68 " + (z + 45) + " minecraft:air");
                 cmd(m, s, "fill -1 64 " + startZ + " 1 66 " + cornerZ + " minecraft:stone");
                 cmd(m, s, "fill 1 64 " + cornerZ + " 6 66 " + cornerZ + " minecraft:stone");
                 System.out.println("[Phase5] edge-corner geometry injected start_z=" + startZ + " corner_z=" + cornerZ);
