@@ -3,68 +3,24 @@ package dev.phantom.ac;
 import java.io.Serializable;
 import java.util.*;
 
-/**
- * Canonical Phase 5 empirical-validation scenario manifest.
- *
- * <p>The catalog is deliberately broader than the currently captured subset.
- * A scenario entry describes what must be exercised by a real 1.21.11 client;
- * it does not manufacture a vanilla result.</p>
- */
+/** Canonical Phase 5 empirical-validation scenario manifest. */
 public final class Phase5ScenarioCatalog {
     private Phase5ScenarioCatalog() {}
 
     public enum InputPattern {
-        IDLE,
-        FORWARD,
-        BACKWARD,
-        STRAFE_LEFT,
-        STRAFE_RIGHT,
-        DIAGONAL,
-        SPRINT_FORWARD,
-        SPRINT_STRAFE,
-        SPRINT_DIAGONAL,
-        JUMP,
-        SPRINT_JUMP,
-        REPEATED_JUMP,
-        SNEAK,
-        ASCENT_APEX_FALL,
-        WATER,
-        DEEP_SWIM,
-        LAVA,
-        CLIMB,
-        CLIMB_SPRINT,
-        GLIDE,
-        KNOCKBACK,
-        CORRECTION,
-        SLEEPING
+        IDLE, FORWARD, BACKWARD, STRAFE_LEFT, STRAFE_RIGHT, DIAGONAL,
+        SPRINT_FORWARD, SPRINT_STRAFE, SPRINT_DIAGONAL, JUMP, SPRINT_JUMP,
+        REPEATED_JUMP, SNEAK, ASCENT_APEX_FALL, WATER, DEEP_SWIM, LAVA,
+        CLIMB, CLIMB_SPRINT, GLIDE, KNOCKBACK, CORRECTION, SLEEPING
     }
 
     public enum WorldSetup {
-        FLAT_GROUND,
-        SLAB,
-        STAIRS,
-        STEP,
-        EDGE,
-        CORNER,
-        PARTIAL_COLLISION,
-        WATER_SURFACE,
-        DEEP_WATER,
-        LAVA,
-        LADDER,
-        VINE,
-        AIRBORNE,
-        NONE
+        FLAT_GROUND, SLAB, STAIRS, STEP, EDGE, CORNER, PARTIAL_COLLISION,
+        WATER_SURFACE, DEEP_WATER, LAVA, LADDER, VINE, AIRBORNE, NONE
     }
 
-    public record Scenario(
-            String id,
-            String category,
-            int minimumTicks,
-            InputPattern input,
-            WorldSetup world,
-            Set<String> requiredObservations,
-            String purpose
-    ) implements Serializable {
+    public record Scenario(String id, String category, int minimumTicks, InputPattern input,
+                           WorldSetup world, Set<String> requiredObservations, String purpose) implements Serializable {
         public Scenario {
             if (id == null || id.isBlank()) throw new IllegalArgumentException("id is required");
             if (category == null || category.isBlank()) throw new IllegalArgumentException("category is required");
@@ -100,7 +56,10 @@ public final class Phase5ScenarioCatalog {
                 s("jump", "jump", InputPattern.JUMP, WorldSetup.FLAT_GROUND, 80, KINEMATICS, "Single jump launch, ascent and landing."),
                 s("sprint-jump", "jump", InputPattern.SPRINT_JUMP, WorldSetup.FLAT_GROUND, 100, KINEMATICS, "Sprint jump trajectory."),
                 s("repeated-jumps", "jump", InputPattern.REPEATED_JUMP, WorldSetup.FLAT_GROUND, 180, KINEMATICS, "Repeated jump/landing cycles."),
-                s("ascent-apex-fall", "jump", InputPattern.ASCENT_APEX_FALL, WorldSetup.FLAT_GROUND, 90, KINEMATICS, "Explicit sampled ascent, apex and descent."),
+                s("controlled-ascent", "jump", InputPattern.ASCENT_APEX_FALL, WorldSetup.FLAT_GROUND, 60, KINEMATICS, "Controlled jump ascent sample."),
+                s("controlled-apex", "jump", InputPattern.ASCENT_APEX_FALL, WorldSetup.FLAT_GROUND, 60, KINEMATICS, "Controlled apex sample."),
+                s("controlled-fall", "jump", InputPattern.ASCENT_APEX_FALL, WorldSetup.AIRBORNE, 80, KINEMATICS, "Controlled airborne fall sample."),
+                s("ascent-apex-fall", "jump", InputPattern.ASCENT_APEX_FALL, WorldSetup.FLAT_GROUND, 90, KINEMATICS, "Combined ascent, apex and descent trace."),
                 s("landing", "jump", InputPattern.ASCENT_APEX_FALL, WorldSetup.FLAT_GROUND, 100, KINEMATICS, "Controlled fall followed by landing and ground friction."),
                 s("sneak", "pose", InputPattern.SNEAK, WorldSetup.FLAT_GROUND, 80, KINEMATICS, "Sneaking movement and crouch pose transition."),
                 s("slab-up", "collision", InputPattern.FORWARD, WorldSetup.SLAB, 100, KINEMATICS, "Half-block collision and upward movement."),
@@ -139,17 +98,9 @@ public final class Phase5ScenarioCatalog {
 
     public static Set<String> requiredIds() {
         Set<String> ids = new LinkedHashSet<>();
-        for (Scenario scenario : required()) {
-            if (!ids.add(scenario.id())) throw new IllegalStateException("duplicate Phase 5 scenario id: " + scenario.id());
-        }
+        for (Scenario scenario : required()) if (!ids.add(scenario.id())) throw new IllegalStateException("duplicate Phase 5 scenario id: " + scenario.id());
         return Collections.unmodifiableSet(ids);
     }
-
-    public static Optional<Scenario> find(String id) {
-        return required().stream().filter(scenario -> scenario.id().equals(id)).findFirst();
-    }
-
-    public static List<String> ids() {
-        return required().stream().map(Scenario::id).toList();
-    }
+    public static Optional<Scenario> find(String id) { return required().stream().filter(scenario -> scenario.id().equals(id)).findFirst(); }
+    public static List<String> ids() { return required().stream().map(Scenario::id).toList(); }
 }
