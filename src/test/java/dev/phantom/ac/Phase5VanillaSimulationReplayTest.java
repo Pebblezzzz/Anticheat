@@ -18,12 +18,13 @@ import static org.junit.jupiter.api.Assertions.*;
  * serialized in the trace. A large position discontinuity is treated as a
  * controlled server reset boundary, not as a movement tick to simulate.
  *
- * Fluid travel and jump-transition rows are not numerically replayed here:
- * the capture records the post-tick input/state but not enough causal
- * information to reconstruct the exact client-side fluid-control and jump
- * consumption order for a single tick. Those cases are covered by the
- * dedicated empirical batch/physics tests instead of being given a broad
- * replay tolerance.
+ * Fluid travel, jump-transition, and jump-boost rows are not numerically
+ * replayed here when the capture does not preserve the exact client-side
+ * causal ordering needed for a one-tick reconstruction. Jump-boost is a
+ * controlled empirical case in this harness because the vanilla jump is
+ * triggered directly by the capture driver after the Jump Boost effect is
+ * applied; the trace records the resulting state, but not that causal call.
+ * Those cases remain covered by the dedicated empirical batch/physics tests.
  */
 class Phase5VanillaSimulationReplayTest {
     private static final String TRACE_PROPERTY = "phantom.phase5.trace";
@@ -32,7 +33,7 @@ class Phase5VanillaSimulationReplayTest {
     private static final Set<String> CALIBRATABLE_PHASES = Set.of(
             "all:walk", "all:sprint", "all:jump", "all:sneak", "all:diagonal",
             "all:water", "all:lava", "all:speed-effect", "all:slowness-effect",
-            "all:jump-boost", "all:tail");
+            "all:tail");
 
     private static final Set<String> OBSERVED_FIELDS = Set.of(
             "x", "y", "z", "vx", "vy", "vz", "on_ground", "forward", "strafe", "jump",
