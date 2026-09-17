@@ -198,22 +198,24 @@ public final class ControlledPhase5ScenarioDriver {
                 && Math.abs(client.player.getZ() - resetZ) <= RESET_TOLERANCE;
         BlockPos below = BlockPos.ofFloored(resetX, resetY - 0.05D, resetZ);
         boolean blockPresent = !client.world.getBlockState(below).isAir();
-        boolean grounded = PHASES[phaseIndex].equals("glide") || blockPresent;
+        String phase = PHASES[phaseIndex];
+        boolean fluidStart = phase.equals("water") || phase.equals("lava") || phase.equals("swim-transition");
+        boolean grounded = fluidStart ? blockPresent : client.player.isOnGround();
 
         if (atTarget && grounded) {
             phaseResetPending = false;
             resetWait = 0;
-            resetForPhase(client, PHASES[phaseIndex]);
+            resetForPhase(client, phase);
             release(client.options);
-            Phase5CaptureDebug.resetAndStart(client, PHASES[phaseIndex], phaseIndex, laneZ(PHASES[phaseIndex]) + 80);
-            System.out.println("[Phase5] START " + scenario + " / " + PHASES[phaseIndex] + " (" + (phaseIndex - startIndex + 1) + "/" + (endIndex - startIndex + 1) + ")");
+            Phase5CaptureDebug.resetAndStart(client, phase, phaseIndex, laneZ(phase) + 80);
+            System.out.println("[Phase5] START " + scenario + " / " + phase + " (" + (phaseIndex - startIndex + 1) + "/" + (endIndex - startIndex + 1) + ")");
             return;
         }
         if (resetWait >= RESET_TIMEOUT_TICKS) {
-            String message = "CAPTURE_STOPPED part=" + scenario + " phase=" + PHASES[phaseIndex] + " reason=reset_timeout target="
+            String message = "CAPTURE_STOPPED part=" + scenario + " phase=" + phase + " reason=reset_timeout target="
                     + resetX + "," + resetY + "," + resetZ + " state=" + describe(client);
             System.err.println("[Phase5] " + message);
-            Phase5CaptureDebug.failure(PHASES[phaseIndex], message);
+            Phase5CaptureDebug.failure(phase, message);
             done = true;
             release(client.options);
             client.scheduleStop();
