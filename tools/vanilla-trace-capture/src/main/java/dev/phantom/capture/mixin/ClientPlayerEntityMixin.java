@@ -7,7 +7,6 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.integrated.IntegratedServer;
-import net.minecraft.server.world.ServerWorld;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -87,13 +86,15 @@ final class ClientPlayerEntityMixin {
             ServerCommandSource s = server.getCommandSource();
             if (phase.equals("part4:climbable")) {
                 int ladderZ = z + 4;
-                int wallZ = ladderZ - 1;
-                cmd(m, s, "fill -1 64 " + ladderZ + " 1 68 " + ladderZ + " minecraft:ladder[facing=south]");
+                int wallZ = ladderZ + 1;
+                cmd(m, s, "fill -1 64 " + ladderZ + " 1 68 " + ladderZ + " minecraft:ladder[facing=north]");
                 cmd(m, s, "fill -1 64 " + wallZ + " 1 68 " + wallZ + " minecraft:stone");
                 System.out.println("[Phase5] climbable geometry injected ladder_z=" + ladderZ + " wall_z=" + wallZ);
             } else {
                 int startZ = z + 5;
                 int cornerZ = startZ + 13;
+                cmd(m, s, "fill 4 64 " + (z + 20) + " 4 68 " + (z + 70) + " minecraft:air");
+                cmd(m, s, "fill 4 64 " + (z + 45) + " 8 68 " + (z + 45) + " minecraft:air");
                 cmd(m, s, "fill -1 64 " + startZ + " 1 66 " + cornerZ + " minecraft:stone");
                 cmd(m, s, "fill 1 64 " + cornerZ + " 6 66 " + cornerZ + " minecraft:stone");
                 System.out.println("[Phase5] edge-corner geometry injected start_z=" + startZ + " corner_z=" + cornerZ);
