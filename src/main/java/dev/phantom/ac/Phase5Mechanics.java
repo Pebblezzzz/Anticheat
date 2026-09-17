@@ -40,18 +40,15 @@ public final class Phase5Mechanics {
     public static MovementEnvironment vanillaLava(boolean onGround,boolean sprinting,boolean sneaking){return new MovementEnvironment(Fluid.LAVA,true,false,onGround,sprinting,sneaking,false,false,1.0,0.5,0.25);}
     public static MovementEnvironment vanillaClimbable(boolean onGround,boolean sprinting,boolean sneaking){return new MovementEnvironment(Fluid.NONE,false,true,onGround,sprinting,sneaking,false,false,1.0,1.0,1.0);}
   }
-  public static Pose nextPose(Pose previous,MovementEnvironment env){Objects.requireNonNull(previous);Objects.requireNonNull(env);if(env.gliding())return Pose.FALL_FLYING;if(env.submerged()&&env.swimmingInput())return Pose.SWIMMING;if(env.sneaking())return Pose.CROUCHING;return Pose.STANDING;}
+  public static Pose nextPose(Pose previous,MovementEnvironment env){return nextPose(previous,env,false);}
+  public static Pose nextPose(Pose previous,MovementEnvironment env,boolean sleeping){Objects.requireNonNull(previous);Objects.requireNonNull(env);if(sleeping)return Pose.SLEEPING;if(env.gliding())return Pose.FALL_FLYING;if(env.submerged()&&env.swimmingInput())return Pose.SWIMMING;if(env.sneaking())return Pose.CROUCHING;return Pose.STANDING;}
 
-  /** Applies an authoritative server velocity/knockback event without inventing acceleration. */
+  /** Applies an authoritative velocity/knockback impulse without inventing acceleration. */
   public static State.Player applyVelocityImpulse(State.Player state, Vec3Like impulse) {
     Objects.requireNonNull(state); Objects.requireNonNull(impulse);
-    return new State.Player(state.position(), state.velocity().add(new Maths.Vec3(impulse.x(), impulse.y(), impulse.z())),
-        state.yaw(), state.pitch(), state.onGround(), state.gamemode(), state.effects(), state.awaitingTeleport(), state.uncertain());
+    return new State.Player(state.position(), state.velocity().add(new Maths.Vec3(impulse.x(), impulse.y(), impulse.z())), state.yaw(), state.pitch(), state.onGround(), state.gamemode(), state.effects(), state.awaitingTeleport(), state.uncertain());
   }
-
-  /** True when an impulse came from an observed server velocity event. */
   public static Knockback observedKnockback(Vec3Like impulse) { return new Knockback(impulse, true); }
-
   public record Knockback(Vec3Like impulse,boolean serverVelocityPacketObserved) implements Serializable {public Knockback{Objects.requireNonNull(impulse);}}
   public record Vec3Like(double x,double y,double z) implements Serializable {}
 
