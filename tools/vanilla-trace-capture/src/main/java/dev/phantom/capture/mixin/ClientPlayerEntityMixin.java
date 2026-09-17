@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Reads pre-tick input and records vanilla post-tick state. Scenario setup is kept separate from observation. */
+/** Reads pre-tick input and records vanilla post-tick state. */
 @Mixin(ClientPlayerEntity.class)
 final class ClientPlayerEntityMixin {
     private boolean phantom$part4GeometryInjected;
@@ -36,32 +36,15 @@ final class ClientPlayerEntityMixin {
             phantom$phaseTicks = 0;
         }
 
-        // The recorder never calls player.jump()/setVelocity()/requestTeleport()
-        // to manufacture movement. All movement here remains vanilla-driven by
-        // the configured keyboard state or server packets.
+        // World setup for the legacy Part 4 controlled capture is performed here
+        // at phase start; movement input itself is set only before the client tick
+        // by MinecraftClientMixin so the recorder can sample it causally at HEAD.
         if (phase.endsWith(":climbable") || phase.endsWith(":edge-corner")) {
             boolean settledAtPhaseStart = player.isOnGround()
                     && Math.abs(player.getY() - 64.0D) <= 0.75D;
-
             if (!phantom$part4GeometryInjected && settledAtPhaseStart && phantom$phaseTicks <= 2) {
                 phantom$injectPart4Geometry(client, player, phase);
                 phantom$part4GeometryInjected = true;
-            }
-
-            if (phase.endsWith(":edge-corner")) {
-                boolean right = phantom$phaseTicks >= 31 && phantom$phaseTicks < 56;
-                boolean left = phantom$phaseTicks >= 56 && phantom$phaseTicks < 81;
-                client.options.rightKey.setPressed(right);
-                client.options.leftKey.setPressed(left);
-                client.options.forwardKey.setPressed(true);
-                client.options.backKey.setPressed(false);
-                client.options.sprintKey.setPressed(false);
-            } else {
-                client.options.forwardKey.setPressed(true);
-                client.options.backKey.setPressed(false);
-                client.options.leftKey.setPressed(false);
-                client.options.rightKey.setPressed(false);
-                client.options.sprintKey.setPressed(false);
             }
         }
 
