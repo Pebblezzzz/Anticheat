@@ -390,7 +390,8 @@ public final class ControlledPhase5ScenarioDriver {
         boolean forward = true, left = false, right = false, jump = false, sneak = false, sprint = false;
         switch (phase) {
             case "sprint", "water", "lava", "collision", "step", "stairs", "glide" -> sprint = true;
-            case "jump", "jump-boost" -> jump = t < 2;
+            case "jump" -> jump = t < 2;
+            case "jump-boost" -> jump = t < 10;
             case "sneak" -> sneak = true;
             case "diagonal" -> left = true;
             case "edge-corner" -> { left = t < 50; right = !left; }
