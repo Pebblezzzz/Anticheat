@@ -30,7 +30,7 @@ foreach ($part in $parts) {
         throw "Missing existing Phase 5 capture: ${path}"
     }
 
-    $lines = Get-Content -LiteralPath $path
+    $lines = [System.IO.File]::ReadAllLines($path)
     if ($lines.Count -lt 5) { throw "Trace is too short: ${path}" }
     if ($lines[0] -ne $magic) { throw "Unexpected trace magic in ${path}" }
     if ($lines[3] -ne $header) { throw "Unexpected trace header in ${path}" }
@@ -44,7 +44,7 @@ foreach ($part in $parts) {
         throw "source_id mismatch: ${path} has '$partSource', expected '$sourceId'"
     }
 
-    $rows = $lines | Select-Object -Skip 4 | Where-Object { $_ -and -not $_.StartsWith('#') }
+    $rows = @($lines | Select-Object -Skip 4 | Where-Object { $_ -and -not $_.StartsWith('#') })
     if ($rows.Count -eq 0) { throw "No data rows found in ${path}" }
 
     [long]$previousRawClientTick = -1
@@ -53,8 +53,11 @@ foreach ($part in $parts) {
     [long]$partFirstReceive = -1
 
     foreach ($line in $rows) {
-        $c = $line -split "`t", -1
-        if ($c.Count -ne 47) { throw "Invalid row in ${path}: expected 47 columns, got $($c.Count)" }
+        $c = $line.Split([char]9)
+        if ($c.Count -ne 47) {
+            $preview = $line.Substring(0, [Math]::Min(120, $line.Length)).Replace("`t", '<TAB>')
+            throw "Invalid row in ${path}: expected 47 columns, got $($c.Count). Row starts: $preview"
+        }
 
         [long]$rawClientTick = 0
         [long]$rawReceive = 0
