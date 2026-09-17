@@ -86,11 +86,24 @@ public final class Phase8MovementValidation {
     public Result { Objects.requireNonNull(verdict); Objects.requireNonNull(evidence); if (evidence.verdict() != verdict) throw new IllegalArgumentException("evidence/result verdict mismatch"); }
   }
 
-  /** Pure comparison of observed state against an already-computed Phase 6 result. */
+  /**
+   * Compatibility entry point. A timing-uncertain window is conservative unless
+   * the caller explicitly states that every possible timing offset was exhaustively modeled.
+   */
   public static Result validate(String playerId, long serverTick, Player prior, Player observed,
                                 WorldSnapshot world, String worldReference,
                                 Validation.SyncWindow timing, List<String> inputAssumptions,
                                 SearchResult reachable, String replayReference) {
+    return validate(playerId, serverTick, prior, observed, world, worldReference, timing,
+        inputAssumptions, reachable, replayReference, !timing.uncertain());
+  }
+
+  /** Pure comparison against an existing Phase 6 result, with an explicit timing-exhaustiveness proof. */
+  public static Result validate(String playerId, long serverTick, Player prior, Player observed,
+                                WorldSnapshot world, String worldReference,
+                                Validation.SyncWindow timing, List<String> inputAssumptions,
+                                SearchResult reachable, String replayReference,
+                                boolean timingExhaustivelyModeled) {
     Objects.requireNonNull(playerId); Objects.requireNonNull(prior); Objects.requireNonNull(observed);
     Objects.requireNonNull(world); Objects.requireNonNull(timing); Objects.requireNonNull(inputAssumptions);
     Objects.requireNonNull(reachable); Objects.requireNonNull(replayReference);
@@ -104,9 +117,9 @@ public final class Phase8MovementValidation {
           OptionalLong.empty(), Optional.empty(), reachable.reasons(), uncertainty, replayReference);
       return new Result(Verdict.UNCERTAIN, evidence);
     }
-    if (timing.uncertain()) {
+    if (timing.uncertain() && !timingExhaustivelyModeled) {
       Evidence evidence = evidence(Verdict.UNCERTAIN, playerId, serverTick, prior, observed, world, worldReference, timing,
-          inputAssumptions, reachable.candidates().size(), 0, 0, "Phase 7 synchronization remains uncertain",
+          inputAssumptions, reachable.candidates().size(), 0, 0, "Phase 7 synchronization is uncertain and its possible offsets were not exhaustively represented",
           OptionalLong.empty(), bestCandidate(reachable.candidates(), observed), reachable.reasons(), uncertainty, replayReference);
       return new Result(Verdict.UNCERTAIN, evidence);
     }
@@ -117,18 +130,22 @@ public final class Phase8MovementValidation {
         ObservedField.TELEPORT_PENDING));
     Phase6Reachability.Evidence comparison = new Phase6Reachability(new Vanilla12111RichPhysics()).compare(reachable, observation);
     if (comparison.verdict() == Phase6Reachability.Verdict.POSSIBLE) {
+      List<String> diagnostics = new ArrayList<>(comparison.reasons());
+      if (timing.uncertain() && timingExhaustivelyModeled) diagnostics.add("Phase 7 timing uncertainty was exhaustively represented across the declared client-tick window");
       Evidence evidence = evidence(Verdict.POSSIBLE, playerId, serverTick, prior, observed, world, worldReference, timing,
           inputAssumptions, reachable.candidates().size(), comparison.matchingCandidates(),
           Math.max(0, reachable.candidates().size() - comparison.matchingCandidates()),
           "at least one complete legitimate candidate explains every declared observed field",
-          OptionalLong.empty(), bestMatchingCandidate(reachable.candidates(), observed), comparison.reasons(), List.of(), replayReference);
+          OptionalLong.empty(), bestMatchingCandidate(reachable.candidates(), observed), diagnostics, uncertainty, replayReference);
       return new Result(Verdict.POSSIBLE, evidence);
     }
 
+    List<String> diagnostics = new ArrayList<>(comparison.reasons());
+    if (timing.uncertain() && timingExhaustivelyModeled) diagnostics.add("Phase 7 timing uncertainty was exhaustively represented; no timing offset produced a matching candidate");
     Evidence evidence = evidence(Verdict.IMPOSSIBLE, playerId, serverTick, prior, observed, world, worldReference, timing,
         inputAssumptions, reachable.candidates().size(), 0, reachable.candidates().size(),
         "all exhaustively modeled legitimate candidates disagree with the observed movement state",
-        OptionalLong.of(serverTick), bestCandidate(reachable.candidates(), observed), comparison.reasons(), List.of(), replayReference);
+        OptionalLong.of(serverTick), bestCandidate(reachable.candidates(), observed), diagnostics, uncertainty, replayReference);
     return new Result(Verdict.IMPOSSIBLE, evidence);
   }
 
