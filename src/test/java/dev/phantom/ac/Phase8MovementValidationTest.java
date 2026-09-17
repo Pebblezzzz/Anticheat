@@ -56,13 +56,26 @@ class Phase8MovementValidationTest {
     assertEquals(1, result.evidence().candidatesEliminated());
   }
 
-  @Test void timingUncertaintyCannotBecomeImpossible() {
+  @Test void timingUncertaintyCannotBecomeImpossibleWithoutExhaustiveProof() {
+    Player prior = Player.initial(new Maths.Vec3(0.5, 65, 0.5));
     Player observed = Player.initial(new Maths.Vec3(100.5, 65, 0.5));
     Validation.SyncWindow uncertain = new Validation.SyncWindow(19, 22, true, List.of("jitter", "delayed movement packet"));
-    var result = Phase8MovementValidation.validate("alice", 21, observed, observed, world(), "world:test:21", uncertain,
-        List.of("input unknown"), possible(observed), "replay:test:21");
+    var result = Phase8MovementValidation.validate("alice", 21, prior, observed, world(), "world:test:21", uncertain,
+        List.of("input known"), possible(prior), "replay:test:21");
     assertEquals(Phase8MovementValidation.Verdict.UNCERTAIN, result.verdict());
     assertFalse(result.evidence().uncertaintySources().isEmpty());
+  }
+
+  @Test void exhaustivelyModeledTimingCanStillProveImpossible() {
+    Player prior = Player.initial(new Maths.Vec3(0.5, 65, 0.5));
+    Player observed = Player.initial(new Maths.Vec3(100.5, 65, 0.5));
+    Validation.SyncWindow uncertain = new Validation.SyncWindow(19, 22, true, List.of("latency bounded", "jitter"));
+    var result = Phase8MovementValidation.validate("alice", 21, prior, observed, world(), "world:test:21", uncertain,
+        List.of("input known", "all client-tick offsets searched"), possible(prior), "replay:test:21", true);
+    assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE, result.verdict());
+    assertEquals(21, result.evidence().firstInconsistentTick().orElseThrow());
+    assertFalse(result.evidence().uncertaintySources().isEmpty(), "timing uncertainty should remain visible in evidence");
+    assertTrue(result.evidence().simulationDiagnostics().stream().anyMatch(s -> s.contains("timing uncertainty was exhaustively represented")));
   }
 
   @Test void phase6BudgetUncertaintyCannotBecomeImpossible() {
