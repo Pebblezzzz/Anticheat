@@ -34,7 +34,7 @@ final class ClientPlayerEntityMixin {
     @Inject(method = "move", at = @At("HEAD"))
     private void phantom$observeMoveStart(MovementType type, Vec3d movement, CallbackInfo ci) {
         ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
-        phantom$moveStart = player.getPos();
+        phantom$moveStart = positionOf(player);
         phantom$moveRequested = movement;
         phantom$moveGroundBefore = player.isOnGround();
     }
@@ -42,7 +42,7 @@ final class ClientPlayerEntityMixin {
     @Inject(method = "move", at = @At("RETURN"))
     private void phantom$observeMoveEnd(MovementType type, Vec3d movement, CallbackInfo ci) {
         ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
-        Vec3d actual = player.getPos().subtract(phantom$moveStart);
+        Vec3d actual = positionOf(player).subtract(phantom$moveStart);
         VanillaTraceCaptureClient.CaptureRuntime.observeMoveResult(type, phantom$moveRequested, actual, phantom$moveGroundBefore, player);
     }
 
@@ -51,18 +51,10 @@ final class ClientPlayerEntityMixin {
         ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
         MinecraftClient client = MinecraftClient.getInstance();
         String phase = ControlledPhase5ScenarioDriver.phaseLabel();
-        if ("corpus".equalsIgnoreCase(System.getProperty("phantom.capture.mode", "legacy"))) {
-            phase = VanillaCorpusScenarioDriver.phaseLabel();
-        }
+        if ("corpus".equalsIgnoreCase(System.getProperty("phantom.capture.mode", "legacy"))) phase = VanillaCorpusScenarioDriver.phaseLabel();
+        if (!phase.equals(phantom$lastPhase)) { phantom$lastPhase = phase; phantom$part4GeometryInjected = false; phantom$phaseTicks = 0; }
 
-        if (!phase.equals(phantom$lastPhase)) {
-            phantom$lastPhase = phase;
-            phantom$part4GeometryInjected = false;
-            phantom$phaseTicks = 0;
-        }
-
-        // Legacy Part 4 geometry is setup, not movement simulation. Input is never
-        // changed here; it is driven before the tick by MinecraftClientMixin.
+        // Legacy Part 4 geometry is setup, not movement simulation. Input is never changed here.
         if (phase.endsWith(":climbable") || phase.endsWith(":edge-corner")) {
             boolean settledAtPhaseStart = player.isOnGround() && Math.abs(player.getY() - 64.0D) <= 0.75D;
             if (!phantom$part4GeometryInjected && settledAtPhaseStart && phantom$phaseTicks <= 2) {
@@ -70,10 +62,11 @@ final class ClientPlayerEntityMixin {
                 phantom$part4GeometryInjected = true;
             }
         }
-
         VanillaTraceCaptureClient.CaptureRuntime.recordForMixin(client, player);
         phantom$phaseTicks++;
     }
+
+    private static Vec3d positionOf(ClientPlayerEntity player) { return new Vec3d(player.getX(), player.getY(), player.getZ()); }
 
     private void phantom$injectPart4Geometry(MinecraftClient client, ClientPlayerEntity player, String phase) {
         IntegratedServer server = client.getServer();
@@ -87,7 +80,6 @@ final class ClientPlayerEntityMixin {
                 int wallZ = ladderZ + 1;
                 cmd(m, s, "fill -1 64 " + ladderZ + " 1 68 " + ladderZ + " minecraft:ladder[facing=north]");
                 cmd(m, s, "fill -1 64 " + wallZ + " 1 68 " + wallZ + " minecraft:stone");
-                System.out.println("[Phase5] climbable geometry injected ladder_z=" + ladderZ + " wall_z=" + wallZ);
             } else {
                 int startZ = z + 5;
                 int cornerZ = startZ + 13;
@@ -95,7 +87,6 @@ final class ClientPlayerEntityMixin {
                 cmd(m, s, "fill 4 64 " + (z + 45) + " 8 68 " + (z + 45) + " minecraft:air");
                 cmd(m, s, "fill -1 64 " + startZ + " 1 66 " + cornerZ + " minecraft:stone");
                 cmd(m, s, "fill 1 64 " + cornerZ + " 6 66 " + cornerZ + " minecraft:stone");
-                System.out.println("[Phase5] edge-corner geometry injected start_z=" + startZ + " corner_z=" + cornerZ);
             }
         });
     }
