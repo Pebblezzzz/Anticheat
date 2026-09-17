@@ -16,6 +16,7 @@ public final class Phase6Reachability {
   public static final int MAX_HORIZON_TICKS=512, MAX_TIMING_OFFSETS=128, MAX_PROVENANCE_PARENTS=8;
   public enum Verdict { POSSIBLE, UNCERTAIN, IMPOSSIBLE }
   public enum UncertainDimension { POSITION, ROTATION, VELOCITY, GROUND, INPUT, ENVIRONMENT, ATTRIBUTES, EFFECTS, POSE, TELEPORT, WORLD, TIMING }
+
   public record Context(long simulationTick,Player player,Simulation.Environment environment,Simulation.Attributes attributes,
                         MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,
                         Set<UncertainDimension> uncertainty) implements Serializable {
@@ -24,6 +25,7 @@ public final class Phase6Reachability {
     public Context withTick(long tick){return new Context(tick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,uncertainty);}
     public Context withUncertainty(UncertainDimension... dimensions){EnumSet<UncertainDimension> u=EnumSet.noneOf(UncertainDimension.class);u.addAll(uncertainty);u.addAll(List.of(dimensions));return new Context(simulationTick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,u);}
   }
+
   public record InputConstraint(OptionalInt forward,OptionalInt strafe,Optional<Boolean> jump,Optional<Boolean> sprint,Optional<Boolean> sneak) implements Serializable {
     public InputConstraint {Objects.requireNonNull(forward);Objects.requireNonNull(strafe);Objects.requireNonNull(jump);Objects.requireNonNull(sprint);Objects.requireNonNull(sneak);if(forward.isPresent()&&Math.abs(forward.getAsInt())>1)throw new IllegalArgumentException("forward must be -1..1");if(strafe.isPresent()&&Math.abs(strafe.getAsInt())>1)throw new IllegalArgumentException("strafe must be -1..1");}
     public static InputConstraint any(){return new InputConstraint(OptionalInt.empty(),OptionalInt.empty(),Optional.empty(),Optional.empty(),Optional.empty());}
@@ -33,6 +35,7 @@ public final class Phase6Reachability {
     private boolean matches(AdvancedInput i){return(!forward.isPresent()||forward.getAsInt()==i.forward())&&(!strafe.isPresent()||strafe.getAsInt()==i.strafe())&&(!jump.isPresent()||jump.get()==i.jump())&&(!sprint.isPresent()||sprint.get()==i.sprint())&&(!sneak.isPresent()||sneak.get()==i.sneak());}
     private static int axis(boolean p,boolean n){return p==n?0:p?1:-1;}
   }
+
   public record WorldBranch(String id,WorldSnapshot world,boolean exhaustive,String description) implements Serializable {public WorldBranch{if(id==null||id.isBlank())throw new IllegalArgumentException("world branch id is required");Objects.requireNonNull(world);if(description==null||description.isBlank())throw new IllegalArgumentException("description is required");}}
   public sealed interface ExternalTransition extends Serializable permits None,VelocityImpulse,TeleportCorrection,TeleportConfirmation{}
   public record None() implements ExternalTransition{}
@@ -46,8 +49,10 @@ public final class Phase6Reachability {
   public enum ObservedField{POSITION,VELOCITY,ROTATION,GROUND,GAMEMODE,EFFECTS,TELEPORT_PENDING}
   public record Observation(Player observed,Set<ObservedField> known) implements Serializable{public Observation{Objects.requireNonNull(observed);known=Set.copyOf(known);if(known.isEmpty())throw new IllegalArgumentException("known observations required");}}
   public record Evidence(Verdict verdict,int matchingCandidates,List<Provenance> witnesses,List<String> reasons) implements Serializable{public Evidence{witnesses=List.copyOf(witnesses);reasons=List.copyOf(reasons);}}
+
   private final Vanilla12111RichPhysics physics;
   public Phase6Reachability(Vanilla12111RichPhysics physics){this.physics=Objects.requireNonNull(physics);}
+
   public SearchResult search(Context start,List<InputConstraint> inputs,LongFunction<List<WorldBranch>> worlds,LongFunction<List<ExternalTransition>> externalTransitions,int maximumCandidates){
     Contracts.requireCandidateBudget(maximumCandidates);Objects.requireNonNull(start);Objects.requireNonNull(inputs);Objects.requireNonNull(worlds);Objects.requireNonNull(externalTransitions);
     if(inputs.size()>MAX_HORIZON_TICKS)return uncertain(0,1,"simulation horizon exceeds the finite Phase 6 envelope");
@@ -74,7 +79,36 @@ public final class Phase6Reachability {
     }
     return new SearchResult(Verdict.POSSIBLE,Set.copyOf(current.values()),inputs.size(),peak,merged,nonExhaustive,uncertainTransitions,provenanceMerges,List.of("exhaustive finite search completed with exact full-context merging"));
   }
-  public TimingSearchResult searchWithinTimingWindow(Context start,long earliestTick,long latestTick,boolean timingUncertain,List<InputConstraint> inputs,LongFunction<List<WorldBranch>> worlds,LongFunction<List<ExternalTransition>> externalTransitions,int maximumCandidates){if(earliestTick<0||latestTick<earliestTick)throw new IllegalArgumentException("invalid timing window");long span=latestTick-earliestTick+1;if(span>MAX_TIMING_OFFSETS)return new TimingSearchResult(Verdict.UNCERTAIN,Set.of(),Map.of(),0,(int)Math.min(Integer.MAX_VALUE,span),List.of("timing window exceeds exhaustive offset envelope"));Map<Long,SearchResult> results=new LinkedHashMap<>();Map<Context,Candidate> union=new LinkedHashMap<>();int evaluated=0;for(long tick=earliestTick;tick<=latestTick;tick++){SearchResult r=search(start.withTick(tick),inputs,worlds,externalTransitions,maximumCandidates);results.put(tick,r);evaluated++;if(r.verdict()!=Verdict.POSSIBLE)return new TimingSearchResult(Verdict.UNCERTAIN,Set.of(),results,evaluated,(int)span-evaluated,List.of("one timing offset is not exhaustively representable"));for(Candidate c:r.candidates())union.put(c.context(),c);if(union.size()>maximumCandidates)return new TimingSearchResult(Verdict.UNCERTAIN,Set.of(),results,evaluated,(int)span-evaluated,List.of("combined candidate budget exceeded across timing offsets"));}if(timingUncertain)return new TimingSearchResult(Verdict.UNCERTAIN,Set.copyOf(union.values()),results,evaluated,0,List.of("all timing offsets were simulated but synchronization remains ambiguous"));return new TimingSearchResult(Verdict.POSSIBLE,Set.copyOf(union.values()),results,evaluated,0,List.of("all client-tick offsets were exhaustively simulated"));}
+
+  public TimingSearchResult searchWithinTimingWindow(Context start,long earliestTick,long latestTick,boolean timingUncertain,List<InputConstraint> inputs,LongFunction<List<WorldBranch>> worlds,LongFunction<List<ExternalTransition>> externalTransitions,int maximumCandidates){
+    if(earliestTick<0||latestTick<earliestTick)throw new IllegalArgumentException("invalid timing window");
+    long span=latestTick-earliestTick+1;
+    if(span>MAX_TIMING_OFFSETS)return new TimingSearchResult(Verdict.UNCERTAIN,Set.of(),Map.of(),0,(int)Math.min(Integer.MAX_VALUE,span),List.of("timing window exceeds exhaustive offset envelope"));
+    Map<Long,SearchResult> results=new LinkedHashMap<>();
+    Map<Context,Candidate> union=new LinkedHashMap<>();
+    LinkedHashSet<String> reasons=new LinkedHashSet<>();
+    boolean incompleteOffset=false;
+    int evaluated=0;
+    for(long tick=earliestTick;tick<=latestTick;tick++){
+      SearchResult r=search(start.withTick(tick),inputs,worlds,externalTransitions,maximumCandidates);
+      results.put(tick,r);
+      evaluated++;
+      if(r.verdict()!=Verdict.POSSIBLE){
+        incompleteOffset=true;
+        reasons.addAll(r.reasons());
+      } else {
+        for(Candidate c:r.candidates())union.put(c.context(),c);
+      }
+      if(union.size()>maximumCandidates)return new TimingSearchResult(Verdict.UNCERTAIN,Set.of(),results,evaluated,(int)span-evaluated,List.of("combined candidate budget exceeded across timing offsets"));
+    }
+    if(incompleteOffset){
+      reasons.add("at least one client-tick offset was not exhaustively representable; candidates from fully represented offsets were retained");
+      return new TimingSearchResult(Verdict.UNCERTAIN,Set.copyOf(union.values()),results,evaluated,0,List.copyOf(reasons));
+    }
+    if(timingUncertain)return new TimingSearchResult(Verdict.UNCERTAIN,Set.copyOf(union.values()),results,evaluated,0,List.of("all timing offsets were simulated but synchronization remains ambiguous"));
+    return new TimingSearchResult(Verdict.POSSIBLE,Set.copyOf(union.values()),results,evaluated,0,List.of("all client-tick offsets were exhaustively simulated"));
+  }
+
   public Evidence compare(SearchResult result,Observation observation){if(result.verdict()==Verdict.UNCERTAIN)return new Evidence(Verdict.UNCERTAIN,0,List.of(),result.reasons());List<Provenance> matches=new ArrayList<>();for(Candidate c:result.candidates())if(matches(c.context().player(),observation))matches.add(c.provenance());if(!matches.isEmpty())return new Evidence(Verdict.POSSIBLE,matches.size(),matches,List.of("observed facts are reachable","candidate provenance is retained"));return new Evidence(Verdict.IMPOSSIBLE,0,List.of(),List.of("no exact candidate matches the declared observed facts","all declared branches were exhausted"));}
   private static boolean matches(Player c,Observation o){Player x=o.observed();for(ObservedField f:o.known())switch(f){case POSITION->{if(!c.position().equals(x.position()))return false;}case VELOCITY->{if(!c.velocity().equals(x.velocity()))return false;}case ROTATION->{if(Float.compare(c.yaw(),x.yaw())!=0||Float.compare(c.pitch(),x.pitch())!=0)return false;}case GROUND->{if(c.onGround()!=x.onGround())return false;}case GAMEMODE->{if(!c.gamemode().equals(x.gamemode()))return false;}case EFFECTS->{if(!c.effects().equals(x.effects()))return false;}case TELEPORT_PENDING->{if(c.awaitingTeleport().isPresent()!=x.awaitingTeleport().isPresent())return false;}}return true;}
   private static Context applyExternal(Context c,ExternalTransition e,long tick){Player s=c.player();if(e instanceof None)return c.withTick(tick);if(e instanceof VelocityImpulse v){Player n=Phase5Mechanics.applyVelocityImpulse(s,new Phase5Mechanics.Vec3Like(v.impulse().x(),v.impulse().y(),v.impulse().z()));return new Context(tick,n,c.environment(),c.attributes(),c.effects(),c.pose(),c.movementEnvironment(),c.sleeping(),c.uncertainty());}if(e instanceof TeleportCorrection t){OptionalInt p=t.awaitingConfirmation()?OptionalInt.of(t.id()):OptionalInt.empty();Player n=new Player(t.position(),t.velocity(),s.yaw(),s.pitch(),false,s.gamemode(),s.effects(),p,false);return new Context(tick,n,c.environment(),c.attributes(),c.effects(),t.pose(),c.movementEnvironment(),c.sleeping(),c.uncertainty());}if(e instanceof TeleportConfirmation t){boolean ok=s.awaitingTeleport().isPresent()&&s.awaitingTeleport().getAsInt()==t.id();Player n=new Player(s.position(),s.velocity(),s.yaw(),s.pitch(),s.onGround(),s.gamemode(),s.effects(),ok?OptionalInt.empty():s.awaitingTeleport(),s.uncertain()||!ok);return new Context(tick,n,c.environment(),c.attributes(),c.effects(),c.pose(),c.movementEnvironment(),c.sleeping(),c.uncertainty());}throw new IllegalStateException("unhandled external transition "+e.getClass());}
