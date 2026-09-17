@@ -66,6 +66,17 @@ class Phase8MovementValidationTest {
     assertFalse(result.evidence().uncertaintySources().isEmpty());
   }
 
+  @Test void exhaustivelyModeledTimingCanStillProducePossibleEvidence() {
+    Player prior = Player.initial(new Maths.Vec3(0.5, 65, 0.5));
+    Player observed = prior;
+    Validation.SyncWindow uncertain = new Validation.SyncWindow(19, 22, true, List.of("latency bounded", "jitter"));
+    var result = Phase8MovementValidation.validate("alice", 21, prior, observed, world(), "world:test:21", uncertain,
+        List.of("input known", "all client-tick offsets searched"), possible(observed), "replay:test:21", true);
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE, result.verdict());
+    assertEquals(1, result.evidence().matchingCandidateCount());
+    assertTrue(result.evidence().simulationDiagnostics().stream().anyMatch(s -> s.contains("timing uncertainty was exhaustively represented")));
+  }
+
   @Test void exhaustivelyModeledTimingCanStillProveImpossible() {
     Player prior = Player.initial(new Maths.Vec3(0.5, 65, 0.5));
     Player observed = Player.initial(new Maths.Vec3(100.5, 65, 0.5));
