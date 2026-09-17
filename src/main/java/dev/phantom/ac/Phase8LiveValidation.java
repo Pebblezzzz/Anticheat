@@ -84,13 +84,14 @@ public final class Phase8LiveValidation {
           "timing-offsets=" + sync.earliestClientTick() + ".." + sync.latestClientTick());
       String worldReference = "timeline-world:tick=" + event.serverTick() + ":chunks=" + world.loadedChunks().size();
 
+      Player simulationPrior = simulationSafe(prior);
       if (candidates.isEmpty()) {
         SearchResult anchor = new SearchResult(Phase6Reachability.Verdict.UNCERTAIN, Set.of(), 0, 0, 0, 0, 0, 0,
             List.of("first movement observation establishes the Phase 6 replay anchor"));
         results.add(Phase8MovementValidation.validate(playerId, event.serverTick(), prior, observed,
             world, worldReference, sync, inputAssumptions, anchor, replayReference));
         candidates = Set.of(new Candidate(0,
-            anchorContext(observed, world, currentInput, Math.max(0, sync.earliestClientTick())),
+            anchorContext(simulationSafe(observed), world, currentInput, Math.max(0, sync.earliestClientTick())),
             new Phase6Reachability.Provenance(0, -1, event.serverTick(), "ROOT", "ROOT", "None",
                 List.of("live movement anchor"), 1, List.of())));
         continue;
@@ -175,6 +176,19 @@ public final class Phase8LiveValidation {
     int uncertain = (int) results.stream().filter(r -> r.verdict() == Phase8MovementValidation.Verdict.UNCERTAIN).count();
     int impossible = (int) results.stream().filter(r -> r.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE).count();
     return new Report(results, movements, possible, uncertain, impossible);
+  }
+
+  private static Player simulationSafe(Player player) {
+    EnumSet<State.UncertaintyReason> reasons = EnumSet.noneOf(State.UncertaintyReason.class);
+    reasons.addAll(player.uncertaintyReasons());
+    reasons.remove(State.UncertaintyReason.UNKNOWN_CLIENT_TICK);
+    boolean uncertain = !reasons.isEmpty();
+    if (!uncertain && !player.uncertain()) {
+      return player;
+    }
+    return new Player(player.position(), player.velocity(), player.yaw(), player.pitch(), player.onGround(),
+        player.gamemode(), player.effects(), player.awaitingTeleport(), uncertain, player.input(),
+        player.attributes(), player.pose(), player.environment(), player.clientTickRange(), player.provenance(), reasons);
   }
 
   private static Phase8MovementValidation.Result anchorUncertain(String playerId, long serverTick,
