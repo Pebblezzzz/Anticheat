@@ -38,6 +38,11 @@ server arrival
 
 The packet is therefore not treated as the exact instant that its underlying input occurred.
 
+For Minecraft 1.21.2 and newer, the client sends a `CLIENT_TICK_END` packet when it finishes processing a client tick. The Paper adapter now uses those observed boundaries to assign a **relative** tick number to movement packets after the first boundary. This is not a protocol-provided tick number: the first observed boundary establishes relative tick zero, and movements before that boundary remain untimed. Multiple movement packets between two boundaries share the same relative tick. PacketEvents 2.13.0 exposes this packet as `PacketType.Play.Client.CLIENT_TICK_END` / `WrapperPlayClientClientTickEnd`. 
+
+An exact relative client tick is a timing fact even when upstream latency remains bounded rather than exact. Phase 7 therefore separates **client-tick certainty** from **network-time uncertainty**: bounded upstream jitter no longer poisons an otherwise exact movement tick. Server-to-client world/correction timing remains uncertain while downstream delivery latency is bounded rather than exact.
+
+
 ## Latency and jitter
 
 Latency is represented separately for client→server and server→client directions as explicit `[min,max]` bounds. The difference is the allowed jitter envelope. Variable latency widens possible client time rather than selecting a single tick. The default configuration is conservative and is replay input data, not hidden state.
