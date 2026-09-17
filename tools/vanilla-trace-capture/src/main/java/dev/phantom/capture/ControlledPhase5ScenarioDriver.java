@@ -33,6 +33,7 @@ public final class ControlledPhase5ScenarioDriver {
     private static final double FALL_CUTOFF_Y = 2.0D;
     private static final double RESET_TOLERANCE = 0.75D;
     private static final int RESET_TIMEOUT_TICKS = 100;
+    private static final int RESET_SETTLE_TICKS = 1;
     private static volatile ControlledPhase5ScenarioDriver LAST;
 
     private String scenario = NONE;
@@ -184,8 +185,10 @@ public final class ControlledPhase5ScenarioDriver {
     private void waitForReset(MinecraftClient client) {
         if (client.player == null) return;
         resetWait++;
-        client.player.requestTeleport(resetX, resetY, resetZ);
-        client.player.setVelocity(Vec3d.ZERO);
+        if (resetWait <= RESET_SETTLE_TICKS) {
+            client.player.requestTeleport(resetX, resetY, resetZ);
+            client.player.setVelocity(Vec3d.ZERO);
+        }
         client.player.setYaw(resetYaw);
         client.player.setPitch(0.0F);
 
