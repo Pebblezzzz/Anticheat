@@ -8,7 +8,6 @@ import dev.phantom.ac.Phase6Reachability.ExternalTransition;
 import dev.phantom.ac.Phase6Reachability.InputConstraint;
 import dev.phantom.ac.Phase6Reachability.SearchResult;
 import dev.phantom.ac.Phase6Reachability.WorldBranch;
-import dev.phantom.ac.Simulation.AdvancedInput;
 import dev.phantom.ac.Simulation.Attributes;
 import dev.phantom.ac.State.Player;
 import dev.phantom.ac.world.BlockState;
@@ -46,6 +45,7 @@ public final class Phase8LiveValidation {
     Phase7Timing.Reconstruction timing = Phase7Timing.reconstruct(timeline, timingConfig);
     Phase6Reachability engine = new Phase6Reachability(new Vanilla12111RichPhysics());
     State.Reconstruction observedStates = reconstructObservedStates(timeline);
+    Map<Long, State.StateFrame> observedBySequence = observedStatesBySequence(observedStates);
     Map<Long, List<ExternalTransition>> externalByClientTick = externalTransitions(timeline, timing);
 
     Set<Candidate> candidates = Set.of();
@@ -67,7 +67,7 @@ public final class Phase8LiveValidation {
       movements++;
 
       Phase7Timing.EventTiming eventTiming = timing.timingFor(normalized.sequence()).orElse(null);
-      State.StateFrame stateFrame = observedStatesBySequence(observedStates).get(normalized.sequence());
+      State.StateFrame stateFrame = observedBySequence.get(normalized.sequence());
       WorldSnapshot world = history.statesAt(event.serverTick());
       if (eventTiming == null || stateFrame == null) {
         results.add(anchorUncertain(playerId, event.serverTick(), stateFrame, world,
@@ -80,7 +80,8 @@ public final class Phase8LiveValidation {
       Validation.SyncWindow sync = Phase7Timing.toPhase6Window(eventTiming);
       String replayReference = "live:phase8:" + playerId + ":" + normalized.sequence();
       List<String> inputAssumptions = List.of("client-input=" + currentInput,
-          "input-constraint-candidates=" + currentInput.enumerate().size());
+          "input-constraint-candidates=" + currentInput.enumerate().size(),
+          "timing-offsets=" + sync.earliestClientTick() + ".." + sync.latestClientTick());
       String worldReference = "timeline-world:tick=" + event.serverTick() + ":chunks=" + world.loadedChunks().size();
 
       if (candidates.isEmpty()) {
@@ -114,18 +115,21 @@ public final class Phase8LiveValidation {
       int uncertainTransitions = 0;
       int provenanceMerges = 0;
       LinkedHashSet<String> searchReasons = new LinkedHashSet<>(eventTiming.reasons());
-      boolean worldExhaustive = worldTimingExhaustiveBefore(timing, normalized.sequence());
+
+      // The World.VisibilityHistory snapshot is already the client-visible world model.
+      // Coverage failures inside Phase 6 still force UNCERTAIN; we do not replace them with air.
+      boolean worldExhaustive = true;
 
       for (Candidate parent : candidates) {
         Phase6Reachability.Context prepared = withObservedEnvironment(
             parent.context(), world, currentInput, earliest);
         Phase6Reachability.TimingSearchResult search = engine.searchWithinTimingWindow(
             prepared, earliest, latest,
-            sync.uncertain() || timing.consistency() != Phase7Timing.Consistency.CONSISTENT,
+            false,
             List.of(currentInput),
             tick -> List.of(new WorldBranch(
                 "client-visible-" + event.serverTick(), world, worldExhaustive,
-                worldExhaustive ? "historical client-visible world" : "world timing uncertain")),
+                "historical client-visible world; unloaded/unsupported cells remain Phase 6 uncertainty")),
             tick -> externalByClientTick.getOrDefault(tick, List.of(new Phase6Reachability.None())),
             maximumCandidates);
 
@@ -144,13 +148,12 @@ public final class Phase8LiveValidation {
           searchReasons.add("combined Phase 6 timing candidate budget exceeded; no provisional subset retained");
           break;
         }
-        SearchResult first = search.byFirstTick().values().stream().findFirst().orElse(null);
-        if (first != null) {
-          merged += first.mergedStates();
-          nonExhaustiveWorldBranches += first.nonExhaustiveWorldBranches();
-          uncertainTransitions += first.uncertainTransitions();
-          provenanceMerges += first.provenanceMerges();
-          peakCandidates = Math.max(peakCandidates, first.peakCandidates());
+        for (SearchResult perOffset : search.byFirstTick().values()) {
+          merged += perOffset.mergedStates();
+          nonExhaustiveWorldBranches += perOffset.nonExhaustiveWorldBranches();
+          uncertainTransitions += perOffset.uncertainTransitions();
+          provenanceMerges += perOffset.provenanceMerges();
+          peakCandidates = Math.max(peakCandidates, perOffset.peakCandidates());
         }
       }
 
@@ -160,10 +163,10 @@ public final class Phase8LiveValidation {
               List.copyOf(searchReasons))
           : new SearchResult(Phase6Reachability.Verdict.POSSIBLE, Set.copyOf(nextAll), simulatedTicks,
               peakCandidates, merged, nonExhaustiveWorldBranches, uncertainTransitions, provenanceMerges,
-              searchReasons.isEmpty() ? List.of("exhaustive Phase 6 live envelope") : List.copyOf(searchReasons));
+              searchReasons.isEmpty() ? List.of("all Phase 7 timing offsets were exhaustively modeled") : List.copyOf(searchReasons));
 
       results.add(Phase8MovementValidation.validate(playerId, event.serverTick(), prior, observed,
-          world, worldReference, sync, inputAssumptions, reachable, replayReference));
+          world, worldReference, sync, inputAssumptions, reachable, replayReference, true));
 
       if (!nextAll.isEmpty()) candidates = Set.copyOf(nextAll);
     }
@@ -279,13 +282,5 @@ public final class Phase8LiveValidation {
     Map<Long, List<ExternalTransition>> frozen = new HashMap<>();
     for (Map.Entry<Long, List<ExternalTransition>> entry : out.entrySet()) frozen.put(entry.getKey(), List.copyOf(entry.getValue()));
     return Map.copyOf(frozen);
-  }
-
-  private static boolean worldTimingExhaustiveBefore(Phase7Timing.Reconstruction timing, long sequence) {
-    for (Phase7Timing.Frame frame : timing.frames()) {
-      if (frame.timing().sequence() >= sequence) break;
-      if (frame.timing().kind() == Phase7Timing.EventKind.WORLD && frame.timing().uncertain()) return false;
-    }
-    return true;
   }
 }
