@@ -44,9 +44,11 @@ tasks.named('runClient') {
     def captureOutput = providers.gradleProperty('phantom.capture.output')
     def captureEvents = providers.gradleProperty('phantom.capture.events')
     def captureScenario = providers.gradleProperty('phantom.capture.scenario').orElse('none')
+    def captureMode = providers.gradleProperty('phantom.capture.mode').orElse('legacy')
 
     systemProperty 'phantom.capture.enabled', captureEnabled.get()
     systemProperty 'phantom.capture.scenario', captureScenario.get()
+    systemProperty 'phantom.capture.mode', captureMode.get()
     captureOutput.orNull?.with { systemProperty 'phantom.capture.output', it }
     captureEvents.orNull?.with { systemProperty 'phantom.capture.events', it }
 }
