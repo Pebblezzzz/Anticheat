@@ -1049,6 +1049,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
   }
 
+  private boolean debugFor(UUID playerId){
+    return Boolean.TRUE.equals(debugPlayers.get(playerId));
+  }
+
   private static final class Capture{
     final UUID playerId;
     final long epochNanos;
@@ -1109,6 +1113,13 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     List<RawPacket> copy(){
       synchronized(packets){
         int start=Math.max(0,packets.size()-MAX_VALIDATION_PACKETS);
+        return List.copyOf(packets.subList(start,packets.size()));
+      }
+    }
+
+    List<RawPacket> copyAll(){
+      synchronized(packets){
+        int start=Math.max(0,packets.size()-MAX_CAPTURE_PACKETS);
         return List.copyOf(packets.subList(start,packets.size()));
       }
     }
