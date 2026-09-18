@@ -830,8 +830,13 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   private void logValidationSummary(Capture capture,String playerName,Phase8LiveValidation.Report report){
-    Phase8MovementValidation.Result latest=report.results().isEmpty()?null:report.results().getLast();
-    if(latest==null)return;
+    Phase8MovementValidation.Result latest=report.results().stream()
+        .filter(result -> result.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE)
+        .findFirst()
+        .orElseGet(() -> report.results().stream()
+            .filter(result -> result.verdict()==Phase8MovementValidation.Verdict.UNCERTAIN)
+            .findFirst()
+            .orElse(report.results().getLast()));
     Phase8MovementValidation.Evidence e=latest.evidence();
     boolean important=latest.verdict()!=Phase8MovementValidation.Verdict.POSSIBLE;
     if(!shouldLogDebugSummary(capture,important))return;
