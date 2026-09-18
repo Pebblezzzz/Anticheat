@@ -160,7 +160,7 @@ public final class Phase8IncrementalRunner {
           ? (anchorState == null ? Player.initial(Maths.Vec3.ZERO) : anchorState)
           : trackedState;
       long serverTick = serverTick(packet.receivedNanos(),
-          packet.provenance().authoritativeServerTick().orElse(-1L));
+          packet.provenance().authoritativeServerTick()==null ? -1L : packet.provenance().authoritativeServerTick());
       Player after = State.apply(before, packet).withServerProvenance(serverTick, packet);
 
       if (event instanceof Packets.ClientTickEnd) {
