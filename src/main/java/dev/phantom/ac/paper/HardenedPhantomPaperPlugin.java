@@ -229,8 +229,16 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
    * asynchronous server-location snapshot.
    */
   @EventHandler public void onPlayerFailMove(PlayerFailMoveEvent event){
-    if(event.isAllowed())return;
     Player player=event.getPlayer();
+    if(Boolean.TRUE.equals(debugPlayers.get(player.getUniqueId()))){
+      getLogger().info("[PhantomAC][PHASE8][PAPER_MOVE_EVENT] player="+player.getName()
+          +" reason="+event.getFailReason()
+          +" allowed="+event.isAllowed()
+          +" from="+event.getFrom()
+          +" to="+event.getTo()
+          +" logWarning="+event.getLogWarning());
+    }
+    if(event.isAllowed())return;
     PlayerFailMoveEvent.FailReason reason=event.getFailReason();
     if(reason!=PlayerFailMoveEvent.FailReason.MOVED_TOO_QUICKLY
         &&reason!=PlayerFailMoveEvent.FailReason.MOVED_WRONGLY)return;
@@ -690,7 +698,19 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         +" decodedPos="+position
         +" decodedYaw="+move.yaw()
         +" decodedPitch="+move.pitch()
-        +" observedDelta="+delta);
+        +" observedDelta="+delta
+        +" authority={tick="+capture.authoritativeServerTick.get()
+        +",serverPos="+capture.lastAuthoritativePosition
+        +",serverVel="+capture.lastAuthoritativeVelocity
+        +",serverGround="+capture.lastAuthoritativeOnGround
+        +",canFly="+capture.lastAuthoritativeCanFly
+        +",flying="+capture.lastAuthoritativeFlying+"}"
+        +" evidenceHint="+(
+            move.position()==null
+              ? "HEARTBEAT_OR_ROTATION_ONLY"
+              : (delta.equals("n/a")||delta.equals("Vec3[x=0.0, y=0.0, z=0.0]")
+                  ? "POSITION_PACKET_WITH_ZERO_DELTA"
+                  : "TRUE_POSITION_MOVEMENT")));
   }
 
   private void logValidationDebug(String playerName,Phase8MovementValidation.Result result){
