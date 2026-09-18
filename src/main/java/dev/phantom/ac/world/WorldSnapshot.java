@@ -88,6 +88,35 @@ public record WorldSnapshot(String version, Map<Chunk, Map<Pos, BlockState>> chu
       java.util.Comparator.comparingInt(Pos::x).thenComparingInt(Pos::y).thenComparingInt(Pos::z);
 
   /** An empty snapshot for a dimension, i.e. the client has received no chunks. */
+  /**
+   * Merges snapshots that came from the same client-world replica at the same
+   * validation instant. Overlapping chunks must agree; disjoint coverage is
+   * combined. This is used to cover both the current observation and an
+   * authoritative replay anchor without inventing world data.
+   */
+  public static WorldSnapshot merge(WorldSnapshot first,WorldSnapshot second){
+    Objects.requireNonNull(first,"first");
+    Objects.requireNonNull(second,"second");
+    if(!first.version().equals(second.version())||first.minY()!=second.minY()||first.maxY()!=second.maxY())
+      throw new IllegalArgumentException("world snapshots have incompatible dimensions or model versions");
+    Map<Chunk,Map<Pos,BlockState>> merged=new HashMap<>(first.chunks());
+    for(var entry:second.chunks().entrySet()){
+      Map<Pos,BlockState> existing=merged.get(entry.getKey());
+      if(existing==null){
+        merged.put(entry.getKey(),new HashMap<>(entry.getValue()));
+        continue;
+      }
+      Map<Pos,BlockState> combined=new HashMap<>(existing);
+      for(var block:entry.getValue().entrySet()){
+        BlockState prior=combined.putIfAbsent(block.getKey(),block.getValue());
+        if(prior!=null&&!prior.equals(block.getValue()))
+          throw new IllegalArgumentException("overlapping world snapshots disagree at "+block.getKey());
+      }
+      merged.put(entry.getKey(),combined);
+    }
+    return new WorldSnapshot(first.version(),merged,first.minY(),first.maxY());
+  }
+
   public static WorldSnapshot empty(String version, int minY, int maxY) {
     return new WorldSnapshot(version, Map.of(), minY, maxY);
   }
