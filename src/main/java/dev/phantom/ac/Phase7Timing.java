@@ -11,7 +11,7 @@ public final class Phase7Timing {
   public enum EventKind { MOVEMENT, INPUT, CLIENT_TICK_END, TELEPORT_CORRECTION, TELEPORT_ACK, VELOCITY, WORLD, EFFECT, GAMEMODE, OTHER }
   public enum TimingSource { EXPLICIT_CLIENT_TICK, LATENCY_BOUNDED, RELATIVE_CLIENT_ANCHOR, SERVER_CAPTURE_ONLY }
   public enum SyncStatus { SYNCHRONIZED, PARTIALLY_SYNCHRONIZED, AMBIGUOUS, RECOVERING, UNKNOWN }
-  public enum WindowKind { TELEPORT, VELOCITY, ACKNOWLEDGEMENT, WORLD_UPDATE, PACKET_GAP, SERVER_TICK_GAP, REORDERING, DUPLICATE, RECOVERY, STARTUP }
+  public enum WindowKind { TELEPORT, VELOCITY, ACKNOWLEDGEMENT, WORLD_UPDATE, PACKET_GAP, SERVER_TICK_GAP, REORDERING, DUPLICATE, MULTIPLE_MOVEMENT_IN_CLIENT_TICK, RECOVERY, STARTUP }
   public enum Consistency { CONSISTENT, UNCERTAIN, INCONSISTENT }
 
   public record Range(long min,long max) implements Serializable {
@@ -88,9 +88,10 @@ public final class Phase7Timing {
   public static Reconstruction reconstruct(Timeline.Snapshot timeline){return reconstruct(timeline,Config.defaultConfig());}
   public static Reconstruction reconstruct(Timeline.Snapshot timeline,Config config){
     Objects.requireNonNull(timeline); Objects.requireNonNull(config);
-    SynchronizationState sync=SynchronizationState.initial(); List<Frame> frames=new ArrayList<>(); OptionalLong anchorSequence=OptionalLong.empty(); Range anchorTick=Range.exact(0); TimeRange anchorGeneration=TimeRange.exact(Math.max(0,timeline.metadata().captureEpochNanos())); boolean anchorSet=false; Consistency consistency=Consistency.CONSISTENT; List<String> consistencyReasons=new ArrayList<>(); long previousCapture=-1,previousServerTick=-1; long clientBoundaryTick=0; boolean clientBoundarySeen=false; int index=0;
+    SynchronizationState sync=SynchronizationState.initial(); List<Frame> frames=new ArrayList<>(); OptionalLong anchorSequence=OptionalLong.empty(); Range anchorTick=Range.exact(0); TimeRange anchorGeneration=TimeRange.exact(Math.max(0,timeline.metadata().captureEpochNanos())); boolean anchorSet=false; Consistency consistency=Consistency.CONSISTENT; List<String> consistencyReasons=new ArrayList<>(); long previousCapture=-1,previousServerTick=-1; long clientBoundaryTick=0; boolean clientBoundarySeen=false; int movementPacketsInClientInterval=0; int index=0;
     for(Timeline.Event event:timeline.events()){
-      NormalizedPacket normalized=event.packet(); Packet packet=normalized.packet(); Direction direction=direction(packet); EventKind kind=kind(packet); long capture=normalized.receivedNanos(); TimingBounds bounds=timingBounds(packet,capture,config); OptionalLong explicit=packet instanceof Move m&&m.clientTick()!=null?OptionalLong.of(m.clientTick()):OptionalLong.empty(); boolean duplicate=normalized.flags().contains(PacketFlag.DUPLICATE); SynchronizationState before=sync; if(kind==EventKind.CLIENT_TICK_END&&!duplicate){clientBoundaryTick=safeAdd(clientBoundaryTick,1);clientBoundarySeen=true;}
+      NormalizedPacket normalized=event.packet(); Packet packet=normalized.packet(); Direction direction=direction(packet); EventKind kind=kind(packet); long capture=normalized.receivedNanos(); TimingBounds bounds=timingBounds(packet,capture,config); OptionalLong explicit=packet instanceof Move m&&m.clientTick()!=null?OptionalLong.of(m.clientTick()):OptionalLong.empty(); boolean duplicate=normalized.flags().contains(PacketFlag.DUPLICATE); SynchronizationState before=sync; if(kind==EventKind.CLIENT_TICK_END&&!duplicate){clientBoundaryTick=safeAdd(clientBoundaryTick,1);clientBoundarySeen=true;movementPacketsInClientInterval=0;}
+      if(kind==EventKind.MOVEMENT&&!duplicate)movementPacketsInClientInterval++;
       if(!anchorSet&&direction==Direction.CLIENT_TO_SERVER&&!duplicate&&kind!=EventKind.CLIENT_TICK_END){anchorSet=true;anchorSequence=OptionalLong.of(normalized.sequence());anchorGeneration=bounds.packetGenerationNanos;anchorTick=explicit.isPresent()?Range.exact(explicit.getAsLong()):(clientBoundarySeen?Range.exact(clientBoundaryTick):Range.exact(0));sync=new SynchronizationState(explicit.isPresent()?SyncStatus.SYNCHRONIZED:SyncStatus.PARTIALLY_SYNCHRONIZED,anchorTick,latencyRange(bounds.latency),OptionalInt.empty(),1,1,List.of(new SynchronizationWindow(WindowKind.STARTUP,event.serverTick(),event.serverTick(),anchorTick,"first client event anchors relative client chronology",normalized.sequence())),List.of(explicit.isPresent()?"explicit client movement tick establishes the clock anchor":clientBoundarySeen?"client tick-end boundaries establish a relative chronology anchor":"first client event anchors relative chronology; absolute client clock origin is unknown"));}
       Range packetTicks; TimingSource source;
       if(explicit.isPresent()){packetTicks=Range.exact(explicit.getAsLong());source=TimingSource.EXPLICIT_CLIENT_TICK;
@@ -120,6 +121,13 @@ public final class Phase7Timing {
       if(duplicate){windows.add(new SynchronizationWindow(WindowKind.DUPLICATE,event.serverTick(),event.serverTick(),packetTicks,"duplicate capture sequence is retained as evidence but has no semantic effect",normalized.sequence()));uncertain=true;reasons.add("duplicate capture sequence");}
       if(normalized.flags().contains(PacketFlag.OUT_OF_ORDER)){windows.add(new SynchronizationWindow(WindowKind.REORDERING,event.serverTick(),event.serverTick(),packetTicks,"arrival chronology is preserved and reordering remains explicit",normalized.sequence()));uncertain=true;reasons.add("out-of-order capture sequence");}
       if(normalized.flags().contains(PacketFlag.SEQUENCE_GAP)){uncertain=true;reasons.add("capture sequence gap; absent records remain unknown");}
+      if(kind==EventKind.MOVEMENT&&!duplicate&&movementPacketsInClientInterval>1){
+        windows.add(new SynchronizationWindow(WindowKind.MULTIPLE_MOVEMENT_IN_CLIENT_TICK,event.serverTick(),event.serverTick(),packetTicks,
+            "multiple movement packets arrived within one client-tick interval; this observation is not treated as a separate exact physics tick",
+            normalized.sequence()));
+        uncertain=true;
+        reasons.add("multiple movement packets in the same client-tick interval");
+      }
 
       // Duplicate records never trigger a second semantic correction, velocity, world,
       // or acknowledgement event. Their chronology remains visible only as uncertainty.
