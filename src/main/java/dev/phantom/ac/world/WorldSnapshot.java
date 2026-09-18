@@ -55,6 +55,13 @@ public final class WorldSnapshot implements Serializable {
     int maxY();
     Set<Chunk> loadedChunks();
 
+    /**
+     * Highest capture sequence for which every state in this backend is known
+     * to have been visible to the client. Negative means no causal bound was
+     * supplied (legacy/test snapshot semantics).
+     */
+    default long causalSequence() { return -1L; }
+
     default boolean hasChunk(int chunkX, int chunkZ) {
       return loadedChunks().contains(new Chunk(chunkX, chunkZ));
     }
@@ -200,6 +207,10 @@ public final class WorldSnapshot implements Serializable {
           Set<Chunk> result = new LinkedHashSet<>(first.loadedChunks());
           result.addAll(second.loadedChunks());
           return Set.copyOf(result);
+        }
+        @Override public long causalSequence() {
+          long a=first.causalSequence(), b=second.causalSequence();
+          return a<0 || b<0 ? -1L : Math.max(a,b);
         }
         @Override public boolean hasChunk(int chunkX,int chunkZ) {
           return first.hasChunk(chunkX,chunkZ) || second.hasChunk(chunkX,chunkZ);
