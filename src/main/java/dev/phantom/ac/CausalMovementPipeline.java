@@ -521,6 +521,12 @@ public final class CausalMovementPipeline {
           assumptions, uncertainty, trace));
     }
 
+    if (results.size() != movements.size() || frames.size() != movements.size()) {
+      throw new IllegalStateException(
+          "Phase 8 movement/result cardinality invariant violated: movements="
+              + movements.size() + " results=" + results.size() + " frames=" + frames.size());
+    }
+
     int possible = (int) results.stream()
         .filter(result -> result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE)
         .count();
