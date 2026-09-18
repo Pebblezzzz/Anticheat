@@ -399,23 +399,6 @@ final class LiveClientWorldReplica {
     return dev.phantom.ac.world.v12111.BlockCatalogue12111.decode(name, properties);
   }
 
-  private static boolean isFence(String name) {
-    return name.endsWith("_fence") && !name.endsWith("_fence_gate");
-  }
-
-  private static boolean isWall(String name) {
-    return name.endsWith("_wall");
-  }
-
-  private static boolean isPane(String name) {
-    return name.endsWith("_pane");
-  }
-
-  private static boolean hasAll(Map<String, String> map, String... keys) {
-    for (String key : keys) if (!map.containsKey(key)) return false;
-    return true;
-  }
-
   private static void putEnum(Map<String, String> map, String key, Object value) {
     if (value != null) map.put(key, value.toString().toLowerCase(Locale.ROOT));
   }
