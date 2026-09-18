@@ -149,8 +149,8 @@ public final class Phase8IncrementalRunner {
     List<Packets.NormalizedPacket> normalized = new Packets.Normalizer().normalize(unseen);
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     int movements = 0;
-    long latestFutureWorldOrContextSequence = normalized.stream()
-        .filter(packet -> packet.packet().mutatesWorld() || packet.packet() instanceof Packets.PlayerContext)
+    long latestFutureWorldSequence = normalized.stream()
+        .filter(packet -> packet.packet().mutatesWorld())
         .mapToLong(Packets.NormalizedPacket::sequence)
         .max().orElse(Long.MIN_VALUE);
 
@@ -189,10 +189,8 @@ public final class Phase8IncrementalRunner {
 
       if (event instanceof Packets.PlayerContext context) {
         entityCollisions = EntityCollisions.of(context.entityBoxes());
+        retargetCandidateEntityCollisions(entityCollisions);
         trackedState = after;
-        reanchorRequired = true;
-        reanchorReason = "player entity-collision context changed; historical entity state is not retained yet";
-        continuation = Continuation.UNCERTAIN;
         continue;
       }
 
@@ -249,7 +247,7 @@ public final class Phase8IncrementalRunner {
       }
 
       if (move.position() != null
-          && packet.sequence() < latestFutureWorldOrContextSequence) {
+          && packet.sequence() < latestFutureWorldSequence) {
         results.add(uncertainResult(
             playerId, packet.sequence(), serverTick, before, after, world, "incremental-client-world:chunks="+world.loadedChunks().size(),
             new Validation.SyncWindow(0, 0, true, List.of("future world/entity context in the same capture batch")),
@@ -434,6 +432,19 @@ public final class Phase8IncrementalRunner {
 
     return new Report(results, normalized.size(), movements, possible, uncertain, impossible,
         lastProcessedSequence, relativeClientTick, continuation, !candidates.isEmpty());
+  }
+
+  private void retargetCandidateEntityCollisions(EntityCollisions updated){
+    if(candidates.isEmpty())return;
+    LinkedHashSet<Candidate> remapped=new LinkedHashSet<>();
+    for(Candidate candidate:candidates){
+      Phase6Reachability.Context c=candidate.context();
+      Phase6Reachability.Context next=new Phase6Reachability.Context(
+          c.simulationTick(),c.player(),c.environment(),c.attributes(),c.effects(),c.pose(),
+          c.movementEnvironment(),c.sleeping(),updated,c.uncertainty());
+      remapped.add(new Candidate(candidate.id(),next,candidate.provenance()));
+    }
+    candidates=Set.copyOf(remapped);
   }
 
   private void retargetCandidateRotation(float yaw,float pitch){
