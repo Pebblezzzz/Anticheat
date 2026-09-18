@@ -488,6 +488,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           player.getAllowFlight(),player.isFlying(),player.isSleeping(),entityBoxes);
 
       if(capture.initialState==null){
+        long anchorReceivedNanos=System.nanoTime();
         State.Environment stateEnvironment=switch(env.fluid()){
           case WATER -> State.Environment.WATER;
           case LAVA -> State.Environment.LAVA;
@@ -499,9 +500,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             player.getGameMode().name().toLowerCase(Locale.ROOT),effects,java.util.OptionalInt.empty(),false,
             java.util.Optional.empty(),new dev.phantom.ac.Simulation.Attributes(movementSpeed),pose,stateEnvironment,
             State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
+        capture.initialStateReceivedNanos=anchorReceivedNanos;
       }
 
-      appendPacket(capture,new RawPacket(capture.sequence.incrementAndGet(),System.nanoTime(),context,
+      long contextReceivedNanos=System.nanoTime();
+      appendPacket(capture,new RawPacket(capture.sequence.incrementAndGet(),contextReceivedNanos,context,
           Packets.CaptureProvenance.fromAdapter("paper-live",context,authoritativeTick)));
     }
   }
@@ -588,6 +591,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
               capture,snapshotCenterX,snapshotCenterZ,observedCenterX,observedCenterZ);
           Phase8IncrementalRunner.Report incremental=capture.movementRunner.process(
               playerName,raw,liveWorld,capture.initialState,
+              capture.initialStateReceivedNanos,
               new Vec3(snapshotCenterX,snapshotCenterY,snapshotCenterZ));
           Phase8LiveValidation.Report report=new Phase8LiveValidation.Report(
               incremental.results(),incremental.movementObservations(),incremental.possible(),
@@ -879,6 +883,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final LiveClientWorldReplica clientWorld=new LiveClientWorldReplica(Contracts.TARGET_VERSION,-64,319);
     final Phase8IncrementalRunner movementRunner;
     volatile State.Player initialState;
+    volatile long initialStateReceivedNanos=-1L;
     final Set<Short> outstandingTransactions=ConcurrentHashMap.newKeySet();
     final Set<Short> reservedTransactions=ConcurrentHashMap.newKeySet();
     final AtomicLong transactionCounter=new AtomicLong(1);
