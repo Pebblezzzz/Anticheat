@@ -157,6 +157,8 @@ public final class Phase8LiveValidation {
       Validation.SyncWindow sync=Phase7Timing.toPhase6Window(eventTiming);
       String replayReference="live:phase8:"+playerId+":"+normalized.sequence();
 
+      String worldReference="timeline-world:serverTick="+event.serverTick()+":chunks="+world.loadedChunks().size();
+
       // Grim keeps multiple movement packets inside one client tick as a distinct
       // sub-tick observation stream. Our deterministic core currently models one
       // physics step per client tick, so a second packet in the same exact tick
@@ -177,7 +179,6 @@ public final class Phase8LiveValidation {
           +", timing-offsets="+sync.earliestClientTick()+".."+sync.latestClientTick();
       List<String> inputAssumptions=List.of(inputDescription);
 
-      String worldReference="timeline-world:serverTick="+event.serverTick()+":chunks="+world.loadedChunks().size();
       boolean chronologyUncertain=normalized.flags().stream().anyMatch(flag ->
           flag==Packets.PacketFlag.DUPLICATE
               ||flag==Packets.PacketFlag.OUT_OF_ORDER
@@ -249,7 +250,7 @@ public final class Phase8LiveValidation {
           }
 
           previousMovementTick=movementTick;
-      ParentAggregation aggregated=aggregateDirectSearches(searches,maximumCandidates,exhaustive);
+          ParentAggregation aggregated=aggregateDirectSearches(searches,maximumCandidates,exhaustive);
           SearchResult reachable=aggregated.result();
           Phase8MovementValidation.Result validation=Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
               worldReference,sync,inputAssumptions,reachable,replayReference,aggregated.timingOffsetsExhaustive());
@@ -487,7 +488,7 @@ public final class Phase8LiveValidation {
 
   private static boolean canReanchorAfterUncertainty(Player observed,WorldSnapshot world,SearchResult reachable){
     if(observed==null||world==null||reachable==null||!reachable.candidates().isEmpty()) return false;
-    Player safe=simulationSafe(observed,false);
+    Player safe=simulationSafe(observed);
     if(safe.uncertain()) return false;
     Maths.Aabb box=Maths.Aabb.playerAt(safe.position(),safe.pose());
     // A temporary missing-world window must not permanently poison the live candidate chain.
