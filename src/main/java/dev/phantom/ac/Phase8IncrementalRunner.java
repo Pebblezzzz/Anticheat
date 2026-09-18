@@ -246,6 +246,8 @@ public final class Phase8IncrementalRunner {
         continue;
       }
 
+      if (move.position() != null) movements++;
+
       if (move.position() != null
           && packet.sequence() < latestFutureWorldSequence) {
         results.add(uncertainResult(
@@ -270,8 +272,6 @@ public final class Phase8IncrementalRunner {
         trackedState = after;
         continue;
       }
-
-      movements++;
 
       long movementTick;
       boolean exactTick;
