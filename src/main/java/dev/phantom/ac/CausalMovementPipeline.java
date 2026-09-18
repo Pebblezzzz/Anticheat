@@ -15,6 +15,7 @@ import dev.phantom.ac.world.EntityCollisions;
 import dev.phantom.ac.world.WorldSnapshot;
 
 import java.util.*;
+import java.util.function.LongFunction;
 
 import static dev.phantom.ac.Maths.Vec3;
 
@@ -141,6 +142,26 @@ public final class CausalMovementPipeline {
       WorldSnapshot liveWorld,
       Player initialAnchor,
       long initialAnchorReceivedNanos) {
+    return analyzeWithWorldProvider(
+        playerId, timeline, maximumCandidates, timingConfig,
+        liveWorld == null ? null : ignored -> liveWorld,
+        initialAnchor, initialAnchorReceivedNanos);
+  }
+
+  /**
+   * Replays movement against a live-world provider whose snapshot is selected
+   * independently for each movement sequence. This preserves causal ordering
+   * when a validation batch contains movements both before and after a world
+   * acknowledgement.
+   */
+  public static Report analyzeWithWorldProvider(
+      String playerId,
+      Timeline.Snapshot timeline,
+      int maximumCandidates,
+      Phase7Timing.Config timingConfig,
+      LongFunction<WorldSnapshot> liveWorldProvider,
+      Player initialAnchor,
+      long initialAnchorReceivedNanos) {
     Objects.requireNonNull(playerId);
     Objects.requireNonNull(timeline);
     Objects.requireNonNull(timingConfig);
@@ -190,13 +211,15 @@ public final class CausalMovementPipeline {
        * replay rather than borrowing current world state.
        */
       long sequence=event.packet().sequence();
-      long liveWorldSequence=liveWorld==null ? -1L : liveWorld.causalSequence();
-      boolean liveWorldCausallyAvailable=liveWorld!=null
+      WorldSnapshot movementLiveWorld = liveWorldProvider == null
+          ? null
+          : liveWorldProvider.apply(sequence);
+      long liveWorldSequence=movementLiveWorld==null ? -1L : movementLiveWorld.causalSequence();
+      boolean liveWorldCausallyAvailable=movementLiveWorld!=null
           && (liveWorldSequence<0L || liveWorldSequence<=sequence);
-      boolean useLiveWorld=liveWorldCausallyAvailable
-          && !hasWorldMutationAfter(timeline, sequence);
+      boolean useLiveWorld=liveWorldCausallyAvailable;
       WorldSnapshot world = useLiveWorld
-          ? liveWorld
+          ? movementLiveWorld
           : worldHistory.statesAt(Math.max(0L, eventTiming.simulationClientTicks().min()));
 
       boolean chronologyClean = !containsChronologyProblem(event.packet().flags());
