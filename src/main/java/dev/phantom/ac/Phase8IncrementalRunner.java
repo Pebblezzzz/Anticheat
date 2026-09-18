@@ -76,9 +76,6 @@ public final class Phase8IncrementalRunner {
   private long lastGroundContradictionTick = -1L;
   private int serverDivergenceStreak;
   private long lastServerDivergenceTick = -1L;
-  private int airHoverStreak;
-  private long lastAirHoverTick = -1L;
-  private double lastAirHoverY = Double.NaN;
   private static final int HARD_GROUND_CONTRADICTION_TICKS = 3;
   private static final int HARD_SERVER_DIVERGENCE_TICKS = 3;
   private static final double HARD_SERVER_DIVERGENCE_BLOCKS = 3.0;
@@ -131,9 +128,6 @@ public final class Phase8IncrementalRunner {
     this.lastGroundContradictionTick = -1L;
     this.serverDivergenceStreak = 0;
     this.lastServerDivergenceTick = -1L;
-    this.airHoverStreak = 0;
-    this.lastAirHoverTick = -1L;
-    this.lastAirHoverY = Double.NaN;
     this.continuation = Continuation.UNINITIALIZED;
   }
 
@@ -292,7 +286,6 @@ public final class Phase8IncrementalRunner {
         reanchorRequired = false;
         resetGroundContradiction();
         resetServerDivergence();
-        resetAirHover();
         poison("server correction received; awaiting correction acknowledgement and a fresh replay anchor");
         continuation = Continuation.UNCERTAIN;
         continue;
@@ -315,7 +308,6 @@ public final class Phase8IncrementalRunner {
         trackedState = after;
         resetGroundContradiction();
         resetServerDivergence();
-        resetAirHover();
         reanchorRequired = true;
         pendingReanchorState = authoritativeGroundState(after);
         reanchorReason = "server velocity was observed; live application timing is not yet represented by the incremental core";
@@ -328,7 +320,6 @@ public final class Phase8IncrementalRunner {
         if (worldMutationAffectsPlayer(event, before, after)) {
           resetGroundContradiction();
           resetServerDivergence();
-          resetAirHover();
           reanchorRequired = true;
           reanchorReason = "relevant client-world mutation observed; historical collision state must be replayed before continuing";
           continuation = Continuation.UNCERTAIN;
@@ -410,34 +401,6 @@ public final class Phase8IncrementalRunner {
         continuation = Continuation.UNCERTAIN;
         lastMovementTick = movementTick;
         continue;
-      }
-
-      if (hardMovementEvidenceEligible(after)
-          && !waitingForTeleport
-          && !hasFutureAuthoritativeTransition(normalized, packetIndex + 1)
-          && exactTick
-          && recordAirHover(after.position(), movementTick)) {
-        double verticalOffset = authoritativeServerPosition == null
-            ? Double.NaN
-            : after.position().y() - authoritativeServerPosition.y();
-        results.add(Phase8MovementValidation.authoritativeImpossible(
-            playerId, serverTick, before, after, world, worldReference, timing,
-            "AUTHORITATIVE_FLIGHT_STATE_CONTRADICTION",
-            "client remained airborne at a nearly constant Y while the authoritative server state "
-                + "does not permit flight for " + airHoverStreak + " consecutive 1:1 client ticks",
-            List.of(
-                "authoritativeCanFly=" + authoritativeCanFly,
-                "authoritativeFlying=" + authoritativeFlying,
-                "authoritativeOnGround=" + authoritativeOnGround,
-                "authoritativeServerPosition=" + authoritativeServerPosition,
-                "authoritativeServerVerticalVelocity=" + authoritativeServerVerticalVelocity,
-                "clientPosition=" + after.position(),
-                "verticalOffsetFromServer=" + String.format(Locale.ROOT, "%.6f", verticalOffset),
-                "consecutiveHoverTicks=" + airHoverStreak,
-                "positionBearingPacket=" + (move.position() != null),
-                "this state contradiction does not require ClientInput",
-                "finite candidate-search completeness is not required for this signal"),
-            replayReference + ":hard-flight"));
       }
 
       // A persistent contradiction between authoritative server collision state
