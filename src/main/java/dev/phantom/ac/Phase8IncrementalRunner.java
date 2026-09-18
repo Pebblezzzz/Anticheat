@@ -61,6 +61,7 @@ public final class Phase8IncrementalRunner {
   private boolean sawClientTickEnd;
   private boolean waitingForTeleport;
   private boolean reanchorRequired;
+  private Player pendingReanchorState;
   private boolean poisoned;
   private String poisonReason = "";
   private String reanchorReason = "";
@@ -100,6 +101,7 @@ public final class Phase8IncrementalRunner {
     this.sawClientTickEnd = false;
     this.waitingForTeleport = false;
     this.reanchorRequired = false;
+    this.pendingReanchorState = null;
     this.poisoned = false;
     this.poisonReason = "";
     this.reanchorReason = "";
@@ -209,6 +211,7 @@ public final class Phase8IncrementalRunner {
         if (waitingForTeleport && after.awaitingTeleport().isEmpty()) {
           waitingForTeleport = false;
           reanchorRequired = true;
+          pendingReanchorState = after;
           clearPoison();
         } else {
           poison("teleport acknowledgement did not establish a confirmed correction anchor");
@@ -219,6 +222,7 @@ public final class Phase8IncrementalRunner {
       if (event instanceof Packets.Velocity) {
         trackedState = after;
         reanchorRequired = true;
+        pendingReanchorState = after;
         reanchorReason = "server velocity was observed; live application timing is not yet represented by the incremental core";
         continuation = Continuation.UNCERTAIN;
         continue;
@@ -235,8 +239,12 @@ public final class Phase8IncrementalRunner {
       if (event instanceof Packets.WorldTransactionAck) {
         trackedState = after;
         if (reanchorRequired && reanchorReason.contains("client-world mutation")) {
-          // The live acknowledged snapshot is authoritative from this point onward;
-          // the next movement is re-anchored so no historical world transition is guessed.
+          // The acknowledged client-visible world is now authoritative for future
+          // simulation. Keep the last legitimate candidate frontier; never promote
+          // the client's current observed position to a new trusted anchor.
+          reanchorRequired = false;
+          reanchorReason = "";
+          if (!poisoned && !candidates.isEmpty()) continuation = Continuation.ACTIVE;
         }
         continue;
       }
@@ -347,10 +355,16 @@ public final class Phase8IncrementalRunner {
         trackedState = after;
         continuation = Continuation.UNCERTAIN;
         lastMovementTick = movementTick;
-        if (!waitingForTeleport && anchorState != null) {
-          anchorCandidates(after, movementTick, world);
+        if (pendingReanchorState != null && anchorState != null) {
+          // Only an explicitly authoritative server state may establish a new
+          // replay anchor. The current client-observed movement is never trusted
+          // as a recovery baseline.
+          Player authoritative = pendingReanchorState;
+          anchorCandidates(authoritative, movementTick, world);
+          pendingReanchorState = null;
           reanchorRequired = false;
           reanchorReason = "";
+          clearPoison();
         }
         continue;
       }
@@ -367,17 +381,18 @@ public final class Phase8IncrementalRunner {
         anchorCandidates(anchorState, 0, world);
       }
 
-      Set<Candidate> reachableCandidates = advanceTo(movementTick, world);
+      AdvanceResult advanced = advanceTo(movementTick, world);
+      Set<Candidate> reachableCandidates = advanced.candidates();
       SearchResult reachable = new SearchResult(
-          reachableCandidates.isEmpty()
+          advanced.uncertain()
               ? Phase6Reachability.Verdict.UNCERTAIN
               : Phase6Reachability.Verdict.POSSIBLE,
           reachableCandidates,
           (int) Math.max(0, movementTick - currentCandidateTick()),
           reachableCandidates.size(),
-          0, 0, reachableCandidates.isEmpty() ? 1 : 0, 0,
-          reachableCandidates.isEmpty()
-              ? List.of("incremental candidate frontier produced no deterministic state")
+          0, 0, advanced.uncertain() ? 1 : 0, 0,
+          advanced.uncertain()
+              ? advanced.reasons()
               : List.of("incremental deterministic candidate frontier advanced"));
 
       Phase8MovementValidation.Result validation = Phase8MovementValidation.validate(
@@ -418,7 +433,7 @@ public final class Phase8IncrementalRunner {
 
     if (!normalized.isEmpty()) lastProcessedSequence = Math.max(
         lastProcessedSequence,
-        normalized.getLast().sequence());
+        normalized.stream().mapToLong(Packets.NormalizedPacket::sequence).max().orElse(lastProcessedSequence));
 
     int possible = (int) results.stream()
         .filter(result -> result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE)
@@ -472,23 +487,29 @@ public final class Phase8IncrementalRunner {
   private float trackedStateYaw(Player player){ return player.yaw(); }
   private float trackedStatePitch(Player player){ return player.pitch(); }
 
-  private Set<Candidate> advanceTo(long targetTick, WorldSnapshot world) {
+  private record AdvanceResult(Set<Candidate> candidates, boolean uncertain, List<String> reasons) {}
+
+  private AdvanceResult advanceTo(long targetTick, WorldSnapshot world) {
     Set<Candidate> nextAll = new LinkedHashSet<>();
+    LinkedHashSet<String> uncertaintyReasons = new LinkedHashSet<>();
     int peak = Math.max(1, candidates.size());
 
     for (Candidate parent : candidates) {
       long parentTick = parent.context().simulationTick();
       if (targetTick < parentTick) {
+        uncertaintyReasons.add("candidate frontier contains a future simulation tick");
         continue;
       }
 
       long steps = targetTick - parentTick;
       if (steps > Phase6Reachability.MAX_HORIZON_TICKS) {
+        uncertaintyReasons.add("candidate branch exceeded the finite movement horizon");
         continue;
       }
 
       boolean parentWorldComplete = worldCoverage(world, parent);
       if (!parentWorldComplete) {
+        uncertaintyReasons.add("candidate branch lacks complete collision coverage at its current position");
         continue;
       }
 
@@ -511,11 +532,21 @@ public final class Phase8IncrementalRunner {
       if (result.verdict() == Phase6Reachability.Verdict.POSSIBLE) {
         nextAll.addAll(result.candidates());
         peak = Math.max(peak, result.peakCandidates());
+      } else {
+        uncertaintyReasons.addAll(result.reasons());
       }
-      if (nextAll.size() > maximumCandidates) return Set.of();
+      if (nextAll.size() > maximumCandidates) {
+        return new AdvanceResult(Set.of(), true, List.of("incremental candidate budget exceeded"));
+      }
     }
 
-    return Set.copyOf(nextAll);
+    if (!uncertaintyReasons.isEmpty()) {
+      return new AdvanceResult(Set.of(), true, List.copyOf(uncertaintyReasons));
+    }
+    if (nextAll.isEmpty()) {
+      return new AdvanceResult(Set.of(), true, List.of("incremental candidate frontier produced no deterministic state"));
+    }
+    return new AdvanceResult(Set.copyOf(nextAll), false, List.of());
   }
 
   private long currentCandidateTick() {
