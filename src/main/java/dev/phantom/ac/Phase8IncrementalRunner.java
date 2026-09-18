@@ -145,10 +145,10 @@ public final class Phase8IncrementalRunner {
     Objects.requireNonNull(raw);
 
     if (currentAnchor != null && !currentAnchor.equals(anchor)) {
-      anchor = currentAnchor;
-      emitted.clear();
-    }
-    if (currentAnchor != null && currentAnchorReceivedNanos >= 0) {
+      /* A changed anchor is a new causal epoch. Never replay pre-anchor packets
+       * through the new authority merely because the caller reused the runner. */
+      reset(currentAnchor, currentAnchorReceivedNanos, -1L);
+    } else if (currentAnchor != null && currentAnchorReceivedNanos >= 0) {
       anchorReceivedNanos = currentAnchorReceivedNanos;
     }
 
