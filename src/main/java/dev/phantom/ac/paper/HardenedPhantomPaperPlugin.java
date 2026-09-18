@@ -77,7 +77,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private static final int PAPER_MOVE_FAILURE_THRESHOLD=1;
 
   private final Map<UUID,Capture> captures=new ConcurrentHashMap<>();
-  private final Map<UUID,Boolean> debugPlayers=new ConcurrentHashMap<>();
+  private enum DebugLevel { OFF, SUMMARY, TRACE }
+
+  private final Map<UUID,DebugLevel> debugPlayers=new ConcurrentHashMap<>();
   private org.bukkit.scheduler.BukkitTask stateTask,validationTask;
   private int validationBudget;
   private boolean alertsEnabled,broadcastAlerts,setbacksEnabled,setbacksOnlyExhaustive;
@@ -119,7 +121,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         String sourceId=tickObservation.hasSeenTickEnd()?"paper-client-tick-boundary":"paper-relative-first-tick";
         long sequence=capture.sequence.incrementAndGet();
         long receivedNanos=System.nanoTime();
-        if(Boolean.TRUE.equals(debugPlayers.get(player.getUniqueId())))
+        if(debugLevel(player.getUniqueId()).trace())
           logMovementPacketDebug(player,capture,sequence,receivedNanos,event.getPacketType().toString(),packet,move,tickObservation);
         appendPacket(capture,new RawPacket(sequence,receivedNanos,move,
             Packets.CaptureProvenance.fromAdapter(sourceId,move,authoritativeTick)));
@@ -205,7 +207,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         ClientVersion clientVersion=event.getUser().getClientVersion();
         capture.chunkPackets.incrementAndGet();
         capture.clientWorld.queueChunk(sequence,column,column.isFullChunk(),clientVersion);
-        if (Boolean.TRUE.equals(debugPlayers.get(player.getUniqueId()))) {
+        if (debugLevel(player.getUniqueId()).trace()) {
           getLogger().info("[PhantomAC][CHUNK] player=" + player.getName()
               + " chunk=" + column.getX() + "," + column.getZ()
               + " cached=true fullChunk=" + column.isFullChunk()
@@ -282,7 +284,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       capture.initialStateReceivedNanos=receivedNanos;
       capture.movementRunner.reset(
           authoritativeAnchor,receivedNanos,capture.sequence.get());
-      if(Boolean.TRUE.equals(debugPlayers.get(player.getUniqueId()))){
+      if (debugLevel(player.getUniqueId()).trace()) {
         getLogger().info("[PhantomAC][PHASE8][REANCHOR] player="+player.getName()
             +" reason=PLAYER_TELEPORT_EVENT"
             +" sequenceBoundary="+capture.sequence.get()
@@ -332,7 +334,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     Packets.FlightToggle toggle=new Packets.FlightToggle(attemptedFlying,event.isCancelled());
     long sequence=capture.sequence.incrementAndGet();
     long receivedNanos=System.nanoTime();
-    if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
+    if (debugLevel(capture.playerId).summary()) {
       getLogger().info("[PhantomAC][PHASE8][FLIGHT_TOGGLE] player="+player.getName()
           +" attemptedFlying="+attemptedFlying
           +" cancelled="+event.isCancelled()
@@ -347,7 +349,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   @EventHandler public void onPlayerFailMove(PlayerFailMoveEvent event){
     Player player=event.getPlayer();
-    if(Boolean.TRUE.equals(debugPlayers.get(player.getUniqueId()))){
+    if (debugLevel(player.getUniqueId()).trace()) {
       getLogger().info("[PhantomAC][PHASE8][PAPER_MOVE_EVENT] player="+player.getName()
           +" reason="+event.getFailReason()
           +" allowed="+event.isAllowed()
@@ -378,7 +380,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         telemetrySequence,now,corroboration,
         Packets.CaptureProvenance.fromAdapter("paper-move-rejection",corroboration,authoritativeTick(capture))));
 
-    if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
+    if (debugLevel(capture.playerId).summary()) {
       getLogger().info("[PhantomAC][PHASE8][PAPER_MOVE_FAIL] player="+player.getName()
           +" reason="+reason
           +" allowed="+event.isAllowed()
@@ -418,7 +420,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private void applyAuthoritativeEventResult(Capture capture,Phase8MovementValidation.Result result){
     Phase8MovementValidation.Evidence evidence=result.evidence();
     boolean accepted=capture.validationGate.accept(evidence.replayReference(),result.verdict());
-    if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
+    if (debugLevel(capture.playerId).summary()) {
       getLogger().info("[PhantomAC][PHASE8][AUTHORITATIVE_RESULT] player="+capture.playerId
           +" rule="+evidence.rule()
           +" verdict="+result.verdict()
@@ -454,12 +456,24 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     if(args[0].equalsIgnoreCase("debug")&&args.length>=2){
       Player target=getServer().getPlayerExact(args[1]);
       if(target==null){sender.sendMessage("Player not found: "+args[1]);return true;}
-      if(args.length>=3&&args[2].equalsIgnoreCase("off")){
-        debugPlayers.remove(target.getUniqueId());
-        sender.sendMessage("Phase 8 debug disabled for "+target.getName());
-      }else{
-        debugPlayers.put(target.getUniqueId(),Boolean.TRUE);
-        sender.sendMessage("Phase 8 debug enabled for "+target.getName());
+      String mode=args.length>=3?args[2].toLowerCase(Locale.ROOT):"summary";
+      switch(mode){
+        case "off" -> {
+          debugPlayers.remove(target.getUniqueId());
+          sender.sendMessage("Phase 8 debug disabled for "+target.getName());
+        }
+        case "summary" -> {
+          debugPlayers.put(target.getUniqueId(),DebugLevel.SUMMARY);
+          sender.sendMessage("Phase 8 summary debug enabled for "+target.getName()
+              +" (important verdicts immediately, otherwise at most once per second).");
+        }
+        case "trace" -> {
+          debugPlayers.put(target.getUniqueId(),DebugLevel.TRACE);
+          sender.sendMessage("Phase 8 trace debug enabled for "+target.getName()+" (packet/frame detail).");
+        }
+        case "status" -> sender.sendMessage("Phase 8 debug for "+target.getName()+": "
+            +debugPlayers.getOrDefault(target.getUniqueId(),DebugLevel.OFF));
+        default -> sender.sendMessage("Usage: /phantom debug <player> [summary|trace|off|status]");
       }
       return true;
     }
@@ -479,7 +493,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       return true;
     }
 
-    sender.sendMessage("Usage: /phantom status | /phantom debug <player> [off] | /phantom setback <player> [on|off]");
+    sender.sendMessage("Usage: /phantom status | /phantom debug <player> [summary|trace|off|status] | /phantom setback <player> [on|off]");
     return true;
   }
 
@@ -677,7 +691,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       final double observedCenterX=observedPositionForValidation==null?snapshotCenterX:observedPositionForValidation.x();
       final double observedCenterZ=observedPositionForValidation==null?snapshotCenterZ:observedPositionForValidation.z();
 
-      if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
+      if (debugLevel(capture.playerId).summary()) {
         getLogger().info("[PhantomAC][PHASE8][VALIDATION_START] player="+playerName
             +" rawPackets="+raw.size()
             +" lastProcessedSequence="+capture.movementRunner.lastProcessedSequence()
@@ -704,7 +718,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
               incremental.results(),incremental.movementObservations(),incremental.possible(),
               incremental.uncertain(),incremental.impossible());
 
-          if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
+          if (debugLevel(capture.playerId).summary()) {
             getLogger().info("[PhantomAC][PHASE8][INCREMENTAL] player="+playerName
                 +" packets="+incremental.packetsProcessed()
                 +" movements="+incremental.movementObservations()
@@ -737,6 +751,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
                 +",flying="+capture.lastAuthoritativeFlying+"}"
                 +" paperRejectionsInWindow="+capture.paperMoveFailureCount);
           }
+          if(debugLevel(capture.playerId).summary()){
+            logValidationSummary(capture,playerName,report);
+          }
           getServer().getScheduler().runTask(this,()->applyResult(capture,report));
         }catch(RuntimeException failure){
           capture.validationRunning.set(false);
@@ -748,7 +765,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   private void applyResult(Capture capture,Phase8LiveValidation.Report report){
-    if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
+    DebugLevel debugLevel=debugLevel(capture.playerId);
+    if (debugLevel.trace()) {
       for(Phase8MovementValidation.Result result:report.results())
         logValidationDebug(getServer().getPlayer(capture.playerId)==null
             ?capture.playerId.toString()
@@ -810,6 +828,75 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   private boolean setbackEnabled(UUID playerId){
     return setbackOverrides.getOrDefault(playerId,setbacksEnabled);
+  }
+
+  private DebugLevel debugLevel(UUID playerId){
+    return debugPlayers.getOrDefault(playerId,DebugLevel.OFF);
+  }
+
+  private boolean shouldLogDebugSummary(Capture capture,boolean important){
+    if(debugLevel(capture.playerId)!=DebugLevel.SUMMARY)return false;
+    long now=System.nanoTime();
+    long last=capture.lastDebugSummaryNanos;
+    if(important||last<0L||now-last>=1_000_000_000L){
+      capture.lastDebugSummaryNanos=now;
+      return true;
+    }
+    return false;
+  }
+
+  private void logValidationSummary(Capture capture,String playerName,Phase8LiveValidation.Report report){
+    Phase8MovementValidation.Result latest=report.results().isEmpty()?null:report.results().getLast();
+    if(latest==null)return;
+    Phase8MovementValidation.Evidence e=latest.evidence();
+    boolean important=latest.verdict()!=Phase8MovementValidation.Verdict.POSSIBLE;
+    if(!shouldLogDebugSummary(capture,important))return;
+
+    String closest=e.closestCandidate().map(candidate->
+        "id="+candidate.candidateId()
+        +",tick="+candidate.simulationTick()
+        +",pos="+candidate.position()
+        +",vel="+candidate.velocity()
+        +",ground="+candidate.onGround()
+        +",provenance="+candidate.provenance()).orElse("none");
+
+    getLogger().info("[PhantomAC][PHASE8][SUMMARY] player="+playerName
+        +" verdict="+latest.verdict()
+        +" results="+report.results().size()
+        +" possible="+report.possible()
+        +" uncertain="+report.uncertain()
+        +" impossible="+report.impossible()
+        +" seq="+capture.movementRunner.lastProcessedSequence()
+        +" serverTick="+e.serverTick()
+        +" clientTick="+e.clientTickMin()+".."+e.clientTickMax()
+        +" authority="+(e.serverTick())
+        +" priorPos="+e.priorState().position()
+        +" observedPos="+e.observedState().position()
+        +" observedGround="+e.observedState().onGround()
+        +" world="+e.worldReference()
+        +" reachable="+e.reachableCandidateCount()
+        +" matching="+e.matchingCandidateCount()
+        +" eliminated="+e.candidatesEliminated()
+        +" firstInconsistent="+(e.firstInconsistentTick().isPresent()?e.firstInconsistentTick().getAsLong():"none")
+        +" rule="+e.rule()
+        +" replay="+e.replayReference());
+
+    getLogger().info("[PhantomAC][PHASE8][WHY] player="+playerName
+        +" elimination="+e.eliminationReason()
+        +" timing="+e.timingAssumptions()
+        +" uncertainty="+e.uncertaintySources()
+        +" simulation="+e.simulationDiagnostics()
+        +" closest="+closest
+        +" authorityState={serverPos="+capture.lastAuthoritativePosition
+        +",serverVel="+capture.lastAuthoritativeVelocity
+        +",serverGround="+capture.lastAuthoritativeOnGround
+        +",canFly="+capture.lastAuthoritativeCanFly
+        +",flying="+capture.lastAuthoritativeFlying+"}"
+        +" worldState={visibleChunks="+capture.clientWorld.visibleChunkCount()
+        +",decodedStates="+capture.clientWorld.decodedStateCacheSize()
+        +",pendingBarriers="+capture.clientWorld.pendingBarrierCount()
+        +",causalSequence="+capture.clientWorld.causalSequence()+"}"
+        +" paperRejectionsInWindow="+capture.paperMoveFailureCount);
   }
 
   private void logMovementPacketDebug(Player player,Capture capture,long sequence,long receivedNanos,
@@ -996,6 +1083,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final AtomicLong chunkPackets=new AtomicLong();
     final AtomicLong multiMovementPackets=new AtomicLong();
     final AtomicLong lastWorldBarrierNanos=new AtomicLong(Long.MIN_VALUE);
+    volatile long lastDebugSummaryNanos=-1L;
     volatile Vec3 lastDebugMovePosition;
     final List<RawPacket> packets=new ArrayList<>();
     final ClientTickTracker clientTickTracker=new ClientTickTracker();
