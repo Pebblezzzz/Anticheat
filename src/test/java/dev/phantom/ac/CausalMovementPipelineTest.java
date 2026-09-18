@@ -82,6 +82,49 @@ class CausalMovementPipelineTest {
   }
 
   @Test
+  void staleInitialAnchorRefreshesFromExactLocalAuthorityWhenOldChunkIsGone() {
+    var stone = dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone", Map.of());
+    var worldBuilder = WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(2, 0);
+    for (int x = 32; x <= 47; x++) for (int z = 0; z <= 15; z++) {
+      worldBuilder.setBlock(x, 63, z, stone);
+    }
+    WorldSnapshot currentWorld = worldBuilder.build();
+
+    Player current = new Player(
+        new Maths.Vec3(32.5, 64, 0.5), Maths.Vec3.ZERO, 0f, 0f, true,
+        "survival", Map.of(), OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.unknown(), State.Provenance.UNKNOWN, Set.of());
+    Packets.PlayerContext currentAuthority = new Packets.PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(), Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        current.position(), current.velocity(), false, false, false, List.of());
+
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 0, new ChunkStates(
+            new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
+        new RawPacket(2, 10, currentAuthority),
+        new RawPacket(3, 20, new Move(
+            new Maths.Vec3(32.5, 64, 0.5), 0f, 0f, true, 1L)));
+
+    var report = CausalMovementPipeline.analyze(
+        "stale-anchor-refresh",
+        Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L),
+        4096,
+        exactTiming(),
+        currentWorld,
+        anchor(),
+        0L);
+
+    assertEquals(1, report.movementObservations());
+    assertEquals(Verdict.POSSIBLE, report.results().getFirst().verdict());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("ROOT LOCAL_AUTHORITATIVE")));
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("ROOT_REFRESH reason=INITIAL_ANCHOR_WORLD_STALE")));
+  }
+
+  @Test
   void PaperMovementRejectionIsPreservedAsCorroborationOnly() {
     List<RawPacket> packets = List.of(
         new RawPacket(1, 0, new ChunkStates(
