@@ -103,7 +103,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         long sequence=capture.sequence.incrementAndGet();
         long receivedNanos=System.nanoTime();
         if(Boolean.TRUE.equals(debugPlayers.get(player.getUniqueId())))
-          logMovementPacketDebug(player,capture,sequence,receivedNanos,event.getPacketType().toString(),location,packet,move,tickObservation);
+          logMovementPacketDebug(player,capture,sequence,receivedNanos,event.getPacketType().toString(),packet,move,tickObservation);
         appendPacket(capture,new RawPacket(sequence,receivedNanos,move,
             Packets.CaptureProvenance.fromAdapter(sourceId,move,null)));
       }else if(event.getPacketType()==PacketType.Play.Client.PLAYER_INPUT){
