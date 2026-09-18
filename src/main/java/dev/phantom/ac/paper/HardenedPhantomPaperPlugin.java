@@ -194,12 +194,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   @EventHandler public void onJoin(PlayerJoinEvent event){
     Capture capture=new Capture(event.getPlayer().getUniqueId(),System.nanoTime());
     capture.updateServerPosition(event.getPlayer());
+    capture.initialState=serverAnchor(event.getPlayer());
     captures.put(event.getPlayer().getUniqueId(),capture);
   }
 
   @EventHandler public void onWorldChange(PlayerChangedWorldEvent event){
     Capture capture=new Capture(event.getPlayer().getUniqueId(),System.nanoTime());
     capture.updateServerPosition(event.getPlayer());
+    capture.initialState=serverAnchor(event.getPlayer());
     captures.put(event.getPlayer().getUniqueId(),capture);
     setbackOverrides.remove(event.getPlayer().getUniqueId());
   }
@@ -250,6 +252,28 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
     sender.sendMessage("Usage: /phantom status | /phantom debug <player> [off] | /phantom setback <player> [on|off]");
     return true;
+  }
+
+  private static State.Player serverAnchor(Player player){
+    Objects.requireNonNull(player);
+    Map<String,Integer> effects=new LinkedHashMap<>();
+    for(PotionEffect effect:player.getActivePotionEffects())
+      if(effect.getType().getKey()!=null)effects.put(effect.getType().getKey().toString(),effect.getAmplifier());
+    Phase5Mechanics.Pose pose=
+        player.isSleeping()?Phase5Mechanics.Pose.SLEEPING:
+        player.isGliding()?Phase5Mechanics.Pose.FALL_FLYING:
+        player.isSwimming()?Phase5Mechanics.Pose.SWIMMING:
+        player.isSneaking()?Phase5Mechanics.Pose.CROUCHING:
+        Phase5Mechanics.Pose.STANDING;
+    AttributeInstance movement=player.getAttribute(Attribute.MOVEMENT_SPEED);
+    double movementSpeed=movement==null?0.1:movement.getValue();
+    Phase5Mechanics.MovementEnvironment env=Phase5Mechanics.MovementEnvironment.dry(player.isOnGround(),player.isSprinting(),player.isSneaking());
+    State.Environment stateEnvironment=State.Environment.DRY;
+    return new State.Player(vector(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()),
+        Vec3.ZERO,player.getLocation().getYaw(),player.getLocation().getPitch(),player.isOnGround(),
+        player.getGameMode().name().toLowerCase(Locale.ROOT),effects,OptionalInt.empty(),false,
+        Optional.empty(),new dev.phantom.ac.Simulation.Attributes(movementSpeed),pose,stateEnvironment,
+        State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
   }
 
   private void requestWorldBarrier(Player player,Capture capture){
