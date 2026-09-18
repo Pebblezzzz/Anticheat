@@ -8,7 +8,7 @@ import java.util.*;
 public final class Phase7Timing {
   private Phase7Timing() {}
   public enum Direction { CLIENT_TO_SERVER, SERVER_TO_CLIENT, UNKNOWN }
-  public enum EventKind { MOVEMENT, INPUT, TELEPORT_CORRECTION, TELEPORT_ACK, VELOCITY, WORLD, EFFECT, GAMEMODE, OTHER }
+  public enum EventKind { MOVEMENT, INPUT, CLIENT_TICK_END, TELEPORT_CORRECTION, TELEPORT_ACK, VELOCITY, WORLD, EFFECT, GAMEMODE, OTHER }
   public enum TimingSource { EXPLICIT_CLIENT_TICK, LATENCY_BOUNDED, RELATIVE_CLIENT_ANCHOR, SERVER_CAPTURE_ONLY }
   public enum SyncStatus { SYNCHRONIZED, PARTIALLY_SYNCHRONIZED, AMBIGUOUS, RECOVERING, UNKNOWN }
   public enum WindowKind { TELEPORT, VELOCITY, ACKNOWLEDGEMENT, WORLD_UPDATE, PACKET_GAP, SERVER_TICK_GAP, REORDERING, DUPLICATE, RECOVERY, STARTUP }
@@ -88,10 +88,10 @@ public final class Phase7Timing {
   public static Reconstruction reconstruct(Timeline.Snapshot timeline){return reconstruct(timeline,Config.defaultConfig());}
   public static Reconstruction reconstruct(Timeline.Snapshot timeline,Config config){
     Objects.requireNonNull(timeline); Objects.requireNonNull(config);
-    SynchronizationState sync=SynchronizationState.initial(); List<Frame> frames=new ArrayList<>(); OptionalLong anchorSequence=OptionalLong.empty(); Range anchorTick=Range.exact(0); TimeRange anchorGeneration=TimeRange.exact(Math.max(0,timeline.metadata().captureEpochNanos())); boolean anchorSet=false; Consistency consistency=Consistency.CONSISTENT; List<String> consistencyReasons=new ArrayList<>(); long previousCapture=-1,previousServerTick=-1; int index=0;
+    SynchronizationState sync=SynchronizationState.initial(); List<Frame> frames=new ArrayList<>(); OptionalLong anchorSequence=OptionalLong.empty(); Range anchorTick=Range.exact(0); TimeRange anchorGeneration=TimeRange.exact(Math.max(0,timeline.metadata().captureEpochNanos())); boolean anchorSet=false; Consistency consistency=Consistency.CONSISTENT; List<String> consistencyReasons=new ArrayList<>(); long previousCapture=-1,previousServerTick=-1; long clientBoundaryTick=0; boolean clientBoundarySeen=false; int index=0;
     for(Timeline.Event event:timeline.events()){
-      NormalizedPacket normalized=event.packet(); Packet packet=normalized.packet(); Direction direction=direction(packet); EventKind kind=kind(packet); long capture=normalized.receivedNanos(); TimingBounds bounds=timingBounds(packet,capture,config); OptionalLong explicit=packet instanceof Move m&&m.clientTick()!=null?OptionalLong.of(m.clientTick()):OptionalLong.empty(); boolean duplicate=normalized.flags().contains(PacketFlag.DUPLICATE); SynchronizationState before=sync;
-      if(!anchorSet&&direction==Direction.CLIENT_TO_SERVER&&!duplicate){anchorSet=true;anchorSequence=OptionalLong.of(normalized.sequence());anchorGeneration=bounds.packetGenerationNanos;anchorTick=explicit.isPresent()?Range.exact(explicit.getAsLong()):Range.exact(0);sync=new SynchronizationState(explicit.isPresent()?SyncStatus.SYNCHRONIZED:SyncStatus.PARTIALLY_SYNCHRONIZED,anchorTick,latencyRange(bounds.latency),OptionalInt.empty(),1,1,List.of(new SynchronizationWindow(WindowKind.STARTUP,event.serverTick(),event.serverTick(),anchorTick,"first client event anchors relative client chronology",normalized.sequence())),List.of(explicit.isPresent()?"explicit client movement tick establishes the clock anchor":"first client event anchors relative chronology; absolute client clock origin is unknown"));}
+      NormalizedPacket normalized=event.packet(); Packet packet=normalized.packet(); Direction direction=direction(packet); EventKind kind=kind(packet); long capture=normalized.receivedNanos(); TimingBounds bounds=timingBounds(packet,capture,config); OptionalLong explicit=packet instanceof Move m&&m.clientTick()!=null?OptionalLong.of(m.clientTick()):OptionalLong.empty(); boolean duplicate=normalized.flags().contains(PacketFlag.DUPLICATE); SynchronizationState before=sync; if(kind==EventKind.CLIENT_TICK_END&&!duplicate){clientBoundaryTick=safeAdd(clientBoundaryTick,1);clientBoundarySeen=true;}
+      if(!anchorSet&&direction==Direction.CLIENT_TO_SERVER&&!duplicate&&kind!=EventKind.CLIENT_TICK_END){anchorSet=true;anchorSequence=OptionalLong.of(normalized.sequence());anchorGeneration=bounds.packetGenerationNanos;anchorTick=explicit.isPresent()?Range.exact(explicit.getAsLong()):(clientBoundarySeen?Range.exact(clientBoundaryTick):Range.exact(0));sync=new SynchronizationState(explicit.isPresent()?SyncStatus.SYNCHRONIZED:SyncStatus.PARTIALLY_SYNCHRONIZED,anchorTick,latencyRange(bounds.latency),OptionalInt.empty(),1,1,List.of(new SynchronizationWindow(WindowKind.STARTUP,event.serverTick(),event.serverTick(),anchorTick,"first client event anchors relative client chronology",normalized.sequence())),List.of(explicit.isPresent()?"explicit client movement tick establishes the clock anchor":clientBoundarySeen?"client tick-end boundaries establish a relative chronology anchor":"first client event anchors relative chronology; absolute client clock origin is unknown"));}
       Range packetTicks; TimingSource source;
       if(explicit.isPresent()){packetTicks=Range.exact(explicit.getAsLong());source=TimingSource.EXPLICIT_CLIENT_TICK;
         // An explicit CLIENT_TICK_END-derived movement tick is stronger chronology
@@ -106,6 +106,8 @@ public final class Phase7Timing {
           consistency=Consistency.INCONSISTENT;
           consistencyReasons.add("explicit client tick "+explicit.getAsLong()+" is outside timing bounds; exact wall-clock comparison failed for sequence "+normalized.sequence());
         }}
+      else if(kind==EventKind.CLIENT_TICK_END&&clientBoundarySeen){packetTicks=Range.exact(clientBoundaryTick);source=TimingSource.RELATIVE_CLIENT_ANCHOR;}
+      else if(clientBoundarySeen&&direction==Direction.CLIENT_TO_SERVER){packetTicks=Range.exact(clientBoundaryTick);source=TimingSource.RELATIVE_CLIENT_ANCHOR;}
       else if(anchorSet&&direction!=Direction.UNKNOWN){TimeRange clockTime=direction==Direction.CLIENT_TO_SERVER?bounds.packetGenerationNanos:bounds.clientProcessingNanos;packetTicks=relativeClientTicks(clockTime,anchorGeneration,anchorTick,config);source=TimingSource.RELATIVE_CLIENT_ANCHOR;}
       else{packetTicks=Range.empty();source=TimingSource.SERVER_CAPTURE_ONLY;}
       Range inputTicks=kind==EventKind.INPUT?nonNegative(packetTicks):Range.empty(); Range simulationTicks;
@@ -149,7 +151,7 @@ public final class Phase7Timing {
           int stable=sync.stableEvents()+1;
           if(stable>=config.recoveryStableEvents) sync=new SynchronizationState(SyncStatus.SYNCHRONIZED,packetTicks,sync.observedLatency(),OptionalInt.empty(),stable,sync.synchronizationEpoch(),sync.activeWindows(),List.of("synchronization re-established after stable observations"));
           else sync=new SynchronizationState(SyncStatus.RECOVERING,packetTicks,sync.observedLatency(),OptionalInt.empty(),stable,sync.synchronizationEpoch(),sync.activeWindows(),List.of("recovery requires additional stable movement observations"));
-        } else if(sync.status()!=SyncStatus.RECOVERING&&direction==Direction.CLIENT_TO_SERVER&&!uncertain){
+        } else if(sync.status()!=SyncStatus.RECOVERING&&direction==Direction.CLIENT_TO_SERVER&&!uncertain&&kind!=EventKind.CLIENT_TICK_END){
           int stable=sync.stableEvents()+1; sync=new SynchronizationState(stable>=2?SyncStatus.SYNCHRONIZED:SyncStatus.PARTIALLY_SYNCHRONIZED,packetTicks,latencyRange(bounds.latency),sync.pendingTeleportId(),stable,sync.synchronizationEpoch(),sync.activeWindows(),List.of("clean client observation incorporated"));
         } else if(uncertain&&sync.status()==SyncStatus.SYNCHRONIZED&&affectsMovementSynchronization(kind)){
           sync=new SynchronizationState(SyncStatus.AMBIGUOUS,packetTicks,sync.observedLatency(),sync.pendingTeleportId(),0,sync.synchronizationEpoch(),sync.activeWindows(),List.of("timing ambiguity prevents strong synchronization"));
