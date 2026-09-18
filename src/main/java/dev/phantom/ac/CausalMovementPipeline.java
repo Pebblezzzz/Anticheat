@@ -355,9 +355,21 @@ public final class CausalMovementPipeline {
         continue;
       }
 
+      boolean recoveryCanClear = recoveryRequired
+          && sequence > lastAmbiguitySequence
+          && movement.authority().quality() == AuthorityQuality.EXACT
+          && movement.authority().snapshot().isPresent()
+          && movement.chronologyClean()
+          && !eventTiming.uncertain()
+          && !sameExplicitClientTick;
+      if (recoveryCanClear) {
+        recoveryRequired = false;
+        trace.add("RECOVERY_CLEARED reason=clean causally aligned movement after ambiguity");
+      }
+
       if (recoveryRequired) {
         uncertainty.add(
-            "prediction frontier was invalidated by chronology ambiguity; waiting for an explicit authoritative epoch reset");
+            "prediction frontier was invalidated by chronology ambiguity; waiting for a clean causally aligned movement");
         SearchResult uncertain = uncertainSearch(
             frontier.candidates(),
             String.join("; ", uncertainty));
@@ -558,12 +570,6 @@ public final class CausalMovementPipeline {
           assumptions.add("client/server position divergence is corroboration only; it is not a Phantom verdict");
         }
       });
-
-      if (lastAmbiguitySequence >= 0 && sequence > lastAmbiguitySequence
-          && movement.authority().quality() == AuthorityQuality.EXACT
-          && eventTiming.simulationClientTicks().isExact()) {
-        recoveryRequired = false;
-      }
 
       frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
           assumptions, uncertainty, trace));
