@@ -379,7 +379,7 @@ public final class Phase8LiveValidation {
         candidates=aggregated.candidates();
         if(candidates.isEmpty()&&canReanchorAfterUncertainty(observed,world,reachable)){
           long anchorTick=Math.max(0,sync.earliestClientTick());
-          Player safe=simulationSafe(observed,false);
+          Player safe=simulationSafe(observed);
           candidates=Set.of(new Candidate(0,anchorContext(safe,world,currentInput,anchorTick,currentEntityCollisions),
               new Phase6Reachability.Provenance(0,-1,event.serverTick(),"RECOVERY","UNCERTAIN_WORLD","None",
                   List.of("re-anchored after previously incomplete client-visible world became exhaustive"),1,List.of())));
@@ -419,33 +419,6 @@ public final class Phase8LiveValidation {
     InputConstraint selected=null;
     for(var entry:inputByClientTick.entrySet()){
       if(entry.getKey()<=tick&&entry.getKey()>best){best=entry.getKey();selected=entry.getValue();}
-    }
-    return selected==null?InputConstraint.any():selected;
-  }
-
-  private static Map<Long,InputConstraint> inputConstraintsByClientTick(Timeline.Snapshot timeline){
-    TreeMap<Long,InputConstraint> out=new TreeMap<>();
-    long clientTick=0;
-    for(Timeline.Event event:timeline.events()){
-      Packets.Packet packet=event.packet().packet();
-      if(packet instanceof Packets.ClientTickEnd){
-        if(!event.packet().flags().contains(Packets.PacketFlag.DUPLICATE))clientTick++;
-      }else if(packet instanceof Packets.ClientInput input&&!event.packet().flags().contains(Packets.PacketFlag.DUPLICATE)){
-        out.put(clientTick,InputConstraint.fromClientInput(input));
-      }
-    }
-    return Map.copyOf(out);
-  }
-
-  private static InputConstraint inputForTick(Map<Long,InputConstraint> inputByClientTick,long tick){
-    if(inputByClientTick.isEmpty())return InputConstraint.any();
-    long best=Long.MIN_VALUE;
-    InputConstraint selected=null;
-    for(var entry:inputByClientTick.entrySet()){
-      if(entry.getKey()<=tick&&entry.getKey()>best){
-        best=entry.getKey();
-        selected=entry.getValue();
-      }
     }
     return selected==null?InputConstraint.any():selected;
   }
