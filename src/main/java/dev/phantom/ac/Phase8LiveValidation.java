@@ -358,7 +358,7 @@ public final class Phase8LiveValidation {
         candidates=aggregated.candidates();
         if(candidates.isEmpty()&&canReanchorAfterUncertainty(observed,world,reachable)){
           long anchorTick=Math.max(0,sync.earliestClientTick());
-          Player safe=simulationSafe(observed);
+          Player safe=simulationSafe(observed,false);
           candidates=Set.of(new Candidate(0,anchorContext(safe,world,currentInput,anchorTick,currentEntityCollisions),
               new Phase6Reachability.Provenance(0,-1,event.serverTick(),"RECOVERY","UNCERTAIN_WORLD","None",
                   List.of("re-anchored after previously incomplete client-visible world became exhaustive"),1,List.of())));
