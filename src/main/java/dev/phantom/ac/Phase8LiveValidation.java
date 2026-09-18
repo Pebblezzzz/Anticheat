@@ -81,6 +81,7 @@ public final class Phase8LiveValidation {
     Map<Long,InputConstraint> inputByClientTick=inputConstraintsByClientTick(timeline);
     boolean hasClientTickBoundaries=timeline.events().stream().anyMatch(e->e.packet().packet() instanceof Packets.ClientTickEnd);
     EntityCollisions currentEntityCollisions=EntityCollisions.NONE_TRACKED;
+    Simulation.MovementCapabilities currentCapabilities=Simulation.MovementCapabilities.NONE;
     List<Phase8MovementValidation.Result> results=new ArrayList<>();
     int movements=0;
     long previousMovementTick=-1;
@@ -101,6 +102,7 @@ public final class Phase8LiveValidation {
       if(packet instanceof Packets.PlayerContext context){
         if(!normalized.flags().contains(Packets.PacketFlag.DUPLICATE)) {
           currentEntityCollisions=EntityCollisions.of(context.entityBoxes());
+          currentCapabilities=context.movementCapabilities();
         }
         continue;
       }
@@ -118,7 +120,7 @@ public final class Phase8LiveValidation {
           Player safe=simulationSafe(anchored);
           if(!safe.uncertain()){
             long anchorTick=Math.max(0,sync.earliestClientTick());
-            candidates=Set.of(new Candidate(0,anchorContext(safe,world,currentInput,anchorTick,currentEntityCollisions),
+            candidates=Set.of(new Candidate(0,anchorContext(safe,world,currentInput,anchorTick,currentEntityCollisions,currentCapabilities),
                 new Phase6Reachability.Provenance(0,-1,event.serverTick(),"ROOT","ROOT","TeleportCorrection",
                     List.of("authoritative server correction anchor"),1,List.of())));
             continuation=Continuation.ACTIVE;
@@ -228,7 +230,7 @@ public final class Phase8LiveValidation {
                       && e.packet().receivedNanos()>initialAnchorReceivedNanos);
           long anchorTick=0L;
           InputConstraint anchorInput=inputForTick(inputByClientTick,anchorTick);
-          Phase6Reachability.Context root=anchorContext(safeInitial,world,anchorInput,anchorTick,currentEntityCollisions);
+          Phase6Reachability.Context root=anchorContext(safeInitial,world,anchorInput,anchorTick,currentEntityCollisions,currentCapabilities);
 
           List<SearchResult> searches=new ArrayList<>();
           boolean exhaustive=worldStable;
@@ -288,7 +290,7 @@ public final class Phase8LiveValidation {
           continue;
         }
         long anchorTick=Math.max(0,sync.earliestClientTick());
-        candidates=Set.of(new Candidate(0,anchorContext(safeObserved,world,currentInput,anchorTick,currentEntityCollisions),
+        candidates=Set.of(new Candidate(0,anchorContext(safeObserved,world,currentInput,anchorTick,currentEntityCollisions,currentCapabilities),
             new Phase6Reachability.Provenance(0,-1,event.serverTick(),"ROOT","ROOT","None",
                 List.of("live movement anchor"),1,List.of())));
         continuation=Continuation.ACTIVE;
@@ -519,8 +521,8 @@ public final class Phase8LiveValidation {
     return new State.Reconstruction(List.of());
   }
   private static Map<Long,State.StateFrame> observedStatesBySequence(State.Reconstruction reconstruction){Map<Long,State.StateFrame> map=new HashMap<>();for(State.StateFrame frame:reconstruction.frames())map.put(frame.event().packet().sequence(),frame);return map;}
-  private static Phase6Reachability.Context anchorContext(Player player,WorldSnapshot world,InputConstraint input,long tick,EntityCollisions entityCollisions){MovementEnvironment env=inferEnvironment(world,player,input);MovementEffects effects=movementEffects(player);Pose pose=player.pose();return new Phase6Reachability.Context(tick,player,environmentFor(env),player.attributes(),effects,pose,env,pose==Pose.SLEEPING,entityCollisions);}
-  private static Phase6Reachability.Context withObservedEnvironment(Phase6Reachability.Context context,WorldSnapshot world,InputConstraint input,long tick,EntityCollisions entityCollisions){MovementEnvironment env=inferEnvironment(world,context.player(),input);return new Phase6Reachability.Context(tick,context.player(),environmentFor(env),context.player().attributes(),movementEffects(context.player()),context.player().pose(),env,context.player().pose()==Pose.SLEEPING,entityCollisions,context.uncertainty());}
+  private static Phase6Reachability.Context anchorContext(Player player,WorldSnapshot world,InputConstraint input,long tick,EntityCollisions entityCollisions,Simulation.MovementCapabilities capabilities){MovementEnvironment env=inferEnvironment(world,player,input);MovementEffects effects=movementEffects(player);Pose pose=player.pose();return new Phase6Reachability.Context(tick,player,environmentFor(env),player.attributes(),effects,pose,env,pose==Pose.SLEEPING,entityCollisions,Set.of(),capabilities);}
+  private static Phase6Reachability.Context withObservedEnvironment(Phase6Reachability.Context context,WorldSnapshot world,InputConstraint input,long tick,EntityCollisions entityCollisions){MovementEnvironment env=inferEnvironment(world,context.player(),input);return new Phase6Reachability.Context(tick,context.player(),environmentFor(env),context.player().attributes(),movementEffects(context.player()),context.player().pose(),env,context.player().pose()==Pose.SLEEPING,entityCollisions,context.uncertainty(),context.capabilities());}
   private static Simulation.Environment environmentFor(MovementEnvironment env){if(env.fluid()==Phase5Mechanics.Fluid.WATER)return Simulation.Environment.WATER;if(env.fluid()==Phase5Mechanics.Fluid.LAVA)return Simulation.Environment.LAVA;if(env.climbable())return Simulation.Environment.CLIMBABLE;return Simulation.Environment.DRY;}
   private static MovementEnvironment inferEnvironment(WorldSnapshot world,Player player,InputConstraint input){Maths.Aabb box=Maths.Aabb.playerAt(player.position(),player.pose());int minX=(int)Math.floor(box.minX()),maxX=(int)Math.floor(Math.nextDown(box.maxX())),minY=(int)Math.floor(box.minY()),maxY=(int)Math.floor(Math.nextDown(box.maxY())),minZ=(int)Math.floor(box.minZ()),maxZ=(int)Math.floor(Math.nextDown(box.maxZ()));boolean water=false,lava=false,climb=false;for(int y=minY;y<=maxY;y++)for(int x=minX;x<=maxX;x++)for(int z=minZ;z<=maxZ;z++){BlockState state=world.blockAtOrNull(x,y,z);if(state==null)continue;if(state.variant()==BlockState.Variant.LADDER)climb=true;var fluid=BlockCatalogue12111.fluid(state);if(fluid.type()==dev.phantom.ac.world.FluidState.Type.WATER)water=true;if(fluid.type()==dev.phantom.ac.world.FluidState.Type.LAVA)lava=true;}boolean sprint=input.sprint().orElse(false),sneak=input.sneak().orElse(false),swim=player.pose()==Pose.SWIMMING;MovementEnvironment env;if(water)env=MovementEnvironment.vanillaWater(player.onGround(),sprint,sneak,swim);else if(lava)env=MovementEnvironment.vanillaLava(player.onGround(),sprint,sneak);else if(climb)env=MovementEnvironment.vanillaClimbable(player.onGround(),sprint,sneak);else env=MovementEnvironment.dry(player.onGround(),sprint,sneak);return new MovementEnvironment(env.fluid(),env.submerged(),env.climbable(),player.onGround(),sprint,sneak,swim,player.pose()==Pose.FALL_FLYING,env.fluidSpeedMultiplier(),env.fluidDrag(),env.gravityMultiplier());}
   private static MovementEffects movementEffects(Player player){return new MovementEffects(amplifier(player.effects(),"speed","minecraft:speed"),amplifier(player.effects(),"slowness","minecraft:slowness"),amplifier(player.effects(),"jump_boost","minecraft:jump_boost"),amplifier(player.effects(),"levitation","minecraft:levitation"),player.effects().keySet().stream().anyMatch(id->id.equals("slow_falling")||id.equals("minecraft:slow_falling")));}
