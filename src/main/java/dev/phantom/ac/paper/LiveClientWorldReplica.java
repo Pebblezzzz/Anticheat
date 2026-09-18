@@ -319,17 +319,13 @@ final class LiveClientWorldReplica {
     }
 
     private WrappedBlockState rawState(ChunkEntry entry, int x, int y, int z) {
-      try {
-        int offsetY = y - backendMinY;
-        BaseChunk[] sections = entry.column().getChunks();
-        int sectionIndex = offsetY >> 4;
-        if (sectionIndex < 0 || sectionIndex >= sections.length) return null;
-        BaseChunk section = sections[sectionIndex];
-        if (section == null || section.isEmpty()) return null;
-        return section.get(entry.clientVersion(), x & 15, offsetY & 15, z & 15);
-      } catch (RuntimeException ignored) {
-        return null;
-      }
+      int offsetY = y - backendMinY;
+      BaseChunk[] sections = entry.column().getChunks();
+      int sectionIndex = offsetY >> 4;
+      if (sectionIndex < 0 || sectionIndex >= sections.length) return null;
+      BaseChunk section = sections[sectionIndex];
+      if (section == null || section.isEmpty()) return null;
+      return section.get(entry.clientVersion(), x & 15, offsetY & 15, z & 15);
     }
 
     private BlockState coreState(ClientVersion clientVersion, WrappedBlockState raw) {
