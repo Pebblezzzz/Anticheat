@@ -78,6 +78,6 @@ class Vanilla12111RichPhysicsMovementFormulaTest {
         State.TickRange.exact(0),State.Provenance.UNKNOWN,java.util.Set.of());
     var result=step(player,new AdvancedInput(1,0,false,true,false),floor("minecraft:stone"));
     assertEquals(.5254800010216236,result.state().position().z(),1e-10);
-    assertEquals(.023186800929677495,result.state().velocity().z(),1e-10)
+    assertEquals(.023186800929677495,result.state().velocity().z(),1e-10);
   }
 }
