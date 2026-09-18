@@ -68,11 +68,17 @@ public final class Phase8IncrementalRunner {
   // Authoritative server-side ground state is kept separately from the client
   // movement packet's reported onGround bit. The latter is evidence, not truth.
   private Boolean authoritativeOnGround;
+  private boolean authoritativeCanFly;
+  private boolean authoritativeFlying;
   private Maths.Vec3 authoritativeServerPosition;
+  private double authoritativeServerVerticalVelocity;
   private int groundContradictionStreak;
   private long lastGroundContradictionTick = -1L;
   private int serverDivergenceStreak;
-  private long lastServerDivergenceSequence = -1L;
+  private long lastServerDivergenceTick = -1L;
+  private int airHoverStreak;
+  private long lastAirHoverTick = -1L;
+  private double lastAirHoverY = Double.NaN;
   private static final int HARD_GROUND_CONTRADICTION_TICKS = 3;
   private static final int HARD_SERVER_DIVERGENCE_TICKS = 3;
   private static final double HARD_SERVER_DIVERGENCE_BLOCKS = 3.0;
@@ -117,11 +123,17 @@ public final class Phase8IncrementalRunner {
     this.poisonReason = "";
     this.reanchorReason = "";
     this.authoritativeOnGround = anchor.onGround();
+    this.authoritativeCanFly = false;
+    this.authoritativeFlying = false;
     this.authoritativeServerPosition = null;
+    this.authoritativeServerVerticalVelocity = 0.0;
     this.groundContradictionStreak = 0;
     this.lastGroundContradictionTick = -1L;
     this.serverDivergenceStreak = 0;
-    this.lastServerDivergenceSequence = -1L;
+    this.lastServerDivergenceTick = -1L;
+    this.airHoverStreak = 0;
+    this.lastAirHoverTick = -1L;
+    this.lastAirHoverY = Double.NaN;
     this.continuation = Continuation.UNINITIALIZED;
   }
 
@@ -229,8 +241,12 @@ public final class Phase8IncrementalRunner {
 
       if (event instanceof Packets.PlayerContext context) {
         entityCollisions = EntityCollisions.of(context.entityBoxes());
-        retargetCandidateEntityCollisions(entityCollisions);
         authoritativeOnGround = context.movementEnvironment().onGround();
+        authoritativeCanFly = context.canFly();
+        authoritativeFlying = context.flying();
+        authoritativeServerPosition = context.serverPosition();
+        authoritativeServerVerticalVelocity = context.serverVelocity().y();
+        retargetCandidateContext(context);
         trackedState = after;
         continue;
       }
@@ -242,6 +258,7 @@ public final class Phase8IncrementalRunner {
         reanchorRequired = false;
         resetGroundContradiction();
         resetServerDivergence();
+        resetAirHover();
         poison("server correction received; awaiting correction acknowledgement and a fresh replay anchor");
         continuation = Continuation.UNCERTAIN;
         continue;
@@ -264,6 +281,7 @@ public final class Phase8IncrementalRunner {
         trackedState = after;
         resetGroundContradiction();
         resetServerDivergence();
+        resetAirHover();
         reanchorRequired = true;
         pendingReanchorState = authoritativeGroundState(after);
         reanchorReason = "server velocity was observed; live application timing is not yet represented by the incremental core";
@@ -276,6 +294,7 @@ public final class Phase8IncrementalRunner {
         if (worldMutationAffectsPlayer(event, before, after)) {
           resetGroundContradiction();
           resetServerDivergence();
+          resetAirHover();
           reanchorRequired = true;
           reanchorReason = "relevant client-world mutation observed; historical collision state must be replayed before continuing";
           continuation = Continuation.UNCERTAIN;
@@ -368,7 +387,7 @@ public final class Phase8IncrementalRunner {
           && !waitingForTeleport
           && packetIndex == latestMovementIndex
           && !hasFutureAuthoritativeTransition(normalized, packetIndex + 1)
-          && recordServerDivergence(move.position(), packet.sequence())) {
+          && recordServerDivergence(move.position(), movementTick)) {
         double distance = authoritativeServerDistance(move.position());
         results.add(Phase8MovementValidation.authoritativeImpossible(
             playerId, serverTick, before, after, world, worldReference, timing,
@@ -387,7 +406,8 @@ public final class Phase8IncrementalRunner {
             replayReference + ":hard-server-position"));
       }
 
-      if (hardMovementEvidenceEligible(after)
+      if (move.position() != null
+          && hardMovementEvidenceEligible(after)
           && !waitingForTeleport
           && !hasFutureAuthoritativeTransition(normalized, packetIndex + 1)
           && recordGroundContradiction(move.onGround(), movementTick)) {
@@ -406,9 +426,36 @@ public final class Phase8IncrementalRunner {
             replayReference + ":hard-ground"));
       }
 
+      if (hardMovementEvidenceEligible(after)
+          && !waitingForTeleport
+          && !hasFutureAuthoritativeTransition(normalized, packetIndex + 1)
+          && recordAirHover(after.position(), movementTick)) {
+        double verticalOffset = authoritativeServerPosition == null
+            ? Double.NaN
+            : after.position().y() - authoritativeServerPosition.y();
+        results.add(Phase8MovementValidation.authoritativeImpossible(
+            playerId, serverTick, before, after, world, worldReference, timing,
+            "AUTHORITATIVE_FLIGHT_STATE_CONTRADICTION",
+            "client remained airborne at a nearly constant Y while the authoritative server state "
+                + "does not permit flight for " + airHoverStreak + " consecutive 1:1 client ticks",
+            List.of(
+                "authoritativeCanFly=" + authoritativeCanFly,
+                "authoritativeFlying=" + authoritativeFlying,
+                "authoritativeOnGround=" + authoritativeOnGround,
+                "authoritativeServerPosition=" + authoritativeServerPosition,
+                "authoritativeServerVerticalVelocity=" + authoritativeServerVerticalVelocity,
+                "clientPosition=" + after.position(),
+                "verticalOffsetFromServer=" + String.format(Locale.ROOT, "%.6f", verticalOffset),
+                "consecutiveHoverTicks=" + airHoverStreak,
+                "this state contradiction does not require ClientInput",
+                "finite candidate-search completeness is not required for this signal"),
+            replayReference + ":hard-flight"));
+      }
+
       if (lastMovementTick >= 0 && movementTick == lastMovementTick) {
         resetGroundContradiction();
         resetServerDivergence();
+        resetAirHover();
         results.add(uncertainResult(
             playerId, packet.sequence(), serverTick, before, after, world, worldReference,
             new Validation.SyncWindow(
@@ -428,6 +475,7 @@ public final class Phase8IncrementalRunner {
       if (movementTick < lastMovementTick) {
         resetGroundContradiction();
         resetServerDivergence();
+        resetAirHover();
         results.add(uncertainResult(
             playerId, packet.sequence(), serverTick, before, after, world, worldReference, timing,
             "movement client tick regressed; chronology cannot be inverted",
@@ -547,6 +595,31 @@ public final class Phase8IncrementalRunner {
         lastProcessedSequence, relativeClientTick, continuation, !candidates.isEmpty());
   }
 
+  private void retargetCandidateContext(Packets.PlayerContext context) {
+    if (candidates.isEmpty()) return;
+    LinkedHashSet<Candidate> remapped = new LinkedHashSet<>();
+    for (Candidate candidate : candidates) {
+      Phase6Reachability.Context c = candidate.context();
+      Player old = c.player();
+      MovementEnvironment a = context.movementEnvironment();
+      MovementEnvironment env = new MovementEnvironment(
+          a.fluid(), a.submerged(), a.climbable(), old.onGround(),
+          a.sprinting(), a.sneaking(), a.swimmingInput(), a.gliding(),
+          a.fluidSpeedMultiplier(), a.fluidDrag(), a.gravityMultiplier());
+      Player updated = new Player(
+          old.position(), old.velocity(), old.yaw(), old.pitch(), old.onGround(),
+          context.gamemode(), context.effects(), old.awaitingTeleport(), old.uncertain(),
+          old.input(), context.attributes(), context.pose(), environmentFor(env),
+          old.clientTickRange(), old.provenance(), old.uncertaintyReasons());
+      Phase6Reachability.Context next = new Phase6Reachability.Context(
+          c.simulationTick(), updated, environmentFor(env), context.attributes(),
+          movementEffects(updated), context.pose(), env, context.sleeping(),
+          entityCollisions, c.uncertainty());
+      remapped.add(new Candidate(candidate.id(), next, candidate.provenance()));
+    }
+    candidates = Set.copyOf(remapped);
+  }
+
   private void retargetCandidateEntityCollisions(EntityCollisions updated){
     if(candidates.isEmpty())return;
     LinkedHashSet<Candidate> remapped=new LinkedHashSet<>();
@@ -653,6 +726,7 @@ public final class Phase8IncrementalRunner {
     if (!"survival".equals(mode) && !"adventure".equals(mode)) return false;
     if (state.pose() == Phase5Mechanics.Pose.FALL_FLYING
         || state.pose() == Phase5Mechanics.Pose.SWIMMING) return false;
+    if (authoritativeCanFly || authoritativeFlying) return false;
     return state.environment() == State.Environment.DRY;
   }
 
@@ -683,7 +757,7 @@ public final class Phase8IncrementalRunner {
     return groundContradictionStreak >= HARD_GROUND_CONTRADICTION_TICKS;
   }
 
-  private boolean recordServerDivergence(Maths.Vec3 clientPosition, long packetSequence) {
+  private boolean recordServerDivergence(Maths.Vec3 clientPosition, long movementTick) {
     if (authoritativeServerPosition == null || clientPosition == null) {
       resetServerDivergence();
       return false;
@@ -694,9 +768,13 @@ public final class Phase8IncrementalRunner {
       resetServerDivergence();
       return false;
     }
-    if (lastServerDivergenceSequence == packetSequence) return false;
-    serverDivergenceStreak++;
-    lastServerDivergenceSequence = packetSequence;
+    if (lastServerDivergenceTick == movementTick) return false;
+    if (lastServerDivergenceTick < 0 || movementTick == lastServerDivergenceTick + 1L) {
+      serverDivergenceStreak++;
+    } else {
+      serverDivergenceStreak = 1;
+    }
+    lastServerDivergenceTick = movementTick;
     return serverDivergenceStreak >= HARD_SERVER_DIVERGENCE_TICKS;
   }
 
@@ -710,7 +788,34 @@ public final class Phase8IncrementalRunner {
 
   private void resetServerDivergence() {
     serverDivergenceStreak = 0;
-    lastServerDivergenceSequence = -1L;
+    lastServerDivergenceTick = -1L;
+  }
+
+  private boolean recordAirHover(Maths.Vec3 clientPosition, long movementTick) {
+    if (clientPosition == null || authoritativeServerPosition == null
+        || authoritativeOnGround == null || authoritativeOnGround
+        || authoritativeCanFly || authoritativeFlying
+        || clientPosition.y() - authoritativeServerPosition.y() < 1.0) {
+      resetAirHover();
+      return false;
+    }
+    if (lastAirHoverTick == movementTick) return false;
+    double y = clientPosition.y();
+    double delta = Double.isNaN(lastAirHoverY) ? Double.POSITIVE_INFINITY : Math.abs(y - lastAirHoverY);
+    if (lastAirHoverTick < 0 || movementTick == lastAirHoverTick + 1L) {
+      airHoverStreak = delta <= 0.005 ? airHoverStreak + 1 : 1;
+    } else {
+      airHoverStreak = 1;
+    }
+    lastAirHoverTick = movementTick;
+    lastAirHoverY = y;
+    return airHoverStreak >= 4;
+  }
+
+  private void resetAirHover() {
+    airHoverStreak = 0;
+    lastAirHoverTick = -1L;
+    lastAirHoverY = Double.NaN;
   }
 
   private void resetGroundContradiction() {
