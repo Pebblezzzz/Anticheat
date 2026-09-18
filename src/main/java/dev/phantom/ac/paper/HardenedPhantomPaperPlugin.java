@@ -287,34 +287,15 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           +" logWarning="+event.getLogWarning());
     }
 
-    if(capture.paperMoveFailureCount<PAPER_MOVE_FAILURE_THRESHOLD)return;
-
-    State.Player template=capture.initialState!=null
-        ?capture.initialState
-        :State.Player.initial(vector(event.getFrom().getX(),event.getFrom().getY(),event.getFrom().getZ()));
-    State.Player prior=paperMovementState(template,event.getFrom(),player);
-    State.Player observed=paperMovementState(template,event.getTo(),player);
-    long serverTick=Math.max(0L,(now-capture.epochNanos)/50_000_000L);
-    String rule="PAPER_"+reason.name();
-    String replayReference="live:paper-move-failure:"+capture.paperMoveFailureSequence.incrementAndGet();
-    Phase8MovementValidation.Result result=Phase8MovementValidation.authoritativeImpossible(
-        player.getName(),serverTick,prior,observed,
-        WorldSnapshot.builder(Contracts.TARGET_VERSION).build(),"paper-authoritative-move-failure",
-        new dev.phantom.ac.Validation.SyncWindow(0,0,true,List.of("Paper PlayerFailMoveEvent is authoritative server-side rejection")),
-        rule,
-        "Paper prevented this movement attempt as "+reason.name()+" after "
-            +capture.paperMoveFailureCount+" rejected movement attempts within 1 second",
-        List.of(
-            "paperFailMoveReason="+reason.name(),
-            "from="+event.getFrom(),
-            "to="+event.getTo(),
-            "failuresInWindow="+capture.paperMoveFailureCount,
-            "this signal comes from Paper's authoritative movement rejection path",
-            "this signal is independent of finite candidate-search completeness"),
-        replayReference);
-
-    applyAuthoritativeEventResult(capture,result);
-  }
+    if(capture.paperMoveFailureCount>=PAPER_MOVE_FAILURE_THRESHOLD
+        &&Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
+      getLogger().warning("[PhantomAC][PHASE8][PAPER_CORROBORATION_ONLY] player="+player.getName()
+          +" reason="+reason
+          +" rejectedAttemptsIn1s="+capture.paperMoveFailureCount
+          +" from="+event.getFrom()
+          +" to="+event.getTo()
+          +" NOTE=Paper rejection is telemetry only; Phantom will not emit an IMPOSSIBLE result from this event");
+    }
 
   private State.Player paperMovementState(State.Player template,org.bukkit.Location location,Player player){
     org.bukkit.util.Vector velocity=player.getVelocity();
