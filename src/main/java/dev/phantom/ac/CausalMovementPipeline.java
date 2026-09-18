@@ -425,7 +425,7 @@ public final class CausalMovementPipeline {
               || initialAnchorFarFromObservation
               || movement.timing().simulationClientTicks().max() > Phase6Reachability.MAX_HORIZON_TICKS);
       if (preferLocalAuthoritativeRoot && initialAnchorWorldStale) {
-        uncertainty.add("original authoritative anchor is outside the retained client-world window; re-anchoring from the exact local server snapshot");
+        assumptions.add("original authoritative anchor is outside the retained client-world window; re-anchoring from the exact local server snapshot");
         trace.add("ROOT_REFRESH reason=INITIAL_ANCHOR_WORLD_STALE");
       }
       if (preferLocalAuthoritativeRoot && initialAnchorFarFromObservation) {
