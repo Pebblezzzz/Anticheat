@@ -89,6 +89,25 @@ class Phase8HardeningRegressionTest {
   }
 
   @Test
+  void firstLiveMovementCanBeProvenImpossibleAgainstAuthoritativeJoinAnchor(){
+    var packets=List.of(
+        new RawPacket(1,0,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
+        new RawPacket(2,0,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+            Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
+        new RawPacket(3,0,new Packets.ClientInput(false,false,false,false,false,false,false)),
+        new RawPacket(4,10_000_000L,new Packets.ClientTickEnd()),
+        new RawPacket(5,60_000_000L,new Packets.ClientTickEnd()),
+        new RawPacket(6,100_000_000L,new Move(new Vec3(0.5,65.0,0.5),0f,0f,false,null))
+    );
+    var timeline=capture(packets);
+    var anchor=Player.initial(new Vec3(0.5,64.0,0.5));
+    var report=Phase8LiveValidation.analyze("flight-anchor",timeline,4096,exactTiming(),null,anchor);
+    assertEquals(1,report.movementObservations(),report.results().toString());
+    assertEquals(Verdict.IMPOSSIBLE,report.results().getFirst().verdict(),report.results().toString());
+    assertEquals(0,report.results().getFirst().evidence().matchingCandidateCount());
+  }
+
+  @Test
   void validationResultGateCountsAnImpossibleObservationOnlyOnce() {
     var gate=new ValidationResultGate();
     assertTrue(gate.accept("move:42",Verdict.IMPOSSIBLE));
