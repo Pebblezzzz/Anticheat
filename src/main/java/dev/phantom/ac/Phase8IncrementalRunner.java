@@ -246,10 +246,13 @@ public final class Phase8IncrementalRunner {
     World.VisibilityHistory historyView = World.fromTimeline(timeline);
     for (Timeline.Event event : timeline.events()) {
       if (!(event.packet().packet() instanceof Packets.FlightToggle)) continue;
+      WorldSnapshot flightWorld = liveWorldProvider == null
+          ? null
+          : liveWorldProvider.apply(event.packet().sequence());
       Optional<Result> authoritative = CausalMovementPipeline.evaluateFlightToggle(
           playerId, event, timeline,
           Phase7Timing.reconstruct(timeline, Phase7Timing.Config.defaultConfig()),
-          liveWorld != null ? liveWorld : historyView.statesAt(event.serverTick()),
+          flightWorld != null ? flightWorld : historyView.statesAt(event.serverTick()),
           anchor);
       if (authoritative.isEmpty()) continue;
       Result result = authoritative.get();
