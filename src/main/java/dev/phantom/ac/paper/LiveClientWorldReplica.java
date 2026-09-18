@@ -8,12 +8,12 @@ import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState
 import com.github.retrooper.packetevents.protocol.world.states.type.StateValue;
 import dev.phantom.ac.world.BlockState;
 import dev.phantom.ac.world.Chunk;
+import dev.phantom.ac.world.Coverage;
 import dev.phantom.ac.world.Pos;
 import dev.phantom.ac.world.WorldSnapshot;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Live per-player client-world replica.
@@ -58,8 +58,6 @@ final class LiveClientWorldReplica {
       long revision
   ) {}
 
-  private record DecodedChunk(long revision, Map<Pos, BlockState> states) {}
-
   private final String version;
   private final int minY;
   private final int maxY;
@@ -68,9 +66,8 @@ final class LiveClientWorldReplica {
   private final List<Mutation> unassigned = new ArrayList<>();
   private final Map<Short, List<Mutation>> pending = new LinkedHashMap<>();
   private final Deque<Short> sentOrder = new ArrayDeque<>();
-  private final Map<ChunkKey, DecodedChunk> decodedCache = new ConcurrentHashMap<>();
-  private final Map<Integer, BlockState> stateCache = new ConcurrentHashMap<>();
-  private final AtomicLong revisionCounter = new AtomicLong();
+  private final Map<ClientVersion, ConcurrentHashMap<Integer, BlockState>> stateCache = new ConcurrentHashMap<>();
+  private long revisionCounter;
 
   LiveClientWorldReplica(String version, int minY, int maxY) {
     this.version = Objects.requireNonNull(version, "version");
@@ -147,9 +144,11 @@ final class LiveClientWorldReplica {
   }
 
   /**
-   * Builds a snapshot from a local chunk window. The raw column references are
-   * copied under the lock; block decoding happens after releasing it, so chunk
-   * parsing cannot stall the packet listener or Paper main thread.
+   * Captures a read-only window over the compact packet-derived chunk cache.
+   *
+   * <p>No chunk is expanded here. The snapshot backend retains the same
+   * palette-backed PacketEvents columns and converts only the individual block
+   * states that the deterministic collision model actually queries.</p>
    */
   WorldSnapshot snapshotAround(double centerX, double centerZ, int radiusChunks) {
     if (radiusChunks < 0) throw new IllegalArgumentException("radiusChunks must be non-negative");
@@ -165,101 +164,129 @@ final class LiveClientWorldReplica {
           ChunkKey key = new ChunkKey(centerChunkX + dx, centerChunkZ + dz);
           ChunkEntry entry = chunks.get(key);
           if (entry != null && entry.complete()) local.put(key, entry);
-
           Map<Pos, BlockState> overlay = blockOverlays.get(key);
           if (overlay != null && !overlay.isEmpty()) overlays.put(key, Map.copyOf(overlay));
         }
       }
     }
 
-    WorldSnapshot.Builder builder = WorldSnapshot.builder(version, minY, maxY);
-    List<ChunkKey> ordered = new ArrayList<>(local.keySet());
-    ordered.sort(Comparator.comparingInt(ChunkKey::x).thenComparingInt(ChunkKey::z));
+    return WorldSnapshot.backed(
+        version,
+        minY,
+        maxY,
+        new BackendView(version, minY, maxY, local, overlays));
+  }
 
-    for (ChunkKey key : ordered) {
-      ChunkEntry entry = local.get(key);
-      DecodedChunk decoded = decodeCached(key, entry);
-      builder.loadChunk(key.x(), key.z());
-
-      for (Map.Entry<Pos, BlockState> block : decoded.states().entrySet()) {
-        BlockState state = block.getValue();
-        if (state.isUnsupported()) {
-          builder.setUnsupportedBlock(block.getKey().x(), block.getKey().y(), block.getKey().z(), state.blockId());
-        } else if (!state.isAir()) {
-          builder.setBlock(block.getKey().x(), block.getKey().y(), block.getKey().z(), state);
-        }
+  /** A full current cache view, still lazy and therefore cheap to capture. */
+  WorldSnapshot snapshot() {
+    Map<ChunkKey, ChunkEntry> local;
+    Map<ChunkKey, Map<Pos, BlockState>> overlays = new LinkedHashMap<>();
+    synchronized (this) {
+      local = new LinkedHashMap<>(chunks);
+      for (Map.Entry<ChunkKey, Map<Pos, BlockState>> entry : blockOverlays.entrySet()) {
+        if (!entry.getValue().isEmpty()) overlays.put(entry.getKey(), Map.copyOf(entry.getValue()));
       }
+    }
+    return WorldSnapshot.backed(
+        version,
+        minY,
+        maxY,
+        new BackendView(version, minY, maxY, local, overlays));
+  }
 
-      Map<Pos, BlockState> mergedStates = new HashMap<>(decoded.states());
+  private final class BackendView implements WorldSnapshot.Backend {
+    private final String backendVersion;
+    private final int backendMinY;
+    private final int backendMaxY;
+    private final Map<ChunkKey, ChunkEntry> localChunks;
+    private final Map<ChunkKey, Map<Pos, BlockState>> overlays;
+
+    private BackendView(
+        String backendVersion,
+        int backendMinY,
+        int backendMaxY,
+        Map<ChunkKey, ChunkEntry> localChunks,
+        Map<ChunkKey, Map<Pos, BlockState>> overlays) {
+      this.backendVersion = backendVersion;
+      this.backendMinY = backendMinY;
+      this.backendMaxY = backendMaxY;
+      this.localChunks = Map.copyOf(localChunks);
+      this.overlays = Map.copyOf(overlays);
+    }
+
+    @Override public String version() { return backendVersion; }
+    @Override public int minY() { return backendMinY; }
+    @Override public int maxY() { return backendMaxY; }
+
+    @Override public Set<Chunk> loadedChunks() {
+      Set<Chunk> result = new LinkedHashSet<>();
+      for (ChunkKey key : localChunks.keySet()) result.add(new Chunk(key.x(), key.z()));
+      return Set.copyOf(result);
+    }
+
+    @Override public Coverage coverageAt(int x, int y, int z) {
+      if (y < backendMinY || y > backendMaxY) return Coverage.UNLOADED;
+      ChunkKey key = new ChunkKey(Math.floorDiv(x, 16), Math.floorDiv(z, 16));
+      ChunkEntry entry = localChunks.get(key);
+      if (entry == null || !entry.complete()) return Coverage.UNLOADED;
+
+      Pos position = new Pos(x, y, z);
       Map<Pos, BlockState> overlay = overlays.get(key);
-      if (overlay != null) {
-        for (Map.Entry<Pos, BlockState> block : overlay.entrySet()) {
-          if (block.getValue().isAir()) mergedStates.remove(block.getKey());
-          else mergedStates.put(block.getKey(), block.getValue());
-        }
+      if (overlay != null && overlay.containsKey(position)) {
+        BlockState state = overlay.get(position);
+        return state.isUnsupported() ? Coverage.UNSUPPORTED : Coverage.KNOWN;
       }
-      List<Map.Entry<Pos, BlockState>> orderedStates = new ArrayList<>(mergedStates.entrySet());
-      orderedStates.sort(Map.Entry.comparingByKey(WorldSnapshot.POS_ORDER));
-      for (Map.Entry<Pos, BlockState> block : orderedStates) {
-        Pos pos = block.getKey();
-        BlockState state = block.getValue();
-        if (state.isUnsupported()) builder.setUnsupportedBlock(pos.x(), pos.y(), pos.z(), state.blockId());
-        else builder.setBlock(pos.x(), pos.y(), pos.z(), state);
+
+      WrappedBlockState raw = rawState(entry, x, y, z);
+      if (raw == null) return Coverage.KNOWN;
+      BlockState state = coreState(entry.clientVersion(), raw);
+      return state != null && state.isUnsupported() ? Coverage.UNSUPPORTED : Coverage.KNOWN;
+    }
+
+    @Override public BlockState blockAtOrNull(int x, int y, int z) {
+      if (y < backendMinY || y > backendMaxY) return null;
+      ChunkKey key = new ChunkKey(Math.floorDiv(x, 16), Math.floorDiv(z, 16));
+      ChunkEntry entry = localChunks.get(key);
+      if (entry == null || !entry.complete()) return null;
+
+      Pos position = new Pos(x, y, z);
+      Map<Pos, BlockState> overlay = overlays.get(key);
+      if (overlay != null && overlay.containsKey(position)) {
+        BlockState state = overlay.get(position);
+        return state.isUnsupported() || state.isAir() ? null : state;
+      }
+
+      WrappedBlockState raw = rawState(entry, x, y, z);
+      if (raw == null || raw.getType().isAir()) return null;
+      BlockState state = coreState(entry.clientVersion(), raw);
+      return state == null || state.isUnsupported() || state.isAir() ? null : state;
+    }
+
+    private WrappedBlockState rawState(ChunkEntry entry, int x, int y, int z) {
+      try {
+        int offsetY = y - backendMinY;
+        BaseChunk[] sections = entry.column().getChunks();
+        int sectionIndex = offsetY >> 4;
+        if (sectionIndex < 0 || sectionIndex >= sections.length) return null;
+        BaseChunk section = sections[sectionIndex];
+        if (section == null || section.isEmpty()) return null;
+        return section.get(entry.clientVersion(), x & 15, offsetY & 15, z & 15);
+      } catch (RuntimeException ignored) {
+        return null;
       }
     }
 
-    return builder.build();
-  }
-
-  private DecodedChunk decodeCached(ChunkKey key, ChunkEntry entry) {
-    DecodedChunk cached = decodedCache.get(key);
-    if (cached != null && cached.revision() == entry.revision()) return cached;
-
-    Map<Pos, BlockState> states = decode(entry.column(), entry.clientVersion());
-    DecodedChunk fresh = new DecodedChunk(entry.revision(), Map.copyOf(states));
-    decodedCache.put(key, fresh);
-    return fresh;
-  }
-
-  private Map<Pos, BlockState> decode(Column column, ClientVersion clientVersion) {
-    Map<Pos, BlockState> states = new HashMap<>();
-    BaseChunk[] sections = column.getChunks();
-    int minSection = Math.floorDiv(minY, 16);
-    int maxSectionExclusive = Math.floorDiv(maxY - 1, 16) + 1;
-    int baseX = column.getX() * 16;
-    int baseZ = column.getZ() * 16;
-
-    for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
-      BaseChunk section = sections[sectionIndex];
-      if (section == null || section.isEmpty()) continue;
-
-      int sectionY = minSection + sectionIndex;
-      if (sectionY < minSection || sectionY >= maxSectionExclusive) continue;
-      int baseY = sectionY * 16;
-
-      for (int localY = 0; localY < 16; localY++) {
-        for (int localZ = 0; localZ < 16; localZ++) {
-          for (int localX = 0; localX < 16; localX++) {
-            int globalId = section.getBlockId(localX, localY, localZ);
-            if (globalId <= 0) continue;
-
-            BlockState core = stateCache.get(globalId);
-            if (core == null) {
-              WrappedBlockState state = WrappedBlockState.getByGlobalId(clientVersion, globalId, false);
-              core = state == null || state.getType().isAir() ? BlockState.air() : toCoreState(state);
-              BlockState existing = stateCache.putIfAbsent(globalId, core);
-              if (existing != null) core = existing;
-            }
-
-            if (!core.isAir()) {
-              states.put(new Pos(baseX + localX, baseY + localY, baseZ + localZ), core);
-            }
-          }
-        }
-      }
+    private BlockState coreState(ClientVersion clientVersion, WrappedBlockState raw) {
+      if (raw == null || raw.getType().isAir()) return null;
+      ConcurrentHashMap<Integer, BlockState> versionCache =
+          stateCache.computeIfAbsent(clientVersion, ignored -> new ConcurrentHashMap<>());
+      int globalId = raw.getGlobalId();
+      BlockState cached = versionCache.get(globalId);
+      if (cached != null) return cached;
+      BlockState fresh = toCoreState(raw);
+      BlockState existing = versionCache.putIfAbsent(globalId, fresh);
+      return existing != null ? existing : fresh;
     }
-
-    return states;
   }
 
   private void apply(Mutation mutation) {
@@ -283,7 +310,7 @@ final class LiveClientWorldReplica {
   private void applyChunk(ChunkMutation mutation) {
     ChunkKey key = new ChunkKey(mutation.column().getX(), mutation.column().getZ());
     ChunkEntry old = chunks.get(key);
-    long revision = revisionCounter.incrementAndGet();
+    long revision = ++revisionCounter;
 
     if (mutation.fullChunk() || old == null) {
       chunks.put(key, new ChunkEntry(
@@ -292,7 +319,6 @@ final class LiveClientWorldReplica {
           mutation.clientVersion(),
           revision));
       blockOverlays.remove(key);
-      decodedCache.remove(key);
       return;
     }
 
