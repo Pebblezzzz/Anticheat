@@ -80,11 +80,13 @@ public final class Phase8LiveValidation {
       Packets.Packet packet=normalized.packet();
 
       if(packet instanceof Packets.ClientInput input){
-        if(!normalized.flags().contains(Packets.PacketFlag.DUPLICATE)) {
-          // Minecraft input state is held until the client sends a replacement.
-          // Missing input packets are therefore not converted into "no input".
-          currentInput=InputConstraint.fromClientInput(input);
-        }
+        // PLAYER_INPUT is not the authoritative per-tick WASD source for ordinary
+        // player locomotion. It is primarily used by vehicle/control paths. Until
+        // a vehicle-specific simulator is active, normal movement must retain the
+        // complete legal input envelope rather than treating this packet as a
+        // walking constraint.
+        if(normalized.flags().contains(Packets.PacketFlag.DUPLICATE)) continue;
+        currentInput=InputConstraint.any();
         continue;
       }
 
