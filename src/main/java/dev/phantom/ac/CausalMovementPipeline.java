@@ -365,10 +365,6 @@ public final class CausalMovementPipeline {
       boolean localAuthoritativeRootAvailable = movement.authority().quality() == AuthorityQuality.EXACT
           && movement.authority().snapshot().isPresent();
       boolean justRecovered = false;
-      boolean preferLocalAuthoritativeRoot = localAuthoritativeRootAvailable
-          && (initialAnchor == null
-              || justRecovered
-              || movement.timing().simulationClientTicks().max() > Phase6Reachability.MAX_HORIZON_TICKS);
       if (!haveAuthoritativeSeed && !localAuthoritativeRootAvailable && frontier.candidates().isEmpty()) {
         uncertainty.add("no trusted authoritative replay anchor exists");
         SearchResult uncertain = uncertainSearch(frontier.candidates(),
@@ -395,6 +391,11 @@ public final class CausalMovementPipeline {
         justRecovered = true;
         trace.add("RECOVERY_CLEARED reason=clean causally aligned movement after fresh authority");
       }
+
+      boolean preferLocalAuthoritativeRoot = localAuthoritativeRootAvailable
+          && (initialAnchor == null
+              || justRecovered
+              || movement.timing().simulationClientTicks().max() > Phase6Reachability.MAX_HORIZON_TICKS);
 
       if (recoveryRequired) {
         uncertainty.add(
