@@ -381,7 +381,7 @@ public final class CausalMovementPipeline {
 
       Optional<Advance> advanced;
       if (!eventTiming.simulationClientTicks().isExact()) {
-        advanced = advanceAcrossTimingRange(
+        advanced = Optional.ofNullable(advanceAcrossTimingRange(
             frontier,
             eventTiming.simulationClientTicks().min(),
             eventTiming.simulationClientTicks().max(),
@@ -389,7 +389,7 @@ public final class CausalMovementPipeline {
             externalByTick,
             worldHistory,
             movement,
-            maximumCandidates);
+            maximumCandidates));
       } else {
         advanced = Optional.of(advanceTo(
             frontier.candidates(),
@@ -432,7 +432,6 @@ public final class CausalMovementPipeline {
 
       boolean timingExhaustive = eventTiming.simulationClientTicks().isExact()
           || (advance.exhaustive()
-              && eventTiming.simulationClientTicks().isFinite()
               && eventTiming.simulationClientTicks().width()
                   <= timingConfig.maxTimingCandidates());
       Phase8MovementValidation.Result validation =
@@ -1033,7 +1032,7 @@ public final class CausalMovementPipeline {
     return new Context(
         tick,
         updated,
-        environmentFor(environment),
+        simulationEnvironmentFor(environment),
         authority.attributes(),
         movementEffects(updated),
         authority.pose(),
@@ -1110,7 +1109,7 @@ public final class CausalMovementPipeline {
         new Context(
             tick,
             player,
-            environmentFor(context.movementEnvironment()),
+            simulationEnvironmentFor(context.movementEnvironment()),
             context.attributes(),
             movementEffects(player),
             context.pose(),
@@ -1345,18 +1344,21 @@ public final class CausalMovementPipeline {
     return MovementEnvironment.dry(player.onGround(), false, false);
   }
 
-  private static MovementEnvironment environmentFor(MovementEnvironment env) {
-    return new MovementEnvironment(
-        env.fluid(),
-        env.submerged(),
-        env.climbable(),
-        env.onGround(),
-        env.sprinting(),
-        env.sneaking(),
-        env.swimmingInput(),
-        env.gliding(),
-        env.fluidSpeedMultiplier(),
-        env.fluidDrag(),
-        env.gravityMultiplier());
+  private static Simulation.Environment simulationEnvironmentFor(MovementEnvironment env) {
+    return switch (env.fluid()) {
+      case WATER -> Simulation.Environment.WATER;
+      case LAVA -> Simulation.Environment.LAVA;
+      case NONE -> env.climbable()
+          ? Simulation.Environment.CLIMBABLE
+          : Simulation.Environment.DRY;
+    };
+  }
+
+  private static double distance(Vec3 a, Vec3 b) {
+    if (a == null || b == null) return Double.NaN;
+    double dx = a.x() - b.x();
+    double dy = a.y() - b.y();
+    double dz = a.z() - b.z();
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
   }
 }
