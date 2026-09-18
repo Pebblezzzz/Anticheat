@@ -395,8 +395,17 @@ public final class CausalMovementPipeline {
               assumptions, uncertainty, trace));
           continue;
         }
-        frontier = new Frontier(Set.of(root.get()), -1L, true);
-        trace.add("ROOT authoritative anchor=" + initialAnchor.position());
+        Candidate root = rootCandidate(initialAnchor, movement, maximumCandidates).orElseThrow();
+        frontier = new Frontier(Set.of(root), root.context().simulationTick(), true);
+        if (exactLocalAuthority) {
+          AuthoritativeSnapshot snapshot = movement.authority().snapshot().orElseThrow();
+          trace.add("ROOT LOCAL_AUTHORITATIVE snapshotSeq=" + snapshot.sequence()
+              + " serverTick=" + snapshot.serverTick()
+              + " simulationTick=" + root.context().simulationTick()
+              + " position=" + root.context().player().position());
+        } else {
+          trace.add("ROOT authoritative anchor=" + initialAnchor.position());
+        }
       }
 
       Optional<Advance> advanced;
