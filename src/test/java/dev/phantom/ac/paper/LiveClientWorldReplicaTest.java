@@ -28,24 +28,27 @@ class LiveClientWorldReplicaTest {
   @Test
   void fullChunkIsNotVisibleBeforeItsBarrierIsAcknowledged() {
     var replica = new LiveClientWorldReplica(Contracts.TARGET_VERSION, -64, 319);
-    replica.queueChunk(emptyFullChunk(0, 0), true, ClientVersion.V_1_21_9);
+    replica.queueChunk(10L, emptyFullChunk(0, 0), true, ClientVersion.V_1_21_9);
 
     assertEquals(0, replica.visibleChunkCount());
     replica.openBarrier((short) -1);
     assertEquals(1, replica.pendingBarrierCount());
     assertEquals(0, replica.visibleChunkCount());
 
-    assertTrue(replica.acknowledge((short) -1));
+    assertTrue(replica.acknowledge((short) -1, 20L));
     assertEquals(1, replica.visibleChunkCount());
-    assertEquals(Coverage.KNOWN, replica.snapshotAround(0.5, 0.5, 0).coverageAt(0, 64, 0));
+
+    var snapshot = replica.snapshotAround(0.5, 0.5, 0);
+    assertEquals(20L, snapshot.causalSequence());
+    assertEquals(Coverage.KNOWN, snapshot.coverageAt(0, 64, 0));
   }
 
   @Test
   void partialChunkWithoutPriorFullChunkRemainsInvisible() {
     var replica = new LiveClientWorldReplica(Contracts.TARGET_VERSION, -64, 319);
-    replica.queueChunk(new Column(0, 0, false, new BaseChunk[24], new TileEntity[0]), false, ClientVersion.V_1_21_11);
+    replica.queueChunk(10L, new Column(0, 0, false, new BaseChunk[24], new TileEntity[0]), false, ClientVersion.V_1_21_11);
     replica.openBarrier((short) -2);
-    assertTrue(replica.acknowledge((short) -2));
+    assertTrue(replica.acknowledge((short) -2, 20L));
 
     assertEquals(0, replica.visibleChunkCount());
     assertEquals(Coverage.UNLOADED, replica.snapshotAround(0.5, 0.5, 0).coverageAt(0, 64, 0));
@@ -54,14 +57,14 @@ class LiveClientWorldReplicaTest {
   @Test
   void blockMutationIsHeldUntilAcknowledgement() {
     var replica = new LiveClientWorldReplica(Contracts.TARGET_VERSION, -64, 319);
-    replica.queueChunk(emptyFullChunk(0, 0), true, ClientVersion.V_1_21_11);
-    replica.queueBlock(new Pos(1, 64, 1), stone());
+    replica.queueChunk(10L, emptyFullChunk(0, 0), true, ClientVersion.V_1_21_11);
+    replica.queueBlock(11L, new Pos(1, 64, 1), stone());
     replica.openBarrier((short) -3);
 
     assertEquals(0, replica.visibleChunkCount());
     assertEquals(Coverage.UNLOADED, replica.snapshotAround(0.5, 0.5, 0).coverageAt(1, 64, 1));
 
-    assertTrue(replica.acknowledge((short) -3));
+    assertTrue(replica.acknowledge((short) -3, 20L));
     assertEquals(Coverage.KNOWN, replica.snapshotAround(1.5, 1.5, 0).coverageAt(1, 64, 1));
     assertEquals(stone(), replica.snapshotAround(1.5, 1.5, 0).blockAtOrNull(1, 64, 1));
   }
@@ -69,14 +72,14 @@ class LiveClientWorldReplicaTest {
   @Test
   void failedBarrierReturnsItsMutationsToTheUnassignedQueue() {
     var replica = new LiveClientWorldReplica(Contracts.TARGET_VERSION, -64, 319);
-    replica.queueChunk(emptyFullChunk(0, 0), true, ClientVersion.V_1_21_11);
+    replica.queueChunk(10L, emptyFullChunk(0, 0), true, ClientVersion.V_1_21_11);
     replica.openBarrier((short) -4);
     replica.abortBarrier((short) -4);
 
     assertEquals(0, replica.pendingBarrierCount());
 
     replica.openBarrier((short) -5);
-    assertTrue(replica.acknowledge((short) -5));
+    assertTrue(replica.acknowledge((short) -5, 20L));
     assertEquals(1, replica.visibleChunkCount());
   }
 
@@ -84,20 +87,20 @@ class LiveClientWorldReplicaTest {
   void fullChunkReplacementClearsOlderOverlayButLaterOverlayWins() {
     var replica = new LiveClientWorldReplica(Contracts.TARGET_VERSION, -64, 319);
 
-    replica.queueChunk(emptyFullChunk(0, 0), true, ClientVersion.V_1_21_11);
-    replica.queueBlock(new Pos(2, 64, 2), stone());
+    replica.queueChunk(10L, emptyFullChunk(0, 0), true, ClientVersion.V_1_21_11);
+    replica.queueBlock(11L, new Pos(2, 64, 2), stone());
     replica.openBarrier((short) -6);
-    assertTrue(replica.acknowledge((short) -6));
+    assertTrue(replica.acknowledge((short) -6, 20L));
     assertEquals(stone(), replica.snapshotAround(2.5, 2.5, 0).blockAtOrNull(2, 64, 2));
 
-    replica.queueChunk(emptyFullChunk(0, 0), true, ClientVersion.V_1_21_11);
+    replica.queueChunk(30L, emptyFullChunk(0, 0), true, ClientVersion.V_1_21_11);
     replica.openBarrier((short) -7);
-    assertTrue(replica.acknowledge((short) -7));
+    assertTrue(replica.acknowledge((short) -7, 40L));
     assertNull(replica.snapshotAround(2.5, 2.5, 0).blockAtOrNull(2, 64, 2));
 
-    replica.queueBlock(new Pos(2, 64, 2), stone());
+    replica.queueBlock(50L, new Pos(2, 64, 2), stone());
     replica.openBarrier((short) -8);
-    assertTrue(replica.acknowledge((short) -8));
+    assertTrue(replica.acknowledge((short) -8, 60L));
     assertEquals(stone(), replica.snapshotAround(2.5, 2.5, 0).blockAtOrNull(2, 64, 2));
   }
 }
