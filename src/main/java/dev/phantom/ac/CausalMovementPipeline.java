@@ -694,8 +694,7 @@ public final class CausalMovementPipeline {
             ? nearestAuthoritativePitch(authorities, initialAnchor, event.packet().receivedNanos()) + teleport.pitch()
             : teleport.pitch();
         transition = new Phase6Reachability.TeleportCorrection(
-            teleport.id(), target, Vec3.ZERO, PoseValue.from(yaw, pitch),
-            true);
+            teleport.id(), target, Vec3.ZERO, Pose.STANDING, true);
       }
       result.computeIfAbsent(tick, ignored -> new ArrayList<>()).add(transition);
     }
@@ -758,104 +757,111 @@ public final class CausalMovementPipeline {
     if (targetTick < 0) {
       return new Advance(Set.of(), List.of("negative client simulation tick"), false);
     }
-
-    Set<Candidate> frontier = Set.copyOf(start);
-    LinkedHashSet<String> reasons = new LinkedHashSet<>();
-
-    if (frontier.isEmpty()) {
+    if (start.isEmpty()) {
       return new Advance(Set.of(), List.of("no candidate frontier"), false);
     }
 
-    long minimumStart = frontier.stream()
-        .mapToLong(candidate -> candidate.context().simulationTick())
-        .min()
-        .orElse(0L);
-    if (targetTick < minimumStart) {
-      return new Advance(Set.of(),
-          List.of("movement tick precedes every retained candidate state"),
-          false);
-    }
+    Set<Candidate> union = new LinkedHashSet<>();
+    LinkedHashSet<String> reasons = new LinkedHashSet<>();
 
-    for (long tick = minimumStart; tick < targetTick; tick++) {
-      Set<Candidate> next = new LinkedHashSet<>();
-
-      // A single call to Phase 6 models exactly one full client tick. This is
-      // intentionally repeated so authoritative context and historical world
-      // state can change at their own causal ticks.
-      for (Candidate candidate : frontier) {
-        long candidateTick = candidate.context().simulationTick();
-        if (candidateTick != tick) continue;
-
-        WorldSnapshot world = worldForTick(
-            tick,
-            worldHistory,
-            movement);
-        Context context = applyAuthoritativeContext(
-            candidate.context(),
-            movement.authority(),
-            tick);
-        InputConstraint input = inputs.getOrDefault(tick, InputConstraint.any());
-        List<ExternalTransition> transitions = external.getOrDefault(
-            tick, List.of(new Phase6Reachability.None()));
-
-        if (containsUntimedExternal(movement, tick, transitions)) {
-          reasons.add("an external transition affecting this path lacks an exact client-tick assignment");
-          continue;
-        }
-
-        SearchResult result = new Phase6Reachability(new Vanilla12111RichPhysics()).search(
-            context,
-            List.of(input),
-            ignored -> List.of(new WorldBranch(
-                "causal-world@" + tick,
-                world,
-                true,
-                "client-visible world selected for the simulated tick")),
-            ignored -> transitions,
-            maximumCandidates);
-
-        if (result.verdict() == Verdict.POSSIBLE) {
-          next.addAll(result.candidates());
-        } else {
-          reasons.addAll(result.reasons());
-        }
-        if (next.size() > maximumCandidates) {
-          return new Advance(Set.of(),
-              List.of("candidate budget exceeded; no provisional subset is safe"),
-              false);
-        }
+    /*
+     * Candidates may legitimately carry different simulation ticks after a
+     * bounded timing window. Never collapse them to the minimum tick: doing so
+     * silently discards later-starting candidates and can create a false
+     * contradiction.
+     */
+    for (Candidate initial : start) {
+      if (initial.context().simulationTick() > targetTick) {
+        reasons.add("movement tick precedes a retained candidate state");
+        continue;
       }
 
-      if (next.isEmpty()) {
-        reasons.add("no deterministic candidate survived the simulated client tick");
-        return new Advance(Set.of(), List.copyOf(reasons), false);
+      Set<Candidate> local = Set.of(initial);
+      long localTick = initial.context().simulationTick();
+
+      while (localTick < targetTick) {
+        Set<Candidate> next = new LinkedHashSet<>();
+
+        for (Candidate candidate : local) {
+          Context context = applyAuthoritativeContext(
+              candidate.context(), movement.authority(), localTick);
+          InputConstraint input = inputs.getOrDefault(
+              localTick, InputConstraint.any());
+
+          WorldSnapshot world = worldForTick(
+              localTick, targetTick, worldHistory, movement);
+
+          List<ExternalTransition> transitions =
+              external.getOrDefault(localTick, List.of(new Phase6Reachability.None()));
+
+          SearchResult result = new Phase6Reachability(
+              new Vanilla12111RichPhysics()).search(
+                  context,
+                  List.of(input),
+                  ignored -> List.of(new WorldBranch(
+                      "causal-world@" + localTick,
+                      world,
+                      true,
+                      "client-visible world selected for the simulated tick")),
+                  ignored -> transitions,
+                  maximumCandidates);
+
+          if (result.verdict() == Verdict.POSSIBLE) {
+            next.addAll(result.candidates());
+          } else {
+            reasons.addAll(result.reasons());
+          }
+
+          if (next.size() > maximumCandidates) {
+            return new Advance(
+                Set.of(),
+                List.of("candidate budget exceeded; no provisional subset is safe to continue"),
+                false);
+          }
+        }
+
+        if (next.isEmpty()) {
+          reasons.add("no deterministic candidate survived the simulated client tick");
+          local = Set.of();
+          break;
+        }
+
+        local = Set.copyOf(next);
+        localTick++;
       }
-      frontier = Set.copyOf(next);
+
+      union.addAll(local);
+      if (union.size() > maximumCandidates) {
+        return new Advance(
+            Set.of(),
+            List.of("combined candidate budget exceeded; no provisional subset is safe to continue"),
+            false);
+      }
     }
 
-    // A movement observation at targetTick itself is compared against states
-    // generated by the prior ticks. This keeps Move.clientTick causally distinct
-    // from the server-receive event that delivered the packet.
-    return new Advance(frontier, List.copyOf(reasons), reasons.isEmpty());
-  }
-
-  private static boolean containsUntimedExternal(
-      MovementEvent movement,
-      long tick,
-      List<ExternalTransition> transitions) {
-    // A transition is only inserted into the map when Phase 7 proved an exact
-    // client tick. There is therefore nothing else to infer here; the method is
-    // kept as an explicit causality seam for future richer transition ranges.
-    return false;
+    if (union.isEmpty()) {
+      return new Advance(Set.of(), List.copyOf(reasons), false);
+    }
+    return new Advance(
+        Set.copyOf(union),
+        List.copyOf(reasons),
+        reasons.isEmpty());
   }
 
   private static WorldSnapshot worldForTick(
-      long tick,
+      long simulationTick,
+      long targetTick,
       World.VisibilityHistory history,
       MovementEvent movement) {
-    // The live acknowledged world is only used for the newest movement by the
-    // caller. Intermediate ticks must always come from the historical replica.
-    return history.statesAt(tick);
+    /*
+     * A live replica is a causally acknowledged snapshot of the newest
+     * observation only. It is never used for historical/intermediate ticks,
+     * and a future world mutation in the captured batch disables this shortcut.
+     */
+    if (movement.liveWorldUsed() && simulationTick == Math.max(0L, targetTick - 1L)) {
+      return movement.world();
+    }
+    return history.statesAt(simulationTick);
   }
 
   private static Context applyAuthoritativeContext(
@@ -1110,8 +1116,9 @@ public final class CausalMovementPipeline {
         .filter(value -> value.receivedNanos() <= receivedNanos)
         .max(Comparator.comparingLong(AuthoritativeSnapshot::receivedNanos))
         .orElse(null);
-    if (snapshot != null) return 0.0f;
-    return initialAnchor == null ? 0.0f : initialAnchor.yaw();
+    if (snapshot != null) return snapshot.context().movementEnvironment().onGround()
+        ? snapshot.context().serverPosition() == null ? 0.0f : 0.0f
+        : (initialAnchor == null ? 0.0f : initialAnchor.yaw());
   }
 
   private static float nearestAuthoritativePitch(
