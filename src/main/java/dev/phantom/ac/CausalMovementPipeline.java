@@ -879,7 +879,6 @@ public final class CausalMovementPipeline {
       }
     }
 
-    if (!reasons.isEmpty()) exhaustive = false;
     return new Advance(union, List.copyOf(reasons), exhaustive);
   }
 
@@ -984,7 +983,7 @@ public final class CausalMovementPipeline {
     return new Advance(
         Set.copyOf(union),
         List.copyOf(reasons),
-        exhaustive && reasons.isEmpty());
+        exhaustive);
   }
 
   private static WorldSnapshot worldForTick(
