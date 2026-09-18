@@ -259,6 +259,7 @@ public final class CausalMovementPipeline {
       if (hasNewUnmodeledExternal) {
         lastHandledUnmodeledExternalSequence = unmodeledExternalSequence;
         lastAmbiguitySequence = Math.max(lastAmbiguitySequence, unmodeledExternalSequence);
+        frontier = Frontier.empty();
         uncertainty.add("an authoritative movement-context transition before this movement could not be assigned to an exact client simulation tick");
         recoveryRequired = true;
         SearchResult uncertain = uncertainSearch(
@@ -343,6 +344,8 @@ public final class CausalMovementPipeline {
         uncertainty.add("multiple position-bearing movement packets occurred in one client tick; sub-tick motion is not modeled");
         lastAmbiguitySequence = sequence;
         recoveryRequired = true;
+        frontier = Frontier.empty();
+        trace.add("FRONTIER_RESET reason=SUB_TICK_AMBIGUITY");
         SearchResult uncertain = uncertainSearch(
             frontier.candidates(),
             "sub-tick movement cannot be causally represented by the full-tick simulator");
@@ -363,6 +366,7 @@ public final class CausalMovementPipeline {
           && movement.authority().snapshot().isPresent();
       boolean preferLocalAuthoritativeRoot = localAuthoritativeRootAvailable
           && (initialAnchor == null
+              || justRecovered
               || movement.timing().simulationClientTicks().max() > Phase6Reachability.MAX_HORIZON_TICKS);
       if (!haveAuthoritativeSeed && !localAuthoritativeRootAvailable && frontier.candidates().isEmpty()) {
         uncertainty.add("no trusted authoritative replay anchor exists");
@@ -376,6 +380,7 @@ public final class CausalMovementPipeline {
         continue;
       }
 
+      boolean justRecovered = false;
       boolean recoveryCanClear = recoveryRequired
           && lastAmbiguitySequence >= 0
           && sequence > lastAmbiguitySequence
@@ -387,7 +392,8 @@ public final class CausalMovementPipeline {
           && !sameExplicitClientTick;
       if (recoveryCanClear) {
         recoveryRequired = false;
-        trace.add("RECOVERY_CLEARED reason=clean causally aligned movement after ambiguity");
+        justRecovered = true;
+        trace.add("RECOVERY_CLEARED reason=clean causally aligned movement after fresh authority");
       }
 
       if (recoveryRequired) {
