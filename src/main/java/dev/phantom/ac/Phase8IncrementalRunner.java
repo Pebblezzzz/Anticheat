@@ -72,7 +72,7 @@ public final class Phase8IncrementalRunner {
   private int groundContradictionStreak;
   private long lastGroundContradictionTick = -1L;
   private int serverDivergenceStreak;
-  private long lastServerDivergenceTick = -1L;
+  private long lastServerDivergenceSequence = -1L;
   private static final int HARD_GROUND_CONTRADICTION_TICKS = 3;
   private static final int HARD_SERVER_DIVERGENCE_TICKS = 3;
   private static final double HARD_SERVER_DIVERGENCE_BLOCKS = 3.0;
@@ -121,7 +121,7 @@ public final class Phase8IncrementalRunner {
     this.groundContradictionStreak = 0;
     this.lastGroundContradictionTick = -1L;
     this.serverDivergenceStreak = 0;
-    this.lastServerDivergenceTick = -1L;
+    this.lastServerDivergenceSequence = -1L;
     this.continuation = Continuation.UNINITIALIZED;
   }
 
@@ -183,6 +183,13 @@ public final class Phase8IncrementalRunner {
     List<Packets.NormalizedPacket> normalized = new Packets.Normalizer().normalize(unseen);
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     int movements = 0;
+    int latestMovementIndex = -1;
+    for (int i = normalized.size() - 1; i >= 0; i--) {
+      if (normalized.get(i).packet() instanceof Packets.Move move && move.position() != null) {
+        latestMovementIndex = i;
+        break;
+      }
+    }
 
     for (int packetIndex = 0; packetIndex < normalized.size(); packetIndex++) {
       Packets.NormalizedPacket packet = normalized.get(packetIndex);
@@ -356,7 +363,8 @@ public final class Phase8IncrementalRunner {
       // A persistent contradiction between authoritative server collision state
       // and the client-reported ground bit is independently actionable evidence.
       // It must not be swallowed merely because world/timing replay is uncertain.
-      if (recordServerDivergence(move.position(), movementTick)) {
+      if (packetIndex == latestMovementIndex
+          && recordServerDivergence(move.position(), packet.sequence())) {
         double distance = authoritativeServerDistance(move.position());
         results.add(Phase8MovementValidation.authoritativeImpossible(
             playerId, serverTick, before, after, world, worldReference, timing,
@@ -659,7 +667,7 @@ public final class Phase8IncrementalRunner {
     return groundContradictionStreak >= HARD_GROUND_CONTRADICTION_TICKS;
   }
 
-  private boolean recordServerDivergence(Maths.Vec3 clientPosition, long movementTick) {
+  private boolean recordServerDivergence(Maths.Vec3 clientPosition, long packetSequence) {
     if (authoritativeServerPosition == null || clientPosition == null) {
       resetServerDivergence();
       return false;
@@ -670,13 +678,9 @@ public final class Phase8IncrementalRunner {
       resetServerDivergence();
       return false;
     }
-    if (lastServerDivergenceTick == movementTick) return false;
-    if (lastServerDivergenceTick < 0 || movementTick == lastServerDivergenceTick + 1L) {
-      serverDivergenceStreak++;
-    } else {
-      serverDivergenceStreak = 1;
-    }
-    lastServerDivergenceTick = movementTick;
+    if (lastServerDivergenceSequence == packetSequence) return false;
+    serverDivergenceStreak++;
+    lastServerDivergenceSequence = packetSequence;
     return serverDivergenceStreak >= HARD_SERVER_DIVERGENCE_TICKS;
   }
 
@@ -690,7 +694,7 @@ public final class Phase8IncrementalRunner {
 
   private void resetServerDivergence() {
     serverDivergenceStreak = 0;
-    lastServerDivergenceTick = -1L;
+    lastServerDivergenceSequence = -1L;
   }
 
   private void resetGroundContradiction() {
