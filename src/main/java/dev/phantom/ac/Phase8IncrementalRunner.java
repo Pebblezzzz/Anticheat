@@ -136,7 +136,7 @@ public final class Phase8IncrementalRunner {
           relativeClientTick, continuation, !candidates.isEmpty());
     }
 
-    long expected = lastProcessedSequence < 0 ? unseen.getFirst().sequence() : lastProcessedSequence + 1;
+    long expected = lastProcessedSequence < 0 ? 1 : lastProcessedSequence + 1;
     if (unseen.getFirst().sequence() != expected) {
       poison("capture sequence gap before incremental validation: expected " + expected
           + " but received " + unseen.getFirst().sequence());
@@ -230,7 +230,18 @@ public final class Phase8IncrementalRunner {
         continue;
       }
 
-      if (!(event instanceof Packets.Move move) || move.position() == null) {
+      if (!(event instanceof Packets.Move move)) {
+        trackedState = after;
+        continue;
+      }
+
+      if (move.yaw() != null || move.pitch() != null) {
+        float yaw = move.yaw() == null ? trackedStateYaw(after) : move.yaw();
+        float pitch = move.pitch() == null ? trackedStatePitch(after) : move.pitch();
+        retargetCandidateRotation(yaw, pitch);
+      }
+
+      if (move.position() == null) {
         trackedState = after;
         continue;
       }
@@ -393,6 +404,31 @@ public final class Phase8IncrementalRunner {
     return new Report(results, normalized.size(), movements, possible, uncertain, impossible,
         lastProcessedSequence, relativeClientTick, continuation, !candidates.isEmpty());
   }
+
+  private void retargetCandidateRotation(float yaw,float pitch){
+    if(candidates.isEmpty())return;
+    LinkedHashSet<Candidate> rotated=new LinkedHashSet<>();
+    for(Candidate candidate:candidates){
+      Player p=candidate.context().player();
+      if(Float.compare(p.yaw(),yaw)==0&&Float.compare(p.pitch(),pitch)==0){
+        rotated.add(candidate);
+        continue;
+      }
+      Player rotatedPlayer=new Player(p.position(),p.velocity(),yaw,pitch,p.onGround(),p.gamemode(),p.effects(),
+          p.awaitingTeleport(),p.uncertain(),p.input(),p.attributes(),p.pose(),p.environment(),
+          p.clientTickRange(),p.provenance(),p.uncertaintyReasons());
+      Phase6Reachability.Context context=new Phase6Reachability.Context(
+          candidate.context().simulationTick(),rotatedPlayer,candidate.context().environment(),
+          candidate.context().attributes(),candidate.context().effects(),candidate.context().pose(),
+          candidate.context().movementEnvironment(),candidate.context().sleeping(),
+          candidate.context().entityCollisions(),candidate.context().uncertainty());
+      rotated.add(new Candidate(candidate.id(),context,candidate.provenance()));
+    }
+    candidates=Set.copyOf(rotated);
+  }
+
+  private float trackedStateYaw(Player player){ return player.yaw(); }
+  private float trackedStatePitch(Player player){ return player.pitch(); }
 
   private Set<Candidate> advanceTo(long targetTick, WorldSnapshot world) {
     Set<Candidate> nextAll = new LinkedHashSet<>();
