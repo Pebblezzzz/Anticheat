@@ -122,7 +122,7 @@ public final class Phase8IncrementalRunner {
     return process(playerId, raw, liveWorld, currentAnchor, -1L, ignoredLatestServerPosition);
   }
 
-  private Report process(
+  public synchronized Report process(
       String playerId,
       List<Packets.RawPacket> raw,
       WorldSnapshot liveWorld,
