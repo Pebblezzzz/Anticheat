@@ -65,6 +65,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private final Map<UUID,Capture> captures=new ConcurrentHashMap<>();
   private final Map<UUID,Boolean> debugPlayers=new ConcurrentHashMap<>();
   private org.bukkit.scheduler.BukkitTask stateTask,validationTask;
+  private final AtomicBoolean validationKickQueued=new AtomicBoolean();
   private int validationBudget;
   private boolean alertsEnabled,broadcastAlerts,setbacksEnabled,setbacksOnlyExhaustive;
   private final Map<UUID,Boolean> setbackOverrides=new ConcurrentHashMap<>();
@@ -101,6 +102,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         String sourceId=tickObservation.hasSeenTickEnd()?"paper-client-tick-boundary":"paper-relative-first-tick";
         appendPacket(capture,new RawPacket(capture.sequence.incrementAndGet(),System.nanoTime(),move,
             Packets.CaptureProvenance.fromAdapter(sourceId,move,null)));
+        requestValidation(capture);
       }else if(event.getPacketType()==PacketType.Play.Client.PLAYER_INPUT){
         var input=new WrapperPlayClientPlayerInput(event);
         record(player,new Packets.ClientInput(input.isForward(),input.isBackward(),input.isLeft(),input.isRight(),input.isJump(),input.isShift(),input.isSprint()));
@@ -372,9 +374,19 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
   }
 
+  private void requestValidation(Capture capture){
+    capture.validationRequested.set(true);
+    if(!validationKickQueued.compareAndSet(false,true))return;
+    getServer().getScheduler().runTask(this,()->{
+      validationKickQueued.set(false);
+      scheduleValidations();
+    });
+  }
+
   private void scheduleValidations(){
     for(Capture capture:captures.values()){
       if(!capture.validationRunning.compareAndSet(false,true))continue;
+      capture.validationRequested.set(false);
       List<RawPacket> raw=capture.copy();
       if(raw.isEmpty()){capture.validationRunning.set(false);continue;}
       Player player=getServer().getPlayer(capture.playerId);
@@ -457,6 +469,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
 
     capture.validationRunning.set(false);
+    if(capture.validationRequested.get())requestValidation(capture);
   }
 
   private boolean setbackEnabled(UUID playerId){
@@ -567,6 +580,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final List<RawPacket> packets=new ArrayList<>();
     final ClientTickTracker clientTickTracker=new ClientTickTracker();
     final AtomicBoolean validationRunning=new AtomicBoolean();
+    final AtomicBoolean validationRequested=new AtomicBoolean();
     final LiveClientWorldReplica clientWorld=new LiveClientWorldReplica(Contracts.TARGET_VERSION,-64,319);
     volatile State.Player initialState;
     final Set<Short> outstandingTransactions=ConcurrentHashMap.newKeySet();
