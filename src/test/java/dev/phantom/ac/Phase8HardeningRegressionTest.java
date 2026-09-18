@@ -179,7 +179,7 @@ class Phase8HardeningRegressionTest {
         new RawPacket(4,10_000_000L,new Packets.ClientTickEnd()),
         new RawPacket(5,50_000_000L,new Move(new Vec3(.5,64,.5),0f,0f,true,null)),
         new RawPacket(6,55_000_000L,new Move(new Vec3(.7,64,.5),15f,0f,true,null)),
-        new RawPacket(7,101_000_000L,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+        new RawPacket(7,90_000_000L,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
             Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),
             new Vec3(.7,64,.5),Vec3.ZERO,false,false,false,List.of())),
         new RawPacket(8,100_000_000L,new Packets.ClientTickEnd()),
