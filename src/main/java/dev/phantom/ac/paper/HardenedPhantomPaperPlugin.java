@@ -1046,9 +1046,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     putBoolean(properties,"west",state.getData(StateValue.WEST));
     putBoolean(properties,"east",state.getData(StateValue.EAST));
     putBoolean(properties,"lit",state.getData(StateValue.LIT));
-    if(isFence(name)&&!hasAll(properties,"waterlogged","north","south","west","east"))return dev.phantom.ac.world.BlockState.unsupported(name);
-    if(isWall(name)&&!hasAll(properties,"waterlogged","up","north","south","west","east"))return dev.phantom.ac.world.BlockState.unsupported(name);
-    if(isPane(name)&&!hasAll(properties,"waterlogged","north","south","west","east"))return dev.phantom.ac.world.BlockState.unsupported(name);
     return dev.phantom.ac.world.v12111.BlockCatalogue12111.decode(name,properties);
   }
 
