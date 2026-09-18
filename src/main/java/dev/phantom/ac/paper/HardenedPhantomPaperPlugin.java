@@ -422,8 +422,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
                 +" candidates="+capture.movementRunner.candidateCount()
                 +" continuation="+incremental.continuation()
                 +" frontierRetained="+incremental.candidateFrontierRetained());
-            for(Phase8MovementValidation.Result result:report.results())
-              logValidationDebug(playerName,result);
           }
 
           getServer().getScheduler().runTask(this,()->applyResult(capture,report));
