@@ -1184,9 +1184,17 @@ public final class CausalMovementPipeline {
             "LOCAL_AUTHORITATIVE_ROOT",
             "ROOT",
             "None",
-            List.of("exact same-tick authoritative snapshot before movement; timing offset modeled independently"),
+            List.of(authorityRootDescription(movement)),
             1,
             List.of())));
+  }
+
+  private static String authorityRootDescription(MovementEvent movement) {
+    AuthoritativeSnapshot snapshot = movement.authority().snapshot().orElseThrow();
+    if (movement.authority().quality() == AuthorityQuality.EXACT) {
+      return "exact same-server-tick authoritative snapshot before movement";
+    }
+    return "causally preceding authoritative snapshot within one server tick; used only as a local re-anchor";
   }
 
   private static Optional<AuthoritativeSnapshot> causallyFreshLocalAuthority(
@@ -1256,7 +1264,7 @@ public final class CausalMovementPipeline {
             "ROOT",
             "None",
             List.of(localAuthoritativeRoot
-                ? "exact same-tick authoritative snapshot before movement; local root avoids long-horizon replay"
+                ? authorityRootDescription(movement) + "; local root avoids long-horizon replay"
                 : "explicit authoritative server anchor"),
             1,
             List.of())));
