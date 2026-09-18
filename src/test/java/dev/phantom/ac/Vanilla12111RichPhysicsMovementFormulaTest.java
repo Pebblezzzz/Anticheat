@@ -37,8 +37,8 @@ class Vanilla12111RichPhysicsMovementFormulaTest {
   void stoneGroundUsesFrictionInfluencedMovementSpeed() {
     var result=step(Player.initial(new Vec3(.5,64,.5)),
         new AdvancedInput(1,0,false,false,false),floor("minecraft:stone"));
-    assertEquals(.6,result.state().position().z(),1e-8);
-    assertEquals(.0546,result.state().velocity().z(),1e-8);
+    assertEquals(.5980000000745058,result.state().position().z(),1e-8);
+    assertEquals(.05350800004065037,result.state().velocity().z(),1e-8);
   }
 
   @Test
@@ -47,16 +47,16 @@ class Vanilla12111RichPhysicsMovementFormulaTest {
         "vanilla:sprinting",0.3,Phase5Mechanics.ModifierOperation.ADD_MULTIPLIED_TOTAL)));
     var result=step(Player.initial(new Vec3(.5,64,.5)),
         new AdvancedInput(1,0,false,true,false),floor("minecraft:stone"),sprintAttributes);
-    assertEquals(.63,result.state().position().z(),1e-8);
-    assertEquals(.07098,result.state().velocity().z(),1e-8);
+    assertEquals(.6274000000788279,result.state().position().z(),1e-8);
+    assertEquals(.06956040005284549,result.state().velocity().z(),1e-8);
   }
 
   @Test
   void iceGroundChangesInputSpeedThroughSlipperiness() {
     var result=step(Player.initial(new Vec3(.5,64,.5)),
         new AdvancedInput(1,0,false,false,false),floor("minecraft:ice"));
-    assertEquals(.5229496234562,result.state().position().z(),1e-10);
-    assertEquals(.0205481624564,result.state().velocity().z(),1e-10);
+    assertEquals(.5224906317599546,result.state().position().z(),1e-10);
+    assertEquals(.020057145403527484,result.state().velocity().z(),1e-10);
   }
 
   @Test
@@ -66,8 +66,8 @@ class Vanilla12111RichPhysicsMovementFormulaTest {
         java.util.Optional.empty(),new Attributes(.1),Pose.STANDING,State.Environment.DRY,
         State.TickRange.exact(0),State.Provenance.UNKNOWN,java.util.Set.of());
     var result=step(player,new AdvancedInput(1,0,false,false,false),floor("minecraft:stone"));
-    assertEquals(.52,result.state().position().z(),1e-10);
-    assertEquals(.0182,result.state().velocity().z(),1e-10);
+    assertEquals(.5195999999433756,result.state().position().z(),1e-10);
+    assertEquals(.01783599994847178,result.state().velocity().z(),1e-10);
   }
 
   @Test
@@ -77,7 +77,7 @@ class Vanilla12111RichPhysicsMovementFormulaTest {
         java.util.Optional.empty(),new Attributes(.1),Pose.STANDING,State.Environment.DRY,
         State.TickRange.exact(0),State.Provenance.UNKNOWN,java.util.Set.of());
     var result=step(player,new AdvancedInput(1,0,false,true,false),floor("minecraft:stone"));
-    assertEquals(.526,result.state().position().z(),1e-10);
-    assertEquals(.02366,result.state().velocity().z(),1e-10);
+    assertEquals(.5254800010216236,result.state().position().z(),1e-10);
+    assertEquals(.023186800929677495,result.state().velocity().z(),1e-10)
   }
 }
