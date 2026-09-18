@@ -43,7 +43,7 @@ public final class Phase8LiveValidation {
    * world. Earlier observations continue to use the historical replay world.
    */
   public static Report analyze(String playerId,Timeline.Snapshot timeline,int maximumCandidates,Phase7Timing.Config timingConfig,WorldSnapshot liveWorld){
-    return analyze(playerId,timeline,maximumCandidates,timingConfig,liveWorld,null);
+    return analyze(playerId,timeline,maximumCandidates,timingConfig,liveWorld,null,-1L);
   }
 
   /**
@@ -53,6 +53,15 @@ public final class Phase8LiveValidation {
    * declaring that first movement an untestable replay anchor.
    */
   public static Report analyze(String playerId,Timeline.Snapshot timeline,int maximumCandidates,Phase7Timing.Config timingConfig,WorldSnapshot liveWorld,Player initialAnchor){
+    return analyze(playerId,timeline,maximumCandidates,timingConfig,liveWorld,initialAnchor,-1L);
+  }
+
+  /**
+   * Full live entry point with the capture-time marker used to order an authoritative
+   * seed against world packets that may land in the same server tick.
+   */
+  public static Report analyze(String playerId,Timeline.Snapshot timeline,int maximumCandidates,Phase7Timing.Config timingConfig,
+                               WorldSnapshot liveWorld,Player initialAnchor,long initialAnchorReceivedNanos){
     Objects.requireNonNull(playerId);Objects.requireNonNull(timeline);Objects.requireNonNull(timingConfig);Contracts.requireCandidateBudget(maximumCandidates);
 
     World.VisibilityHistory history=World.fromTimeline(timeline);
@@ -201,10 +210,16 @@ public final class Phase8LiveValidation {
           // "first packet is always the root" blind spot. The snapshot is exhaustive
           // only when no world mutations occurred before this observation; otherwise a
           // historical client-world trace is required before IMPOSSIBLE is safe.
-          boolean worldStable=!timeline.events().stream().anyMatch(e->
-              e.packet().packet().mutatesWorld()
-                  && e.serverTick()>0
-                  && e.serverTick()<=event.serverTick());
+          boolean worldStable=initialAnchorReceivedNanos<0
+              ? !timeline.events().stream().anyMatch(e->
+                  e.packet().packet().mutatesWorld()
+                      && e.serverTick()<=event.serverTick())
+              : !timeline.events().stream().anyMatch(e->
+                  e.packet().packet().mutatesWorld()
+                      && e.serverTick()<=event.serverTick()
+                      && (e.packet().receivedNanos()>initialAnchorReceivedNanos
+                          || e.packet().receivedNanos()==initialAnchorReceivedNanos));
+
           long anchorTick=0L;
           InputConstraint anchorInput=inputForTick(inputByClientTick,anchorTick);
           Phase6Reachability.Context root=anchorContext(safeInitial,world,anchorInput,anchorTick,currentEntityCollisions);
