@@ -36,10 +36,8 @@ public final class Phase8IncrementalRunner {
       boolean candidateFrontierRetained,
       List<CausalMovementPipeline.Frame> frames) {
     public Report {
-      frames = List.copyOf(frames);
-    }
-    public Report {
       results = List.copyOf(results);
+      frames = List.copyOf(frames);
     }
   }
 
