@@ -276,6 +276,13 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       capture.paperMoveFailureCount++;
     }
 
+    Packets.PaperMovementRejection corroboration =
+        new Packets.PaperMovementRejection(reason.name(),event.isAllowed());
+    long telemetrySequence=capture.sequence.incrementAndGet();
+    appendPacket(capture,new RawPacket(
+        telemetrySequence,now,corroboration,
+        Packets.CaptureProvenance.fromAdapter("paper-move-rejection",corroboration,authoritativeTick(capture))));
+
     if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
       getLogger().info("[PhantomAC][PHASE8][PAPER_MOVE_FAIL] player="+player.getName()
           +" reason="+reason
@@ -295,6 +302,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           +" to="+event.getTo()
           +" NOTE=Paper rejection is telemetry only; Phantom will not emit an IMPOSSIBLE result from this event");
     }
+  }
+
+  private static Long authoritativeTick(Capture capture){
+    long tick=capture.authoritativeServerTick.get();
+    return tick>=0 ? tick : null;
   }
 
   private State.Player paperMovementState(State.Player template,org.bukkit.Location location,Player player){
