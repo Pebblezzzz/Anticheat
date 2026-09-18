@@ -371,7 +371,7 @@ public final class CausalMovementPipeline {
       }
 
       if (frontier.candidates().isEmpty()) {
-        if (initialAnchor == null || initialAnchor.uncertain()) {
+        if (!exactLocalAuthority && (initialAnchor == null || initialAnchor.uncertain())) {
           uncertainty.add("first movement cannot be proven without an authoritative server anchor");
           SearchResult uncertain = uncertainSearch(Set.of(), String.join("; ", uncertainty));
           results.add(Phase8MovementValidation.validate(
@@ -386,7 +386,7 @@ public final class CausalMovementPipeline {
             movement,
             maximumCandidates);
         if (root.isEmpty()) {
-          uncertainty.add("authoritative anchor is outside known world coverage");
+          uncertainty.add("authoritative local root is outside the finite causal horizon");
           SearchResult uncertain = uncertainSearch(Set.of(), String.join("; ", uncertainty));
           results.add(Phase8MovementValidation.validate(
               playerId, serverTick, observedBefore, observedAfter, movement.world(),
@@ -395,14 +395,14 @@ public final class CausalMovementPipeline {
               assumptions, uncertainty, trace));
           continue;
         }
-        Candidate root = rootCandidate(initialAnchor, movement, maximumCandidates).orElseThrow();
-        frontier = new Frontier(Set.of(root), root.context().simulationTick(), true);
+        Candidate rootCandidate = root.orElseThrow();
+        frontier = new Frontier(Set.of(rootCandidate), rootCandidate.context().simulationTick(), true);
         if (exactLocalAuthority) {
           AuthoritativeSnapshot snapshot = movement.authority().snapshot().orElseThrow();
           trace.add("ROOT LOCAL_AUTHORITATIVE snapshotSeq=" + snapshot.sequence()
               + " serverTick=" + snapshot.serverTick()
-              + " simulationTick=" + root.context().simulationTick()
-              + " position=" + root.context().player().position());
+              + " simulationTick=" + rootCandidate.context().simulationTick()
+              + " position=" + rootCandidate.context().player().position());
         } else {
           trace.add("ROOT authoritative anchor=" + initialAnchor.position());
         }
