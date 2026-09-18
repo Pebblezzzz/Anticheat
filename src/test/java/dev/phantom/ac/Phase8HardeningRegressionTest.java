@@ -108,6 +108,42 @@ class Phase8HardeningRegressionTest {
   }
 
   @Test
+  void multipleMovementPacketsInOneClientTickRemainExplicitlyUncertain(){
+    var packets=List.of(
+        new RawPacket(1,0,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
+        new RawPacket(2,0,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+            Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
+        new RawPacket(3,0,new Packets.ClientInput(false,false,false,false,false,false,false)),
+        new RawPacket(4,0,new Packets.ClientTickEnd()),
+        new RawPacket(5,50_000_000L,new Move(new Vec3(.5,64,.5),0f,0f,true,null)),
+        new RawPacket(6,55_000_000L,new Move(new Vec3(.7,64,.5),15f,0f,true,null)),
+        new RawPacket(7,100_000_000L,new Packets.ClientTickEnd()),
+        new RawPacket(8,150_000_000L,new Move(new Vec3(.9,64,.5),15f,0f,true,null))
+    );
+    var report=Phase8LiveValidation.analyze("subtick",capture(packets),4096,exactTiming());
+    assertEquals(3,report.movementObservations(),report.results().toString());
+    assertEquals(Verdict.UNCERTAIN,report.results().get(1).verdict(),report.results().toString());
+  }
+
+  @Test
+  void inputChangesAreAppliedToTheirOwnClientTickIntervals(){
+    var packets=List.of(
+        new RawPacket(1,0,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
+        new RawPacket(2,0,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+            Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
+        new RawPacket(3,0,new Packets.ClientInput(true,false,false,false,false,false,false)),
+        new RawPacket(4,10_000_000L,new Packets.ClientTickEnd()),
+        new RawPacket(5,60_000_000L,new Packets.ClientInput(false,false,false,true,false,false,false)),
+        new RawPacket(6,70_000_000L,new Packets.ClientTickEnd()),
+        new RawPacket(7,120_000_000L,new Move(new Vec3(.5,64,.1),0f,0f,true,null))
+    );
+    var timeline=capture(packets);
+    var report=Phase8LiveValidation.analyze("held-input",timeline,4096,exactTiming());
+    assertEquals(1,report.movementObservations(),report.results().toString());
+    assertNotEquals(Verdict.IMPOSSIBLE,report.results().getFirst().verdict(),report.results().toString());
+  }
+
+  @Test
   void validationResultGateCountsAnImpossibleObservationOnlyOnce() {
     var gate=new ValidationResultGate();
     assertTrue(gate.accept("move:42",Verdict.IMPOSSIBLE));
