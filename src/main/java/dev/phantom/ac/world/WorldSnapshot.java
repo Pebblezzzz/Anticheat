@@ -46,14 +46,61 @@ import dev.phantom.ac.world.v12111.BlockCatalogue12111;
  * @param minY      lowest block Y the dimension exposes
  * @param maxY      highest block Y the dimension exposes
  */
-public record WorldSnapshot(String version, Map<Chunk, Map<Pos, BlockState>> chunks, int minY, int maxY)
-    implements Serializable {
+public final class WorldSnapshot implements Serializable {
+
+  /** A read-only, query-oriented backend used by compact client-world caches. */
+  public interface Backend {
+    String version();
+    int minY();
+    int maxY();
+    Set<Chunk> loadedChunks();
+    Coverage coverageAt(int x, int y, int z);
+    BlockState blockAtOrNull(int x, int y, int z);
+
+    /**
+     * Materializes the backend only when a caller explicitly requests the full
+     * map representation (for example replay serialization or diagnostic APIs).
+     * Hot-path physics queries must use coverageAt/blockAtOrNull instead.
+     */
+    default Map<Chunk, Map<Pos, BlockState>> materializeChunks() {
+      Map<Chunk, Map<Pos, BlockState>> result = new HashMap<>();
+      for (Chunk chunk : loadedChunks()) {
+        Map<Pos, BlockState> states = new HashMap<>();
+        int minX = chunk.x() * 16;
+        int maxX = minX + 15;
+        int minZ = chunk.z() * 16;
+        int maxZ = minZ + 15;
+        for (int x = minX; x <= maxX; x++) {
+          for (int y = minY(); y <= maxY(); y++) {
+            for (int z = minZ; z <= maxZ; z++) {
+              if (coverageAt(x, y, z) == Coverage.UNSUPPORTED) {
+                BlockState state = blockAtOrNull(x, y, z);
+                states.put(new Pos(x, y, z),
+                    state == null ? BlockState.unsupported("backend-unsupported") : state);
+              } else if (coverageAt(x, y, z) == Coverage.KNOWN) {
+                BlockState state = blockAtOrNull(x, y, z);
+                if (state != null && !state.isAir()) states.put(new Pos(x, y, z), state);
+              }
+            }
+          }
+        }
+        result.put(chunk, states);
+      }
+      return result;
+    }
+  }
 
   /** The dimension height of every 1.21.11 dimension that a client can be in. */
   public static final int OVERWORLD_MIN_Y = -64;
   public static final int OVERWORLD_MAX_Y = 319;
 
-  public WorldSnapshot {
+  private final String version;
+  private volatile Map<Chunk, Map<Pos, BlockState>> chunks;
+  private final int minY;
+  private final int maxY;
+  private final transient Backend backend;
+
+  public WorldSnapshot(String version, Map<Chunk, Map<Pos, BlockState>> chunks, int minY, int maxY) {
     Objects.requireNonNull(version, "version");
     Objects.requireNonNull(chunks, "chunks");
     if (minY > maxY) throw new IllegalArgumentException("minY must not exceed maxY");
@@ -65,9 +112,6 @@ public record WorldSnapshot(String version, Map<Chunk, Map<Pos, BlockState>> chu
       for (Map.Entry<Pos, BlockState> state : states.entrySet()) {
         Pos position = Objects.requireNonNull(state.getKey(), "state position");
         BlockState value = Objects.requireNonNull(state.getValue(), "state value");
-        // Unsupported states are stored deliberately: they are how the snapshot
-        // remembers "a state arrived here that this build cannot verify", which
-        // must be distinct from both air and a guessed shape.
         if (!Chunk.containing(position.x(), position.z()).equals(chunk)) {
           throw new IllegalArgumentException("position " + position + " is outside chunk " + chunk);
         }
@@ -80,8 +124,50 @@ public record WorldSnapshot(String version, Map<Chunk, Map<Pos, BlockState>> chu
       }
       frozen.put(chunk, Collections.unmodifiableMap(sorted));
     }
-    chunks = Collections.unmodifiableMap(frozen);
+    this.chunks = Collections.unmodifiableMap(frozen);
+    this.version = version;
+    this.minY = minY;
+    this.maxY = maxY;
+    this.backend = null;
   }
+
+  private WorldSnapshot(String version, int minY, int maxY, Backend backend) {
+    this.version = Objects.requireNonNull(version, "version");
+    this.minY = minY;
+    this.maxY = maxY;
+    if (minY > maxY) throw new IllegalArgumentException("minY must not exceed maxY");
+    this.backend = Objects.requireNonNull(backend, "backend");
+    this.chunks = null;
+  }
+
+  public static WorldSnapshot backed(String version, int minY, int maxY, Backend backend) {
+    Objects.requireNonNull(backend, "backend");
+    if (!version.equals(backend.version()) || minY != backend.minY() || maxY != backend.maxY()) {
+      throw new IllegalArgumentException("backend dimensions/version do not match snapshot");
+    }
+    return new WorldSnapshot(version, minY, maxY, backend);
+  }
+
+  public String version() { return version; }
+
+  public Map<Chunk, Map<Pos, BlockState>> chunks() {
+    Map<Chunk, Map<Pos, BlockState>> current = chunks;
+    if (current != null) return current;
+    Map<Chunk, Map<Pos, BlockState>> materialized = backend.materializeChunks();
+    Map<Chunk, Map<Pos, BlockState>> frozen = new HashMap<>(materialized.size());
+    for (Map.Entry<Chunk, Map<Pos, BlockState>> entry : materialized.entrySet()) {
+      TreeMap<Pos, BlockState> sorted = new TreeMap<>(POS_ORDER);
+      sorted.putAll(entry.getValue());
+      frozen.put(entry.getKey(), Collections.unmodifiableMap(sorted));
+    }
+    current = Collections.unmodifiableMap(frozen);
+    chunks = current;
+    return current;
+  }
+
+  public int minY() { return minY; }
+
+  public int maxY() { return maxY; }
 
   /** Canonical position order: x, then y, then z. */
   public static final java.util.Comparator<Pos> POS_ORDER =
@@ -141,17 +227,13 @@ public record WorldSnapshot(String version, Map<Chunk, Map<Pos, BlockState>> chu
 
   /** Whether the client's world data covers this position at all. */
   public Coverage coverageAt(int x, int y, int z) {
+    if (backend != null) return backend.coverageAt(x, y, z);
     if (y < minY || y > maxY) return Coverage.UNLOADED;
     Chunk chunk = Chunk.containing(x, z);
     Map<Pos, BlockState> states = chunks.get(chunk);
     if (states == null) return Coverage.UNLOADED;
     BlockState state = states.get(new Pos(x, y, z));
-    if (state == null) {
-      // The chunk is loaded and the packet left this position empty. Vanilla
-      // sends only non-air sections, so a loaded chunk with no stored state at a
-      // position means genuine air, which is a known value.
-      return Coverage.KNOWN;
-    }
+    if (state == null) return Coverage.KNOWN;
     return state.isUnsupported() ? Coverage.UNSUPPORTED : Coverage.KNOWN;
   }
 
@@ -160,19 +242,22 @@ public record WorldSnapshot(String version, Map<Chunk, Map<Pos, BlockState>> chu
   }
 
   public boolean hasChunk(int chunkX, int chunkZ) {
-    return chunks.containsKey(new Chunk(chunkX, chunkZ));
+    return backend != null
+        ? backend.loadedChunks().contains(new Chunk(chunkX, chunkZ))
+        : chunks.containsKey(new Chunk(chunkX, chunkZ));
   }
 
   public boolean hasChunk(Chunk chunk) {
-    return chunks.containsKey(chunk);
+    return backend != null ? backend.loadedChunks().contains(chunk) : chunks.containsKey(chunk);
   }
 
   public Set<Chunk> loadedChunks() {
-    return chunks.keySet();
+    return backend != null ? Set.copyOf(backend.loadedChunks()) : chunks.keySet();
   }
 
   /** All block states in a chunk, in canonical order, or an empty map if unloaded. */
   public Map<Pos, BlockState> chunkStates(Chunk chunk) {
+    if (backend != null) return chunks().getOrDefault(chunk, Map.of());
     return chunks.getOrDefault(chunk, Map.of());
   }
 
@@ -183,6 +268,7 @@ public record WorldSnapshot(String version, Map<Chunk, Map<Pos, BlockState>> chu
    *         {@link #coverageAt} rather than substituting air.
    */
   public BlockState blockAtOrNull(int x, int y, int z) {
+    if (backend != null) return backend.blockAtOrNull(x, y, z);
     if (y < minY || y > maxY) return null;
     Map<Pos, BlockState> states = chunks.get(Chunk.containing(x, z));
     if (states == null) return null;
@@ -362,7 +448,24 @@ public record WorldSnapshot(String version, Map<Chunk, Map<Pos, BlockState>> chu
   }
 
   @Override public String toString() {
-    return "WorldSnapshot[" + version + " chunks=" + chunks.size() + " y=" + minY + ".." + maxY + "]";
+    int chunkCount = backend != null ? backend.loadedChunks().size() : chunks.size();
+    return "WorldSnapshot[" + version + " chunks=" + chunkCount + " y=" + minY + ".." + maxY + "]";
+  }
+
+  /** Materializes a compact backend only at explicit serialization/replay boundaries. */
+  private Object writeReplace() {
+    return backend == null ? this : new WorldSnapshot(version, chunks(), minY, maxY);
+  }
+
+  @Override public boolean equals(Object other) {
+    if (this == other) return true;
+    if (!(other instanceof WorldSnapshot that)) return false;
+    return minY == that.minY && maxY == that.maxY
+        && version.equals(that.version) && chunks().equals(that.chunks());
+  }
+
+  @Override public int hashCode() {
+    return Objects.hash(version, chunks(), minY, maxY);
   }
 
   // ------------------------------------------------------------------
