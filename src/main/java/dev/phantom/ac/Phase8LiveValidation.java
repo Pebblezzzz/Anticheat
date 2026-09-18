@@ -74,6 +74,7 @@ public final class Phase8LiveValidation {
     EntityCollisions currentEntityCollisions=EntityCollisions.NONE_TRACKED;
     List<Phase8MovementValidation.Result> results=new ArrayList<>();
     int movements=0;
+    long previousMovementTick=-1;
 
     for(Timeline.Event event:timeline.events()){
       Packets.NormalizedPacket normalized=event.packet();
@@ -146,6 +147,22 @@ public final class Phase8LiveValidation {
       Player observed=stateFrame.after();
       Validation.SyncWindow sync=Phase7Timing.toPhase6Window(eventTiming);
       String replayReference="live:phase8:"+playerId+":"+normalized.sequence();
+
+      // Grim keeps multiple movement packets inside one client tick as a distinct
+      // sub-tick observation stream. Our deterministic core currently models one
+      // physics step per client tick, so a second packet in the same exact tick
+      // cannot be safely interpreted as another full physics step.
+      long movementTick=eventTiming.simulationClientTicks().min();
+      if(previousMovementTick>=0
+          &&eventTiming.simulationClientTicks().isExact()
+          &&movementTick==previousMovementTick){
+        SearchResult subTick=new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,candidates,0,candidates.size(),
+            0,0,1,0,List.of("multiple movement packets occurred in the same client simulation tick; sub-tick movement is not yet modeled"));
+        results.add(Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
+            worldReference,sync,List.of("sub-tick movement packet; full-tick physics was not advanced"),subTick,replayReference));
+        previousMovementTick=movementTick;
+        continue;
+      }
       String inputDescription="client-input="+currentInput
           +", input-held-until-replacement=true"
           +", timing-offsets="+sync.earliestClientTick()+".."+sync.latestClientTick();
@@ -216,7 +233,8 @@ public final class Phase8LiveValidation {
             if(search.verdict()!=Phase6Reachability.Verdict.POSSIBLE)exhaustive=false;
           }
 
-          ParentAggregation aggregated=aggregateDirectSearches(searches,maximumCandidates,exhaustive);
+          previousMovementTick=movementTick;
+      ParentAggregation aggregated=aggregateDirectSearches(searches,maximumCandidates,exhaustive);
           SearchResult reachable=aggregated.result();
           Phase8MovementValidation.Result validation=Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
               worldReference,sync,inputAssumptions,reachable,replayReference,aggregated.timingOffsetsExhaustive());
@@ -319,7 +337,12 @@ public final class Phase8LiveValidation {
           }
 
           List<InputConstraint> perTickInput=new ArrayList<>((int)steps);
-          for(long i=0;i<steps;i++) perTickInput.add(currentInput);
+          for(long i=0;i<steps;i++){
+            long simulationTick=parentTick+i;
+            perTickInput.add(hasClientTickBoundaries
+                ?inputForTick(inputByClientTick,simulationTick)
+                :currentInput);
+          }
 
           Phase6Reachability.Context prepared=withObservedEnvironment(parent.context(),world,currentInput,parentTick,currentEntityCollisions);
           List<InputConstraint> inputs=List.copyOf(perTickInput);
