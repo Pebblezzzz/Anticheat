@@ -387,7 +387,7 @@ public final class Phase8IncrementalRunner {
           && !waitingForTeleport
           && packetIndex == latestMovementIndex
           && !hasFutureAuthoritativeTransition(normalized, packetIndex + 1)
-          && recordServerDivergence(move.position(), movementTick)) {
+          && recordServerDivergence(after.position(), movementTick)) {
         double distance = authoritativeServerDistance(move.position());
         results.add(Phase8MovementValidation.authoritativeImpossible(
             playerId, serverTick, before, after, world, worldReference, timing,
@@ -420,6 +420,7 @@ public final class Phase8IncrementalRunner {
             List.of(
                 "authoritativeServerOnGround=" + authoritativeOnGround,
                 "clientReportedOnGround=" + move.onGround(),
+                "clientPositionChanged=" + (move.position() != null),
                 "consecutiveContradictionTicks=" + groundContradictionStreak,
                 "movementTick=" + movementTick,
                 "this signal is independent of finite candidate-search completeness"),
@@ -547,8 +548,13 @@ public final class Phase8IncrementalRunner {
               "input is held until replacement",
               "movementTick=" + movementTick,
               "timingSource=" + timingReason,
-              "candidateFrontierSize=" + reachableCandidates.size()),
-          reachable, replayReference, exactTick && !poisoned && !reanchorRequired);
+              "candidateFrontierSize=" + reachableCandidates.size(),
+              "clientGroundClaim=" + move.onGround(),
+              "authoritativeGround=" + authoritativeOnGround,
+              "authoritativeCanFly=" + authoritativeCanFly,
+              "authoritativeFlying=" + authoritativeFlying),
+          reachable, replayReference, exactTick && !poisoned && !reanchorRequired,
+          EnumSet.of(Phase6Reachability.ObservedField.POSITION, Phase6Reachability.ObservedField.ROTATION));
 
       results.add(validation);
       trackedState = after;
@@ -970,8 +976,7 @@ public final class Phase8IncrementalRunner {
   private boolean matchesObserved(Player candidate, Player observed) {
     return candidate.position().equals(observed.position())
         && Float.compare(candidate.yaw(), observed.yaw()) == 0
-        && Float.compare(candidate.pitch(), observed.pitch()) == 0
-        && candidate.onGround() == observed.onGround();
+        && Float.compare(candidate.pitch(), observed.pitch()) == 0;
   }
 
   private Phase8MovementValidation.Result uncertainResult(
