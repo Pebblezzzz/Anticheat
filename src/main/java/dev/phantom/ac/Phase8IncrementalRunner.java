@@ -152,11 +152,13 @@ public final class Phase8IncrementalRunner {
     Objects.requireNonNull(playerId);
     Objects.requireNonNull(raw);
     Objects.requireNonNull(world);
-    this.authoritativeServerPosition = authoritativeServerPosition;
 
     if (currentAnchor != null && (anchorState == null || !anchorState.equals(currentAnchor))) {
       reset(currentAnchor, epochNanos);
     }
+    // reset() intentionally clears transient live evidence; restore the current
+    // authoritative server position for this validation cycle afterwards.
+    this.authoritativeServerPosition = authoritativeServerPosition;
 
     if (raw.isEmpty()) {
       return new Report(List.of(), 0, 0, 0, 0, 0, lastProcessedSequence,
