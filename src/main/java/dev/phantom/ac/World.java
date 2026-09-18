@@ -378,6 +378,90 @@ public final class World {
    * environment information, while a legacy capture that only recorded shape
    * keys still produces the legacy snapshot.</p>
    */
+  /**
+   * Reconstructs client-visible world state using the Phase 7 client chronology.
+   * Server-send ticks are never compared directly with client simulation ticks.
+   * When downstream timing is a range, visibility is conservatively delayed until
+   * the latest possible client tick; this avoids validating against future state.
+   */
+  public static VisibilityHistory fromTimeline(
+      Timeline.Snapshot timeline,
+      Phase7Timing.Reconstruction timing) {
+    Objects.requireNonNull(timeline);
+    Objects.requireNonNull(timing);
+    VisibilityHistory history = new VisibilityHistory();
+    boolean hasTransactionEvidence = timeline.events().stream().anyMatch(event ->
+        event.packet().packet() instanceof Packets.WorldTransactionSend
+            || event.packet().packet() instanceof Packets.WorldTransactionAck);
+
+    for (Timeline.Event event : timeline.events()) {
+      var packet = event.packet().packet();
+      Phase7Timing.EventTiming eventTiming = timing.timingFor(event.packet().sequence()).orElse(null);
+      long clientTick;
+      if (eventTiming == null) {
+        continue;
+      }
+      if (eventTiming.kind() == Phase7Timing.EventKind.WORLD) {
+        Phase7Timing.Range visibility = eventTiming.packetGenerationClientTicks();
+        clientTick = visibility.max();
+      } else if (packet instanceof Packets.WorldTransactionAck) {
+        clientTick = eventTiming.simulationClientTicks().max();
+      } else {
+        continue;
+      }
+
+      if (!hasTransactionEvidence) {
+        if (packet instanceof Packets.ChunkData data) {
+          history.chunkData(clientTick, data.chunk(), data.blocks());
+        } else if (packet instanceof Packets.ChunkStates states) {
+          history.chunkStates(clientTick,
+              new dev.phantom.ac.world.Chunk(states.chunk().x(), states.chunk().z()),
+              states.states());
+        } else if (packet instanceof Packets.ChunkUnload unload) {
+          history.chunkUnloaded(clientTick, unload.chunk());
+          history.stateChunkUnloaded(clientTick, unload.chunk());
+        } else if (packet instanceof Packets.BlockChange change) {
+          history.blockChanged(clientTick, change.position(), change.block());
+        } else if (packet instanceof Packets.BlockStateChange change) {
+          history.blockStateChanged(clientTick, change.position(), change.state());
+        } else if (packet instanceof Packets.UnsupportedBlockStateChange change) {
+          history.blockStateChanged(clientTick, change.position(), change.state());
+        }
+        continue;
+      }
+
+      if (packet instanceof Packets.WorldTransactionSend send) {
+        history.openStateTransaction(send.id());
+      } else if (packet instanceof Packets.WorldTransactionAck ack) {
+        history.acknowledgeStateTransaction(ack.id(), clientTick);
+      } else if (packet instanceof Packets.ChunkStates states) {
+        history.queueStateChunk(clientTick, states.chunk(), states.states());
+      } else if (packet instanceof Packets.ChunkUnload unload) {
+        history.queueStateChunkUnload(clientTick,
+            new dev.phantom.ac.world.Chunk(unload.chunk().x(), unload.chunk().z()));
+      } else if (packet instanceof Packets.BlockStateChange change) {
+        history.queueStateBlock(clientTick, change.position(), change.state());
+      } else if (packet instanceof Packets.UnsupportedBlockStateChange change) {
+        history.queueStateBlock(clientTick, change.position(), change.state());
+      } else if (packet instanceof Packets.ChunkData data) {
+        Map<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> states = new HashMap<>();
+        for (Map.Entry<World.Pos, World.Block> entry : data.blocks().entrySet()) {
+          states.put(new dev.phantom.ac.world.Pos(
+                  entry.getKey().x(), entry.getKey().y(), entry.getKey().z()),
+              World.legacyBlockState(entry.getValue()));
+        }
+        history.queueStateChunk(clientTick,
+            new dev.phantom.ac.world.Chunk(data.chunk().x(), data.chunk().z()), states);
+      } else if (packet instanceof Packets.BlockChange change) {
+        history.queueStateBlock(clientTick,
+            new dev.phantom.ac.world.Pos(
+                change.position().x(), change.position().y(), change.position().z()),
+            World.legacyBlockState(change.block()));
+      }
+    }
+    return history;
+  }
+
   public static VisibilityHistory fromTimeline(Timeline.Snapshot timeline) {
     VisibilityHistory history=new VisibilityHistory();
 
