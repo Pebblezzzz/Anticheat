@@ -755,7 +755,7 @@ public final class Phase8IncrementalRunner {
       return chunkIntersectsSweep(chunk.chunk().x(), chunk.chunk().z(), minX, maxX, minZ, maxZ);
     }
     if (packet instanceof Packets.ChunkUnload chunk) {
-      return chunkIntersectsSweep(chunk.chunk(), minX, maxX, minZ, maxZ);
+      return chunkIntersectsSweep(chunk.chunk().x(), chunk.chunk().z(), minX, maxX, minZ, maxZ);
     }
     return false;
   }
