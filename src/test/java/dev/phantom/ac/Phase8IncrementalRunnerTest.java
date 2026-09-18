@@ -86,8 +86,10 @@ class Phase8IncrementalRunnerTest {
         new RawPacket(2,60,new Move(new Maths.Vec3(.5,64,.5),0f,0f,true,null)),
         new RawPacket(3,70,new Packets.BlockChange(new World.Pos(0,63,0),World.Block.FULL))
     );
-    // Keep this regression focused on chronology; an actual world mutation is supplied
-    // by the Packet type below in the replacement block.
+    var report=runner.process("future-world",raw,floorWorld(),anchor);
+    assertEquals(1,report.movementObservations(),report.results().toString());
+    assertEquals(Phase8MovementValidation.Verdict.UNCERTAIN,report.results().getFirst().verdict(),report.results().toString());
+    assertEquals(Phase8IncrementalRunner.Continuation.UNCERTAIN,report.continuation());
   }
 
   @Test
