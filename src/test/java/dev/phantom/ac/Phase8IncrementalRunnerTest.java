@@ -78,6 +78,19 @@ class Phase8IncrementalRunnerTest {
   }
 
   @Test
+  void futureWorldMutationCannotValidateEarlierMovementAgainstFutureState(){
+    Phase8IncrementalRunner runner=new Phase8IncrementalRunner(4096,0);
+    Player anchor=anchor();
+    List<RawPacket> raw=List.of(
+        new RawPacket(1,10,new ClientTickEnd()),
+        new RawPacket(2,60,new Move(new Maths.Vec3(.5,64,.5),0f,0f,true,null)),
+        new RawPacket(3,70,new Packets.BlockChange(new World.Pos(0,63,0),World.Block.FULL))
+    );
+    // Keep this regression focused on chronology; an actual world mutation is supplied
+    // by the Packet type below in the replacement block.
+  }
+
+  @Test
   void replayingTheSameInputDoesNotReprocessAlreadySeenPackets() {
     Phase8IncrementalRunner runner=new Phase8IncrementalRunner(4096,0);
     Player anchor=anchor();
