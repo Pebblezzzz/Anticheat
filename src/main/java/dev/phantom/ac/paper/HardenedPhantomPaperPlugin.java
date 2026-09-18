@@ -733,8 +733,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
               }
             }
           }
-
-          }
           if(debugLevel(capture.playerId).summary()){
             logValidationSummary(capture,playerName,report);
           }
