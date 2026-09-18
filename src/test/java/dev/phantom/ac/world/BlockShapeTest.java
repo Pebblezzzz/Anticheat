@@ -194,6 +194,13 @@ class BlockShapeTest {
   // Fences: state-dependent, multi-box, neighbour-dependent
   // ------------------------------------------------------------------
 
+  @Test void fenceWithOmittedDefaultBooleanPropertiesRemainsSupported() {
+    BlockState fence = decode("minecraft:oak_fence", Map.of());
+    assertFalse(fence.isUnsupported());
+    assertTrue(BlockCatalogue12111.baseCollisionShape(fence).isFullCube() == false);
+    assertEquals(1, BlockCatalogue12111.collisionShape(fence, BlockCatalogue12111.NO_NEIGHBOURS).boxes().size());
+  }
+
   @Test void fencePostIsTheVanillaSixToTenColumn() {
     VoxelShape post = BlockCatalogue12111.baseCollisionShape(state("minecraft:oak_fence"));
     assertEquals(List.of(BlockBox.of(6 * S, 0, 6 * S, 10 * S, 1, 10 * S)), post.boxes());
