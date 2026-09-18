@@ -181,7 +181,8 @@ public final class CausalMovementPipeline {
       // historical movement against "latest" world state. Until the world snapshot
       // carries an explicit capture tick, replay remains historical-only.
       boolean useLiveWorld = false;
-      WorldSnapshot world = worldHistory.statesAt(event.serverTick());
+      WorldSnapshot world = worldHistory.statesAt(
+          Math.max(0L, eventTiming.simulationClientTicks().min()));
 
       boolean chronologyClean = !containsChronologyProblem(event.packet().flags());
       movements.add(new MovementEvent(
@@ -457,7 +458,7 @@ public final class CausalMovementPipeline {
       if (validation.verdict() == Phase8MovementValidation.Verdict.POSSIBLE) {
         Set<Candidate> matching = new LinkedHashSet<>();
         for (Candidate candidate : reachable) {
-          if (matchesObserved(candidate.context().player(), observedAfter)) {
+          if (matchesObserved(candidate.context().player(), observedAfter, movement.move())) {
             matching.add(candidate);
           }
         }
@@ -1002,9 +1003,7 @@ public final class CausalMovementPipeline {
     long target = movement.timing().simulationClientTicks().min();
     if (target < 0 || target > Phase6Reachability.MAX_HORIZON_TICKS) return Optional.empty();
 
-    World.VisibilityHistory history = World.fromTimeline(
-        new Timeline.Snapshot(List.of(movement.event())));
-    WorldSnapshot world = history.statesAt(Math.max(0, target));
+    /* The simulation receives world state per client-visible simulation tick. */
     Context context = new Context(
         0,
         anchor,
@@ -1099,10 +1098,11 @@ public final class CausalMovementPipeline {
     return Set.copyOf(result);
   }
 
-  private static boolean matchesObserved(Player candidate, Player observed) {
-    return candidate.position().equals(observed.position())
-        && Float.compare(candidate.yaw(), observed.yaw()) == 0
-        && Float.compare(candidate.pitch(), observed.pitch()) == 0;
+  private static boolean matchesObserved(Player candidate, Player observed, Packets.Move movement) {
+    if (!candidate.position().equals(observed.position())) return false;
+    if (Float.compare(candidate.yaw(), observed.yaw()) != 0) return false;
+    if (Float.compare(candidate.pitch(), observed.pitch()) != 0) return false;
+    return movement.onGround() == null || candidate.onGround() == movement.onGround();
   }
 
   private static SearchResult uncertainSearch(
