@@ -264,10 +264,14 @@ final class LiveClientWorldReplica {
         return state.isUnsupported() ? Coverage.UNSUPPORTED : Coverage.KNOWN;
       }
 
-      WrappedBlockState raw = rawState(entry, x, y, z);
-      if (raw == null) return Coverage.KNOWN;
-      BlockState state = coreState(entry.clientVersion(), raw);
-      return state != null && state.isUnsupported() ? Coverage.UNSUPPORTED : Coverage.KNOWN;
+      try {
+        WrappedBlockState raw = rawState(entry, x, y, z);
+        if (raw == null) return Coverage.KNOWN;
+        BlockState state = coreState(entry.clientVersion(), raw);
+        return state != null && state.isUnsupported() ? Coverage.UNSUPPORTED : Coverage.KNOWN;
+      } catch (RuntimeException failure) {
+        return Coverage.UNSUPPORTED;
+      }
     }
 
     @Override public BlockState blockAtOrNull(int x, int y, int z) {
