@@ -53,6 +53,15 @@ public final class Phase8LiveValidation {
    * declaring that first movement an untestable replay anchor.
    */
   public static Report analyze(String playerId,Timeline.Snapshot timeline,int maximumCandidates,Phase7Timing.Config timingConfig,WorldSnapshot liveWorld,Player initialAnchor){
+    return analyze(playerId,timeline,maximumCandidates,timingConfig,liveWorld,initialAnchor,-1L);
+  }
+
+  /**
+   * Full live entry point. The capture-time marker is used to order authoritative
+   * server state against world packets that share the same coarse server tick.
+   */
+  public static Report analyze(String playerId,Timeline.Snapshot timeline,int maximumCandidates,Phase7Timing.Config timingConfig,
+                               WorldSnapshot liveWorld,Player initialAnchor,long initialAnchorReceivedNanos){
     Objects.requireNonNull(playerId);Objects.requireNonNull(timeline);Objects.requireNonNull(timingConfig);Contracts.requireCandidateBudget(maximumCandidates);
 
     World.VisibilityHistory history=World.fromTimeline(timeline);
@@ -209,10 +218,14 @@ public final class Phase8LiveValidation {
           // "first packet is always the root" blind spot. The snapshot is exhaustive
           // only when no world mutations occurred before this observation; otherwise a
           // historical client-world trace is required before IMPOSSIBLE is safe.
-          boolean worldStable=!timeline.events().stream().anyMatch(e->
-              e.packet().packet().mutatesWorld()
-                  && e.serverTick()>0
-                  && e.serverTick()<=event.serverTick());
+          boolean worldStable=initialAnchorReceivedNanos<0
+              ? !timeline.events().stream().anyMatch(e->
+                  e.packet().packet().mutatesWorld()
+                      && e.serverTick()<=event.serverTick())
+              : !timeline.events().stream().anyMatch(e->
+                  e.packet().packet().mutatesWorld()
+                      && e.serverTick()<=event.serverTick()
+                      && e.packet().receivedNanos()>initialAnchorReceivedNanos);
           long anchorTick=0L;
           InputConstraint anchorInput=inputForTick(inputByClientTick,anchorTick);
           Phase6Reachability.Context root=anchorContext(safeInitial,world,anchorInput,anchorTick,currentEntityCollisions);
@@ -350,7 +363,8 @@ public final class Phase8LiveValidation {
             perTickInput.add(hasClientTickBoundaries?inputForTick(inputByClientTick,simulationTick):currentInput);
           }
 
-          Phase6Reachability.Context prepared=withObservedEnvironment(parent.context(),world,currentInput,parentTick,currentEntityCollisions);
+          InputConstraint parentInput=hasClientTickBoundaries?inputForTick(inputByClientTick,parentTick):currentInput;
+          Phase6Reachability.Context prepared=withObservedEnvironment(parent.context(),world,parentInput,parentTick,currentEntityCollisions);
           List<InputConstraint> inputs=List.copyOf(perTickInput);
           SearchResult search=engine.search(prepared,inputs,
               tick->List.of(new WorldBranch("client-visible-"+event.serverTick(),world,parentWorldComplete,
