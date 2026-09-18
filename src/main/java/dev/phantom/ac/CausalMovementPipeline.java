@@ -182,7 +182,11 @@ public final class CausalMovementPipeline {
        * replica cannot contain a future block state relative to this movement.
        * Earlier simulated ticks still come from the historical timeline.
        */
-      boolean useLiveWorld = liveWorld != null
+      long sequence=event.packet().sequence();
+      long liveWorldSequence=liveWorld==null ? -1L : liveWorld.causalSequence();
+      boolean liveWorldCausallyAvailable=liveWorld!=null
+          && (liveWorldSequence<0L || liveWorldSequence<=sequence);
+      boolean useLiveWorld=liveWorldCausallyAvailable
           && !hasWorldMutationAfter(timeline, sequence);
       WorldSnapshot world = useLiveWorld
           ? liveWorld
