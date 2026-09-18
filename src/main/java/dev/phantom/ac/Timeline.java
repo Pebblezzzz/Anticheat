@@ -9,7 +9,7 @@ import static dev.phantom.ac.Simulation.Input;
 public final class Timeline {
   private Timeline() {}
   private static final int MAGIC=0x50484143; // PHAC
-  private static final short FORMAT_VERSION=3;
+  private static final short FORMAT_VERSION=4;
 
   public record Metadata(String modelVersion,long captureEpochNanos,long serverTickNanos) implements Serializable {
     public Metadata { Contracts.requireTargetVersion(modelVersion); if(captureEpochNanos<0||serverTickNanos<=0) throw new IllegalArgumentException("invalid timeline clock metadata"); }
@@ -58,7 +58,7 @@ public final class Timeline {
   public record WorldIntegrity(int chunkPayloads,int chunkUnloads,int blockChanges,int worldStatePayloads) {}
   public static WorldIntegrity inspectWorld(Snapshot timeline){int chunks=0,unloads=0,blocks=0,states=0;for(Event event:timeline.events()){Packet packet=event.packet().packet();if(packet instanceof ChunkData)chunks++;else if(packet instanceof ChunkStates)states++;else if(packet instanceof ChunkUnload)unloads++;else if(packet instanceof BlockChange||packet instanceof BlockStateChange)blocks++;}return new WorldIntegrity(chunks,unloads,blocks,states);}
 
-  /** Fixed binary v3 replay format. v1/v2 are accepted for backward-compatible decoding. */
+  /** Fixed binary v4 replay format. v1-v3 are accepted for backward-compatible decoding. */
   public static final class Codec {
     public byte[] encode(Snapshot snapshot){try(var bytes=new ByteArrayOutputStream();var out=new DataOutputStream(bytes)){out.writeInt(MAGIC);out.writeShort(FORMAT_VERSION);writeString(out,snapshot.metadata().modelVersion());out.writeLong(snapshot.metadata().captureEpochNanos());out.writeLong(snapshot.metadata().serverTickNanos());out.writeInt(snapshot.events().size());for(Event event:snapshot.events())writeEvent(out,event,FORMAT_VERSION);out.flush();return bytes.toByteArray();}catch(IOException impossible){throw new IllegalStateException("in-memory replay encoding failed",impossible);}}
     public Snapshot decode(byte[] bytes){if(bytes==null)throw new IllegalArgumentException("replay bytes are required");try(var in=new DataInputStream(new ByteArrayInputStream(bytes))){if(in.readInt()!=MAGIC)throw new IllegalArgumentException("unsupported replay format");int version=in.readUnsignedShort();if(version<1||version>FORMAT_VERSION)throw new IllegalArgumentException("unsupported replay format");Metadata metadata=new Metadata(readString(in),in.readLong(),in.readLong());int count=readCount(in,"event");List<Event> events=new ArrayList<>(count);for(int i=0;i<count;i++)events.add(readEvent(in,version));if(in.available()!=0)throw new IllegalArgumentException("trailing replay data");return new Snapshot(metadata,events);}catch(EOFException e){throw new IllegalArgumentException("truncated replay",e);}catch(IOException|IllegalArgumentException e){throw new IllegalArgumentException("invalid replay",e);}}
@@ -71,6 +71,7 @@ public final class Timeline {
     private static void writePacket(DataOutputStream out,Packet p)throws IOException{
       if(p instanceof Move v){out.writeByte(1);writeNullableVec(out,v.position());writeNullableFloat(out,v.yaw());writeNullableFloat(out,v.pitch());writeNullableBoolean(out,v.onGround());writeNullableLong(out,v.clientTick());}
       else if(p instanceof ClientInput v){out.writeByte(2);out.writeByte((v.forward()?1:0)|(v.backward()?2:0)|(v.left()?4:0)|(v.right()?8:0)|(v.jump()?16:0)|(v.sneak()?32:0)|(v.sprint()?64:0));}
+      else if(p instanceof ClientTickEnd){out.writeByte(17);}
       else if(p instanceof Teleport v){out.writeByte(3);out.writeInt(v.id());writeVec(out,v.position());out.writeFloat(v.yaw());out.writeFloat(v.pitch());out.writeByte((v.relativeX()?1:0)|(v.relativeY()?2:0)|(v.relativeZ()?4:0)|(v.relativeYaw()?8:0)|(v.relativePitch()?16:0));}
       else if(p instanceof TeleportConfirm v){out.writeByte(4);out.writeInt(v.id());}
       else if(p instanceof Velocity v){out.writeByte(5);writeVec(out,v.velocity());}
@@ -90,6 +91,7 @@ public final class Timeline {
     private static Packet readPacket(DataInputStream in)throws IOException{return switch(in.readUnsignedByte()){
       case 1->new Move(readNullableVec(in),readNullableFloat(in),readNullableFloat(in),readNullableBoolean(in),readNullableLong(in));
       case 2->{int b=in.readUnsignedByte();if((b&~127)!=0)throw new IllegalArgumentException("unknown input bits");yield new ClientInput((b&1)!=0,(b&2)!=0,(b&4)!=0,(b&8)!=0,(b&16)!=0,(b&32)!=0,(b&64)!=0);}
+      case 17->new ClientTickEnd(),
       case 3->{int id=in.readInt();var pos=readVec(in);float yaw=in.readFloat(),pitch=in.readFloat();int b=in.readUnsignedByte();if((b&~31)!=0)throw new IllegalArgumentException("unknown teleport bits");yield new Teleport(id,pos,yaw,pitch,(b&1)!=0,(b&2)!=0,(b&4)!=0,(b&8)!=0,(b&16)!=0);}
       case 4->new TeleportConfirm(in.readInt());case 5->new Velocity(readVec(in));case 6->new Effect(readString(in),in.readInt(),in.readBoolean());case 7->new Gamemode(readString(in));
       case 8->{World.Chunk chunk=readChunk(in);int count=readCount(in,"chunk block");Map<World.Pos,World.Block> blocks=new HashMap<>();for(int i=0;i<count;i++){World.Pos pos=readPos(in);if(blocks.put(pos,readBlock(in))!=null)throw new IllegalArgumentException("duplicate chunk block");}yield new ChunkData(chunk,blocks);}
