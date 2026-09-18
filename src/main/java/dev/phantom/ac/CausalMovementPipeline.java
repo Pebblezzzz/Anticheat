@@ -450,6 +450,7 @@ public final class CausalMovementPipeline {
               EnumSet.of(
                   Phase6Reachability.ObservedField.POSITION,
                   Phase6Reachability.ObservedField.ROTATION));
+      results.add(validation);
 
       // The candidate frontier advances only through a POSSIBLE observation.
       // IMPOSSIBLE/UNCERTAIN evidence does not turn the client's observed state
