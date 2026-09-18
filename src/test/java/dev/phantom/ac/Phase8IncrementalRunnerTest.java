@@ -68,7 +68,7 @@ class Phase8IncrementalRunnerTest {
         List.of(
             new RawPacket(4, 110, new ClientTickEnd()),
             new RawPacket(5, 160, new Move(
-                new Maths.Vec3(.6, 64, .5), 0f, 0f, true, 2L))),
+                new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 2L))),
         floorWorld(), anchor, 20L);
 
     assertFalse(second.results().isEmpty(), second.toString());
