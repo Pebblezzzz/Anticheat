@@ -7,7 +7,7 @@ depend:
   - packetevents
 commands:
   phantom:
-    description: Inspect captures and targeted Phase 8 diagnostics
+    description: Inspect captures, diagnostics, and optional strict Phase 8 setbacks
     permission: phantom.admin
 permissions:
   phantom.admin:

@@ -1,43 +1,61 @@
 package dev.phantom.ac;
 
+import java.io.Serializable;
+
 /**
- * Reconstructs a relative client simulation-tick number from the 1.21.2+ CLIENT_TICK_END boundary.
+ * Tracks the relative client tick interval surrounding CLIENT_TICK_END boundaries.
  *
- * <p>The protocol packet carries no tick number. The first observed boundary therefore establishes
- * an arbitrary relative origin. Movement packets received before that first boundary are deliberately
- * left untimed rather than assigned a fabricated tick. After the first boundary, all movement packets
- * until the next boundary are assigned the same relative tick.</p>
+ * <p>CLIENT_TICK_END is emitted after the client's current tick has finished.
+ * Therefore it is a boundary, not the timestamp of the movement packet that
+ * arrived immediately before it. A movement packet before the first boundary
+ * is assigned relative tick zero; after each boundary the next movement interval
+ * advances by one.</p>
+ *
+ * <p>The tracker also records how many movement packets arrived in the current
+ * client tick interval. Multiple movement packets between two tick-end
+ * boundaries are retained as an explicit integrity signal rather than silently
+ * treating them as independent 1:1 simulation ticks.</p>
  */
 public final class ClientTickTracker {
-  private boolean observedFirstBoundary;
-  private long movementTick;
-  private long endTickCount;
+  public record MovementObservation(long clientTick, int packetsInTick, boolean oneToOne,
+                                    long completedTickEnds, boolean hasSeenTickEnd) implements Serializable {}
 
-  /**
-   * Observes the end of the client's current tick.
-   *
-   * <p>The first boundary establishes relative tick zero for the following movement interval.
-   * Each later boundary advances that relative tick by one.</p>
-   */
-  public synchronized void onClientTickEnd() {
-    if (!observedFirstBoundary) {
-      observedFirstBoundary = true;
-    } else {
-      movementTick = Math.addExact(movementTick, 1L);
-    }
-    endTickCount = Math.addExact(endTickCount, 1L);
+  private long completedTickEnds;
+  private int movementPacketsInCurrentTick;
+  private boolean hasSeenTickEnd;
+
+  /** Observes a movement packet and returns its relative client tick interval. */
+  public synchronized MovementObservation onMovement() {
+    movementPacketsInCurrentTick = Math.addExact(movementPacketsInCurrentTick, 1);
+    return new MovementObservation(
+        completedTickEnds,
+        movementPacketsInCurrentTick,
+        movementPacketsInCurrentTick == 1,
+        completedTickEnds,
+        hasSeenTickEnd);
   }
 
-  /** Returns the current relative movement tick, or {@code null} before the first boundary. */
+  /** Observes the end of a client tick; subsequent movement belongs to the next tick. */
+  public synchronized void onClientTickEnd() {
+    completedTickEnds = Math.addExact(completedTickEnds, 1L);
+    movementPacketsInCurrentTick = 0;
+    hasSeenTickEnd = true;
+  }
+
+  /** Compatibility helper: returns the tick interval for the next movement. */
   public synchronized Long clientTickForMovement() {
-    return observedFirstBoundary ? movementTick : null;
+    return completedTickEnds;
   }
 
   public synchronized boolean hasObservedBoundary() {
-    return observedFirstBoundary;
+    return hasSeenTickEnd;
   }
 
   public synchronized long endTickCount() {
-    return endTickCount;
+    return completedTickEnds;
+  }
+
+  public synchronized int movementPacketsInCurrentTick() {
+    return movementPacketsInCurrentTick;
   }
 }

@@ -17,3 +17,9 @@ enforcement:
 validation:
   candidate-budget: 4096
   interval-ticks: 10
+
+setbacks:
+  # Optional strict debug mode. Only exhaustively-impossible movements are restored.
+  enabled: false
+  # Never setback from a verdict produced by an incomplete timing/world search.
+  only-when-exhaustive: true

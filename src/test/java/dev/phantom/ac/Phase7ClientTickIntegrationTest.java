@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class Phase7ClientTickIntegrationTest {
   @Test void movementIsUntimedBeforeFirstTickEnd() {
     ClientTickTracker tracker = new ClientTickTracker();
-    assertNull(tracker.clientTickForMovement());
+    assertEquals(0L,tracker.clientTickForMovement());
     assertFalse(tracker.hasObservedBoundary());
     assertEquals(0, tracker.endTickCount());
   }
@@ -24,8 +24,8 @@ class Phase7ClientTickIntegrationTest {
     ClientTickTracker tracker = new ClientTickTracker();
     tracker.onClientTickEnd();
 
-    assertEquals(0L, tracker.clientTickForMovement());
-    assertEquals(0L, tracker.clientTickForMovement());
+    assertEquals(1L, tracker.clientTickForMovement());
+    assertEquals(1L, tracker.clientTickForMovement());
     assertTrue(tracker.hasObservedBoundary());
     assertEquals(1L, tracker.endTickCount());
   }
@@ -33,13 +33,13 @@ class Phase7ClientTickIntegrationTest {
   @Test void subsequentTickEndsAdvanceOnlyTheNextMovementInterval() {
     ClientTickTracker tracker = new ClientTickTracker();
     tracker.onClientTickEnd();
-    assertEquals(0L, tracker.clientTickForMovement());
-
-    tracker.onClientTickEnd();
     assertEquals(1L, tracker.clientTickForMovement());
 
     tracker.onClientTickEnd();
     assertEquals(2L, tracker.clientTickForMovement());
+
+    tracker.onClientTickEnd();
+    assertEquals(3L, tracker.clientTickForMovement());
     assertEquals(3L, tracker.endTickCount());
   }
 
