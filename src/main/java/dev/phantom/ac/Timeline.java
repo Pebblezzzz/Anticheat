@@ -91,7 +91,7 @@ public final class Timeline {
     private static Packet readPacket(DataInputStream in)throws IOException{return switch(in.readUnsignedByte()){
       case 1->new Move(readNullableVec(in),readNullableFloat(in),readNullableFloat(in),readNullableBoolean(in),readNullableLong(in));
       case 2->{int b=in.readUnsignedByte();if((b&~127)!=0)throw new IllegalArgumentException("unknown input bits");yield new ClientInput((b&1)!=0,(b&2)!=0,(b&4)!=0,(b&8)!=0,(b&16)!=0,(b&32)!=0,(b&64)!=0);}
-      case 17->new ClientTickEnd(),
+      case 17->new ClientTickEnd();
       case 3->{int id=in.readInt();var pos=readVec(in);float yaw=in.readFloat(),pitch=in.readFloat();int b=in.readUnsignedByte();if((b&~31)!=0)throw new IllegalArgumentException("unknown teleport bits");yield new Teleport(id,pos,yaw,pitch,(b&1)!=0,(b&2)!=0,(b&4)!=0,(b&8)!=0,(b&16)!=0);}
       case 4->new TeleportConfirm(in.readInt());case 5->new Velocity(readVec(in));case 6->new Effect(readString(in),in.readInt(),in.readBoolean());case 7->new Gamemode(readString(in));
       case 8->{World.Chunk chunk=readChunk(in);int count=readCount(in,"chunk block");Map<World.Pos,World.Block> blocks=new HashMap<>();for(int i=0;i<count;i++){World.Pos pos=readPos(in);if(blocks.put(pos,readBlock(in))!=null)throw new IllegalArgumentException("duplicate chunk block");}yield new ChunkData(chunk,blocks);}
