@@ -176,13 +176,12 @@ public final class CausalMovementPipeline {
           authorities,
           initialAnchor,
           initialAnchorReceivedNanos);
-      boolean futureWorldMutation = hasWorldMutationAfter(timeline, event.packet().sequence());
-      boolean useLiveWorld = liveWorld != null
-          && move.position() != null
-          && !futureWorldMutation;
-      WorldSnapshot world = useLiveWorld
-          ? liveWorld
-          : worldHistory.statesAt(event.serverTick());
+      // The asynchronous live snapshot has no causal timestamp/provenance in the
+      // WorldSnapshot type. Using it for an older packet would silently validate
+      // historical movement against "latest" world state. Until the world snapshot
+      // carries an explicit capture tick, replay remains historical-only.
+      boolean useLiveWorld = false;
+      WorldSnapshot world = worldHistory.statesAt(event.serverTick());
 
       boolean chronologyClean = !containsChronologyProblem(event.packet().flags());
       movements.add(new MovementEvent(
@@ -253,7 +252,7 @@ public final class CausalMovementPipeline {
       boolean hasUnmodeledExternalBefore = unmodeledExternalSequences.stream()
           .anyMatch(transitionSequence -> transitionSequence < sequence);
       if (hasUnmodeledExternalBefore) {
-        uncertainty.add("an authoritative velocity/teleport transition before this movement could not be assigned to an exact client simulation tick");
+        uncertainty.add("an authoritative movement-context transition before this movement could not be assigned to an exact client simulation tick");
         recoveryRequired = true;
       }
 
@@ -822,6 +821,10 @@ public final class CausalMovementPipeline {
         transition = new Phase6Reachability.TeleportConfirmation(confirm.id());
       } else {
         Packets.Teleport teleport = (Packets.Teleport) packet;
+        if (teleport.relativeYaw() || teleport.relativePitch()) {
+          unmodeledSequences.add(event.packet().sequence());
+          continue;
+        }
         Vec3 base = nearestAuthoritativePosition(
             authorities, initialAnchor, event.packet().receivedNanos(), event.serverTick());
         Vec3 target = new Vec3(
@@ -1104,9 +1107,18 @@ public final class CausalMovementPipeline {
   private static boolean hasWorldMutationAfter(
       Timeline.Snapshot timeline,
       long sequence) {
-    return timeline.events().stream()
-        .anyMatch(event -> event.packet().sequence() > sequence
-            && event.packet().packet().mutatesWorld());
+    int movementIndex = -1;
+    for (int i = 0; i < timeline.events().size(); i++) {
+      if (timeline.events().get(i).packet().sequence() == sequence) {
+        movementIndex = i;
+        break;
+      }
+    }
+    if (movementIndex < 0) return true;
+    for (int i = movementIndex + 1; i < timeline.events().size(); i++) {
+      if (timeline.events().get(i).packet().packet().mutatesWorld()) return true;
+    }
+    return false;
   }
 
   private static Set<Candidate> retargetRotation(
