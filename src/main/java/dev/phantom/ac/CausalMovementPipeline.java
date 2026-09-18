@@ -320,8 +320,13 @@ public final class CausalMovementPipeline {
           movement.move().clientTick() != null
               && previousExplicitClientTick != null
               && movement.move().clientTick().longValue() == previousExplicitClientTick.longValue();
+      boolean distinctExplicitClientTicks =
+          movement.move().clientTick() != null
+              && previousExplicitClientTick != null
+              && movement.move().clientTick().longValue() != previousExplicitClientTick.longValue();
       boolean overlappingTimingWindow =
           previousPositionPacketRange != null
+              && !distinctExplicitClientTicks
               && (!previousPositionPacketRange.isExact()
                   || !eventTiming.simulationClientTicks().isExact())
               && rangesOverlap(previousPositionPacketRange, eventTiming.simulationClientTicks());
