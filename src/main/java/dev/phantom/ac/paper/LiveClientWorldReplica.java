@@ -151,7 +151,7 @@ final class LiveClientWorldReplica {
     return count;
   }
 
-  int decodedCacheSize() {
+  int decodedStateCacheSize() {
     int decodedStates = 0;
     for (ConcurrentHashMap<Integer, BlockState> cache : stateCache.values()) decodedStates += cache.size();
     return decodedStates;

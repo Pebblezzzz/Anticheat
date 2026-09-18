@@ -908,7 +908,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         +" movement="+movementSummary
         +" result="+resultSummary
         +" chunks={seen="+capture.chunkPackets.get()
-        +",decodedCached="+capture.clientWorld.decodedCacheSize()
+        +",decodedStatesCached="+capture.clientWorld.decodedStateCacheSize()
         +",pendingBarriers="+capture.clientWorld.pendingBarrierCount()
         +",visible="+capture.clientWorld.visibleChunkCount()+"}"
         +" tickIntegrity={endTicks="+capture.clientTickTracker.endTickCount()

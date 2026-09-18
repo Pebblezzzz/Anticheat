@@ -177,10 +177,10 @@ public final class CausalMovementPipeline {
           initialAnchor,
           initialAnchorReceivedNanos);
       /*
-       * The live client-world replica is safe for the final simulated tick when
-       * the timeline contains no later world mutation. In that case the compact
-       * replica cannot contain a future block state relative to this movement.
-       * Earlier simulated ticks still come from the historical timeline.
+       * The compact live replica is safe only when its acknowledgement boundary
+       * is no later than this movement and no later world mutation is retained
+       * in the causal timeline. Earlier simulated ticks still use historical
+       * replay rather than borrowing current world state.
        */
       long sequence=event.packet().sequence();
       long liveWorldSequence=liveWorld==null ? -1L : liveWorld.causalSequence();
