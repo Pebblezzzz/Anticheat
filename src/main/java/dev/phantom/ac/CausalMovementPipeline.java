@@ -162,7 +162,7 @@ public final class CausalMovementPipeline {
     Map<Long, List<ExternalTransition>> externalByTick =
         collectExternalTransitions(
             timeline, timing, authorities, initialAnchor, unmodeledExternalSequences);
-    World.VisibilityHistory worldHistory = World.fromTimeline(timeline);
+    World.VisibilityHistory worldHistory = World.fromTimeline(timeline, timing);
 
     List<MovementEvent> movements = new ArrayList<>();
     for (Timeline.Event event : timeline.events()) {
@@ -900,6 +900,7 @@ public final class CausalMovementPipeline {
 
     Set<Candidate> union = new LinkedHashSet<>();
     LinkedHashSet<String> reasons = new LinkedHashSet<>();
+    boolean exhaustive = true;
 
     /*
      * Candidates may legitimately carry different simulation ticks after a
@@ -947,6 +948,7 @@ public final class CausalMovementPipeline {
             next.addAll(result.candidates());
           } else {
             reasons.addAll(result.reasons());
+            if (result.verdict() == Verdict.UNCERTAIN) exhaustive = false;
           }
 
           if (next.size() > maximumCandidates) {
@@ -977,12 +979,12 @@ public final class CausalMovementPipeline {
     }
 
     if (union.isEmpty()) {
-      return new Advance(Set.of(), List.copyOf(reasons), false);
+      return new Advance(Set.of(), List.copyOf(reasons), exhaustive);
     }
     return new Advance(
         Set.copyOf(union),
         List.copyOf(reasons),
-        reasons.isEmpty());
+        exhaustive && reasons.isEmpty());
   }
 
   private static WorldSnapshot worldForTick(
