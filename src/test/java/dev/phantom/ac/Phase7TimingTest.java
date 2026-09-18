@@ -22,6 +22,29 @@ class Phase7TimingTest {
   @Test void wrongTeleportAckLeavesAmbiguousSynchronization(){var r=Phase7Timing.reconstruct(timeline(new RawPacket(1,0,new Move(Vec3.ZERO,0f,0f,true,0L)),new RawPacket(2,50_000_000L,new Teleport(7,Vec3.ZERO,0f,0f)),new RawPacket(3,100_000_000L,new TeleportConfirm(8))),exactConfig());assertEquals(SyncStatus.AMBIGUOUS,r.finalState().status());assertTrue(r.frames().get(2).timing().reasons().stream().anyMatch(s->s.contains("did not match")||s.contains("acknowledgement")));}
   @Test void captureSequenceGapIsRetainedAsUncertainty(){var t=timeline(new RawPacket(1,0,new Move(Vec3.ZERO,0f,0f,true,0L)),new RawPacket(3,50_000_000L,new Move(new Vec3(.1,0,0),0f,0f,true,1L)));var r=Phase7Timing.reconstruct(t,exactConfig());assertTrue(r.frames().get(1).timing().reasons().stream().anyMatch(s->s.contains("sequence gap")));assertTrue(r.frames().get(1).timing().uncertain());}
   @Test void reorderingRemainsArrivalEvidenceAndDoesNotSilentlyResortBySequence(){var t=timeline(new RawPacket(1,0,new Move(Vec3.ZERO,0f,0f,true,0L)),new RawPacket(3,50_000_000L,new Move(new Vec3(.3,0,0),0f,0f,true,3L)),new RawPacket(2,60_000_000L,new Move(new Vec3(.2,0,0),0f,0f,true,2L)));assertEquals(List.of(1L,3L,2L),t.events().stream().map(e->e.packet().sequence()).toList());var r=Phase7Timing.reconstruct(t,exactConfig());assertTrue(r.frames().get(2).timing().windows().stream().anyMatch(w->w.kind()==WindowKind.REORDERING));}
+  @Test void serverWorldAndContextEventsDoNotPoisonAnExplicitClientMovementClock(){
+    Config c=new Config(50_000_000L,50_000_000L,50_000_000L,
+        new LatencyBounds(0,100_000_000L),new LatencyBounds(0,100_000_000L),
+        new TickDelayBounds(0,1),new TickDelayBounds(0,1),
+        250_000_000L,3,128);
+    var context=new PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+        Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),
+        false,List.of());
+    var r=Phase7Timing.reconstruct(timeline(
+        new RawPacket(1,0,new Move(Vec3.ZERO,0f,0f,true,100L)),
+        new RawPacket(2,10_000_000L,context),
+        new RawPacket(3,20_000_000L,new ChunkData(new World.Chunk(0,0),Map.of())),
+        new RawPacket(4,50_000_000L,new Move(new Vec3(.1,0,0),0f,0f,true,101L)),
+        new RawPacket(5,60_000_000L,context),
+        new RawPacket(6,70_000_000L,new Move(new Vec3(.2,0,0),0f,0f,true,102L))
+    ),c);
+    assertFalse(r.timingFor(4).orElseThrow().uncertain(),r.timingFor(4).orElseThrow().reasons().toString());
+    assertFalse(r.timingFor(6).orElseThrow().uncertain(),r.timingFor(6).orElseThrow().reasons().toString());
+    assertEquals(SyncStatus.SYNCHRONIZED,r.finalState().status(),r.finalState().reasons().toString());
+    assertTrue(r.timingFor(3).orElseThrow().uncertain());
+    assertTrue(r.timingFor(3).orElseThrow().windows().stream().anyMatch(w->w.kind()==WindowKind.WORLD_UPDATE));
+  }
+
   @Test void serverTickGapIsExplicit(){var r=Phase7Timing.reconstruct(timeline(new RawPacket(1,0,new Move(Vec3.ZERO,0f,0f,true,0L)),new RawPacket(2,200_000_000L,new Move(new Vec3(.2,0,0),0f,0f,true,4L))),exactConfig());assertTrue(r.frames().get(1).timing().windows().stream().anyMatch(w->w.kind()==WindowKind.SERVER_TICK_GAP));}
   @Test void explicitClientTickContradictionIsIdentifiedAsInconsistentTiming(){var r=Phase7Timing.reconstruct(timeline(new RawPacket(1,0,new Move(Vec3.ZERO,0f,0f,true,0L)),new RawPacket(2,50_000_000L,new Move(new Vec3(.1,0,0),0f,0f,true,10L))),exactConfig());assertEquals(Consistency.INCONSISTENT,r.consistency());}
   @Test void impossibleTimingIsExplainableAndNotAPlayerViolation(){var r=Phase7Timing.reconstruct(timeline(new RawPacket(1,0,new Move(Vec3.ZERO,0f,0f,true,0L)),new RawPacket(2,50_000_000L,new Move(new Vec3(.1,0,0),0f,0f,true,10L))),exactConfig());assertEquals(Consistency.INCONSISTENT,r.consistency());assertTrue(r.consistencyReasons().getFirst().contains("outside timing bounds"));}
