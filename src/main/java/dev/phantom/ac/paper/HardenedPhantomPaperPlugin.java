@@ -378,19 +378,41 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
   }
 
-  private WorldSnapshot validationSnapshot(Capture capture,double centerX,double centerZ){
-    WorldSnapshot current=capture.clientWorld.snapshotAround(centerX,centerZ,LOCAL_SNAPSHOT_RADIUS_CHUNKS);
+  private WorldSnapshot validationSnapshot(Capture capture,double centerX,double centerZ,
+                                             double observedX,double observedZ){
+    double anchorX=centerX;
+    double anchorZ=centerZ;
     State.Player anchor=capture.initialState;
-    if(anchor==null||anchor.uncertain())return current;
-    double anchorX=anchor.position().x(),anchorZ=anchor.position().z();
-    int currentChunkX=Math.floorDiv((int)Math.floor(centerX),16);
-    int currentChunkZ=Math.floorDiv((int)Math.floor(centerZ),16);
-    int anchorChunkX=Math.floorDiv((int)Math.floor(anchorX),16);
-    int anchorChunkZ=Math.floorDiv((int)Math.floor(anchorZ),16);
-    if(Math.abs(currentChunkX-anchorChunkX)<=LOCAL_SNAPSHOT_RADIUS_CHUNKS
-        &&Math.abs(currentChunkZ-anchorChunkZ)<=LOCAL_SNAPSHOT_RADIUS_CHUNKS)return current;
-    WorldSnapshot anchorSnapshot=capture.clientWorld.snapshotAround(anchorX,anchorZ,LOCAL_SNAPSHOT_RADIUS_CHUNKS);
-    return WorldSnapshot.merge(current,anchorSnapshot);
+    if(anchor!=null&&!anchor.uncertain()){
+      anchorX=anchor.position().x();
+      anchorZ=anchor.position().z();
+    }
+
+    double spanX=Math.abs(observedX-centerX);
+    double spanZ=Math.abs(observedZ-centerZ);
+    int observedRadius=Math.max(
+        LOCAL_SNAPSHOT_RADIUS_CHUNKS,
+        Math.min(8,(int)Math.ceil(Math.max(spanX,spanZ)/16.0)+LOCAL_SNAPSHOT_RADIUS_CHUNKS));
+
+    WorldSnapshot snapshot=capture.clientWorld.snapshotAround(
+        centerX,centerZ,LOCAL_SNAPSHOT_RADIUS_CHUNKS);
+
+    if(Math.abs(centerX-anchorX)>16.0*LOCAL_SNAPSHOT_RADIUS_CHUNKS
+        ||Math.abs(centerZ-anchorZ)>16.0*LOCAL_SNAPSHOT_RADIUS_CHUNKS){
+      snapshot=WorldSnapshot.merge(snapshot,
+          capture.clientWorld.snapshotAround(anchorX,anchorZ,LOCAL_SNAPSHOT_RADIUS_CHUNKS));
+    }
+
+    // The server may deliberately refuse to move a player whose client-reported
+    // position is invalid. Validate against the observed destination as well as
+    // the server position, otherwise a long rejected movement can fall outside
+    // the acknowledged collision window and become UNKNOWN instead of impossible.
+    if(Math.abs(observedX-centerX)>1.0 || Math.abs(observedZ-centerZ)>1.0){
+      snapshot=WorldSnapshot.merge(snapshot,
+          capture.clientWorld.snapshotAround(observedX,observedZ,observedRadius));
+    }
+
+    return snapshot;
   }
 
   private void scheduleValidations(){
@@ -404,6 +426,13 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       long epoch=capture.epochNanos;
       double snapshotCenterX=player.getLocation().getX();
       double snapshotCenterZ=player.getLocation().getZ();
+      Vec3 latestObservedPosition=null;
+      for(int i=raw.size()-1;i>=0;i--){
+        if(raw.get(i).packet() instanceof Packets.Move move && move.position()!=null){
+          latestObservedPosition=move.position();
+          break;
+        }
+      }
 
       if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
         getLogger().info("[PhantomAC][PHASE8][VALIDATION_START] player="+playerName
@@ -415,7 +444,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       getServer().getScheduler().runTaskAsynchronously(this,()->{
         long validationStartedNanos=System.nanoTime();
         try{
-          WorldSnapshot liveWorld=validationSnapshot(capture,snapshotCenterX,snapshotCenterZ);
+          double observedCenterX=latestObservedPosition==null?snapshotCenterX:latestObservedPosition.x();
+          double observedCenterZ=latestObservedPosition==null?snapshotCenterZ:latestObservedPosition.z();
+          WorldSnapshot liveWorld=validationSnapshot(
+              capture,snapshotCenterX,snapshotCenterZ,observedCenterX,observedCenterZ);
           Phase8IncrementalRunner.Report incremental=capture.movementRunner.process(
               playerName,raw,liveWorld,capture.initialState);
           Phase8LiveValidation.Report report=new Phase8LiveValidation.Report(
