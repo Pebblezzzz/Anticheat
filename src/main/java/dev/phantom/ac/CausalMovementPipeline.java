@@ -426,12 +426,19 @@ public final class CausalMovementPipeline {
           && !movement.world().fullyKnown(playerCollisionBox(initialAnchor));
       boolean initialAnchorFarFromObservation = initialAnchor != null
           && distance(initialAnchor.position(), observedAfter.position()) > 32.0;
+      /*
+       * A fresh pre-movement authoritative snapshot is the strongest available
+       * root for this validation epoch. Prefer it whenever present rather than
+       * replaying from a possibly older join anchor. The populated frontier is
+       * still retained on subsequent movements unless it has drifted beyond the
+       * same fresh authority snapshot.
+       */
       boolean preferLocalAuthoritativeRoot = localAuthoritativeRootAvailable
-          && (initialAnchor == null
-              || justRecovered
-              || initialAnchorWorldStale
-              || initialAnchorFarFromObservation
-              || movement.timing().simulationClientTicks().max() > Phase6Reachability.MAX_HORIZON_TICKS);
+          || initialAnchor == null
+          || justRecovered
+          || initialAnchorWorldStale
+          || initialAnchorFarFromObservation
+          || movement.timing().simulationClientTicks().max() > Phase6Reachability.MAX_HORIZON_TICKS;
       if (preferLocalAuthoritativeRoot && initialAnchorWorldStale) {
         assumptions.add("original authoritative anchor is outside the retained client-world window; re-anchoring from the exact local server snapshot");
         trace.add("ROOT_REFRESH reason=INITIAL_ANCHOR_WORLD_STALE");
