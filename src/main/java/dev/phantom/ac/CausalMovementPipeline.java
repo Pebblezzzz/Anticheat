@@ -1258,11 +1258,11 @@ public final class CausalMovementPipeline {
   }
 
   private static String authorityRootDescription(MovementEvent movement) {
-    AuthoritativeSnapshot snapshot = movement.authority().snapshot().orElseThrow();
-    if (movement.authority().quality() == AuthorityQuality.EXACT) {
-      return "exact same-server-tick authoritative snapshot before movement";
+    AuthoritativeSnapshot snapshot = movement.simulationAuthority().orElseThrow();
+    if (snapshot.serverTick() < movement.event().serverTick()) {
+      return "causally preceding authoritative snapshot from the prior server tick";
     }
-    return "causally preceding authoritative snapshot within one server tick; used only as a local re-anchor";
+    return "early-capture same-tick authoritative snapshot fallback";
   }
 
   private static Optional<AuthoritativeSnapshot> causallyFreshLocalAuthority(
@@ -1306,33 +1306,37 @@ public final class CausalMovementPipeline {
     if (previous.isPresent()) return previous;
 
     /*
-     * Very early captures may have no preceding per-tick PlayerContext. Retain a
-     * supplied immutable join anchor as the only safe fallback; tests and short
-     * captures can therefore still establish their first exact root.
+     * Backward compatibility for very early captures that have exactly one
+     * same-tick authoritative sample and no preceding per-tick sample. This can
+     * still establish a first root, but it is never preferred once a preceding
+     * server-tick snapshot exists.
+     */
+    Optional<AuthoritativeSnapshot> sameTick = authorities.stream()
+        .filter(snapshot -> snapshot.sequence() < sequence)
+        .filter(snapshot -> snapshot.receivedNanos() <= received)
+        .filter(snapshot -> snapshot.serverTick() == serverTick)
+        .max(Comparator.comparingLong(AuthoritativeSnapshot::receivedNanos)
+            .thenComparingLong(AuthoritativeSnapshot::sequence));
+    if (sameTick.isPresent()) return sameTick;
+
+    /*
+     * Very early captures may have no server-side context packet yet. Retain the
+     * immutable join anchor as a final fallback. Use sequence zero because it is
+     * the synthetic start of the causal epoch; it remains eligible before every
+     * normal movement packet.
      */
     if (initialAnchor != null
         && !initialAnchor.uncertain()
         && initialAnchorReceivedNanos >= 0
         && received >= initialAnchorReceivedNanos) {
       return Optional.of(new AuthoritativeSnapshot(
-          Long.MAX_VALUE,
+          0L,
           initialAnchorReceivedNanos,
           Math.max(0L, serverTick - 1L),
           contextFromAnchor(initialAnchor)));
     }
 
-    /*
-     * Backward compatibility for captures that contain exactly one same-tick
-     * authoritative sample and no prior sample. This is deliberately last:
-     * it preserves old captures without treating a same-tick live capture as the
-     * normal simulation root.
-     */
-    return authorities.stream()
-        .filter(snapshot -> snapshot.sequence() < sequence)
-        .filter(snapshot -> snapshot.receivedNanos() <= received)
-        .filter(snapshot -> snapshot.serverTick() == serverTick)
-        .max(Comparator.comparingLong(AuthoritativeSnapshot::receivedNanos)
-            .thenComparingLong(AuthoritativeSnapshot::sequence));
+    return Optional.empty();
   }
 
   private static boolean frontierFarFromLocalAuthority(
@@ -1421,7 +1425,8 @@ public final class CausalMovementPipeline {
         context,
         new Phase6Reachability.Provenance(
             0,
-            movement.authority().snapshot().map(AuthoritativeSnapshot::sequence).orElse(-1L),
+            simulationAuthority.map(AuthoritativeSnapshot::sequence).orElse(
+                movement.authority().snapshot().map(AuthoritativeSnapshot::sequence).orElse(-1L)),
             rootTick,
             localAuthoritativeRoot ? "LOCAL_AUTHORITATIVE_ROOT" : "ROOT_AUTHORITATIVE",
             "ROOT",
