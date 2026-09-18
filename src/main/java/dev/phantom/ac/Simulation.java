@@ -62,6 +62,7 @@ public final class Simulation {
     public Attributes(double movementSpeed,List<Phase5Mechanics.AttributeModifier> modifiers){this(movementSpeed,modifiers,false);}
     public Attributes(double movementSpeed,List<Phase5Mechanics.AttributeModifier> modifiers,boolean effectiveSnapshot) {
       if(!Double.isFinite(movementSpeed)||movementSpeed<0)throw new IllegalArgumentException("invalid movement speed");
+      this.movementSpeed=movementSpeed;
       this.modifiers=List.copyOf(modifiers);
       this.effectiveSnapshot=effectiveSnapshot;
     }
