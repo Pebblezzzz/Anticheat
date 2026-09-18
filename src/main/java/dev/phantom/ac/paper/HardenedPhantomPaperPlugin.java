@@ -854,46 +854,35 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         +",tick="+candidate.simulationTick()
         +",pos="+candidate.position()
         +",vel="+candidate.velocity()
-        +",ground="+candidate.onGround()
-        +",provenance="+candidate.provenance()).orElse("none");
+        +",ground="+candidate.onGround()).orElse("none");
 
     getLogger().info("[PhantomAC][PHASE8][SUMMARY] player="+playerName
         +" verdict="+latest.verdict()
-        +" results="+report.results().size()
-        +" possible="+report.possible()
-        +" uncertain="+report.uncertain()
-        +" impossible="+report.impossible()
         +" seq="+capture.movementRunner.lastProcessedSequence()
         +" serverTick="+e.serverTick()
         +" clientTick="+e.clientTickMin()+".."+e.clientTickMax()
-        +" authority="+(e.serverTick())
-        +" priorPos="+e.priorState().position()
-        +" observedPos="+e.observedState().position()
-        +" observedGround="+e.observedState().onGround()
-        +" world="+e.worldReference()
+        +" prior="+e.priorState().position()
+        +" observed="+e.observedState().position()
+        +" clientGround="+e.observedState().onGround()
         +" reachable="+e.reachableCandidateCount()
         +" matching="+e.matchingCandidateCount()
         +" eliminated="+e.candidatesEliminated()
         +" firstInconsistent="+(e.firstInconsistentTick().isPresent()?e.firstInconsistentTick().getAsLong():"none")
         +" rule="+e.rule()
-        +" replay="+e.replayReference());
-
-    getLogger().info("[PhantomAC][PHASE8][WHY] player="+playerName
-        +" elimination="+e.eliminationReason()
-        +" timing="+e.timingAssumptions()
-        +" uncertainty="+e.uncertaintySources()
-        +" simulation="+e.simulationDiagnostics()
+        +" cause="+reason
+        +" world="+e.worldReference()
         +" closest="+closest
-        +" authorityState={serverPos="+capture.lastAuthoritativePosition
-        +",serverVel="+capture.lastAuthoritativeVelocity
-        +",serverGround="+capture.lastAuthoritativeOnGround
+        +" authorityState={pos="+capture.lastAuthoritativePosition
+        +",vel="+capture.lastAuthoritativeVelocity
+        +",ground="+capture.lastAuthoritativeOnGround
         +",canFly="+capture.lastAuthoritativeCanFly
         +",flying="+capture.lastAuthoritativeFlying+"}"
         +" worldState={visibleChunks="+capture.clientWorld.visibleChunkCount()
         +",decodedStates="+capture.clientWorld.decodedStateCacheSize()
         +",pendingBarriers="+capture.clientWorld.pendingBarrierCount()
         +",causalSequence="+capture.clientWorld.causalSequence()+"}"
-        +" paperRejectionsInWindow="+capture.paperMoveFailureCount);
+        +" paperRejectionsInWindow="+capture.paperMoveFailureCount
+        +" replay="+e.replayReference());
   }
 
   private void logMovementPacketDebug(Player player,Capture capture,long sequence,long receivedNanos,
