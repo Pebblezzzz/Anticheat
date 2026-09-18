@@ -7,6 +7,8 @@ import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.teleport.RelativeFlag;
+import com.github.retrooper.packetevents.protocol.player.ClientVersion;
+import com.github.retrooper.packetevents.protocol.world.chunk.BaseChunk;
 import com.github.retrooper.packetevents.protocol.world.chunk.Column;
 import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
 import com.github.retrooper.packetevents.protocol.world.states.type.StateValue;
@@ -58,7 +60,12 @@ import org.bukkit.potion.PotionEffect;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /** Hardened Paper boundary: Bukkit work is main-thread only; validation and packet-world decoding are asynchronous. */
@@ -71,7 +78,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   private final Map<UUID,Capture> captures=new ConcurrentHashMap<>();
   private final Map<UUID,Boolean> debugPlayers=new ConcurrentHashMap<>();
-  private org.bukkit.scheduler.BukkitTask stateTask,validationTask;
+  private org.bukkit.scheduler.BukkitTask stateTask,validationTask,chunkDecodeTask;
+  private ExecutorService chunkExecutor;
+  private volatile int chunkDecoderThreads;
+  private final AtomicInteger chunkInFlight=new AtomicInteger();
+  private final Map<ClientVersion,ConcurrentHashMap<Integer,dev.phantom.ac.world.BlockState>> coreStateCache=new ConcurrentHashMap<>();
   private int validationBudget;
   private boolean alertsEnabled,broadcastAlerts,setbacksEnabled,setbacksOnlyExhaustive;
   private final Map<UUID,Boolean> setbackOverrides=new ConcurrentHashMap<>();
@@ -177,6 +188,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         Column column=packet.getColumn();
         capture.chunkPackets.incrementAndGet();
         capture.clientWorld.queueChunk(column,column.isFullChunk(),event.getUser().getClientVersion());
+        capture.chunkQueue.add(new PendingChunk(sequence,receivedNanos,column,player.getWorld().getMinHeight(),player.getWorld().getMaxHeight(),clientVersion));
         if(isNearChunk(capture,column))event.getTasksAfterSend().add(()->requestWorldBarrier(player,capture));
       }
     }
@@ -191,6 +203,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     validationBudget=Math.max(1,getConfig().getInt("validation.candidate-budget",4096));
     getServer().getPluginManager().registerEvents(this,this);
     PacketEvents.getAPI().getEventManager().registerListener(listener);
+    int processors=Runtime.getRuntime().availableProcessors();
+    chunkDecoderThreads=Math.max(1,Math.min(4,processors/2));
+    chunkExecutor=Executors.newFixedThreadPool(chunkDecoderThreads,r->{Thread thread=new Thread(r,"Phantom-ClientChunkDecoder");thread.setDaemon(true);return thread;});
+    chunkDecodeTask=getServer().getScheduler().runTaskTimer(this,this::drainChunkQueue,1L,1L);
     stateTask=getServer().getScheduler().runTaskTimer(this,this::captureLiveContext,1L,1L);
     int interval=Math.max(1,getConfig().getInt("validation.interval-ticks",1));
     validationTask=getServer().getScheduler().runTaskTimer(this,this::scheduleValidations,interval,interval);
@@ -200,8 +216,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   @Override public void onDisable(){
     if(stateTask!=null)stateTask.cancel();
     if(validationTask!=null)validationTask.cancel();
+    if(chunkDecodeTask!=null)chunkDecodeTask.cancel();
     PacketEvents.getAPI().getEventManager().unregisterListener(listener);
-    captures.clear();
+    if(chunkExecutor!=null){chunkExecutor.shutdownNow();try{chunkExecutor.awaitTermination(1L,java.util.concurrent.TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}}
+    chunkInFlight.set(0);coreStateCache.clear();captures.clear();
     debugPlayers.clear();
     setbackOverrides.clear();
   }
@@ -615,7 +633,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private void scheduleValidations(){
     for(Capture capture:captures.values()){
       if(!capture.validationRunning.compareAndSet(false,true))continue;
-      List<RawPacket> raw=capture.copySince(capture.movementRunner.lastProcessedSequence());
+      long requestedWorldBackfillGeneration=capture.worldBackfillGeneration.get();
+      boolean includeWorldBackfill=requestedWorldBackfillGeneration>capture.validatedWorldBackfillGeneration;
+      List<RawPacket> raw=includeWorldBackfill?capture.copyAll():capture.copySince(capture.movementRunner.lastProcessedSequence());
       if(raw.isEmpty()){capture.validationRunning.set(false);continue;}
       Player player=getServer().getPlayer(capture.playerId);
       if(player==null){capture.validationRunning.set(false);continue;}
@@ -662,6 +682,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           Phase8LiveValidation.Report report=new Phase8LiveValidation.Report(
               incremental.results(),incremental.movementObservations(),incremental.possible(),
               incremental.uncertain(),incremental.impossible());
+          if(includeWorldBackfill)capture.validatedWorldBackfillGeneration=requestedWorldBackfillGeneration;
 
           if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
             getLogger().info("[PhantomAC][PHASE8][INCREMENTAL] player="+playerName
@@ -941,6 +962,89 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private static void putNumber(Map<String,String> map,String key,Object value){if(value instanceof Number number)map.put(key,Integer.toString(number.intValue()));}
   private static void putBoolean(Map<String,String> map,String key,Object value){if(value instanceof Boolean bool)map.put(key,Boolean.toString(bool));}
 
+  private record PendingChunk(long sequence,long receivedNanos,Column column,int minY,int maxY,ClientVersion clientVersion) {}
+
+  private void drainChunkQueue(){
+    if(chunkExecutor==null)return;
+    int submitted=0;
+    while(submitted<chunkDecoderThreads){
+      if(chunkInFlight.get()>=chunkDecoderThreads)return;
+      Capture selected=null;PendingChunk pending=null;
+      for(Capture candidate:captures.values()){pending=candidate.chunkQueue.poll();if(pending!=null){selected=candidate;break;}}
+      if(selected==null)return;
+      Capture target=selected;PendingChunk work=pending;chunkInFlight.incrementAndGet();
+      try{chunkExecutor.execute(()->{try{decodeChunk(target,work);}finally{chunkInFlight.decrementAndGet();}});}
+      catch(RejectedExecutionException rejected){chunkInFlight.decrementAndGet();target.chunkQueue.add(work);return;}
+      submitted++;
+    }
+  }
+
+  private void decodeChunk(Capture capture, PendingChunk pending) {
+    long startedNanos = System.nanoTime();
+    try {
+      Map<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> states = new LinkedHashMap<>();
+      ConcurrentHashMap<Integer, dev.phantom.ac.world.BlockState> stateCache = coreStateCache.computeIfAbsent(pending.clientVersion, ignored -> new ConcurrentHashMap<>());
+      BaseChunk[] sections = pending.column.getChunks();
+      int minSection = Math.floorDiv(pending.minY, 16), maxSectionExclusive = Math.floorDiv(pending.maxY - 1, 16) + 1;
+      int baseX = pending.column.getX() * 16, baseZ = pending.column.getZ() * 16;
+      for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+        BaseChunk section = sections[sectionIndex];
+        if (section == null || section.isEmpty()) continue;
+        int sectionY = minSection + sectionIndex;
+        if (sectionY < minSection || sectionY >= maxSectionExclusive) continue;
+        int baseY = sectionY * 16;
+        boolean packedDecoded = false;
+        if (section instanceof com.github.retrooper.packetevents.protocol.world.chunk.impl.v_1_18.Chunk_v1_18 modernSection) {
+          com.github.retrooper.packetevents.protocol.world.chunk.palette.DataPalette palette = modernSection.getChunkData();
+          if (palette.storage == null) {
+            int globalId = palette.palette.idToState(0);
+            dev.phantom.ac.world.BlockState core = stateCache.get(globalId);
+            if (core == null) {
+              WrappedBlockState state = globalId == 0 ? null : WrappedBlockState.getByGlobalId(pending.clientVersion, globalId, false);
+              core = state == null || state.getType().isAir() ? dev.phantom.ac.world.BlockState.air() : toCoreState(state);
+              dev.phantom.ac.world.BlockState existing = stateCache.putIfAbsent(globalId, core); if (existing != null) core = existing;
+            }
+            if (!core.isAir()) for (int localY = 0; localY < 16; localY++) for (int localZ = 0; localZ < 16; localZ++) for (int localX = 0; localX < 16; localX++)
+              states.put(new dev.phantom.ac.world.Pos(baseX + localX, baseY + localY, baseZ + localZ), core);
+            packedDecoded = true;
+          } else if (palette.storage instanceof com.github.retrooper.packetevents.protocol.world.chunk.storage.BitStorage storage) {
+            long[] data = storage.getData(); int bits = storage.getBitsPerEntry(); int valuesPerLong = 64 / bits; long mask = (1L << bits) - 1L; int linearIndex = 0;
+            for (int cellIndex = 0; cellIndex < data.length && linearIndex < 4096; cellIndex++) {
+              long cell = data[cellIndex]; int values = Math.min(valuesPerLong, 4096 - linearIndex);
+              for (int slot = 0; slot < values; slot++, linearIndex++) {
+                int paletteId = (int)((cell >>> (slot * bits)) & mask); int globalId = palette.palette.idToState(paletteId); if (globalId <= 0) continue;
+                dev.phantom.ac.world.BlockState core = stateCache.get(globalId);
+                if (core == null) { WrappedBlockState state = WrappedBlockState.getByGlobalId(pending.clientVersion, globalId, false); core = state == null || state.getType().isAir() ? dev.phantom.ac.world.BlockState.air() : toCoreState(state); dev.phantom.ac.world.BlockState existing = stateCache.putIfAbsent(globalId, core); if (existing != null) core = existing; }
+                if (!core.isAir()) { int localY = linearIndex >>> 8, localZ = (linearIndex >>> 4) & 15, localX = linearIndex & 15; states.put(new dev.phantom.ac.world.Pos(baseX + localX, baseY + localY, baseZ + localZ), core); }
+              }
+            }
+            packedDecoded = true;
+          }
+        }
+        if (packedDecoded) continue;
+        for (int localX = 0; localX < 16; localX++) for (int localY = 0; localY < 16; localY++) for (int localZ = 0; localZ < 16; localZ++) {
+          int globalId = section.getBlockId(localX, localY, localZ); if (globalId <= 0) continue;
+          dev.phantom.ac.world.BlockState core = stateCache.get(globalId);
+          if (core == null) { WrappedBlockState state = WrappedBlockState.getByGlobalId(pending.clientVersion, globalId, false); core = state == null || state.getType().isAir() ? dev.phantom.ac.world.BlockState.air() : toCoreState(state); dev.phantom.ac.world.BlockState existing = stateCache.putIfAbsent(globalId, core); if (existing != null) core = existing; }
+          if (!core.isAir()) states.put(new dev.phantom.ac.world.Pos(baseX + localX, baseY + localY, baseZ + localZ), core);
+        }
+      }
+      appendPacket(capture,new RawPacket(pending.sequence(),pending.receivedNanos(),new Packets.ChunkStates(new dev.phantom.ac.world.Chunk(pending.column.getX(),pending.column.getZ()),states),
+          Packets.CaptureProvenance.fromAdapter("paper-client-chunk",null,null)));
+      long decoded = capture.decodedChunks.incrementAndGet();
+      capture.worldBackfillGeneration.incrementAndGet();
+      if (debugFor(capture.playerId)) {
+        long micros = (System.nanoTime() - startedNanos) / 1_000L;
+        getLogger().info("[PhantomAC][CHUNK] player=" + capture.playerId + " chunk=" + pending.column.getX() + "," + pending.column.getZ()
+            + " states=" + states.size() + " decodeMicros=" + micros + " decodedTotal=" + decoded + " queue=" + capture.chunkQueue.size());
+      }
+    } catch (RuntimeException failure) {
+      capture.chunkDecodeFailures.incrementAndGet();
+      getLogger().log(java.util.logging.Level.WARNING, "[PhantomAC][CHUNK] client chunk decode failed player=" + capture.playerId
+          + " chunk=" + pending.column.getX() + "," + pending.column.getZ(), failure);
+    }
+  }
+
   private static final class Capture{
     final UUID playerId;
     final long epochNanos;
@@ -950,6 +1054,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final AtomicLong lastWorldBarrierNanos=new AtomicLong(Long.MIN_VALUE);
     volatile Vec3 lastDebugMovePosition;
     final List<RawPacket> packets=new ArrayList<>();
+    final ConcurrentLinkedQueue<PendingChunk> chunkQueue=new ConcurrentLinkedQueue<>();
+    final AtomicLong decodedChunks=new AtomicLong();
+    final AtomicLong chunkDecodeFailures=new AtomicLong();
+    final AtomicLong worldBackfillGeneration=new AtomicLong();
+    volatile long validatedWorldBackfillGeneration;
     final ClientTickTracker clientTickTracker=new ClientTickTracker();
     final AtomicBoolean validationRunning=new AtomicBoolean();
     final LiveClientWorldReplica clientWorld=new LiveClientWorldReplica(Contracts.TARGET_VERSION,-64,319);
