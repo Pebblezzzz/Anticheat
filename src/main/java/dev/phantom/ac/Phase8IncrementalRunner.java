@@ -149,6 +149,10 @@ public final class Phase8IncrementalRunner {
     List<Packets.NormalizedPacket> normalized = new Packets.Normalizer().normalize(unseen);
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     int movements = 0;
+    long latestFutureWorldOrContextSequence = normalized.stream()
+        .filter(packet -> packet.packet().mutatesWorld() || packet.packet() instanceof Packets.PlayerContext)
+        .mapToLong(Packets.NormalizedPacket::sequence)
+        .max().orElse(Long.MIN_VALUE);
 
     for (Packets.NormalizedPacket packet : normalized) {
       Packets.Packet event = packet.packet();
@@ -186,6 +190,9 @@ public final class Phase8IncrementalRunner {
       if (event instanceof Packets.PlayerContext context) {
         entityCollisions = EntityCollisions.of(context.entityBoxes());
         trackedState = after;
+        reanchorRequired = true;
+        reanchorReason = "player entity-collision context changed; historical entity state is not retained yet";
+        continuation = Continuation.UNCERTAIN;
         continue;
       }
 
@@ -238,6 +245,20 @@ public final class Phase8IncrementalRunner {
 
       if (!(event instanceof Packets.Move move)) {
         trackedState = after;
+        continue;
+      }
+
+      if (move.position() != null
+          && packet.sequence() < latestFutureWorldOrContextSequence) {
+        results.add(uncertainResult(
+            playerId, packet.sequence(), serverTick, before, after, world, "incremental-client-world:chunks="+world.loadedChunks().size(),
+            new Validation.SyncWindow(0, 0, true, List.of("future world/entity context in the same capture batch")),
+            "movement precedes a later world/entity update in the same validation batch; current snapshot is not historically valid for this movement",
+            "live:incremental:"+packet.sequence()));
+        trackedState = after;
+        continuation = Continuation.UNCERTAIN;
+        reanchorRequired = true;
+        reanchorReason = "future world/entity context makes the current movement snapshot temporally non-causal";
         continue;
       }
 
