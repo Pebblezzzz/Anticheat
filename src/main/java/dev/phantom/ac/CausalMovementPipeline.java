@@ -250,6 +250,16 @@ public final class CausalMovementPipeline {
       if (hasUnmodeledExternalBefore) {
         uncertainty.add("an authoritative movement-context transition before this movement could not be assigned to an exact client simulation tick");
         recoveryRequired = true;
+        SearchResult uncertain = uncertainSearch(
+            frontier.candidates(),
+            String.join("; ", uncertainty));
+        results.add(Phase8MovementValidation.validate(
+            playerId, serverTick, observedBefore, observedAfter, movement.world(),
+            worldReference, sync, assumptions, uncertain, replayReference, false));
+        trace.add("EVIDENCE UNCERTAIN unmodeled authoritative transition");
+        frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+            assumptions, uncertainty, trace));
+        continue;
       }
 
       String replayReference = "causal:phase8:" + playerId + ":" + sequence;
@@ -343,6 +353,9 @@ public final class CausalMovementPipeline {
 
       boolean localAuthoritativeRootAvailable = movement.authority().quality() == AuthorityQuality.EXACT
           && movement.authority().snapshot().isPresent();
+      boolean preferLocalAuthoritativeRoot = localAuthoritativeRootAvailable
+          && (initialAnchor == null
+              || movement.timing().simulationClientTicks().max() > Phase6Reachability.MAX_HORIZON_TICKS);
       if (!haveAuthoritativeSeed && !localAuthoritativeRootAvailable && frontier.candidates().isEmpty()) {
         uncertainty.add("no trusted authoritative replay anchor exists");
         SearchResult uncertain = uncertainSearch(frontier.candidates(),
@@ -356,9 +369,11 @@ public final class CausalMovementPipeline {
       }
 
       boolean recoveryCanClear = recoveryRequired
+          && lastAmbiguitySequence >= 0
           && sequence > lastAmbiguitySequence
           && movement.authority().quality() == AuthorityQuality.EXACT
           && movement.authority().snapshot().isPresent()
+          && movement.authority().snapshot().get().sequence() > lastAmbiguitySequence
           && movement.chronologyClean()
           && !eventTiming.uncertain()
           && !sameExplicitClientTick;
@@ -383,7 +398,7 @@ public final class CausalMovementPipeline {
 
       boolean rootedFromLocalAuthority = false;
       if (frontier.candidates().isEmpty()) {
-        if (!localAuthoritativeRootAvailable && (initialAnchor == null || initialAnchor.uncertain())) {
+        if (!preferLocalAuthoritativeRoot && (initialAnchor == null || initialAnchor.uncertain())) {
           uncertainty.add("first movement cannot be proven without an authoritative server anchor");
           SearchResult uncertain = uncertainSearch(Set.of(), String.join("; ", uncertainty));
           results.add(Phase8MovementValidation.validate(
@@ -409,8 +424,8 @@ public final class CausalMovementPipeline {
         }
         Candidate rootCandidate = root.orElseThrow();
         frontier = new Frontier(Set.of(rootCandidate), rootCandidate.context().simulationTick(), true);
-        rootedFromLocalAuthority = localAuthoritativeRootAvailable;
-        if (localAuthoritativeRootAvailable) {
+        rootedFromLocalAuthority = preferLocalAuthoritativeRoot;
+        if (preferLocalAuthoritativeRoot) {
           AuthoritativeSnapshot snapshot = movement.authority().snapshot().orElseThrow();
           trace.add("ROOT LOCAL_AUTHORITATIVE snapshotSeq=" + snapshot.sequence()
               + " serverTick=" + snapshot.serverTick()
@@ -1112,7 +1127,7 @@ public final class CausalMovementPipeline {
   private static Optional<Candidate> rootCandidateForTarget(
       MovementEvent movement,
       long target) {
-    if (target <= 0 || movement.authority().quality() != AuthorityQuality.EXACT
+    if (target < 0 || movement.authority().quality() != AuthorityQuality.EXACT
         || movement.authority().snapshot().isEmpty()) {
       return Optional.empty();
     }
@@ -1120,7 +1135,7 @@ public final class CausalMovementPipeline {
     Player authoritative = playerFromAuthority(snapshot.context());
     Player observedBefore = movement.stateFrame().before();
     Player anchor = withClientRotation(authoritative, observedBefore.yaw(), observedBefore.pitch());
-    long rootTick = target - 1L;
+    long rootTick = target == 0 ? 0L : target - 1L;
     if (rootTick < 0 || target - rootTick > Phase6Reachability.MAX_HORIZON_TICKS) {
       return Optional.empty();
     }
