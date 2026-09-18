@@ -39,26 +39,25 @@ class Phase8IncrementalRunnerTest {
     Phase8IncrementalRunner runner=new Phase8IncrementalRunner(4096,0);
     Player anchor=anchor();
     List<RawPacket> first=List.of(
-        new RawPacket(1,10,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
-        new RawPacket(2,20,new PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+        new RawPacket(1,20,new PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
             Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
-        new RawPacket(3,30,new ClientTickEnd()),
-        new RawPacket(4,60,new Move(new Maths.Vec3(.5,65,.5),0f,0f,false,null))
+        new RawPacket(2,30,new ClientTickEnd()),
+        new RawPacket(3,60,new Move(new Maths.Vec3(.5,65,.5),0f,0f,false,null))
     );
     var firstReport=runner.process("flight",first,floorWorld(),anchor);
     assertEquals(1,firstReport.movementObservations(),firstReport.results().toString());
     assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE,firstReport.results().getFirst().verdict(),firstReport.results().toString());
     assertEquals(Phase8IncrementalRunner.Continuation.IMPOSSIBLE,firstReport.continuation());
-    assertEquals(4,firstReport.lastProcessedSequence());
+    assertEquals(3,firstReport.lastProcessedSequence());
 
     List<RawPacket> second=List.of(
-        new RawPacket(5,110,new ClientTickEnd()),
-        new RawPacket(6,160,new Move(new Maths.Vec3(.5,65,.5),0f,0f,false,null))
+        new RawPacket(4,110,new ClientTickEnd()),
+        new RawPacket(5,160,new Move(new Maths.Vec3(.5,65,.5),0f,0f,false,null))
     );
     var secondReport=runner.process("flight",second,floorWorld(),anchor);
     assertEquals(1,secondReport.movementObservations(),secondReport.results().toString());
     assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE,secondReport.results().getFirst().verdict(),secondReport.results().toString());
-    assertEquals(6,secondReport.lastProcessedSequence());
+    assertEquals(5,secondReport.lastProcessedSequence());
   }
 
   @Test
