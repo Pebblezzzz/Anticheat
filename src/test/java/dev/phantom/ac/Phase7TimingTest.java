@@ -45,6 +45,24 @@ class Phase7TimingTest {
     assertTrue(r.timingFor(3).orElseThrow().windows().stream().anyMatch(w->w.kind()==WindowKind.WORLD_UPDATE));
   }
 
+  @Test void clientTickEndBoundariesProvideRelativeMovementChronologyWithoutFakeExplicitTicks(){
+    var r=Phase7Timing.reconstruct(timeline(
+        new RawPacket(1,0,new ClientTickEnd()),
+        new RawPacket(2,50_000_000L,new Move(Vec3.ZERO,0f,0f,true,null)),
+        new RawPacket(3,100_000_000L,new ClientTickEnd()),
+        new RawPacket(4,150_000_000L,new Move(new Vec3(.1,0,0),0f,0f,true,null))
+    ),exactConfig());
+    var first=r.timingFor(2).orElseThrow();
+    var second=r.timingFor(4).orElseThrow();
+    assertEquals(Range.exact(1),first.packetGenerationClientTicks());
+    assertEquals(Range.exact(2),second.packetGenerationClientTicks());
+    assertEquals(TimingSource.RELATIVE_CLIENT_ANCHOR,first.source());
+    assertEquals(TimingSource.RELATIVE_CLIENT_ANCHOR,second.source());
+    assertTrue(first.explicitClientTick().isEmpty());
+    assertTrue(second.explicitClientTick().isEmpty());
+    assertFalse(second.uncertain(),second.reasons().toString());
+  }
+
   @Test void serverTickGapIsExplicit(){var r=Phase7Timing.reconstruct(timeline(new RawPacket(1,0,new Move(Vec3.ZERO,0f,0f,true,0L)),new RawPacket(2,200_000_000L,new Move(new Vec3(.2,0,0),0f,0f,true,4L))),exactConfig());assertTrue(r.frames().get(1).timing().windows().stream().anyMatch(w->w.kind()==WindowKind.SERVER_TICK_GAP));}
   @Test void explicitClientTickContradictionIsIdentifiedAsInconsistentTiming(){var r=Phase7Timing.reconstruct(timeline(new RawPacket(1,0,new Move(Vec3.ZERO,0f,0f,true,0L)),new RawPacket(2,50_000_000L,new Move(new Vec3(.1,0,0),0f,0f,true,10L))),exactConfig());assertEquals(Consistency.INCONSISTENT,r.consistency());}
   @Test void impossibleTimingIsExplainableAndNotAPlayerViolation(){var r=Phase7Timing.reconstruct(timeline(new RawPacket(1,0,new Move(Vec3.ZERO,0f,0f,true,0L)),new RawPacket(2,50_000_000L,new Move(new Vec3(.1,0,0),0f,0f,true,10L))),exactConfig());assertEquals(Consistency.INCONSISTENT,r.consistency());assertTrue(r.consistencyReasons().getFirst().contains("outside timing bounds"));}
