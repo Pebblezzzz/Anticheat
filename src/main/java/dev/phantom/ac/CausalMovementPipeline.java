@@ -784,10 +784,10 @@ public final class CausalMovementPipeline {
         List.of("no causally alignable authoritative server snapshot was captured"));
   }
 
-  private static Map<Long, InputConstraint> collectInputs(
+  private static NavigableMap<Long, InputConstraint> collectInputs(
       Timeline.Snapshot timeline,
       Phase7Timing.Reconstruction timing) {
-    Map<Long, InputConstraint> result = new HashMap<>();
+    NavigableMap<Long, InputConstraint> result = new TreeMap<>();
     for (Timeline.Event event : timeline.events()) {
       if (!(event.packet().packet() instanceof Packets.ClientInput input)) continue;
       Phase7Timing.EventTiming eventTiming =
@@ -800,7 +800,7 @@ public final class CausalMovementPipeline {
       }
       result.put(eventTiming.inputClientTicks().min(), InputConstraint.fromClientInput(input));
     }
-    return Map.copyOf(result);
+    return Collections.unmodifiableNavigableMap(new TreeMap<>(result));
   }
 
   private static Map<Long, List<ExternalTransition>> collectExternalTransitions(
@@ -863,7 +863,7 @@ public final class CausalMovementPipeline {
       Frontier frontier,
       long earliest,
       long latest,
-      Map<Long, InputConstraint> inputs,
+      NavigableMap<Long, InputConstraint> inputs,
       Map<Long, List<ExternalTransition>> external,
       World.VisibilityHistory worldHistory,
       MovementEvent movement,
@@ -902,7 +902,7 @@ public final class CausalMovementPipeline {
   private static Advance advanceTo(
       Set<Candidate> start,
       long targetTick,
-      Map<Long, InputConstraint> inputs,
+      NavigableMap<Long, InputConstraint> inputs,
       Map<Long, List<ExternalTransition>> external,
       World.VisibilityHistory worldHistory,
       MovementEvent movement,
@@ -938,8 +938,10 @@ public final class CausalMovementPipeline {
 
         for (Candidate candidate : local) {
           Context context = candidate.context().withTick(localTick);
-          InputConstraint input = inputs.getOrDefault(
-              localTick, InputConstraint.any());
+          Map.Entry<Long, InputConstraint> heldInput = inputs.floorEntry(localTick);
+          InputConstraint input = heldInput == null
+              ? InputConstraint.any()
+              : heldInput.getValue();
 
           long simulationTick = localTick;
           WorldSnapshot world = worldForTick(
