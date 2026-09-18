@@ -203,10 +203,31 @@ public final class Phase8IncrementalRunner {
        * UNCERTAIN can later resolve to POSSIBLE/IMPOSSIBLE after an authoritative
        * snapshot or world acknowledgement arrives. This is recovery, not poison.
        */
-      if (prior == result.verdict()) continue;
-      emitted.put(sequence, result.verdict());
-      fresh.add(result);
+      if (prior != result.verdict()) {
+        emitted.put(sequence, result.verdict());
+        fresh.add(result);
+      }
     }
+
+    World.VisibilityHistory historyView = World.fromTimeline(timeline);
+    for (Timeline.Event event : timeline.events()) {
+      if (!(event.packet().packet() instanceof Packets.FlightToggle)) continue;
+      Optional<Result> authoritative = CausalMovementPipeline.evaluateFlightToggle(
+          playerId, event, timeline,
+          Phase7Timing.reconstruct(timeline, Phase7Timing.Config.defaultConfig()),
+          liveWorld != null ? liveWorld : historyView.statesAt(event.serverTick()),
+          anchor);
+      if (authoritative.isEmpty()) continue;
+      Result result = authoritative.get();
+      long sequence = event.packet().sequence();
+      Verdict prior = emitted.get(sequence);
+      if (prior != result.verdict()) {
+        emitted.put(sequence, result.verdict());
+        fresh.add(result);
+      }
+    }
+
+    fresh.sort(Comparator.comparingLong(result -> result.evidence().serverTick()));
 
     Continuation continuation = continuationFor(pipeline, fresh);
     int possible = count(fresh, Verdict.POSSIBLE);
