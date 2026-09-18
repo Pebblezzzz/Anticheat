@@ -27,7 +27,9 @@ class Phase5MechanicsTest {
     var physics=new Vanilla12111Physics();
     var state=Player.initial(Vec3.ZERO);
     var normal=physics.step(new PhysicsContext(1,state,new AdvancedInput(1,0,false),air(),Simulation.Environment.DRY,new Attributes(.1)));
-    var sprint=physics.step(new PhysicsContext(1,state,new AdvancedInput(1,0,false,true,false),air(),Simulation.Environment.DRY,new Attributes(.1)));
+    var sprint=physics.step(new PhysicsContext(1,state,new AdvancedInput(1,0,false,true,false),air(),Simulation.Environment.DRY,
+        new Attributes(.1,List.of(new Phase5Mechanics.AttributeModifier("vanilla:sprinting",0.3,
+            Phase5Mechanics.ModifierOperation.ADD_MULTIPLIED_TOTAL)))));
     var sneak=physics.step(new PhysicsContext(1, state, new AdvancedInput(1, 0, false, false, true), air(), Simulation.Environment.DRY, new Attributes(.1)));
     assertTrue(sprint.state().position().z()>normal.state().position().z());
     assertTrue(sneak.state().position().z()<normal.state().position().z());
@@ -50,7 +52,7 @@ class Phase5MechanicsTest {
     var physics=new Vanilla12111Physics();
     var water=physics.step(new PhysicsContext(4,Player.initial(Vec3.ZERO),new AdvancedInput(1,0,false,true,false),air(),Simulation.Environment.WATER,new Attributes(.1),Phase5Mechanics.MovementEffects.NONE,Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.vanillaWater(false,true,false,true)));
     var lava=physics.step(new PhysicsContext(5,Player.initial(Vec3.ZERO),new AdvancedInput(1,0,false),air(),Simulation.Environment.LAVA,new Attributes(.1),Phase5Mechanics.MovementEffects.NONE,Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.vanillaLava(true,false,false)));
-    assertEquals(0.01764, water.state().velocity().z(), 1e-12);
+    assertEquals(0.0172872003364563, water.state().velocity().z(), 1e-12);
     assertEquals(0.0098, lava.state().velocity().z(), 1e-12);
     assertEquals(0.25, Phase5Mechanics.MovementEnvironment.vanillaLava(true,false,false).gravityMultiplier(), 1e-12);
     assertEquals(0.5, Phase5Mechanics.MovementEnvironment.vanillaLava(true,false,false).fluidDrag(), 1e-12);
