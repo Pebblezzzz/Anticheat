@@ -64,7 +64,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private static final int LOCAL_SNAPSHOT_RADIUS_CHUNKS=2;
   private static final long WORLD_TRANSACTION_MIN_INTERVAL_NANOS=2_000_000L;
   private static final long PAPER_MOVE_FAILURE_WINDOW_NANOS=1_000_000_000L;
-  private static final int PAPER_MOVE_FAILURE_THRESHOLD=2;
+  private static final int PAPER_MOVE_FAILURE_THRESHOLD=1;
 
   private final Map<UUID,Capture> captures=new ConcurrentHashMap<>();
   private final Map<UUID,Boolean> debugPlayers=new ConcurrentHashMap<>();
@@ -96,6 +96,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         // counter as Move.clientTick; Phase 7 derives a relative interval from the
         // retained boundary events and keeps protocol-authoritative ticks distinct.
         Long clientTick=null;
+        Long authoritativeTick=capture.authoritativeServerTick.get()>=0
+            ?capture.authoritativeServerTick.get():null;
         Packets.Move move=new Packets.Move(
             packet.hasPositionChanged()?vector(location.getX(),location.getY(),location.getZ()):null,
             packet.hasRotationChanged()?location.getYaw():null,
@@ -108,7 +110,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         if(Boolean.TRUE.equals(debugPlayers.get(player.getUniqueId())))
           logMovementPacketDebug(player,capture,sequence,receivedNanos,event.getPacketType().toString(),packet,move,tickObservation);
         appendPacket(capture,new RawPacket(sequence,receivedNanos,move,
-            Packets.CaptureProvenance.fromAdapter(sourceId,move,null)));
+            Packets.CaptureProvenance.fromAdapter(sourceId,move,authoritativeTick)));
       }else if(event.getPacketType()==PacketType.Play.Client.PLAYER_INPUT){
         var input=new WrapperPlayClientPlayerInput(event);
         record(player,new Packets.ClientInput(input.isForward(),input.isBackward(),input.isLeft(),input.isRight(),input.isJump(),input.isShift(),input.isSprint()));
@@ -400,6 +402,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     for(Capture capture:captures.values()){
       Player player=getServer().getPlayer(capture.playerId);
       if(player==null)continue;
+      long authoritativeTick=capture.authoritativeServerTick.incrementAndGet();
       capture.updateServerPosition(player);
       capture.minY=player.getWorld().getMinHeight();
       capture.maxY=player.getWorld().getMaxHeight();
@@ -431,6 +434,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         if(material==Material.LADDER||material==Material.VINE||material==Material.SCAFFOLDING)climb=true;
       }
 
+      org.bukkit.util.Vector velocity=player.getVelocity();
       boolean sprint=player.isSprinting(),sneak=player.isSneaking();
       Phase5Mechanics.MovementEnvironment env=
           water?Phase5Mechanics.MovementEnvironment.vanillaWater(player.isOnGround(),sprint,sneak,player.isSwimming()):
@@ -450,7 +454,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       Packets.PlayerContext context=new Packets.PlayerContext(
           player.getGameMode().name().toLowerCase(Locale.ROOT),
           new dev.phantom.ac.Simulation.Attributes(movementSpeed),
-          effects,pose,env,player.isSleeping(),entityBoxes);
+          effects,pose,env,
+          new Vec3(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()),
+          new Vec3(velocity.getX(),velocity.getY(),velocity.getZ()),
+          player.getAllowFlight(),player.isFlying(),player.isSleeping(),entityBoxes);
 
       if(capture.initialState==null){
         State.Environment stateEnvironment=switch(env.fluid()){
@@ -458,7 +465,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           case LAVA -> State.Environment.LAVA;
           case NONE -> env.climbable()?State.Environment.CLIMBABLE:State.Environment.DRY;
         };
-        org.bukkit.util.Vector velocity=player.getVelocity();
         capture.initialState=new State.Player(
             vector(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()),
             vector(velocity.getX(),velocity.getY(),velocity.getZ()),player.getLocation().getYaw(),player.getLocation().getPitch(),player.isOnGround(),
@@ -468,7 +474,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       }
 
       appendPacket(capture,new RawPacket(capture.sequence.incrementAndGet(),System.nanoTime(),context,
-          Packets.CaptureProvenance.fromAdapter("paper-live",context,null)));
+          Packets.CaptureProvenance.fromAdapter("paper-live",context,authoritativeTick)));
     }
   }
 
@@ -696,7 +702,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         +" uncertaintySources="+e.uncertaintySources()
         +" simulationDiagnostics="+e.simulationDiagnostics()
         +" closestCandidate={"+closest+"}"
-        +" replay="+e.replayReference());
+        +" replay="+e.replayReference()
+        +" evidenceSource="+(e.rule().startsWith("PAPER_")?"PAPER_REJECTION":e.rule().startsWith("AUTHORITATIVE_")?"AUTHORITATIVE_STATE":"PREDICTION")
+        +" clientState={pos="+e.observedState().position()+",ground="+e.observedState().onGround()+",gamemode="+e.observedState().gamemode()+",pose="+e.observedState().pose()+"}");
   }
 
   private void logPhase8Timing(String playerName,Capture capture,Timeline.Snapshot timeline,
@@ -811,6 +819,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final Set<Short> reservedTransactions=ConcurrentHashMap.newKeySet();
     final AtomicLong transactionCounter=new AtomicLong(1);
     final AtomicLong paperMoveFailureSequence=new AtomicLong();
+    final AtomicLong authoritativeServerTick=new AtomicLong(-1L);
     volatile long paperMoveFailureWindowStartNanos=-1L;
     volatile int paperMoveFailureCount;
     Phase8MovementValidation.Accumulator accumulator=Phase8MovementValidation.Accumulator.empty();
