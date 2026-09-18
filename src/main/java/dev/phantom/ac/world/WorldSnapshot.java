@@ -185,6 +185,41 @@ public final class WorldSnapshot implements Serializable {
     Objects.requireNonNull(second,"second");
     if(!first.version().equals(second.version())||first.minY()!=second.minY()||first.maxY()!=second.maxY())
       throw new IllegalArgumentException("world snapshots have incompatible dimensions or model versions");
+
+    if (first.backend != null || second.backend != null) {
+      Backend mergedBackend = new Backend() {
+        @Override public String version() { return first.version(); }
+        @Override public int minY() { return first.minY(); }
+        @Override public int maxY() { return first.maxY(); }
+        @Override public Set<Chunk> loadedChunks() {
+          Set<Chunk> result = new LinkedHashSet<>(first.loadedChunks());
+          result.addAll(second.loadedChunks());
+          return Set.copyOf(result);
+        }
+        @Override public Coverage coverageAt(int x,int y,int z) {
+          Chunk sought=Chunk.containing(x,z);
+          boolean a=first.hasChunk(sought), b=second.hasChunk(sought);
+          if (a && b) {
+            Coverage ca=first.coverageAt(x,y,z), cb=second.coverageAt(x,y,z);
+            if (ca==cb && ca!=Coverage.UNLOADED) {
+              BlockState sa=first.blockAtOrNull(x,y,z), sb=second.blockAtOrNull(x,y,z);
+              if ((ca==Coverage.KNOWN || ca==Coverage.UNSUPPORTED) && !Objects.equals(sa,sb)) {
+                throw new IllegalArgumentException("overlapping world snapshots disagree at ("+x+","+y+","+z+")");
+              }
+            }
+            return ca;
+          }
+          return a ? first.coverageAt(x,y,z) : second.coverageAt(x,y,z);
+        }
+        @Override public BlockState blockAtOrNull(int x,int y,int z) {
+          Chunk sought=Chunk.containing(x,z);
+          if (first.hasChunk(sought)) return first.blockAtOrNull(x,y,z);
+          return second.blockAtOrNull(x,y,z);
+        }
+      };
+      return WorldSnapshot.backed(first.version(),first.minY(),first.maxY(),mergedBackend);
+    }
+
     Map<Chunk,Map<Pos,BlockState>> merged=new HashMap<>(first.chunks());
     for(var entry:second.chunks().entrySet()){
       Map<Pos,BlockState> existing=merged.get(entry.getKey());
