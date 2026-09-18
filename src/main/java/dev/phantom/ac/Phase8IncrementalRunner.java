@@ -363,7 +363,8 @@ public final class Phase8IncrementalRunner {
       // A persistent contradiction between authoritative server collision state
       // and the client-reported ground bit is independently actionable evidence.
       // It must not be swallowed merely because world/timing replay is uncertain.
-      if (!waitingForTeleport
+      if (hardMovementEvidenceEligible(after)
+          && !waitingForTeleport
           && packetIndex == latestMovementIndex
           && !hasFutureAuthoritativeTransition(normalized, packetIndex + 1)
           && recordServerDivergence(move.position(), packet.sequence())) {
@@ -385,7 +386,8 @@ public final class Phase8IncrementalRunner {
             replayReference));
       }
 
-      if (!waitingForTeleport
+      if (hardMovementEvidenceEligible(after)
+          && !waitingForTeleport
           && !hasFutureAuthoritativeTransition(normalized, packetIndex + 1)
           && recordGroundContradiction(move.onGround(), movementTick)) {
         results.add(Phase8MovementValidation.authoritativeImpossible(
@@ -642,6 +644,15 @@ public final class Phase8IncrementalRunner {
       return new AdvanceResult(Set.of(), true, List.of("incremental candidate frontier produced no deterministic state"));
     }
     return new AdvanceResult(Set.copyOf(nextAll), false, List.of());
+  }
+
+  private boolean hardMovementEvidenceEligible(Player state) {
+    if (state == null || state.sleeping()) return false;
+    String mode = state.gamemode();
+    if (!"survival".equals(mode) && !"adventure".equals(mode)) return false;
+    if (state.pose() == Phase5Mechanics.Pose.FALL_FLYING
+        || state.pose() == Phase5Mechanics.Pose.SWIMMING) return false;
+    return state.environment() == State.Environment.DRY;
   }
 
   private Player authoritativeGroundState(Player state) {
