@@ -200,6 +200,7 @@ public final class CausalMovementPipeline {
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     List<Frame> frames = new ArrayList<>();
     long previousPositionPacketTick = -1L;
+    Phase7Timing.Range previousPositionPacketRange = null;
     Long previousExplicitClientTick = null;
     boolean recoveryRequired = false;
     long lastAmbiguitySequence = -1L;
@@ -319,6 +320,9 @@ public final class CausalMovementPipeline {
           movement.move().clientTick() != null
               && previousExplicitClientTick != null
               && movement.move().clientTick().longValue() == previousExplicitClientTick.longValue();
+      boolean overlappingTimingWindow =
+          previousPositionPacketRange != null
+              && rangesOverlap(previousPositionPacketRange, eventTiming.simulationClientTicks());
       if (!frontier.candidates().isEmpty() && movement.authority().snapshot().isPresent()) {
         /*
          * PlayerContext carries the entity boxes observed by the server at the
@@ -340,11 +344,14 @@ public final class CausalMovementPipeline {
       if ((previousPositionPacketTick >= 0
               && eventTiming.simulationClientTicks().isExact()
               && movementTick == previousPositionPacketTick)
-          || sameExplicitClientTick) {
+          || sameExplicitClientTick
+          || overlappingTimingWindow) {
         uncertainty.add("multiple position-bearing movement packets occurred in one client tick; sub-tick motion is not modeled");
         lastAmbiguitySequence = sequence;
         recoveryRequired = true;
         frontier = Frontier.empty();
+        previousPositionPacketTick = -1L;
+        previousPositionPacketRange = null;
         trace.add("FRONTIER_RESET reason=SUB_TICK_AMBIGUITY");
         SearchResult uncertain = uncertainSearch(
             frontier.candidates(),
@@ -362,8 +369,9 @@ public final class CausalMovementPipeline {
         uncertainty.add("capture chronology is incomplete; missing or reordered packets cannot be treated as inactivity");
       }
 
-      boolean localAuthoritativeRootAvailable = movement.authority().quality() == AuthorityQuality.EXACT
-          && movement.authority().snapshot().isPresent();
+      Optional<AuthoritativeSnapshot> freshLocalAuthority =
+          causallyFreshLocalAuthority(movement, 1L, -1L);
+      boolean localAuthoritativeRootAvailable = freshLocalAuthority.isPresent();
       boolean justRecovered = false;
       if (!haveAuthoritativeSeed && !localAuthoritativeRootAvailable && frontier.candidates().isEmpty()) {
         uncertainty.add("no trusted authoritative replay anchor exists");
@@ -380,11 +388,9 @@ public final class CausalMovementPipeline {
       boolean recoveryCanClear = recoveryRequired
           && lastAmbiguitySequence >= 0
           && sequence > lastAmbiguitySequence
-          && movement.authority().quality() == AuthorityQuality.EXACT
-          && movement.authority().snapshot().isPresent()
-          && movement.authority().snapshot().get().sequence() > lastAmbiguitySequence
+          && freshLocalAuthority.isPresent()
+          && freshLocalAuthority.get().sequence() > lastAmbiguitySequence
           && movement.chronologyClean()
-          && !eventTiming.uncertain()
           && !sameExplicitClientTick;
       if (recoveryCanClear) {
         recoveryRequired = false;
@@ -554,6 +560,7 @@ public final class CausalMovementPipeline {
               .orElse(movementTick);
           frontier = new Frontier(Set.copyOf(matching), resultingTick, true);
           previousPositionPacketTick = resultingTick;
+          previousPositionPacketRange = eventTiming.simulationClientTicks();
           if (movement.move().clientTick() != null) {
             previousExplicitClientTick = movement.move().clientTick();
           }
@@ -562,6 +569,7 @@ public final class CausalMovementPipeline {
         }
       } else if (validation.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
         previousPositionPacketTick = movementTick;
+        previousPositionPacketRange = eventTiming.simulationClientTicks();
         if (movement.move().clientTick() != null) {
           previousExplicitClientTick = movement.move().clientTick();
         }
@@ -1143,8 +1151,8 @@ public final class CausalMovementPipeline {
   private static Optional<Candidate> rootCandidateForTarget(
       MovementEvent movement,
       long target) {
-    if (target < 0 || movement.authority().quality() != AuthorityQuality.EXACT
-        || movement.authority().snapshot().isEmpty()) {
+    if (target < 0
+        || causallyFreshLocalAuthority(movement, 1L, -1L).isEmpty()) {
       return Optional.empty();
     }
     AuthoritativeSnapshot snapshot = movement.authority().snapshot().orElseThrow();
@@ -1181,6 +1189,22 @@ public final class CausalMovementPipeline {
             List.of())));
   }
 
+  private static Optional<AuthoritativeSnapshot> causallyFreshLocalAuthority(
+      MovementEvent movement,
+      long maxServerTickAge,
+      long minimumSequenceExclusive) {
+    return movement.authority().snapshot()
+        .filter(snapshot -> snapshot.sequence() > minimumSequenceExclusive)
+        .filter(snapshot -> snapshot.sequence() < movement.event().packet().sequence())
+        .filter(snapshot -> snapshot.receivedNanos() <= movement.event().packet().receivedNanos())
+        .filter(snapshot -> snapshot.serverTick() <= movement.event().serverTick())
+        .filter(snapshot -> movement.event().serverTick() - snapshot.serverTick() <= maxServerTickAge);
+  }
+
+  private static boolean rangesOverlap(Phase7Timing.Range a, Phase7Timing.Range b) {
+    return a.min() <= b.max() && b.min() <= a.max();
+  }
+
   private static Optional<Candidate> rootCandidate(
       Player fallbackAnchor,
       MovementEvent movement,
@@ -1192,8 +1216,7 @@ public final class CausalMovementPipeline {
     Player anchor = fallbackAnchor;
     long rootTick = 0L;
     boolean localAuthoritativeRoot = useLocalAuthoritativeRoot
-        && movement.authority().quality() == AuthorityQuality.EXACT
-        && movement.authority().snapshot().isPresent();
+        && causallyFreshLocalAuthority(movement, 1L, -1L).isPresent();
 
     if (localAuthoritativeRoot) {
       AuthoritativeSnapshot snapshot = movement.authority().snapshot().orElseThrow();
