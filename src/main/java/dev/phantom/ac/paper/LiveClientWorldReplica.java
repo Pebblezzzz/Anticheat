@@ -33,22 +33,27 @@ final class LiveClientWorldReplica {
 
   private sealed interface Mutation permits ChunkMutation, BlockMutation, UnloadMutation {}
 
-  private record ChunkMutation(Column column, boolean fullChunk, ClientVersion clientVersion) implements Mutation {
+  private record ChunkMutation(Column column, boolean fullChunk, ClientVersion clientVersion, long sequence) implements Mutation {
     ChunkMutation {
       Objects.requireNonNull(column, "column");
       Objects.requireNonNull(clientVersion, "clientVersion");
+      if (sequence < 0) throw new IllegalArgumentException("sequence must be non-negative");
     }
   }
 
-  private record BlockMutation(Pos position, BlockState state) implements Mutation {
+  private record BlockMutation(Pos position, BlockState state, long sequence) implements Mutation {
     BlockMutation {
       Objects.requireNonNull(position, "position");
       Objects.requireNonNull(state, "state");
+      if (sequence < 0) throw new IllegalArgumentException("sequence must be non-negative");
     }
   }
 
-  private record UnloadMutation(ChunkKey chunk) implements Mutation {
-    UnloadMutation { Objects.requireNonNull(chunk, "chunk"); }
+  private record UnloadMutation(ChunkKey chunk, long sequence) implements Mutation {
+    UnloadMutation {
+      Objects.requireNonNull(chunk, "chunk");
+      if (sequence < 0) throw new IllegalArgumentException("sequence must be non-negative");
+    }
   }
 
   private record ChunkEntry(
@@ -68,6 +73,7 @@ final class LiveClientWorldReplica {
   private final Deque<Short> sentOrder = new ArrayDeque<>();
   private final Map<ClientVersion, ConcurrentHashMap<Integer, BlockState>> stateCache = new ConcurrentHashMap<>();
   private long revisionCounter;
+  private long lastVisibleSequence=-1L;
 
   LiveClientWorldReplica(String version, int minY, int maxY) {
     this.version = Objects.requireNonNull(version, "version");
@@ -76,16 +82,16 @@ final class LiveClientWorldReplica {
     this.maxY = maxY;
   }
 
-  synchronized void queueChunk(Column column, boolean fullChunk, ClientVersion clientVersion) {
-    unassigned.add(new ChunkMutation(column, fullChunk, clientVersion));
+  synchronized void queueChunk(long sequence, Column column, boolean fullChunk, ClientVersion clientVersion) {
+    unassigned.add(new ChunkMutation(column, fullChunk, clientVersion, sequence));
   }
 
-  synchronized void queueBlock(Pos position, BlockState state) {
-    unassigned.add(new BlockMutation(position, state));
+  synchronized void queueBlock(long sequence, Pos position, BlockState state) {
+    unassigned.add(new BlockMutation(position, state, sequence));
   }
 
-  synchronized void queueUnload(Chunk chunk) {
-    unassigned.add(new UnloadMutation(new ChunkKey(chunk.x(), chunk.z())));
+  synchronized void queueUnload(long sequence, Chunk chunk) {
+    unassigned.add(new UnloadMutation(new ChunkKey(chunk.x(), chunk.z()), sequence));
   }
 
   synchronized boolean hasUnassignedMutations() {
@@ -107,7 +113,8 @@ final class LiveClientWorldReplica {
     sentOrder.addLast(transactionId);
   }
 
-  synchronized boolean acknowledge(short transactionId) {
+  synchronized boolean acknowledge(short transactionId, long acknowledgementSequence) {
+    if (acknowledgementSequence < 0) throw new IllegalArgumentException("acknowledgementSequence must be non-negative");
     if (!pending.containsKey(transactionId)) return false;
 
     while (!sentOrder.isEmpty()) {
@@ -118,7 +125,12 @@ final class LiveClientWorldReplica {
       }
       if (head == transactionId) break;
     }
+    lastVisibleSequence=Math.max(lastVisibleSequence,acknowledgementSequence);
     return true;
+  }
+
+  synchronized long causalSequence() {
+    return lastVisibleSequence;
   }
 
   synchronized void abortBarrier(short transactionId) {
@@ -159,8 +171,10 @@ final class LiveClientWorldReplica {
 
     Map<ChunkKey, ChunkEntry> local = new LinkedHashMap<>();
     Map<ChunkKey, Map<Pos, BlockState>> overlays = new LinkedHashMap<>();
+    long visibleSequence;
 
     synchronized (this) {
+      visibleSequence=lastVisibleSequence;
       for (int dx = -radiusChunks; dx <= radiusChunks; dx++) {
         for (int dz = -radiusChunks; dz <= radiusChunks; dz++) {
           ChunkKey key = new ChunkKey(centerChunkX + dx, centerChunkZ + dz);
@@ -176,15 +190,17 @@ final class LiveClientWorldReplica {
         version,
         minY,
         maxY,
-        new BackendView(version, minY, maxY, local, overlays));
+        new BackendView(version, minY, maxY, local, overlays, visibleSequence));
   }
 
   /** A full current cache view, still lazy and therefore cheap to capture. */
   WorldSnapshot snapshot() {
     Map<ChunkKey, ChunkEntry> local;
     Map<ChunkKey, Map<Pos, BlockState>> overlays = new LinkedHashMap<>();
+    long visibleSequence;
     synchronized (this) {
       local = new LinkedHashMap<>(chunks);
+      visibleSequence=lastVisibleSequence;
       for (Map.Entry<ChunkKey, Map<Pos, BlockState>> entry : blockOverlays.entrySet()) {
         if (!entry.getValue().isEmpty()) overlays.put(entry.getKey(), Map.copyOf(entry.getValue()));
       }
@@ -193,7 +209,7 @@ final class LiveClientWorldReplica {
         version,
         minY,
         maxY,
-        new BackendView(version, minY, maxY, local, overlays));
+        new BackendView(version, minY, maxY, local, overlays, visibleSequence));
   }
 
   private final class BackendView implements WorldSnapshot.Backend {
@@ -202,23 +218,28 @@ final class LiveClientWorldReplica {
     private final int backendMaxY;
     private final Map<ChunkKey, ChunkEntry> localChunks;
     private final Map<ChunkKey, Map<Pos, BlockState>> overlays;
+    private final long visibleSequence;
 
     private BackendView(
         String backendVersion,
         int backendMinY,
         int backendMaxY,
         Map<ChunkKey, ChunkEntry> localChunks,
-        Map<ChunkKey, Map<Pos, BlockState>> overlays) {
+        Map<ChunkKey, Map<Pos, BlockState>> overlays,
+        long visibleSequence) {
       this.backendVersion = backendVersion;
       this.backendMinY = backendMinY;
       this.backendMaxY = backendMaxY;
       this.localChunks = Map.copyOf(localChunks);
       this.overlays = Map.copyOf(overlays);
+      this.visibleSequence = visibleSequence;
     }
 
     @Override public String version() { return backendVersion; }
     @Override public int minY() { return backendMinY; }
     @Override public int maxY() { return backendMaxY; }
+
+    @Override public long causalSequence() { return visibleSequence; }
 
     @Override public Set<Chunk> loadedChunks() {
       Set<Chunk> result = new LinkedHashSet<>();
