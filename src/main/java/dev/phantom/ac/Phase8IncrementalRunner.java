@@ -282,7 +282,7 @@ public final class Phase8IncrementalRunner {
 
       if (!exactTick) {
         results.add(uncertainResult(
-            packet.sequence(), serverTick, before, after, world, worldReference, timing,
+            playerId, packet.sequence(), serverTick, before, after, world, worldReference, timing,
             "movement tick cannot be derived from a verified client boundary",
             replayReference));
         trackedState = after;
@@ -293,7 +293,7 @@ public final class Phase8IncrementalRunner {
 
       if (lastMovementTick >= 0 && movementTick == lastMovementTick) {
         results.add(uncertainResult(
-            packet.sequence(), serverTick, before, after, world, worldReference, timing,
+            playerId, packet.sequence(), serverTick, before, after, world, worldReference, timing,
             "multiple movement packets occurred in the same client tick; sub-tick trajectory is not yet modeled",
             replayReference));
         poison("unmodeled same-tick movement packet");
@@ -323,7 +323,7 @@ public final class Phase8IncrementalRunner {
                 : poisoned
                     ? poisonReason
                     : "no authoritative live replay anchor is available";
-        results.add(uncertainResult(packet.sequence(), serverTick, before, after, world, worldReference,
+        results.add(uncertainResult(playerId, packet.sequence(), serverTick, before, after, world, worldReference,
             timing, reason, replayReference));
         trackedState = after;
         continuation = Continuation.UNCERTAIN;
@@ -337,7 +337,7 @@ public final class Phase8IncrementalRunner {
       }
 
       if (continuation == Continuation.IMPOSSIBLE) {
-        results.add(terminalImpossible(packet.sequence(), serverTick, before, after, world,
+        results.add(terminalImpossible(playerId, packet.sequence(), serverTick, before, after, world,
             worldReference, timing, replayReference));
         trackedState = after;
         lastMovementTick = movementTick;
@@ -566,6 +566,7 @@ public final class Phase8IncrementalRunner {
   }
 
   private Phase8MovementValidation.Result uncertainResult(
+      String playerId,
       long sequence,
       long serverTick,
       Player prior,
@@ -588,6 +589,7 @@ public final class Phase8IncrementalRunner {
   }
 
   private Phase8MovementValidation.Result terminalImpossible(
+      String playerId,
       long sequence,
       long serverTick,
       Player prior,
