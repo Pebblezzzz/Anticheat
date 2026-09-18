@@ -372,6 +372,21 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
   }
 
+  private WorldSnapshot validationSnapshot(Capture capture,double centerX,double centerZ){
+    WorldSnapshot current=capture.clientWorld.snapshotAround(centerX,centerZ,LOCAL_SNAPSHOT_RADIUS_CHUNKS);
+    State.Player anchor=capture.initialState;
+    if(anchor==null||anchor.uncertain())return current;
+    double anchorX=anchor.position().x(),anchorZ=anchor.position().z();
+    int currentChunkX=Math.floorDiv((int)Math.floor(centerX),16);
+    int currentChunkZ=Math.floorDiv((int)Math.floor(centerZ),16);
+    int anchorChunkX=Math.floorDiv((int)Math.floor(anchorX),16);
+    int anchorChunkZ=Math.floorDiv((int)Math.floor(anchorZ),16);
+    if(Math.abs(currentChunkX-anchorChunkX)<=LOCAL_SNAPSHOT_RADIUS_CHUNKS
+        &&Math.abs(currentChunkZ-anchorChunkZ)<=LOCAL_SNAPSHOT_RADIUS_CHUNKS)return current;
+    WorldSnapshot anchorSnapshot=capture.clientWorld.snapshotAround(anchorX,anchorZ,LOCAL_SNAPSHOT_RADIUS_CHUNKS);
+    return WorldSnapshot.merge(current,anchorSnapshot);
+  }
+
   private void scheduleValidations(){
     for(Capture capture:captures.values()){
       if(!capture.validationRunning.compareAndSet(false,true))continue;
@@ -386,7 +401,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
       getServer().getScheduler().runTaskAsynchronously(this,()->{
         try{
-          WorldSnapshot liveWorld=capture.clientWorld.snapshotAround(snapshotCenterX,snapshotCenterZ,LOCAL_SNAPSHOT_RADIUS_CHUNKS);
+          WorldSnapshot liveWorld=validationSnapshot(capture,snapshotCenterX,snapshotCenterZ);
           Timeline.Snapshot timeline=Timeline.assign(new Packets.Normalizer().normalize(raw),epoch,50_000_000L);
           Phase8LiveValidation.Report report=Phase8LiveValidation.analyze(playerName,timeline,validationBudget,Phase7Timing.Config.defaultConfig(),liveWorld,capture.initialState);
 
