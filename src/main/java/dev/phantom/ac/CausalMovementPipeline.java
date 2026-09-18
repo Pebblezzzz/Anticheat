@@ -163,13 +163,6 @@ public final class CausalMovementPipeline {
     World.VisibilityHistory worldHistory = World.fromTimeline(timeline);
 
     List<MovementEvent> movements = new ArrayList<>();
-    long latestMovementSequence = -1L;
-    for (Timeline.Event event : timeline.events()) {
-      if (event.packet().packet() instanceof Packets.Move move && move.position() != null) {
-        latestMovementSequence = Math.max(latestMovementSequence, event.packet().sequence());
-      }
-    }
-
     for (Timeline.Event event : timeline.events()) {
       if (!(event.packet().packet() instanceof Packets.Move move)) continue;
       Phase7Timing.EventTiming eventTiming = timing.timingFor(event.packet().sequence()).orElse(null);
@@ -184,7 +177,6 @@ public final class CausalMovementPipeline {
       boolean futureWorldMutation = hasWorldMutationAfter(timeline, event.packet().sequence());
       boolean useLiveWorld = liveWorld != null
           && move.position() != null
-          && event.packet().sequence() == latestMovementSequence
           && !futureWorldMutation;
       WorldSnapshot world = useLiveWorld
           ? liveWorld
@@ -694,7 +686,7 @@ public final class CausalMovementPipeline {
             ? nearestAuthoritativePitch(authorities, initialAnchor, event.packet().receivedNanos()) + teleport.pitch()
             : teleport.pitch();
         transition = new Phase6Reachability.TeleportCorrection(
-            teleport.id(), target, Vec3.ZERO, Pose.STANDING, true);
+            teleport.id(), target, Vec3.ZERO, Pose.STANDING, true, yaw, pitch);
       }
       result.computeIfAbsent(tick, ignored -> new ArrayList<>()).add(transition);
     }
@@ -854,11 +846,12 @@ public final class CausalMovementPipeline {
       World.VisibilityHistory history,
       MovementEvent movement) {
     /*
-     * A live replica is a causally acknowledged snapshot of the newest
-     * observation only. It is never used for historical/intermediate ticks,
-     * and a future world mutation in the captured batch disables this shortcut.
+     * A live acknowledged replica is safe only for the final step when no
+     * world mutation was observed after this movement. Historical/intermediate
+     * simulation always comes from the ticked client-visible world history.
      */
-    if (movement.liveWorldUsed() && simulationTick == Math.max(0L, targetTick - 1L)) {
+    if (movement.liveWorldUsed()
+        && simulationTick == Math.max(0L, targetTick - 1L)) {
       return movement.world();
     }
     return history.statesAt(simulationTick);
@@ -1112,13 +1105,14 @@ public final class CausalMovementPipeline {
       List<AuthoritativeSnapshot> authorities,
       Player initialAnchor,
       long receivedNanos) {
-    AuthoritativeSnapshot snapshot = authorities.stream()
-        .filter(value -> value.receivedNanos() <= receivedNanos)
-        .max(Comparator.comparingLong(AuthoritativeSnapshot::receivedNanos))
-        .orElse(null);
-    if (snapshot != null) return snapshot.context().movementEnvironment().onGround()
-        ? snapshot.context().serverPosition() == null ? 0.0f : 0.0f
-        : (initialAnchor == null ? 0.0f : initialAnchor.yaw());
+    /*
+     * PlayerContext intentionally carries authoritative position/velocity and
+     * movement context, but not a server yaw/pitch. A relative teleport rotation
+     * therefore cannot be reconstructed exactly from server state. Use the
+     * explicit anchor only; otherwise retain the prior client orientation and
+     * let the surrounding timing/recovery logic mark the transition uncertain.
+     */
+    return initialAnchor == null ? 0.0f : initialAnchor.yaw();
   }
 
   private static float nearestAuthoritativePitch(
