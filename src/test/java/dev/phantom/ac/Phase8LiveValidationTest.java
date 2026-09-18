@@ -86,7 +86,7 @@ class Phase8LiveValidationTest {
         ignored -> List.of(new WorldBranch("floor", world, true, "fully known floor")),
         ignored -> List.of(new Phase6Reachability.None()), 256);
     Phase6Reachability.Evidence phase6Evidence = engine.compare(search,
-        new Observation(Player.initial(new Vec3(100.5, 64.0, 100.5)), EnumSet.of(ObservedField.POSITION)));
+        new Observation(Player.initial(new Vec3(6.5, 64.0, 0.5)), EnumSet.of(ObservedField.POSITION)));
     assertEquals(Verdict.IMPOSSIBLE, phase6Evidence.verdict());
     assertEquals(0, phase6Evidence.matchingCandidates());
 
