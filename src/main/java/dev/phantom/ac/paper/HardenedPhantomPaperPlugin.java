@@ -186,9 +186,13 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       }else if(event.getPacketType()==PacketType.Play.Server.CHUNK_DATA){
         var packet=new WrapperPlayServerChunkData(event);
         Column column=packet.getColumn();
+        long sequence=capture.sequence.incrementAndGet();
+        long receivedNanos=System.nanoTime();
+        ClientVersion clientVersion=event.getUser().getClientVersion();
         capture.chunkPackets.incrementAndGet();
-        capture.clientWorld.queueChunk(column,column.isFullChunk(),event.getUser().getClientVersion());
-        capture.chunkQueue.add(new PendingChunk(sequence,receivedNanos,column,player.getWorld().getMinHeight(),player.getWorld().getMaxHeight(),clientVersion));
+        capture.clientWorld.queueChunk(column,column.isFullChunk(),clientVersion);
+        capture.chunkQueue.add(new PendingChunk(sequence,receivedNanos,column,
+            player.getWorld().getMinHeight(),player.getWorld().getMaxHeight(),clientVersion));
         if(isNearChunk(capture,column))event.getTasksAfterSend().add(()->requestWorldBarrier(player,capture));
       }
     }
