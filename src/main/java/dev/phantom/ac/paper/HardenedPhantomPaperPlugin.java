@@ -719,10 +719,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       getServer().getScheduler().runTaskAsynchronously(this,()->{
         long validationStartedNanos=System.nanoTime();
         try{
-          WorldSnapshot liveWorld=validationSnapshot(
-              capture,snapshotCenterX,snapshotCenterZ,observedCenterX,observedCenterZ);
-          Phase8IncrementalRunner.Report incremental=capture.movementRunner.process(
-              playerName,raw,liveWorld,capture.initialState,
+          Phase8IncrementalRunner.Report incremental=capture.movementRunner.processWithWorldProvider(
+              playerName,
+              raw,
+              sequence -> capture.clientWorld.snapshotAtOrBefore(sequence),
+              capture.initialState,
               capture.initialStateReceivedNanos,
               new Vec3(snapshotCenterX,snapshotCenterY,snapshotCenterZ));
           Phase8LiveValidation.Report report=new Phase8LiveValidation.Report(
