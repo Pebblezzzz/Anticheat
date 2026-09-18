@@ -26,6 +26,29 @@ class LiveClientWorldReplicaTest {
   }
 
   @Test
+  void snapshotAtOrBeforeUsesLatestAcknowledgedCheckpoint() {
+    var replica = new LiveClientWorldReplica(Contracts.TARGET_VERSION, -64, 319);
+    replica.queueChunk(10L, emptyFullChunk(0, 0), true, ClientVersion.V_1_21_11);
+    replica.openBarrier((short) -11);
+    assertTrue(replica.acknowledge((short) -11, 20L));
+
+    replica.queueBlock(30L, new Pos(1, 64, 1), stone());
+    replica.openBarrier((short) -12);
+    assertTrue(replica.acknowledge((short) -12, 40L));
+
+    assertNull(replica.snapshotAtOrBefore(19L));
+    var first = replica.snapshotAtOrBefore(20L);
+    assertNotNull(first);
+    assertEquals(20L, first.causalSequence());
+    assertNull(first.blockAtOrNull(1, 64, 1));
+
+    var second = replica.snapshotAtOrBefore(40L);
+    assertNotNull(second);
+    assertEquals(40L, second.causalSequence());
+    assertEquals(stone(), second.blockAtOrNull(1, 64, 1));
+  }
+
+  @Test
   void fullChunkIsNotVisibleBeforeItsBarrierIsAcknowledged() {
     var replica = new LiveClientWorldReplica(Contracts.TARGET_VERSION, -64, 319);
     replica.queueChunk(10L, emptyFullChunk(0, 0), true, ClientVersion.V_1_21_9);
