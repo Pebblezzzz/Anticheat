@@ -63,6 +63,7 @@ public final class Phase8IncrementalRunner {
   private boolean reanchorRequired;
   private boolean poisoned;
   private String poisonReason = "";
+  private String reanchorReason = "";
   private Continuation continuation = Continuation.UNINITIALIZED;
 
   public Phase8IncrementalRunner(int maximumCandidates, long epochNanos) {
@@ -101,6 +102,7 @@ public final class Phase8IncrementalRunner {
     this.reanchorRequired = false;
     this.poisoned = false;
     this.poisonReason = "";
+    this.reanchorReason = "";
     this.continuation = Continuation.UNINITIALIZED;
   }
 
@@ -211,23 +213,25 @@ public final class Phase8IncrementalRunner {
 
       if (event instanceof Packets.Velocity) {
         trackedState = after;
-        poison("server velocity was observed; live application timing is not represented by the incremental core");
+        reanchorRequired = true;
+        reanchorReason = "server velocity was observed; live application timing is not yet represented by the incremental core";
         continuation = Continuation.UNCERTAIN;
         continue;
       }
 
       if (event.mutatesWorld()) {
         trackedState = after;
-        poison("client-world mutation observed; historical collision state must be replayed before continuing");
+        reanchorRequired = true;
+        reanchorReason = "client-world mutation observed; historical collision state must be replayed before continuing";
         continuation = Continuation.UNCERTAIN;
         continue;
       }
 
       if (event instanceof Packets.WorldTransactionAck) {
         trackedState = after;
-        if (poisoned && poisonReason.contains("client-world mutation")) {
-          reanchorRequired = true;
-          clearPoison();
+        if (reanchorRequired && reanchorReason.contains("client-world mutation")) {
+          // The live acknowledged snapshot is authoritative from this point onward;
+          // the next movement is re-anchored so no historical world transition is guessed.
         }
         continue;
       }
@@ -313,7 +317,9 @@ public final class Phase8IncrementalRunner {
         String reason = waitingForTeleport
             ? "waiting for post-correction replay anchor"
             : reanchorRequired
-                ? "fresh movement anchor required after a synchronization-affecting transition"
+                ? (reanchorReason.isBlank()
+                    ? "fresh movement anchor required after a synchronization-affecting transition"
+                    : reanchorReason)
                 : poisoned
                     ? poisonReason
                     : "no authoritative live replay anchor is available";
@@ -324,6 +330,8 @@ public final class Phase8IncrementalRunner {
         lastMovementTick = movementTick;
         if (!waitingForTeleport && anchorState != null) {
           anchorCandidates(after, movementTick, world);
+          reanchorRequired = false;
+          reanchorReason = "";
         }
         continue;
       }
@@ -689,6 +697,7 @@ public final class Phase8IncrementalRunner {
   private void clearPoison() {
     poisoned = false;
     poisonReason = "";
+    reanchorReason = "";
     if (!waitingForTeleport && !reanchorRequired && !candidates.isEmpty()) {
       continuation = Continuation.ACTIVE;
     }
