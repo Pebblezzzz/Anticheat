@@ -816,28 +816,38 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     return debugPlayers.getOrDefault(playerId,DebugLevel.OFF);
   }
 
-  private boolean shouldLogDebugSummary(Capture capture,boolean important){
+  private boolean shouldLogDebugSummary(Capture capture,Phase8MovementValidation.Verdict verdict,String reason){
     if(debugLevel(capture.playerId)!=DebugLevel.SUMMARY)return false;
     long now=System.nanoTime();
+    boolean changed=verdict!=capture.lastDebugSummaryVerdict
+        || !Objects.equals(reason,capture.lastDebugSummaryReason);
+    boolean important=verdict==Phase8MovementValidation.Verdict.IMPOSSIBLE;
     long last=capture.lastDebugSummaryNanos;
-    if(important||last<0L||now-last>=1_000_000_000L){
+    if(important||changed||last<0L||now-last>=5_000_000_000L){
       capture.lastDebugSummaryNanos=now;
+      capture.lastDebugSummaryVerdict=verdict;
+      capture.lastDebugSummaryReason=reason;
       return true;
     }
     return false;
   }
 
   private void logValidationSummary(Capture capture,String playerName,Phase8LiveValidation.Report report){
-    Phase8MovementValidation.Result latest=report.results().stream()
-        .filter(result -> result.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE)
-        .findFirst()
-        .orElseGet(() -> report.results().stream()
-            .filter(result -> result.verdict()==Phase8MovementValidation.Verdict.UNCERTAIN)
-            .findFirst()
-            .orElse(report.results().getLast()));
+    if(report.results().isEmpty())return;
+
+    Phase8MovementValidation.Result latest=report.results().getLast();
+    for(Phase8MovementValidation.Result result:report.results()){
+      if(result.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE)latest=result;
+    }
+    if(latest.verdict()!=Phase8MovementValidation.Verdict.IMPOSSIBLE){
+      for(Phase8MovementValidation.Result result:report.results()){
+        if(result.verdict()==Phase8MovementValidation.Verdict.UNCERTAIN)latest=result;
+      }
+    }
+
     Phase8MovementValidation.Evidence e=latest.evidence();
-    boolean important=latest.verdict()!=Phase8MovementValidation.Verdict.POSSIBLE;
-    if(!shouldLogDebugSummary(capture,important))return;
+    String reason=e.eliminationReason();
+    if(!shouldLogDebugSummary(capture,latest.verdict(),reason))return;
 
     String closest=e.closestCandidate().map(candidate->
         "id="+candidate.candidateId()
@@ -1068,6 +1078,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final AtomicLong multiMovementPackets=new AtomicLong();
     final AtomicLong lastWorldBarrierNanos=new AtomicLong(Long.MIN_VALUE);
     volatile long lastDebugSummaryNanos=-1L;
+    volatile Phase8MovementValidation.Verdict lastDebugSummaryVerdict;
+    volatile String lastDebugSummaryReason;
     volatile Vec3 lastDebugMovePosition;
     final List<RawPacket> packets=new ArrayList<>();
     final ClientTickTracker clientTickTracker=new ClientTickTracker();
