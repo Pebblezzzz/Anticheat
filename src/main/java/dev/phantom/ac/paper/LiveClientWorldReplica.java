@@ -251,6 +251,31 @@ final class LiveClientWorldReplica {
       return localChunks.containsKey(new ChunkKey(chunkX, chunkZ));
     }
 
+    @Override public String coverageDetailAt(int x, int y, int z) {
+      if (y < backendMinY || y > backendMaxY) return "UNLOADED";
+      ChunkKey key = new ChunkKey(Math.floorDiv(x, 16), Math.floorDiv(z, 16));
+      ChunkEntry entry = localChunks.get(key);
+      if (entry == null || !entry.complete()) return "UNLOADED chunk=" + key;
+      Pos position = new Pos(x, y, z);
+      Map<Pos, BlockState> overlay = overlays.get(key);
+      if (overlay != null && overlay.containsKey(position)) {
+        BlockState state = overlay.get(position);
+        return state.isUnsupported()
+            ? "UNSUPPORTED overlayBlock=" + state.blockId()
+            : "KNOWN overlayBlock=" + state.blockId();
+      }
+      WrappedBlockState raw = rawState(entry, x, y, z);
+      if (raw == null || raw.getType().isAir()) return "KNOWN air";
+      BlockState state = coreState(entry.clientVersion(), raw);
+      if (state == null) return "UNSUPPORTED block=" + raw.getType().getName() + " globalId=" + raw.getGlobalId();
+      if (state.isUnsupported()) {
+        return "UNSUPPORTED block=" + raw.getType().getName()
+            + " globalId=" + raw.getGlobalId()
+            + " coreState=" + state.blockId();
+      }
+      return "KNOWN block=" + state.blockId();
+    }
+
     @Override public Coverage coverageAt(int x, int y, int z) {
       if (y < backendMinY || y > backendMaxY) return Coverage.UNLOADED;
       ChunkKey key = new ChunkKey(Math.floorDiv(x, 16), Math.floorDiv(z, 16));
