@@ -87,7 +87,7 @@ class Phase8HardeningRegressionTest {
         "blatant",capture(packets),256,exactTiming(),null,
         Player.initial(new Vec3(.5,64,.5)),0L);
     assertEquals(2,report.movementObservations(),report.results().toString());
-    assertEquals(Verdict.UNCERTAIN,report.results().getFirst().verdict());
+    assertEquals(Verdict.POSSIBLE,report.results().getFirst().verdict(),report.results().toString());
     assertEquals(Verdict.IMPOSSIBLE,report.results().get(1).verdict(),report.results().toString());
     assertEquals(0,report.results().get(1).evidence().matchingCandidateCount());
     assertTrue(report.results().get(1).evidence().eliminationReason().startsWith("all exhaustively modeled legitimate candidates"));
