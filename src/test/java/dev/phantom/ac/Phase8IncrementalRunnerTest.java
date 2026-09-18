@@ -65,7 +65,8 @@ class Phase8IncrementalRunnerTest {
     Phase8IncrementalRunner runner=new Phase8IncrementalRunner(4096,0);
     Player anchor=anchor();
     List<RawPacket> raw=List.of(
-        new RawPacket(1,10,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
+        new RawPacket(1,10,new PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+            Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
         new RawPacket(2,20,new ClientTickEnd()),
         new RawPacket(3,60,new Move(new Maths.Vec3(.5,64,.5),0f,0f,true,null)),
         new RawPacket(4,65,new Move(new Maths.Vec3(.6,64,.5),15f,0f,true,null))
