@@ -341,7 +341,10 @@ public final class CausalMovementPipeline {
         uncertainty.add("capture chronology is incomplete; missing or reordered packets cannot be treated as inactivity");
       }
 
-      if (!haveAuthoritativeSeed && frontier.candidates().isEmpty()) {
+      boolean exactLocalAuthority = movement.authority().quality() == AuthorityQuality.EXACT
+          && movement.authority().snapshot().isPresent()
+          && eventTiming.simulationClientTicks().isExact();
+      if (!haveAuthoritativeSeed && !exactLocalAuthority && frontier.candidates().isEmpty()) {
         uncertainty.add("no trusted authoritative replay anchor exists");
         SearchResult uncertain = uncertainSearch(frontier.candidates(),
             String.join("; ", uncertainty));
@@ -498,7 +501,13 @@ public final class CausalMovementPipeline {
         if (movement.move().clientTick() != null) {
           previousExplicitClientTick = movement.move().clientTick();
         }
+        // An IMPOSSIBLE observation is evidence, never a trusted state. Discard
+        // the prediction frontier so the next movement can restart from a fresh
+        // causally aligned authoritative snapshot instead of replaying an
+        // untrusted path all the way from join/epoch time.
+        frontier = Frontier.empty();
         trace.add("EVIDENCE REACHABILITY_CONTRADICTION");
+        trace.add("FRONTIER_RESET reason=IMPOSSIBLE; next movement may use exact authoritative local root");
       } else {
         recoveryRequired = recoveryRequired || eventTiming.uncertain();
         trace.add("EVIDENCE UNCERTAIN " + advance.reasons());
@@ -1023,21 +1032,43 @@ public final class CausalMovementPipeline {
   }
 
   private static Optional<Candidate> rootCandidate(
-      Player anchor,
+      Player fallbackAnchor,
       MovementEvent movement,
       int maximumCandidates) {
     long target = movement.timing().simulationClientTicks().min();
-    if (target < 0 || target > Phase6Reachability.MAX_HORIZON_TICKS) return Optional.empty();
+    if (target < 0) return Optional.empty();
 
-    /* The simulation receives world state per client-visible simulation tick. */
+    Player anchor = fallbackAnchor;
+    long rootTick = 0L;
+    boolean localAuthoritativeRoot = movement.authority().quality() == AuthorityQuality.EXACT
+        && movement.authority().snapshot().isPresent()
+        && movement.timing().simulationClientTicks().isExact();
+
+    if (localAuthoritativeRoot) {
+      AuthoritativeSnapshot snapshot = movement.authority().snapshot().orElseThrow();
+      Player authoritative = playerFromAuthority(snapshot.context());
+      Player observedBefore = movement.stateFrame().before();
+      // PlayerContext has no server yaw/pitch. Rotation is a client-controlled
+      // movement input, so retain the immediately preceding client orientation
+      // while taking position/velocity/ground/context exclusively from authority.
+      anchor = withClientRotation(authoritative, observedBefore.yaw(), observedBefore.pitch());
+      rootTick = Math.max(0L, target - 1L);
+    }
+
+    if (target < rootTick || target - rootTick > Phase6Reachability.MAX_HORIZON_TICKS) {
+      return Optional.empty();
+    }
+
+    MovementEnvironment movementEnvironment =
+        localAuthoritativeRoot ? movementEnvironmentOf(anchor) : MovementEnvironment.dry(anchor.onGround(), false, false);
     Context context = new Context(
-        0,
+        rootTick,
         anchor,
-        Simulation.Environment.DRY,
+        simulationEnvironmentFor(movementEnvironment),
         anchor.attributes(),
         movementEffects(anchor),
         anchor.pose(),
-        MovementEnvironment.dry(anchor.onGround(), false, false),
+        movementEnvironment,
         anchor.pose() == Pose.SLEEPING,
         entityCollisionsFor(movement));
     return Optional.of(new Candidate(
@@ -1045,14 +1076,45 @@ public final class CausalMovementPipeline {
         context,
         new Phase6Reachability.Provenance(
             0,
-            -1,
-            0,
-            "ROOT_AUTHORITATIVE",
+            movement.authority().snapshot().map(AuthoritativeSnapshot::sequence).orElse(-1L),
+            rootTick,
+            localAuthoritativeRoot ? "LOCAL_AUTHORITATIVE_ROOT" : "ROOT_AUTHORITATIVE",
             "ROOT",
             "None",
-            List.of("explicit authoritative server anchor"),
+            List.of(localAuthoritativeRoot
+                ? "exact same-tick authoritative snapshot before movement; local root avoids long-horizon replay"
+                : "explicit authoritative server anchor"),
             1,
             List.of())));
+  }
+
+  private static Player withClientRotation(Player authoritative, float yaw, float pitch) {
+    return new Player(
+        authoritative.position(),
+        authoritative.velocity(),
+        yaw,
+        pitch,
+        authoritative.onGround(),
+        authoritative.gamemode(),
+        authoritative.effects(),
+        authoritative.awaitingTeleport(),
+        authoritative.uncertain(),
+        authoritative.input(),
+        authoritative.attributes(),
+        authoritative.pose(),
+        authoritative.environment(),
+        authoritative.clientTickRange(),
+        authoritative.provenance(),
+        authoritative.uncertaintyReasons());
+  }
+
+  private static MovementEnvironment movementEnvironmentOf(Player player) {
+    return switch (player.environment()) {
+      case WATER -> MovementEnvironment.vanillaWater(player.onGround(), false, false, player.pose() == Pose.SWIMMING);
+      case LAVA -> MovementEnvironment.vanillaLava(player.onGround(), false, false);
+      case CLIMBABLE -> MovementEnvironment.vanillaClimbable(player.onGround(), false, false);
+      case DRY -> MovementEnvironment.dry(player.onGround(), false, false);
+    };
   }
 
   private static EntityCollisions entityCollisionsFor(MovementEvent movement) {
