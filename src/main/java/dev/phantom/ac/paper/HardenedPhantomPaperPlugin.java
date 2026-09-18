@@ -360,9 +360,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           case LAVA -> State.Environment.LAVA;
           case NONE -> env.climbable()?State.Environment.CLIMBABLE:State.Environment.DRY;
         };
+        org.bukkit.util.Vector velocity=player.getVelocity();
         capture.initialState=new State.Player(
             vector(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()),
-            Vec3.ZERO,player.getLocation().getYaw(),player.getLocation().getPitch(),player.isOnGround(),
+            vector(velocity.getX(),velocity.getY(),velocity.getZ()),player.getLocation().getYaw(),player.getLocation().getPitch(),player.isOnGround(),
             player.getGameMode().name().toLowerCase(Locale.ROOT),effects,java.util.OptionalInt.empty(),false,
             java.util.Optional.empty(),new dev.phantom.ac.Simulation.Attributes(movementSpeed),pose,stateEnvironment,
             State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
