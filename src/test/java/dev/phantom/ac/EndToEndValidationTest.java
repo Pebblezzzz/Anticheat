@@ -38,7 +38,9 @@ class EndToEndValidationTest {
     LiveValidation.Report report=LiveValidation.analyze(timeline,4096);
     assertEquals(3,report.movementObservations());
     assertTrue(report.timelineEvents()>=4);
-    assertTrue(report.anchoredObservations()>=1);
+    // No PlayerContext or explicit server anchor is present in this legacy replay;
+    // the causal pipeline must not manufacture one from client movement alone.
+    assertEquals(0,report.anchoredObservations());
     assertEquals(0,report.impossibleFindings(),report.findings().toString());
     assertTrue(report.uncertainFindings()>=2,report.findings().toString());
   }
