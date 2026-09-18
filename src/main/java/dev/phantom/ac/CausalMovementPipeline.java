@@ -413,7 +413,8 @@ public final class CausalMovementPipeline {
         Optional<Candidate> root = rootCandidate(
             initialAnchor,
             movement,
-            maximumCandidates);
+            maximumCandidates,
+            preferLocalAuthoritativeRoot);
         if (root.isEmpty()) {
           uncertainty.add("authoritative local root is outside the finite causal horizon");
           SearchResult uncertain = uncertainSearch(Set.of(), String.join("; ", uncertainty));
@@ -1170,13 +1171,15 @@ public final class CausalMovementPipeline {
   private static Optional<Candidate> rootCandidate(
       Player fallbackAnchor,
       MovementEvent movement,
-      int maximumCandidates) {
+      int maximumCandidates,
+      boolean useLocalAuthoritativeRoot) {
     long target = movement.timing().simulationClientTicks().min();
     if (target < 0) return Optional.empty();
 
     Player anchor = fallbackAnchor;
     long rootTick = 0L;
-    boolean localAuthoritativeRoot = movement.authority().quality() == AuthorityQuality.EXACT
+    boolean localAuthoritativeRoot = useLocalAuthoritativeRoot
+        && movement.authority().quality() == AuthorityQuality.EXACT
         && movement.authority().snapshot().isPresent();
 
     if (localAuthoritativeRoot) {
