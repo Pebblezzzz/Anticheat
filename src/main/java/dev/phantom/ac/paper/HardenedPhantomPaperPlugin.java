@@ -269,8 +269,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     double movementSpeed=movement==null?0.1:movement.getValue();
     Phase5Mechanics.MovementEnvironment env=Phase5Mechanics.MovementEnvironment.dry(player.isOnGround(),player.isSprinting(),player.isSneaking());
     State.Environment stateEnvironment=State.Environment.DRY;
+    org.bukkit.util.Vector velocity=player.getVelocity();
     return new State.Player(vector(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()),
-        Vec3.ZERO,player.getLocation().getYaw(),player.getLocation().getPitch(),player.isOnGround(),
+        vector(velocity.getX(),velocity.getY(),velocity.getZ()),player.getLocation().getYaw(),player.getLocation().getPitch(),player.isOnGround(),
         player.getGameMode().name().toLowerCase(Locale.ROOT),effects,OptionalInt.empty(),false,
         Optional.empty(),new dev.phantom.ac.Simulation.Attributes(movementSpeed),pose,stateEnvironment,
         State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
