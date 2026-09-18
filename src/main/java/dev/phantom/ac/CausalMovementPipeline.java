@@ -479,12 +479,18 @@ public final class CausalMovementPipeline {
        * Re-anchor only when the frontier itself is far away; this avoids replacing
        * a healthy frontier on every movement after the original anchor becomes old.
        */
+      boolean frontierCoverageIncomplete =
+          !frontier.candidates().isEmpty()
+              && frontier.candidates().stream()
+                  .anyMatch(candidate ->
+                      !movement.world().fullyKnown(
+                          playerCollisionBox(candidate.context().player())));
       boolean frontierFarFromLocalAuthority =
           localAuthoritativeRootAvailable
               && frontierFarFromLocalAuthority(frontier, movement, 32.0);
       if (!frontier.candidates().isEmpty()
           && preferLocalAuthoritativeRoot
-          && frontierFarFromLocalAuthority
+          && (frontierFarFromLocalAuthority || frontierCoverageIncomplete)
           && !recoveryRequired) {
         Optional<Candidate> refreshedRoot =
             rootCandidate(initialAnchor, movement, maximumCandidates, true);
@@ -492,9 +498,15 @@ public final class CausalMovementPipeline {
           Candidate root = refreshedRoot.get();
           double oldDistance = nearestFrontierAuthorityDistance(frontier, movement);
           frontier = new Frontier(Set.of(root), root.context().simulationTick(), true);
-          trace.add("FRONTIER_REFRESH reason=FRONTIER_FAR_FROM_LOCAL_AUTHORITY distance="
+          String reason = frontierCoverageIncomplete
+              ? "FRONTIER_WORLD_COVERAGE_INCOMPLETE"
+              : "FRONTIER_FAR_FROM_LOCAL_AUTHORITY";
+          trace.add("FRONTIER_REFRESH reason=" + reason
+              + " distance="
               +String.format(Locale.ROOT, "%.3f", oldDistance));
-          assumptions.add("stale prediction frontier was re-anchored from the fresh local authoritative snapshot");
+          assumptions.add(frontierCoverageIncomplete
+              ? "prediction frontier was re-anchored because its current client-world coverage was incomplete"
+              : "stale prediction frontier was re-anchored from the fresh local authoritative snapshot");
         } else {
           uncertainty.add("fresh local authoritative state exists but cannot be represented inside the finite Phase 6 horizon");
           trace.add("FRONTIER_REFRESH_FAILED reason=LOCAL_AUTHORITY_ROOT_UNREPRESENTABLE");
