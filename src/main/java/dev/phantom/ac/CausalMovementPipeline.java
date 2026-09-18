@@ -112,6 +112,7 @@ public final class CausalMovementPipeline {
       Phase7Timing.EventTiming timing,
       State.StateFrame stateFrame,
       AuthorityAlignment authority,
+      Optional<AuthoritativeSnapshot> simulationAuthority,
       WorldSnapshot world,
       boolean liveWorldUsed,
       boolean chronologyClean) {}
@@ -176,6 +177,12 @@ public final class CausalMovementPipeline {
           authorities,
           initialAnchor,
           initialAnchorReceivedNanos);
+      Optional<AuthoritativeSnapshot> simulationAuthority =
+          selectSimulationAuthority(
+              event,
+              authorities,
+              initialAnchor,
+              initialAnchorReceivedNanos);
       /*
        * The compact live replica is safe only when its acknowledgement boundary
        * is no later than this movement and no later world mutation is retained
@@ -199,6 +206,7 @@ public final class CausalMovementPipeline {
           eventTiming,
           stateFrame,
           authority,
+          simulationAuthority,
           world,
           useLiveWorld,
           chronologyClean));
@@ -1212,11 +1220,10 @@ public final class CausalMovementPipeline {
   private static Optional<Candidate> rootCandidateForTarget(
       MovementEvent movement,
       long target) {
-    if (target < 0
-        || causallyFreshLocalAuthority(movement, 1L, -1L).isEmpty()) {
+    if (target < 0 || movement.simulationAuthority().isEmpty()) {
       return Optional.empty();
     }
-    AuthoritativeSnapshot snapshot = movement.authority().snapshot().orElseThrow();
+    AuthoritativeSnapshot snapshot = movement.simulationAuthority().orElseThrow();
     Player authoritative = playerFromAuthority(snapshot.context());
     Player observedBefore = movement.stateFrame().before();
     Player anchor = withClientRotation(authoritative, observedBefore.yaw(), observedBefore.pitch());
@@ -1262,12 +1269,70 @@ public final class CausalMovementPipeline {
       MovementEvent movement,
       long maxServerTickAge,
       long minimumSequenceExclusive) {
-    return movement.authority().snapshot()
+    return movement.simulationAuthority()
         .filter(snapshot -> snapshot.sequence() > minimumSequenceExclusive)
         .filter(snapshot -> snapshot.sequence() < movement.event().packet().sequence())
         .filter(snapshot -> snapshot.receivedNanos() <= movement.event().packet().receivedNanos())
-        .filter(snapshot -> snapshot.serverTick() <= movement.event().serverTick())
+        .filter(snapshot -> snapshot.serverTick() < movement.event().serverTick())
         .filter(snapshot -> movement.event().serverTick() - snapshot.serverTick() <= maxServerTickAge);
+  }
+
+  /**
+   * Selects the authoritative snapshot that is safe to use as the pre-movement
+   * physics state. A same-tick PlayerContext may already contain the server's
+   * post-movement position because the live capture runs once per server tick.
+   * Therefore Phase 6 roots from the latest causally preceding server tick.
+   *
+   * <p>The same-tick snapshot remains in {@link AuthorityAlignment} for
+   * corroboration and diagnostics; it is never silently discarded.</p>
+   */
+  private static Optional<AuthoritativeSnapshot> selectSimulationAuthority(
+      Timeline.Event movement,
+      List<AuthoritativeSnapshot> authorities,
+      Player initialAnchor,
+      long initialAnchorReceivedNanos) {
+    long sequence = movement.packet().sequence();
+    long received = movement.packet().receivedNanos();
+    long serverTick = movement.serverTick();
+
+    Optional<AuthoritativeSnapshot> previous = authorities.stream()
+        .filter(snapshot -> snapshot.sequence() < sequence)
+        .filter(snapshot -> snapshot.receivedNanos() <= received)
+        .filter(snapshot -> snapshot.serverTick() < serverTick)
+        .filter(snapshot -> serverTick - snapshot.serverTick() <= 1L)
+        .max(Comparator.comparingLong(AuthoritativeSnapshot::serverTick)
+            .thenComparingLong(AuthoritativeSnapshot::receivedNanos)
+            .thenComparingLong(AuthoritativeSnapshot::sequence));
+    if (previous.isPresent()) return previous;
+
+    /*
+     * Very early captures may have no preceding per-tick PlayerContext. Retain a
+     * supplied immutable join anchor as the only safe fallback; tests and short
+     * captures can therefore still establish their first exact root.
+     */
+    if (initialAnchor != null
+        && !initialAnchor.uncertain()
+        && initialAnchorReceivedNanos >= 0
+        && received >= initialAnchorReceivedNanos) {
+      return Optional.of(new AuthoritativeSnapshot(
+          Long.MAX_VALUE,
+          initialAnchorReceivedNanos,
+          Math.max(0L, serverTick - 1L),
+          contextFromAnchor(initialAnchor)));
+    }
+
+    /*
+     * Backward compatibility for captures that contain exactly one same-tick
+     * authoritative sample and no prior sample. This is deliberately last:
+     * it preserves old captures without treating a same-tick live capture as the
+     * normal simulation root.
+     */
+    return authorities.stream()
+        .filter(snapshot -> snapshot.sequence() < sequence)
+        .filter(snapshot -> snapshot.receivedNanos() <= received)
+        .filter(snapshot -> snapshot.serverTick() == serverTick)
+        .max(Comparator.comparingLong(AuthoritativeSnapshot::receivedNanos)
+            .thenComparingLong(AuthoritativeSnapshot::sequence));
   }
 
   private static boolean frontierFarFromLocalAuthority(
@@ -1319,11 +1384,13 @@ public final class CausalMovementPipeline {
 
     Player anchor = fallbackAnchor;
     long rootTick = 0L;
+    Optional<AuthoritativeSnapshot> simulationAuthority =
+        movement.simulationAuthority();
     boolean localAuthoritativeRoot = useLocalAuthoritativeRoot
-        && causallyFreshLocalAuthority(movement, 1L, -1L).isPresent();
+        && simulationAuthority.isPresent();
 
     if (localAuthoritativeRoot) {
-      AuthoritativeSnapshot snapshot = movement.authority().snapshot().orElseThrow();
+      AuthoritativeSnapshot snapshot = simulationAuthority.orElseThrow();
       Player authoritative = playerFromAuthority(snapshot.context());
       Player observedBefore = movement.stateFrame().before();
       // PlayerContext has no server yaw/pitch. Rotation is a client-controlled
