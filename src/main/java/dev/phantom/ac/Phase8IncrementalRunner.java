@@ -338,11 +338,6 @@ public final class Phase8IncrementalRunner {
         retargetCandidateRotation(yaw, pitch);
       }
 
-      if (move.position() == null) {
-        trackedState = after;
-        continue;
-      }
-
       long movementTick;
       boolean exactTick;
       String timingReason;
@@ -369,6 +364,9 @@ public final class Phase8IncrementalRunner {
       String replayReference = "live:incremental:" + packet.sequence();
       String worldReference = "incremental-client-world:chunks=" + world.loadedChunks().size();
 
+      // Cheap authoritative/state evidence is evaluated for every movement-class
+      // packet, including rotation-only and heartbeat packets. Full trajectory
+      // prediction remains limited to packets that actually carry coordinates.
       if (!exactTick) {
         results.add(uncertainResult(
             playerId, packet.sequence(), serverTick, before, after, world, worldReference, timing,
@@ -378,6 +376,34 @@ public final class Phase8IncrementalRunner {
         continuation = Continuation.UNCERTAIN;
         lastMovementTick = movementTick;
         continue;
+      }
+
+      if (hardMovementEvidenceEligible(after)
+          && !waitingForTeleport
+          && packetIndex == latestMovementIndex
+          && !hasFutureAuthoritativeTransition(normalized, packetIndex + 1)
+          && recordAirHover(after.position(), movementTick)) {
+        double verticalOffset = authoritativeServerPosition == null
+            ? Double.NaN
+            : after.position().y() - authoritativeServerPosition.y();
+        results.add(Phase8MovementValidation.authoritativeImpossible(
+            playerId, serverTick, before, after, world, worldReference, timing,
+            "AUTHORITATIVE_FLIGHT_STATE_CONTRADICTION",
+            "client remained airborne at a nearly constant Y while the authoritative server state "
+                + "does not permit flight for " + airHoverStreak + " consecutive 1:1 client ticks",
+            List.of(
+                "authoritativeCanFly=" + authoritativeCanFly,
+                "authoritativeFlying=" + authoritativeFlying,
+                "authoritativeOnGround=" + authoritativeOnGround,
+                "authoritativeServerPosition=" + authoritativeServerPosition,
+                "authoritativeServerVerticalVelocity=" + authoritativeServerVerticalVelocity,
+                "clientPosition=" + after.position(),
+                "verticalOffsetFromServer=" + String.format(Locale.ROOT, "%.6f", verticalOffset),
+                "consecutiveHoverTicks=" + airHoverStreak,
+                "positionBearingPacket=" + (move.position() != null),
+                "this state contradiction does not require ClientInput",
+                "finite candidate-search completeness is not required for this signal"),
+            replayReference + ":hard-flight"));
       }
 
       // A persistent contradiction between authoritative server collision state
@@ -398,7 +424,8 @@ public final class Phase8IncrementalRunner {
                 + " consecutive 1:1 client ticks",
             List.of(
                 "authoritativeServerPosition=" + authoritativeServerPosition,
-                "clientReportedPosition=" + move.position(),
+                "clientReportedPosition=" + after.position(),
+                "positionBearingPacket=" + (move.position() != null),
                 "positionBearingPacket=" + (move.position() != null),
                 "positionDistance=" + String.format(Locale.ROOT, "%.6f", distance),
                 "consecutiveDivergenceTicks=" + serverDivergenceStreak,
@@ -426,6 +453,11 @@ public final class Phase8IncrementalRunner {
                 "movementTick=" + movementTick,
                 "this signal is independent of finite candidate-search completeness"),
             replayReference + ":hard-ground"));
+      }
+
+      if (move.position() == null) {
+        trackedState = after;
+        continue;
       }
 
       if (hardMovementEvidenceEligible(after)
