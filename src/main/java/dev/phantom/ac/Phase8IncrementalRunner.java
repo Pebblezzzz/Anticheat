@@ -363,7 +363,8 @@ public final class Phase8IncrementalRunner {
       // A persistent contradiction between authoritative server collision state
       // and the client-reported ground bit is independently actionable evidence.
       // It must not be swallowed merely because world/timing replay is uncertain.
-      if (packetIndex == latestMovementIndex
+      if (!waitingForTeleport
+          && packetIndex == latestMovementIndex
           && !hasFutureAuthoritativeTransition(normalized, packetIndex + 1)
           && recordServerDivergence(move.position(), packet.sequence())) {
         double distance = authoritativeServerDistance(move.position());
@@ -384,7 +385,8 @@ public final class Phase8IncrementalRunner {
             replayReference));
       }
 
-      if (!hasFutureAuthoritativeTransition(normalized, packetIndex + 1)
+      if (!waitingForTeleport
+          && !hasFutureAuthoritativeTransition(normalized, packetIndex + 1)
           && recordGroundContradiction(move.onGround(), movementTick)) {
         results.add(Phase8MovementValidation.authoritativeImpossible(
             playerId, serverTick, before, after, world, worldReference, timing,
