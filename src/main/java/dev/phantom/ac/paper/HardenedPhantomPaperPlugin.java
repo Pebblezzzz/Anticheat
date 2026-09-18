@@ -603,6 +603,23 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
                 +" frontierRetained="+incremental.candidateFrontierRetained());
           }
 
+          if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))
+              && report.results().stream().noneMatch(r -> r.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE)){
+            getLogger().info("[PhantomAC][PHASE8][NO_INDEPENDENT_FLAG] player="+playerName
+                +" packetBatch="+incremental.packetsProcessed()
+                +" movementObservations="+incremental.movementObservations()
+                +" predictionPossible="+incremental.possible()
+                +" predictionUncertain="+incremental.uncertain()
+                +" predictionImpossible="+incremental.impossible()
+                +" continuation="+incremental.continuation()
+                +" candidateCount="+capture.movementRunner.candidateCount()
+                +" authority={serverPos="+capture.lastAuthoritativePosition
+                +",serverVel="+capture.lastAuthoritativeVelocity
+                +",serverGround="+capture.lastAuthoritativeOnGround
+                +",canFly="+capture.lastAuthoritativeCanFly
+                +",flying="+capture.lastAuthoritativeFlying+"}"
+                +" paperRejectionsInWindow="+capture.paperMoveFailureCount);
+          }
           getServer().getScheduler().runTask(this,()->applyResult(capture,report));
         }catch(RuntimeException failure){
           capture.validationRunning.set(false);
