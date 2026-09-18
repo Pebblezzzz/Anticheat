@@ -304,7 +304,7 @@ public final class Phase8IncrementalRunner {
 
       if (movementTick < lastMovementTick) {
         results.add(uncertainResult(
-            packet.sequence(), serverTick, before, after, world, worldReference, timing,
+            playerId, packet.sequence(), serverTick, before, after, world, worldReference, timing,
             "movement client tick regressed; chronology cannot be inverted",
             replayReference));
         poison("movement client tick regressed");
