@@ -74,7 +74,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     @Override public void onPacketReceive(PacketReceiveEvent event){
       Object sender=event.getPlayer();
       if(!(sender instanceof Player player))return;
-      Capture capture=captures.computeIfAbsent(player.getUniqueId(),ignored->new Capture(player.getUniqueId(),System.nanoTime()));
+      Capture capture=captures.computeIfAbsent(player.getUniqueId(),ignored->new Capture(player.getUniqueId(),System.nanoTime(),validationBudget));
 
       if(event.getPacketType()==PacketType.Play.Client.CLIENT_TICK_END){
         capture.clientTickTracker.onClientTickEnd();
@@ -193,7 +193,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   @EventHandler public void onJoin(PlayerJoinEvent event){
-    Capture capture=new Capture(event.getPlayer().getUniqueId(),System.nanoTime());
+    Capture capture=new Capture(event.getPlayer().getUniqueId(),System.nanoTime(),validationBudget);
     capture.updateServerPosition(event.getPlayer());
     captures.put(event.getPlayer().getUniqueId(),capture);
   }
@@ -596,7 +596,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final ClientTickTracker clientTickTracker=new ClientTickTracker();
     final AtomicBoolean validationRunning=new AtomicBoolean();
     final LiveClientWorldReplica clientWorld=new LiveClientWorldReplica(Contracts.TARGET_VERSION,-64,319);
-    final Phase8IncrementalRunner movementRunner=new Phase8IncrementalRunner(validationBudget,epoch);
+    final Phase8IncrementalRunner movementRunner;
     volatile State.Player initialState;
     final Set<Short> outstandingTransactions=ConcurrentHashMap.newKeySet();
     final Set<Short> reservedTransactions=ConcurrentHashMap.newKeySet();
@@ -607,7 +607,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     volatile int minY=-64,maxY=319;
     volatile double lastServerX,lastServerY,lastServerZ;
 
-    Capture(UUID id,long epoch){playerId=id;epochNanos=epoch;}
+    Capture(UUID id,long epoch,int candidateBudget){
+      playerId=id;
+      epochNanos=epoch;
+      movementRunner=new Phase8IncrementalRunner(candidateBudget,epoch);
+    }
 
     void updateServerPosition(Player player){
       org.bukkit.Location location=player.getLocation();
