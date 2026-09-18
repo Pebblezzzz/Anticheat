@@ -68,9 +68,14 @@ public final class Phase8IncrementalRunner {
   // Authoritative server-side ground state is kept separately from the client
   // movement packet's reported onGround bit. The latter is evidence, not truth.
   private Boolean authoritativeOnGround;
+  private Maths.Vec3 authoritativeServerPosition;
   private int groundContradictionStreak;
   private long lastGroundContradictionTick = -1L;
+  private int serverDivergenceStreak;
+  private long lastServerDivergenceTick = -1L;
   private static final int HARD_GROUND_CONTRADICTION_TICKS = 3;
+  private static final int HARD_SERVER_DIVERGENCE_TICKS = 3;
+  private static final double HARD_SERVER_DIVERGENCE_BLOCKS = 3.0;
   private Continuation continuation = Continuation.UNINITIALIZED;
 
   public Phase8IncrementalRunner(int maximumCandidates, long epochNanos) {
@@ -112,8 +117,11 @@ public final class Phase8IncrementalRunner {
     this.poisonReason = "";
     this.reanchorReason = "";
     this.authoritativeOnGround = anchor.onGround();
+    this.authoritativeServerPosition = null;
     this.groundContradictionStreak = 0;
     this.lastGroundContradictionTick = -1L;
+    this.serverDivergenceStreak = 0;
+    this.lastServerDivergenceTick = -1L;
     this.continuation = Continuation.UNINITIALIZED;
   }
 
@@ -127,9 +135,24 @@ public final class Phase8IncrementalRunner {
       List<Packets.RawPacket> raw,
       WorldSnapshot world,
       Player currentAnchor) {
+    return process(playerId, raw, world, currentAnchor, null);
+  }
+
+  /**
+   * Processes a live packet batch with an optional authoritative server position.
+   * The server position is only used for a sustained contradiction check; it is
+   * never promoted to the client's replay state.
+   */
+  public synchronized Report process(
+      String playerId,
+      List<Packets.RawPacket> raw,
+      WorldSnapshot world,
+      Player currentAnchor,
+      Maths.Vec3 authoritativeServerPosition) {
     Objects.requireNonNull(playerId);
     Objects.requireNonNull(raw);
     Objects.requireNonNull(world);
+    this.authoritativeServerPosition = authoritativeServerPosition;
 
     if (currentAnchor != null && (anchorState == null || !anchorState.equals(currentAnchor))) {
       reset(currentAnchor, epochNanos);
@@ -333,6 +356,25 @@ public final class Phase8IncrementalRunner {
       // A persistent contradiction between authoritative server collision state
       // and the client-reported ground bit is independently actionable evidence.
       // It must not be swallowed merely because world/timing replay is uncertain.
+      if (recordServerDivergence(move.position(), movementTick)) {
+        double distance = authoritativeServerDistance(move.position());
+        results.add(Phase8MovementValidation.authoritativeImpossible(
+            playerId, serverTick, before, after, world, worldReference, timing,
+            "AUTHORITATIVE_SERVER_POSITION_DIVERGENCE",
+            "client-reported position diverges from the authoritative server position by "
+                + String.format(Locale.ROOT, "%.2f", distance)
+                + " blocks for " + serverDivergenceStreak
+                + " consecutive 1:1 client ticks",
+            List.of(
+                "authoritativeServerPosition=" + authoritativeServerPosition,
+                "clientReportedPosition=" + move.position(),
+                "positionDistance=" + String.format(Locale.ROOT, "%.6f", distance),
+                "consecutiveDivergenceTicks=" + serverDivergenceStreak,
+                "thresholdBlocks=" + HARD_SERVER_DIVERGENCE_BLOCKS,
+                "this signal is independent of finite candidate-search completeness"),
+            replayReference));
+      }
+
       if (recordGroundContradiction(move.onGround(), movementTick)) {
         results.add(Phase8MovementValidation.authoritativeImpossible(
             playerId, serverTick, before, after, world, worldReference, timing,
@@ -351,6 +393,7 @@ public final class Phase8IncrementalRunner {
 
       if (lastMovementTick >= 0 && movementTick == lastMovementTick) {
         resetGroundContradiction();
+        resetServerDivergence();
         results.add(uncertainResult(
             playerId, packet.sequence(), serverTick, before, after, world, worldReference,
             new Validation.SyncWindow(
@@ -369,6 +412,7 @@ public final class Phase8IncrementalRunner {
 
       if (movementTick < lastMovementTick) {
         resetGroundContradiction();
+        resetServerDivergence();
         results.add(uncertainResult(
             playerId, packet.sequence(), serverTick, before, after, world, worldReference, timing,
             "movement client tick regressed; chronology cannot be inverted",
@@ -613,6 +657,40 @@ public final class Phase8IncrementalRunner {
     }
     lastGroundContradictionTick = movementTick;
     return groundContradictionStreak >= HARD_GROUND_CONTRADICTION_TICKS;
+  }
+
+  private boolean recordServerDivergence(Maths.Vec3 clientPosition, long movementTick) {
+    if (authoritativeServerPosition == null || clientPosition == null) {
+      resetServerDivergence();
+      return false;
+    }
+
+    double distance = authoritativeServerDistance(clientPosition);
+    if (!Double.isFinite(distance) || distance <= HARD_SERVER_DIVERGENCE_BLOCKS) {
+      resetServerDivergence();
+      return false;
+    }
+    if (lastServerDivergenceTick == movementTick) return false;
+    if (lastServerDivergenceTick < 0 || movementTick == lastServerDivergenceTick + 1L) {
+      serverDivergenceStreak++;
+    } else {
+      serverDivergenceStreak = 1;
+    }
+    lastServerDivergenceTick = movementTick;
+    return serverDivergenceStreak >= HARD_SERVER_DIVERGENCE_TICKS;
+  }
+
+  private double authoritativeServerDistance(Maths.Vec3 clientPosition) {
+    if (authoritativeServerPosition == null || clientPosition == null) return Double.NaN;
+    double dx = clientPosition.x() - authoritativeServerPosition.x();
+    double dy = clientPosition.y() - authoritativeServerPosition.y();
+    double dz = clientPosition.z() - authoritativeServerPosition.z();
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+
+  private void resetServerDivergence() {
+    serverDivergenceStreak = 0;
+    lastServerDivergenceTick = -1L;
   }
 
   private void resetGroundContradiction() {
