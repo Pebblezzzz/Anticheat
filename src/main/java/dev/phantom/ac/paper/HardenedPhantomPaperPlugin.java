@@ -132,8 +132,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         int id=new WrapperPlayClientPong(event).getId();
         if(id>=0)return;
         short transaction=(short)id;
-        if(capture.outstandingTransactions.remove(transaction)&&capture.clientWorld.acknowledge(transaction)){
-          record(player,new Packets.WorldTransactionAck(transaction));
+        if(capture.outstandingTransactions.remove(transaction)){
+          long sequence=capture.sequence.incrementAndGet();
+          long receivedNanos=System.nanoTime();
+          if(capture.clientWorld.acknowledge(transaction,sequence)){
+            Packets.WorldTransactionAck ack=new Packets.WorldTransactionAck(transaction);
+            appendPacket(capture,new RawPacket(sequence,receivedNanos,ack,
+                Packets.CaptureProvenance.fromAdapter("paper-transaction-ack",ack,null)));
+          }
         }
       }
     }
@@ -159,8 +165,12 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         var blockPosition=packet.getBlockPosition();
         var pos=new dev.phantom.ac.world.Pos(blockPosition.getX(),blockPosition.getY(),blockPosition.getZ());
         var state=toCoreState(packet.getBlockState());
-        capture.clientWorld.queueBlock(pos,state);
-        recordBlockState(player,pos,state);
+        long sequence=capture.sequence.incrementAndGet();
+        long receivedNanos=System.nanoTime();
+        capture.clientWorld.queueBlock(sequence,pos,state);
+        Packets.BlockStateChange blockChange=new Packets.BlockStateChange(pos,state);
+        appendPacket(capture,new RawPacket(sequence,receivedNanos,blockChange,
+            Packets.CaptureProvenance.fromAdapter("paper-block-change",blockChange,null)));
         if(isNearBlock(capture,pos))event.getTasksAfterSend().add(()->requestWorldBarrier(player,capture));
       }else if(event.getPacketType()==PacketType.Play.Server.MULTI_BLOCK_CHANGE){
         var packet=new WrapperPlayServerMultiBlockChange(event);
@@ -168,16 +178,24 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         for(var change:packet.getBlocks()){
           var pos=new dev.phantom.ac.world.Pos(change.getX(),change.getY(),change.getZ());
           var state=toCoreState(change.getBlockState(event.getUser().getClientVersion()));
-          capture.clientWorld.queueBlock(pos,state);
-          recordBlockState(player,pos,state);
+          long sequence=capture.sequence.incrementAndGet();
+          long receivedNanos=System.nanoTime();
+          capture.clientWorld.queueBlock(sequence,pos,state);
+          Packets.BlockStateChange blockChange=new Packets.BlockStateChange(pos,state);
+          appendPacket(capture,new RawPacket(sequence,receivedNanos,blockChange,
+              Packets.CaptureProvenance.fromAdapter("paper-multi-block-change",blockChange,null)));
           near|=isNearBlock(capture,pos);
         }
         if(near)event.getTasksAfterSend().add(()->requestWorldBarrier(player,capture));
       }else if(event.getPacketType()==PacketType.Play.Server.UNLOAD_CHUNK){
         var packet=new WrapperPlayServerUnloadChunk(event);
         var chunk=new World.Chunk(packet.getChunkX(),packet.getChunkZ());
-        capture.clientWorld.queueUnload(new dev.phantom.ac.world.Chunk(packet.getChunkX(),packet.getChunkZ()));
-        record(player,new Packets.ChunkUnload(chunk));
+        long sequence=capture.sequence.incrementAndGet();
+        long receivedNanos=System.nanoTime();
+        capture.clientWorld.queueUnload(sequence,new dev.phantom.ac.world.Chunk(packet.getChunkX(),packet.getChunkZ()));
+        Packets.ChunkUnload unload=new Packets.ChunkUnload(chunk);
+        appendPacket(capture,new RawPacket(sequence,receivedNanos,unload,
+            Packets.CaptureProvenance.fromAdapter("paper-client-chunk-unload",unload,null)));
         if(isNearChunk(capture,packet.getChunkX(),packet.getChunkZ()))event.getTasksAfterSend().add(()->requestWorldBarrier(player,capture));
       }else if(event.getPacketType()==PacketType.Play.Server.CHUNK_DATA){
         var packet=new WrapperPlayServerChunkData(event);
@@ -186,7 +204,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         long receivedNanos=System.nanoTime();
         ClientVersion clientVersion=event.getUser().getClientVersion();
         capture.chunkPackets.incrementAndGet();
-        capture.clientWorld.queueChunk(column,column.isFullChunk(),clientVersion);
+        capture.clientWorld.queueChunk(sequence,column,column.isFullChunk(),clientVersion);
         if (Boolean.TRUE.equals(debugPlayers.get(player.getUniqueId()))) {
           getLogger().info("[PhantomAC][CHUNK] player=" + player.getName()
               + " chunk=" + column.getX() + "," + column.getZ()
