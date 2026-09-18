@@ -364,6 +364,7 @@ public final class CausalMovementPipeline {
 
       boolean localAuthoritativeRootAvailable = movement.authority().quality() == AuthorityQuality.EXACT
           && movement.authority().snapshot().isPresent();
+      boolean justRecovered = false;
       boolean preferLocalAuthoritativeRoot = localAuthoritativeRootAvailable
           && (initialAnchor == null
               || justRecovered
@@ -380,7 +381,6 @@ public final class CausalMovementPipeline {
         continue;
       }
 
-      boolean justRecovered = false;
       boolean recoveryCanClear = recoveryRequired
           && lastAmbiguitySequence >= 0
           && sequence > lastAmbiguitySequence
