@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import dev.phantom.ac.Maths.Vec3;
 import dev.phantom.ac.Packets.ChunkStates;
+import dev.phantom.ac.Packets.ClientInput;
+import dev.phantom.ac.Packets.ClientTickEnd;
 import dev.phantom.ac.Packets.Move;
 import dev.phantom.ac.Packets.Normalizer;
 import dev.phantom.ac.Packets.RawPacket;
