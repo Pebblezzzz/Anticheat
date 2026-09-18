@@ -269,9 +269,8 @@ final class LiveClientWorldReplica {
         ChunkKey key = new ChunkKey(
             Math.floorDiv(block.position().x(), 16),
             Math.floorDiv(block.position().z(), 16));
-        ChunkEntry entry = chunks.get(key);
-        if (entry == null || !entry.complete()) return;
-        blockOverlays.computeIfAbsent(key, ignored -> new HashMap<>()).put(block.position(), block.state());
+        blockOverlays.computeIfAbsent(key, ignored -> new HashMap<>())
+            .put(block.position(), block.state());
       }
       case UnloadMutation unload -> {
         chunks.remove(unload.chunk());
