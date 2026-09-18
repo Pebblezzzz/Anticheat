@@ -123,6 +123,24 @@ class Phase8IncrementalRunnerTest {
   }
 
   @Test
+  void unauthorizedFlightToggleProducesImmediateEvidenceWithoutMovementOrInput() {
+    Phase8IncrementalRunner runner=new Phase8IncrementalRunner(4096,0);
+    Player anchor=Player.initial(new Maths.Vec3(.5,64,.5));
+    List<RawPacket> raw=List.of(
+        new RawPacket(1,10,new PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+            Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),
+            new Maths.Vec3(.5,64,.5),Maths.Vec3.ZERO,false,false,false,List.of())),
+        new RawPacket(2,20,new Packets.FlightToggle(true,true))
+    );
+    var report=runner.process("flight-toggle",raw,
+        WorldSnapshot.builder(Contracts.TARGET_VERSION).build(),anchor);
+    assertTrue(report.results().stream().anyMatch(result ->
+        result.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE
+            && result.evidence().rule().equals("UNAUTHORIZED_FLIGHT_TOGGLE_ATTEMPT")),
+        report.results().toString());
+  }
+
+  @Test
   void stationaryAirborneStateCanProduceFlightEvidenceWithoutClientInput() {
     Phase8IncrementalRunner runner=new Phase8IncrementalRunner(4096,0);
     Player anchor=new Player(new Maths.Vec3(.5,67,.5),Maths.Vec3.ZERO,0f,0f,false,"survival",Map.of(),
