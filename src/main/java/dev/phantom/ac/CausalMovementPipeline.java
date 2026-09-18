@@ -516,7 +516,7 @@ public final class CausalMovementPipeline {
         frontier = new Frontier(Set.of(rootCandidate), rootCandidate.context().simulationTick(), true);
         rootedFromLocalAuthority = preferLocalAuthoritativeRoot;
         if (preferLocalAuthoritativeRoot) {
-          AuthoritativeSnapshot snapshot = movement.authority().snapshot().orElseThrow();
+          AuthoritativeSnapshot snapshot = movement.simulationAuthority().orElseThrow();
           trace.add("ROOT LOCAL_AUTHORITATIVE snapshotSeq=" + snapshot.sequence()
               + " serverTick=" + snapshot.serverTick()
               + " simulationTick=" + rootCandidate.context().simulationTick()
