@@ -82,8 +82,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       if(event.getPacketType()==PacketType.Play.Client.CLIENT_TICK_END){
         capture.clientTickTracker.onClientTickEnd();
         Packets.ClientTickEnd boundary=new Packets.ClientTickEnd();
+        Long authoritativeTick=capture.authoritativeServerTick.get()>=0
+            ?capture.authoritativeServerTick.get():null;
         appendPacket(capture,new RawPacket(capture.sequence.incrementAndGet(),System.nanoTime(),boundary,
-            Packets.CaptureProvenance.fromAdapter("paper-client-tick-end",boundary,null)));
+            Packets.CaptureProvenance.fromAdapter("paper-client-tick-end",boundary,authoritativeTick)));
         return;
       }
 
@@ -187,7 +189,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     getServer().getPluginManager().registerEvents(this,this);
     PacketEvents.getAPI().getEventManager().registerListener(listener);
     stateTask=getServer().getScheduler().runTaskTimer(this,this::captureLiveContext,1L,1L);
-    int interval=Math.max(1,getConfig().getInt("validation.interval-ticks",10));
+    int interval=Math.max(1,getConfig().getInt("validation.interval-ticks",1));
     validationTask=getServer().getScheduler().runTaskTimer(this,this::scheduleValidations,interval,interval);
     getLogger().info("[PhantomAC] Hardened Phase 8 adapter enabled");
   }
@@ -296,7 +298,16 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   private void applyAuthoritativeEventResult(Capture capture,Phase8MovementValidation.Result result){
     Phase8MovementValidation.Evidence evidence=result.evidence();
-    if(!capture.validationGate.accept(evidence.replayReference(),result.verdict()))return;
+    boolean accepted=capture.validationGate.accept(evidence.replayReference(),result.verdict());
+    if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
+      getLogger().info("[PhantomAC][PHASE8][AUTHORITATIVE_RESULT] player="+capture.playerId
+          +" rule="+evidence.rule()
+          +" verdict="+result.verdict()
+          +" acceptedByGate="+accepted
+          +" tick="+evidence.serverTick()
+          +" replay="+evidence.replayReference());
+    }
+    if(!accepted)return;
     var accumulated=capture.accumulator.accept(evidence,
         new Phase8MovementValidation.Config(1,20,alertsEnabled,true));
     capture.processedResults++;
@@ -404,6 +415,12 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       if(player==null)continue;
       long authoritativeTick=capture.authoritativeServerTick.incrementAndGet();
       capture.updateServerPosition(player);
+      capture.lastAuthoritativePosition=new Vec3(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ());
+      org.bukkit.util.Vector authoritativeVelocity=player.getVelocity();
+      capture.lastAuthoritativeVelocity=new Vec3(authoritativeVelocity.getX(),authoritativeVelocity.getY(),authoritativeVelocity.getZ());
+      capture.lastAuthoritativeOnGround=player.isOnGround();
+      capture.lastAuthoritativeCanFly=player.getAllowFlight();
+      capture.lastAuthoritativeFlying=player.isFlying();
       capture.minY=player.getWorld().getMinHeight();
       capture.maxY=player.getWorld().getMaxHeight();
 
@@ -434,7 +451,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         if(material==Material.LADDER||material==Material.VINE||material==Material.SCAFFOLDING)climb=true;
       }
 
-      org.bukkit.util.Vector velocity=player.getVelocity();
       boolean sprint=player.isSprinting(),sneak=player.isSneaking();
       Phase5Mechanics.MovementEnvironment env=
           water?Phase5Mechanics.MovementEnvironment.vanillaWater(player.isOnGround(),sprint,sneak,player.isSwimming()):
@@ -544,7 +560,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             +" rawPackets="+raw.size()
             +" lastProcessedSequence="+capture.movementRunner.lastProcessedSequence()
             +" candidateCount="+capture.movementRunner.candidateCount()
-            +" continuation="+capture.movementRunner.continuation());
+            +" continuation="+capture.movementRunner.continuation()
+            +" authority={tick="+capture.authoritativeServerTick.get()
+            +",pos="+capture.lastAuthoritativePosition
+            +",vel="+capture.lastAuthoritativeVelocity
+            +",ground="+capture.lastAuthoritativeOnGround
+            +",canFly="+capture.lastAuthoritativeCanFly
+            +",flying="+capture.lastAuthoritativeFlying+"}"
+            +" latestObserved="+latestObservedPosition);
       }
       getServer().getScheduler().runTaskAsynchronously(this,()->{
         long validationStartedNanos=System.nanoTime();
@@ -819,6 +842,12 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final Set<Short> reservedTransactions=ConcurrentHashMap.newKeySet();
     final AtomicLong transactionCounter=new AtomicLong(1);
     final AtomicLong paperMoveFailureSequence=new AtomicLong();
+    final AtomicLong authoritativeServerTick=new AtomicLong(-1L);
+    volatile Vec3 lastAuthoritativePosition=Vec3.ZERO;
+    volatile Vec3 lastAuthoritativeVelocity=Vec3.ZERO;
+    volatile boolean lastAuthoritativeOnGround;
+    volatile boolean lastAuthoritativeCanFly;
+    volatile boolean lastAuthoritativeFlying;
     final AtomicLong authoritativeServerTick=new AtomicLong(-1L);
     volatile long paperMoveFailureWindowStartNanos=-1L;
     volatile int paperMoveFailureCount;
