@@ -344,7 +344,8 @@ public final class Phase8LiveValidation {
                 :currentInput);
           }
 
-          Phase6Reachability.Context prepared=withObservedEnvironment(parent.context(),world,currentInput,parentTick,currentEntityCollisions);
+          InputConstraint parentInput=hasClientTickBoundaries?inputForTick(inputByClientTick,parentTick):currentInput;
+          Phase6Reachability.Context prepared=withObservedEnvironment(parent.context(),world,parentInput,parentTick,currentEntityCollisions);
           List<InputConstraint> inputs=List.copyOf(perTickInput);
           SearchResult search=engine.search(prepared,inputs,
               tick->List.of(new WorldBranch("client-visible-"+event.serverTick(),world,parentWorldComplete,
