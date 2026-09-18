@@ -76,6 +76,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
       if(event.getPacketType()==PacketType.Play.Client.CLIENT_TICK_END){
         capture.clientTickTracker.onClientTickEnd();
+        Packets.ClientTickEnd boundary=new Packets.ClientTickEnd();
+        appendPacket(capture,new RawPacket(capture.sequence.incrementAndGet(),System.nanoTime(),boundary,
+            Packets.CaptureProvenance.fromAdapter("paper-client-tick-end",boundary,null)));
         return;
       }
 
@@ -84,7 +87,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         var location=packet.getLocation();
         ClientTickTracker.MovementObservation tickObservation=capture.clientTickTracker.onMovement();
         if(!tickObservation.oneToOne())capture.multiMovementPackets.incrementAndGet();
-        Long clientTick=tickObservation.clientTick();
+        // CLIENT_TICK_END is a boundary signal. Do not serialize the local boundary
+        // counter as Move.clientTick; Phase 7 derives a relative interval from the
+        // retained boundary events and keeps protocol-authoritative ticks distinct.
+        Long clientTick=null;
         Packets.Move move=new Packets.Move(
             packet.hasPositionChanged()?vector(location.getX(),location.getY(),location.getZ()):null,
             packet.hasRotationChanged()?location.getYaw():null,
