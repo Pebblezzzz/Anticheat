@@ -366,7 +366,7 @@ public final class CausalMovementPipeline {
       boolean overlappingGenerationWindow =
           previousPositionPacketGenerationRange != null
               && !distinctExplicitClientTicks
-              && rangesStrictlyOverlap(
+              && rangesOverlapForSubTickDetection(
                   previousPositionPacketGenerationRange,
                   eventTiming.packetGenerationClientTicks());
       if (!frontier.candidates().isEmpty() && movement.authority().snapshot().isPresent()) {
@@ -1429,11 +1429,22 @@ public final class CausalMovementPipeline {
   }
 
   /**
-   * Detects a genuine timing-window intersection rather than a shared boundary.
-   * For example, 385..386 followed by 386..387 can be consecutive ticks and must
-   * not be treated as proof of two movements inside the same client tick.
+   * Detects a real overlap for sub-tick ambiguity.
+   *
+   * <p>The timing ranges are discrete client-tick sets, so an exact tick must
+   * overlap any range that contains it. For two non-exact bounded ranges, however,
+   * sharing only an endpoint is treated as adjacency (for example 385..386 followed
+   * by 386..387), not as proof that two movements occurred in the same tick.</p>
    */
-  private static boolean rangesStrictlyOverlap(Phase7Timing.Range a, Phase7Timing.Range b) {
+  private static boolean rangesOverlapForSubTickDetection(
+      Phase7Timing.Range a,
+      Phase7Timing.Range b) {
+    if (a.isExact()) {
+      return b.contains(a.min());
+    }
+    if (b.isExact()) {
+      return a.contains(b.min());
+    }
     return a.min() < b.max() && b.min() < a.max();
   }
 
