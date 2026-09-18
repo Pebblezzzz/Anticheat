@@ -76,7 +76,7 @@ public final class Phase6Reachability {
       List<WorldBranch> branches=Objects.requireNonNull(worlds.apply(tick),"world branches");if(branches.isEmpty())return uncertain(offset,peak,"world hypothesis envelope is empty at tick "+tick);if(branches.stream().anyMatch(b->!b.exhaustive()))nonExhaustive++;
       List<ExternalTransition> external=Objects.requireNonNull(externalTransitions.apply(tick),"external transitions");if(external.isEmpty())external=List.of(new None());
       Map<Context,Candidate> next=new LinkedHashMap<>();
-      for(Candidate parent:current.values())for(WorldBranch branch:branches){Maths.Aabb pb=Maths.Aabb.playerAt(parent.context().player().position(),parent.context().pose());Set<dev.phantom.ac.world.Coverage> coverage=branch.world().coverageIn(new dev.phantom.ac.geometry.BlockBox(pb.minX(),pb.minY(),pb.minZ(),pb.maxX(),pb.maxY(),pb.maxZ()));if(!coverage.equals(Set.of(dev.phantom.ac.world.Coverage.KNOWN))){uncertainTransitions++;if(firstCoverageIssue==null)firstCoverageIssue="coverage="+coverage+" candidateAabb="+pb;continue;}
+      for(Candidate parent:current.values())for(WorldBranch branch:branches){Maths.Aabb pb=Maths.Aabb.playerAt(parent.context().player().position(),parent.context().pose());dev.phantom.ac.geometry.BlockBox coverageBox=new dev.phantom.ac.geometry.BlockBox(pb.minX(),pb.minY(),pb.minZ(),pb.maxX(),pb.maxY(),pb.maxZ());Set<dev.phantom.ac.world.Coverage> coverage=branch.world().coverageIn(coverageBox);if(!coverage.equals(Set.of(dev.phantom.ac.world.Coverage.KNOWN))){uncertainTransitions++;if(firstCoverageIssue==null)firstCoverageIssue=firstCoverageIssue(branch.world(),coverageBox);continue;}
         Context pre=parent.context().withTick(tick);
         boolean externalUncertain=false;
         for(ExternalTransition event:external){pre=applyExternal(pre,event,tick);if(pre.player().uncertain()){externalUncertain=true;break;}}
@@ -154,5 +154,18 @@ public final class Phase6Reachability {
     if(env.climbable())return Simulation.Environment.CLIMBABLE;
     return Simulation.Environment.DRY;
   }
+  private static String firstCoverageIssue(WorldSnapshot world,dev.phantom.ac.geometry.BlockBox box){
+    for(dev.phantom.ac.world.Pos position:world.positionsIntersecting(box)){
+      dev.phantom.ac.world.Coverage coverage=world.coverageAt(position.x(),position.y(),position.z());
+      if(coverage!=dev.phantom.ac.world.Coverage.KNOWN){
+        return "coverage="+coverage
+            +" position="+position
+            +" detail="+world.coverageDetailAt(position.x(),position.y(),position.z())
+            +" box="+box;
+      }
+    }
+    return "coverage=UNKNOWN box="+box;
+  }
+
   private static SearchResult uncertain(int ticks,int peak,String reason){return new SearchResult(Verdict.UNCERTAIN,Set.of(),ticks,peak,0,0,0,0,List.of(reason));}
 }
