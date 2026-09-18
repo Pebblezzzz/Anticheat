@@ -16,7 +16,7 @@ enforcement:
   permission: phantom.exempt
 validation:
   candidate-budget: 4096
-  interval-ticks: 10
+  interval-ticks: 1
 
 setbacks:
   # Optional strict debug mode. Only exhaustively-impossible movements are restored.
