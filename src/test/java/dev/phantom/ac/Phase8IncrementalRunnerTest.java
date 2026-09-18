@@ -61,6 +61,46 @@ class Phase8IncrementalRunnerTest {
   }
 
   @Test
+  void remoteWorldMutationDoesNotPoisonMovementValidation() {
+    Phase8IncrementalRunner runner=new Phase8IncrementalRunner(4096,0);
+    Player anchor=anchor();
+    List<RawPacket> raw=List.of(
+        new RawPacket(1,10,new PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+            Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
+        new RawPacket(2,20,new ClientTickEnd()),
+        new RawPacket(3,60,new Move(new Maths.Vec3(.5,64,.5),0f,0f,true,null)),
+        new RawPacket(4,70,new Packets.BlockChange(new World.Pos(1000,63,1000),World.Block.FULL))
+    );
+    var report=runner.process("remote-world",raw,floorWorld(),anchor);
+    assertEquals(1,report.movementObservations(),report.results().toString());
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,report.results().getFirst().verdict(),report.results().toString());
+    assertEquals(Phase8IncrementalRunner.Continuation.ACTIVE,report.continuation());
+  }
+
+  @Test
+  void authoritativeGroundContradictionProducesHardEvidenceDuringReplayUncertainty() {
+    Phase8IncrementalRunner runner=new Phase8IncrementalRunner(4096,0);
+    Player anchor=new Player(new Maths.Vec3(.5,65,.5),Maths.Vec3.ZERO,0f,0f,false,"survival",Map.of(),
+        OptionalInt.empty(),false,Optional.empty(),Simulation.Attributes.DEFAULT,Phase5Mechanics.Pose.STANDING,
+        State.Environment.DRY,State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
+    List<RawPacket> raw=List.of(
+        new RawPacket(1,10,new PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+            Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(false,false,false),false,List.of())),
+        new RawPacket(2,20,new ClientTickEnd()),
+        new RawPacket(3,60,new Move(new Maths.Vec3(.5,65,.5),0f,0f,true,null)),
+        new RawPacket(4,110,new ClientTickEnd()),
+        new RawPacket(5,160,new Move(new Maths.Vec3(.5,65,.5),0f,0f,true,null)),
+        new RawPacket(6,210,new ClientTickEnd()),
+        new RawPacket(7,260,new Move(new Maths.Vec3(.5,65,.5),0f,0f,true,null))
+    );
+    var report=runner.process("ground-contradiction",raw,WorldSnapshot.builder(Contracts.TARGET_VERSION).build(),anchor);
+    assertTrue(report.results().stream().anyMatch(result ->
+        result.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE
+            && result.evidence().rule().equals("AUTHORITATIVE_GROUND_CONTRADICTION")),
+        report.results().toString());
+  }
+
+  @Test
   void sameTickMovementIsUncertainButDoesNotPoisonLaterTicks() {
     Phase8IncrementalRunner runner=new Phase8IncrementalRunner(4096,0);
     Player anchor=anchor();
