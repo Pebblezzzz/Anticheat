@@ -674,6 +674,17 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       if(raw.isEmpty()){capture.validationRunning.set(false);continue;}
       Player player=getServer().getPlayer(capture.playerId);
       if(player==null){capture.validationRunning.set(false);continue;}
+
+      /*
+       * Client-world mutations remain pending until the synthetic acknowledgement
+       * barrier completes. Also drive that barrier from the validation loop so
+       * chunks received during rapid movement cannot remain pending solely because
+       * they missed the old 16-block proximity callback.
+       */
+      if(capture.clientWorld.hasUnassignedMutations()){
+        requestWorldBarrier(player,capture);
+      }
+
       String playerName=player.getName();
       long epoch=capture.epochNanos;
       double snapshotCenterX=player.getLocation().getX();
