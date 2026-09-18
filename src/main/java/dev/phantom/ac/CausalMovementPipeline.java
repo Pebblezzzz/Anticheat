@@ -150,7 +150,7 @@ public final class CausalMovementPipeline {
         ? initialAnchor
         : State.Player.initial(Vec3.ZERO);
     State.Reconstruction observedReconstruction =
-        State.reconstruct(State.Seed.serverAnchor(observedSeed), timeline);
+        reconstructClientObservations(observedSeed, timeline);
     Map<Long, State.StateFrame> observedBySequence = new HashMap<>();
     for (State.StateFrame frame : observedReconstruction.frames()) {
       observedBySequence.put(frame.event().packet().sequence(), frame);
@@ -628,6 +628,59 @@ public final class CausalMovementPipeline {
             "authoritySnapshotServerTick=" + authority.serverTick(),
             "this evidence is independent of Paper movement rejection events"),
         "causal:flight:" + playerId + ":" + event.packet().sequence()));
+  }
+
+  /**
+   * Reconstructs the client observation channel only. Server authority packets,
+   * corrections, world packets, and Paper telemetry do not overwrite the client
+   * observation state.
+   */
+  private static State.Reconstruction reconstructClientObservations(
+      Player seed,
+      Timeline.Snapshot timeline) {
+    Player current = seed;
+    Set<State.Fact> known = EnumSet.of(
+        State.Fact.POSITION,
+        State.Fact.ROTATION,
+        State.Fact.VELOCITY,
+        State.Fact.GROUND);
+    Optional<Packets.ClientInput> currentInput = Optional.empty();
+    List<State.StateFrame> frames = new ArrayList<>();
+    int index = 0;
+
+    for (Timeline.Event event : timeline.events()) {
+      Player before = current;
+      Packets.Packet packet = event.packet().packet();
+      Set<State.Fact> refreshed = EnumSet.noneOf(State.Fact.class);
+
+      if (!event.packet().flags().contains(Packets.PacketFlag.DUPLICATE)) {
+        if (packet instanceof Packets.Move move) {
+          current = State.apply(current, event.packet());
+          if (move.position() != null) refreshed.add(State.Fact.POSITION);
+          if (move.yaw() != null || move.pitch() != null) refreshed.add(State.Fact.ROTATION);
+          if (move.onGround() != null) refreshed.add(State.Fact.GROUND);
+        } else if (packet instanceof Packets.ClientInput input) {
+          current = State.apply(current, event.packet());
+          currentInput = Optional.of(input);
+          refreshed.add(State.Fact.INPUT);
+        }
+      } else {
+        current = current.withUncertainty(State.UncertaintyReason.DUPLICATE_PACKET);
+      }
+
+      if (!refreshed.isEmpty()) known.addAll(refreshed);
+      frames.add(new State.StateFrame(
+          index++,
+          event,
+          before,
+          current,
+          Set.copyOf(known),
+          Set.copyOf(refreshed),
+          currentInput,
+          current.environment()));
+    }
+
+    return new State.Reconstruction(frames);
   }
 
   private static List<AuthoritativeSnapshot> collectAuthorities(Timeline.Snapshot timeline) {
