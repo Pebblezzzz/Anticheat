@@ -28,7 +28,7 @@ class LiveClientWorldReplicaTest {
   @Test
   void fullChunkIsNotVisibleBeforeItsBarrierIsAcknowledged() {
     var replica = new LiveClientWorldReplica(Contracts.TARGET_VERSION, -64, 319);
-    replica.queueChunk(emptyFullChunk(0, 0), true, ClientVersion.V_1_21_11);
+    replica.queueChunk(emptyFullChunk(0, 0), true, ClientVersion.V_1_21_9);
 
     assertEquals(0, replica.visibleChunkCount());
     replica.openBarrier((short) -1);
