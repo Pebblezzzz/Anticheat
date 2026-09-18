@@ -168,7 +168,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         long sequence=capture.sequence.incrementAndGet();
         long receivedNanos=System.nanoTime();
         capture.clientWorld.queueBlock(sequence,pos,state);
-        Packets.BlockStateChange blockChange=new Packets.BlockStateChange(pos,state);
+        Packets.Packet blockChange=blockStatePacket(pos,state);
         appendPacket(capture,new RawPacket(sequence,receivedNanos,blockChange,
             Packets.CaptureProvenance.fromAdapter("paper-block-change",blockChange,null)));
         if(isNearBlock(capture,pos))event.getTasksAfterSend().add(()->requestWorldBarrier(player,capture));
@@ -181,7 +181,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           long sequence=capture.sequence.incrementAndGet();
           long receivedNanos=System.nanoTime();
           capture.clientWorld.queueBlock(sequence,pos,state);
-          Packets.BlockStateChange blockChange=new Packets.BlockStateChange(pos,state);
+          Packets.Packet blockChange=blockStatePacket(pos,state);
           appendPacket(capture,new RawPacket(sequence,receivedNanos,blockChange,
               Packets.CaptureProvenance.fromAdapter("paper-multi-block-change",blockChange,null)));
           near|=isNearBlock(capture,pos);
@@ -928,6 +928,13 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     Capture capture=captures.computeIfAbsent(player.getUniqueId(),
         ignored->new Capture(player.getUniqueId(),System.nanoTime(),validationBudget));
     appendPacket(capture,new RawPacket(capture.sequence.incrementAndGet(),System.nanoTime(),packet));
+  }
+
+  /** Creates the lossless timeline representation for a client-bound block change without throwing on unsupported states. */
+  static Packets.Packet blockStatePacket(dev.phantom.ac.world.Pos position,dev.phantom.ac.world.BlockState state){
+    return state.isUnsupported()
+        ?new Packets.UnsupportedBlockStateChange(position,state)
+        :new Packets.BlockStateChange(position,state);
   }
 
   private void recordBlockState(Player player,dev.phantom.ac.world.Pos position,dev.phantom.ac.world.BlockState state){
