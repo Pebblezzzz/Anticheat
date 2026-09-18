@@ -203,6 +203,7 @@ public final class CausalMovementPipeline {
     Long previousExplicitClientTick = null;
     boolean recoveryRequired = false;
     long lastAmbiguitySequence = -1L;
+    long lastHandledUnmodeledExternalSequence = -1L;
     boolean haveAuthoritativeSeed = initialAnchor != null && !initialAnchor.uncertain();
     for (MovementEvent movement : movements) {
       Timeline.Event event = movement.event();
@@ -250,9 +251,14 @@ public final class CausalMovementPipeline {
           + "serverTick=" + serverTick
           + ":chunks=" + movement.world().loadedChunks().size();
 
-      boolean hasUnmodeledExternalBefore = unmodeledExternalSequences.stream()
-          .anyMatch(transitionSequence -> transitionSequence < sequence);
-      if (hasUnmodeledExternalBefore) {
+      long unmodeledExternalSequence = unmodeledExternalSequences.stream()
+          .filter(transitionSequence -> transitionSequence < sequence)
+          .max(Long::compareTo)
+          .orElse(-1L);
+      boolean hasNewUnmodeledExternal = unmodeledExternalSequence > lastHandledUnmodeledExternalSequence;
+      if (hasNewUnmodeledExternal) {
+        lastHandledUnmodeledExternalSequence = unmodeledExternalSequence;
+        lastAmbiguitySequence = Math.max(lastAmbiguitySequence, unmodeledExternalSequence);
         uncertainty.add("an authoritative movement-context transition before this movement could not be assigned to an exact client simulation tick");
         recoveryRequired = true;
         SearchResult uncertain = uncertainSearch(
@@ -261,7 +267,7 @@ public final class CausalMovementPipeline {
         results.add(Phase8MovementValidation.validate(
             playerId, serverTick, observedBefore, observedAfter, movement.world(),
             worldReference, sync, assumptions, uncertain, replayReference, false));
-        trace.add("EVIDENCE UNCERTAIN unmodeled authoritative transition");
+        trace.add("EVIDENCE UNCERTAIN unmodeled authoritative transition seq=" + unmodeledExternalSequence);
         frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
             assumptions, uncertainty, trace));
         continue;
