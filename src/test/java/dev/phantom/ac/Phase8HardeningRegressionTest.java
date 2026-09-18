@@ -108,6 +108,54 @@ class Phase8HardeningRegressionTest {
   }
 
   @Test
+  void firstMovementPreservesAuthoritativeAnchorVelocity(){
+    var packets=List.of(
+        new RawPacket(1,0,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
+        new RawPacket(2,10_000_000L,new Packets.ClientTickEnd()),
+        new RawPacket(3,60_000_000L,new Move(new Vec3(.6,64,.5),0f,0f,true,null))
+    );
+    var timeline=capture(packets);
+    var anchor=new Player(new Vec3(.5,64,.5),new Vec3(.1,0,0),0f,0f,true,
+        "survival",Map.of(),OptionalInt.empty(),false);
+    var report=Phase8LiveValidation.analyze("moving-anchor",timeline,4096,exactTiming(),null,anchor,1L);
+    assertEquals(Verdict.POSSIBLE,report.results().getFirst().verdict(),report.results().toString());
+    assertEquals(1,report.results().getFirst().evidence().matchingCandidateCount());
+  }
+
+  @Test
+  void inputReplacementIsAppliedAtTheTickItWasObserved(){
+    var packets=List.of(
+        new RawPacket(1,0,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
+        new RawPacket(2,1_000_000L,new ClientInput(false,false,false,false,false,false,false)),
+        new RawPacket(3,10_000_000L,new Packets.ClientTickEnd()),
+        new RawPacket(4,51_000_000L,new ClientInput(true,false,false,false,false,false,false)),
+        new RawPacket(5,60_000_000L,new Packets.ClientTickEnd()),
+        new RawPacket(6,110_000_000L,new Move(new Vec3(.5,64,.598),0f,0f,true,null))
+    );
+    var timeline=capture(packets);
+    var anchor=new Player(new Vec3(.5,64,.5),Vec3.ZERO,0f,0f,true,
+        "survival",Map.of(),OptionalInt.empty(),false);
+    var report=Phase8LiveValidation.analyze("input-timeline",timeline,4096,exactTiming(),null,anchor,1L);
+    assertEquals(Verdict.POSSIBLE,report.results().getFirst().verdict(),report.results().toString());
+  }
+
+  @Test
+  void worldMutationAfterAuthoritativeAnchorMakesFirstMovementUncertain(){
+    var packets=List.of(
+        new RawPacket(1,10_000_000L,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
+        new RawPacket(2,20_000_000L,new Packets.ClientTickEnd()),
+        new RawPacket(3,70_000_000L,new Move(new Vec3(.5,65,.5),0f,0f,false,null))
+    );
+    var timeline=capture(packets);
+    var anchor=new Player(new Vec3(.5,64,.5),Vec3.ZERO,0f,0f,true,
+        "survival",Map.of(),OptionalInt.empty(),false);
+    var report=Phase8LiveValidation.analyze("world-order",timeline,4096,exactTiming(),floorWorld(),anchor,1L);
+    assertEquals(Verdict.UNCERTAIN,report.results().getFirst().verdict(),report.results().toString());
+    assertTrue(report.results().getFirst().evidence().uncertaintySources().stream()
+        .anyMatch(reason->reason.contains("world changed before the first movement")));
+  }
+
+  @Test
   void validationResultGateCountsAnImpossibleObservationOnlyOnce() {
     var gate=new ValidationResultGate();
     assertTrue(gate.accept("move:42",Verdict.IMPOSSIBLE));
