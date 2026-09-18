@@ -105,7 +105,7 @@ public final class Phase8LiveValidation {
           ?liveWorld
           :history.statesAt(event.serverTick());
           Validation.SyncWindow sync=Phase7Timing.toPhase6Window(teleportTiming);
-          Player safe=simulationSafe(anchored);
+          Player safe=simulationSafe(anchored,false);
           if(!safe.uncertain()){
             long anchorTick=Math.max(0,sync.earliestClientTick());
             candidates=Set.of(new Candidate(0,anchorContext(safe,world,currentInput,anchorTick,currentEntityCollisions),
@@ -165,9 +165,9 @@ public final class Phase8LiveValidation {
       }
 
       if(continuation==Continuation.UNANCHORED){
-        Player safeObserved=simulationSafe(observed);
+        Player safeObserved=simulationSafe(observed,eventTiming.simulationClientTicks().isExact()&&!eventTiming.uncertain());
         if(initialAnchor!=null&&!initialAnchor.uncertain()){
-          Player safeInitial=simulationSafe(initialAnchor);
+          Player safeInitial=simulationSafe(initialAnchor,true);
           long earliest=Math.max(0,sync.earliestClientTick());
           long latest=Math.max(earliest,sync.latestClientTick());
           long timingSpan=latest-earliest+1;
@@ -461,7 +461,7 @@ public final class Phase8LiveValidation {
   private enum Continuation { UNANCHORED, ACTIVE, UNCERTAIN_EMPTY, IMPOSSIBLE }
   private static boolean worldCoverageExhaustive(WorldSnapshot world,Candidate parent){Maths.Aabb box=Maths.Aabb.playerAt(parent.context().player().position(),parent.context().pose());return world.fullyKnown(new dev.phantom.ac.geometry.BlockBox(box.minX(),box.minY(),box.minZ(),box.maxX(),box.maxY(),box.maxZ()));}
   private static boolean matchesObserved(Player candidate,Player observed){return candidate.position().equals(observed.position())&&Float.compare(candidate.yaw(),observed.yaw())==0&&Float.compare(candidate.pitch(),observed.pitch())==0&&candidate.onGround()==observed.onGround();}
-  private static Player simulationSafe(Player player){EnumSet<State.UncertaintyReason> reasons=EnumSet.noneOf(State.UncertaintyReason.class);reasons.addAll(player.uncertaintyReasons());reasons.remove(State.UncertaintyReason.UNKNOWN_CLIENT_TICK);boolean uncertain=!reasons.isEmpty();if(!uncertain&&!player.uncertain())return player;return new Player(player.position(),player.velocity(),player.yaw(),player.pitch(),player.onGround(),player.gamemode(),player.effects(),player.awaitingTeleport(),uncertain,player.input(),player.attributes(),player.pose(),player.environment(),player.clientTickRange(),player.provenance(),reasons);}
+  private static Player simulationSafe(Player player,boolean exactTiming){EnumSet<State.UncertaintyReason> reasons=EnumSet.noneOf(State.UncertaintyReason.class);reasons.addAll(player.uncertaintyReasons());if(exactTiming)reasons.remove(State.UncertaintyReason.UNKNOWN_CLIENT_TICK);boolean uncertain=!reasons.isEmpty();if(!uncertain&&!player.uncertain())return player;return new Player(player.position(),player.velocity(),player.yaw(),player.pitch(),player.onGround(),player.gamemode(),player.effects(),player.awaitingTeleport(),uncertain,player.input(),player.attributes(),player.pose(),player.environment(),player.clientTickRange(),player.provenance(),reasons);}
   private static Player teleportAnchorState(Player player){EnumSet<State.UncertaintyReason> reasons=EnumSet.noneOf(State.UncertaintyReason.class);reasons.addAll(player.uncertaintyReasons());reasons.remove(State.UncertaintyReason.TELEPORT_CORRECTION);reasons.remove(State.UncertaintyReason.EXPLICIT_UNCERTAINTY);return new Player(player.position(),player.velocity(),player.yaw(),player.pitch(),player.onGround(),player.gamemode(),player.effects(),OptionalInt.empty(),!reasons.isEmpty(),player.input(),player.attributes(),player.pose(),player.environment(),player.clientTickRange(),player.provenance(),reasons);}
   private static Phase8MovementValidation.Result anchorUncertain(String playerId,long serverTick,State.StateFrame frame,WorldSnapshot world,String reason,String replayReference){Player state=frame==null?Player.initial(Maths.Vec3.ZERO):frame.after();Player prior=frame==null?state:frame.before();Validation.SyncWindow sync=new Validation.SyncWindow(Math.max(0,serverTick),Math.max(0,serverTick),true,List.of(reason));SearchResult uncertain=new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,Set.of(),0,0,0,0,1,0,List.of(reason));return Phase8MovementValidation.validate(playerId,serverTick,prior,state,world,"timeline-world:tick="+serverTick,sync,List.of("input unavailable"),uncertain,replayReference);}
   private static State.Reconstruction reconstructObservedStates(Timeline.Snapshot timeline){for(Timeline.Event event:timeline.events())if(event.packet().packet() instanceof Packets.Move move&&move.position()!=null)return State.reconstruct(State.Seed.serverAnchor(Player.initial(move.position())),timeline);return new State.Reconstruction(List.of());}
