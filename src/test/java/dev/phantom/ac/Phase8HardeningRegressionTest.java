@@ -133,9 +133,9 @@ class Phase8HardeningRegressionTest {
         new RawPacket(2,0,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
             Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
         new RawPacket(3,1_000_000L,new ClientInput(false,false,false,false,false,false,false)),
-        new RawPacket(3,10_000_000L,new Packets.ClientTickEnd()),
-        new RawPacket(4,51_000_000L,new ClientInput(true,false,false,false,false,false,false)),
-        new RawPacket(5,60_000_000L,new Packets.ClientTickEnd()),
+        new RawPacket(4,10_000_000L,new Packets.ClientTickEnd()),
+        new RawPacket(5,51_000_000L,new ClientInput(true,false,false,false,false,false,false)),
+        new RawPacket(6,60_000_000L,new Packets.ClientTickEnd()),
         new RawPacket(7,110_000_000L,new Move(new Vec3(.5,64,.598),0f,0f,true,null))
     );
     var timeline=capture(packets);
@@ -149,10 +149,10 @@ class Phase8HardeningRegressionTest {
   void worldMutationAfterAuthoritativeAnchorMakesFirstMovementUncertain(){
     var packets=List.of(
         new RawPacket(1,10_000_000L,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
-        new RawPacket(2,10_000_000L,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+        new RawPacket(2,10_000_001L,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
             Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
-        new RawPacket(2,20_000_000L,new Packets.ClientTickEnd()),
-        new RawPacket(3,70_000_000L,new Move(new Vec3(.5,65,.5),0f,0f,false,null))
+        new RawPacket(3,20_000_000L,new Packets.ClientTickEnd()),
+        new RawPacket(4,70_000_000L,new Move(new Vec3(.5,65,.5),0f,0f,false,null))
     );
     var timeline=capture(packets);
     var anchor=new Player(new Vec3(.5,64,.5),Vec3.ZERO,0f,0f,true,
