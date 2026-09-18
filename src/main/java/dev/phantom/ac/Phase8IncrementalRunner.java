@@ -320,11 +320,17 @@ public final class Phase8IncrementalRunner {
 
       if (lastMovementTick >= 0 && movementTick == lastMovementTick) {
         results.add(uncertainResult(
-            playerId, packet.sequence(), serverTick, before, after, world, worldReference, timing,
-            "multiple movement packets occurred in the same client tick; sub-tick trajectory is not yet modeled",
+            playerId, packet.sequence(), serverTick, before, after, world, worldReference,
+            new Validation.SyncWindow(
+                Math.max(0, movementTick),
+                Math.max(0, movementTick),
+                true,
+                List.of(timingReason, "multiple movement packets occurred in the same client tick; sub-tick trajectory is not yet modeled")),
+            "multiple movement packets occurred in the same client tick; this packet is uncertain, but later client ticks remain independently verifiable",
             replayReference));
-        poison("unmodeled same-tick movement packet");
-        continuation = Continuation.UNCERTAIN;
+        // Do not poison the persistent frontier. Same-tick ambiguity applies only
+        // to this observation; poisoning would suppress all subsequent 1:1 ticks.
+        continuation = candidates.isEmpty() ? Continuation.UNCERTAIN : Continuation.ACTIVE;
         trackedState = after;
         continue;
       }
