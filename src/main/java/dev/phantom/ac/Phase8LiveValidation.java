@@ -185,8 +185,8 @@ public final class Phase8LiveValidation {
           // only when no world mutations occurred before this observation; otherwise a
           // historical client-world trace is required before IMPOSSIBLE is safe.
           boolean worldStable=!timeline.events().stream().anyMatch(e->
-              e.packet().packet() instanceof Packets.ClientTickEnd==false
-                  && e.packet().packet().mutatesWorld()
+              e.packet().packet().mutatesWorld()
+                  && e.serverTick()>0
                   && e.serverTick()<=event.serverTick());
           long anchorTick=0L;
           InputConstraint anchorInput=inputForTick(inputByClientTick,anchorTick);
@@ -394,8 +394,12 @@ public final class Phase8LiveValidation {
 
   private static InputConstraint inputForTick(Map<Long,InputConstraint> inputByClientTick,long tick){
     if(inputByClientTick.isEmpty())return InputConstraint.any();
-    var entry=((TreeMap<Long,InputConstraint>)new TreeMap<>(inputByClientTick)).floorEntry(tick);
-    return entry==null?InputConstraint.any():entry.getValue();
+    long best=Long.MIN_VALUE;
+    InputConstraint selected=null;
+    for(var entry:inputByClientTick.entrySet()){
+      if(entry.getKey()<=tick&&entry.getKey()>best){best=entry.getKey();selected=entry.getValue();}
+    }
+    return selected==null?InputConstraint.any():selected;
   }
 
   static ParentAggregation aggregateDirectSearches(List<SearchResult> searches,int maximumCandidates,boolean timingOffsetsExhaustive){
