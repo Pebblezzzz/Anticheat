@@ -24,7 +24,8 @@ public record PipelineReplay(String schemaVersion,Timeline.Snapshot timeline,Sta
     State.Reconstruction playerHistory=State.reconstruct(seed,timeline);
     World.VisibilityHistory worldHistory=World.fromTimeline(timeline);
     Phase7Timing.Reconstruction timing=Phase7Timing.reconstruct(timeline,timingConfig);
-    LiveValidation.Report validation=LiveValidation.analyze(timeline,maximumCandidates,timingConfig);
+    LiveValidation.Report validation=LiveValidation.analyze(
+        timeline, maximumCandidates, timingConfig, seed.player(), null, 0L);
     return new Result(timeline,playerHistory,worldHistory,timing,validation,Timeline.projectInputs(timeline));
   }
 
