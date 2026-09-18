@@ -413,7 +413,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         try{
           WorldSnapshot liveWorld=capture.clientWorld.snapshotAround(snapshotCenterX,snapshotCenterZ,LOCAL_SNAPSHOT_RADIUS_CHUNKS);
           Timeline.Snapshot timeline=Timeline.assign(new Packets.Normalizer().normalize(raw),epoch,50_000_000L);
-          Phase8LiveValidation.Report report=Phase8LiveValidation.analyze(playerName,timeline,validationBudget,Phase7Timing.Config.defaultConfig(),liveWorld,capture.initialState);
+          Phase8LiveValidation.Report report=Phase8LiveValidation.analyze(playerName,timeline,validationBudget,Phase7Timing.Config.defaultConfig(),liveWorld,capture.initialState,capture.epochNanos);
 
           if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
             logPhase8Timing(playerName,capture,timeline,Phase7Timing.reconstruct(timeline,Phase7Timing.Config.defaultConfig()),report);
