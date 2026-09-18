@@ -218,7 +218,7 @@ class CausalMovementPipelineTest {
     assertEquals(Verdict.POSSIBLE, report.results().getFirst().verdict(),
         report.results().toString());
     assertTrue(report.frames().getFirst().trace().stream()
-        .anyMatch(line -> line.contains("serverTick=0") && line.contains("LOCAL_AUTHORITATIVE_ROOT")),
+        .anyMatch(line -> line.contains("serverTick=0") && line.contains("ROOT LOCAL_AUTHORITATIVE")),
         report.frames().getFirst().trace().toString());
   }
 
