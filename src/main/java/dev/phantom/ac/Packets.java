@@ -9,7 +9,7 @@ public final class Packets {
 
   public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm,
       Velocity, Effect, Gamemode, PlayerContext, FlightToggle, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange,
-      WorldTransactionSend, WorldTransactionAck {
+      WorldTransactionSend, WorldTransactionAck, PaperMovementRejection {
     default boolean mutatesWorld() {
       return this instanceof ChunkData || this instanceof ChunkUnload
           || this instanceof BlockChange || this instanceof ChunkStates || this instanceof BlockStateChange || this instanceof UnsupportedBlockStateChange;
@@ -26,6 +26,16 @@ public final class Packets {
     public Teleport(int id, Vec3 position, float yaw, float pitch) { this(id,position,yaw,pitch,false,false,false,false,false); }
   }
   public record TeleportConfirm(int id) implements Packet {}
+  /**
+   * Adapter telemetry describing a Paper movement rejection. This is deliberately
+   * not a physics input or an authoritative movement state.
+   */
+  public record PaperMovementRejection(String failReason, boolean allowed) implements Packet {
+    public PaperMovementRejection {
+      if (failReason == null || failReason.isBlank()) failReason = "UNKNOWN";
+    }
+  }
+
   /** Server-side synthetic transaction barrier used to prove client receipt of world updates. */
   public record WorldTransactionSend(short id) implements Packet {}
   /** Client acknowledgement of a synthetic world transaction barrier. */
