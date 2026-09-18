@@ -499,7 +499,7 @@ public final class WorldSnapshot implements Serializable {
 
   /** The world's loaded chunks as a stable ordered set, for diagnostics and tests. */
   public List<Chunk> loadedChunkList() {
-    List<Chunk> ordered = new ArrayList<>(chunks.keySet());
+    List<Chunk> ordered = new ArrayList<>(loadedChunks());
     ordered.sort(java.util.Comparator.comparingInt(Chunk::x).thenComparingInt(Chunk::z));
     return List.copyOf(ordered);
   }
