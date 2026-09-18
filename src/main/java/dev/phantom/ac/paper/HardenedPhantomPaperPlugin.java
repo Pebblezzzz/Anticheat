@@ -435,6 +435,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         }
       }
 
+      final Vec3 observedPositionForValidation=latestObservedPosition;
+      final double observedCenterX=observedPositionForValidation==null?snapshotCenterX:observedPositionForValidation.x();
+      final double observedCenterZ=observedPositionForValidation==null?snapshotCenterZ:observedPositionForValidation.z();
+
       if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
         getLogger().info("[PhantomAC][PHASE8][VALIDATION_START] player="+playerName
             +" rawPackets="+raw.size()
@@ -445,8 +449,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       getServer().getScheduler().runTaskAsynchronously(this,()->{
         long validationStartedNanos=System.nanoTime();
         try{
-          double observedCenterX=latestObservedPosition==null?snapshotCenterX:latestObservedPosition.x();
-          double observedCenterZ=latestObservedPosition==null?snapshotCenterZ:latestObservedPosition.z();
           WorldSnapshot liveWorld=validationSnapshot(
               capture,snapshotCenterX,snapshotCenterZ,observedCenterX,observedCenterZ);
           Phase8IncrementalRunner.Report incremental=capture.movementRunner.process(
