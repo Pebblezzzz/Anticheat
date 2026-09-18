@@ -41,6 +41,8 @@ public final class Phase8IncrementalRunner {
 
   private record CaptureKey(long sequence, long receivedNanos, Packets.Packet packet) {}
 
+  private static final int MAX_HISTORY_PACKETS = 12_000;
+
   private final int maximumCandidates;
   private final long epochNanos;
   private final List<Packets.RawPacket> history = new ArrayList<>();
@@ -50,6 +52,9 @@ public final class Phase8IncrementalRunner {
   private Player anchor;
   private long anchorReceivedNanos = -1L;
   private long lastProcessedSequence = -1L;
+  private long latestRelativeClientTick = -1L;
+  private int latestCandidateCount;
+  private Continuation latestContinuation = Continuation.UNANCHORED;
 
   public Phase8IncrementalRunner(int maximumCandidates, long epochNanos) {
     Contracts.requireCandidateBudget(maximumCandidates);
@@ -62,6 +67,14 @@ public final class Phase8IncrementalRunner {
     return lastProcessedSequence;
   }
 
+  public synchronized int candidateCount() {
+    return latestCandidateCount;
+  }
+
+  public synchronized Continuation continuation() {
+    return latestContinuation;
+  }
+
   public synchronized void reset(Player authoritativeAnchor, long ignoredEpochNanos) {
     Objects.requireNonNull(authoritativeAnchor, "authoritativeAnchor");
     history.clear();
@@ -70,6 +83,11 @@ public final class Phase8IncrementalRunner {
     anchor = authoritativeAnchor;
     anchorReceivedNanos = -1L;
     lastProcessedSequence = -1L;
+    latestRelativeClientTick = -1L;
+    latestCandidateCount = 0;
+    latestContinuation = anchor == null
+        ? Continuation.UNANCHORED
+        : Continuation.ACTIVE;
   }
 
   public synchronized Report process(
@@ -135,10 +153,20 @@ public final class Phase8IncrementalRunner {
     }
     lastProcessedSequence = maxSeen;
 
+    if (history.size() > MAX_HISTORY_PACKETS) {
+      int remove = history.size() - MAX_HISTORY_PACKETS;
+      history.subList(0, remove).clear();
+      // Once the causal prefix is gone, never pretend prior verdicts remain
+      // exactly reproducible. The next retained replay will establish fresh
+      // evidence from the explicit server anchor or become UNCERTAIN.
+      emitted.clear();
+    }
+
     if (newlyCaptured == 0) {
       return new Report(
           List.of(), 0, movementCount(raw), 0, 0, 0,
-          lastProcessedSequence, -1L, continuationForLatest(), false);
+          lastProcessedSequence, latestRelativeClientTick, latestContinuation,
+          latestCandidateCount > 0);
     }
 
     history.sort(Comparator
@@ -189,6 +217,12 @@ public final class Phase8IncrementalRunner {
         .anyMatch(result -> result.evidence().matchingCandidateCount() > 0
             && result.verdict() == Verdict.POSSIBLE);
 
+    latestRelativeClientTick = relativeTick;
+    latestCandidateCount = (int) pipeline.results().stream()
+        .mapToInt(result -> result.evidence().reachableCandidateCount())
+        .max().orElse(0);
+    latestContinuation = continuation;
+
     return new Report(
         fresh,
         newlyCaptured,
@@ -200,13 +234,6 @@ public final class Phase8IncrementalRunner {
         relativeTick,
         continuation,
         frontier);
-  }
-
-  private Continuation continuationForLatest() {
-    if (emitted.isEmpty()) {
-      return anchor == null ? Continuation.UNANCHORED : Continuation.UNCERTAIN_EMPTY;
-    }
-    return Continuation.UNCERTAIN_EMPTY;
   }
 
   private static Continuation continuationFor(
