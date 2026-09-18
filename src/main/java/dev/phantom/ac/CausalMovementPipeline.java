@@ -176,13 +176,17 @@ public final class CausalMovementPipeline {
           authorities,
           initialAnchor,
           initialAnchorReceivedNanos);
-      // The asynchronous live snapshot has no causal timestamp/provenance in the
-      // WorldSnapshot type. Using it for an older packet would silently validate
-      // historical movement against "latest" world state. Until the world snapshot
-      // carries an explicit capture tick, replay remains historical-only.
-      boolean useLiveWorld = false;
-      WorldSnapshot world = worldHistory.statesAt(
-          Math.max(0L, eventTiming.simulationClientTicks().min()));
+      /*
+       * The live client-world replica is safe for the final simulated tick when
+       * the timeline contains no later world mutation. In that case the compact
+       * replica cannot contain a future block state relative to this movement.
+       * Earlier simulated ticks still come from the historical timeline.
+       */
+      boolean useLiveWorld = liveWorld != null
+          && !hasWorldMutationAfter(timeline, sequence);
+      WorldSnapshot world = useLiveWorld
+          ? liveWorld
+          : worldHistory.statesAt(Math.max(0L, eventTiming.simulationClientTicks().min()));
 
       boolean chronologyClean = !containsChronologyProblem(event.packet().flags());
       movements.add(new MovementEvent(
