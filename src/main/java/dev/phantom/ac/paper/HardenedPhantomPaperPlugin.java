@@ -28,6 +28,7 @@ import dev.phantom.ac.Packets.RawPacket;
 import dev.phantom.ac.Phase5Mechanics;
 import dev.phantom.ac.Phase7Timing;
 import dev.phantom.ac.Phase8LiveValidation;
+import dev.phantom.ac.Phase8IncrementalRunner;
 import dev.phantom.ac.Phase8MovementValidation;
 import dev.phantom.ac.SetbackPolicy;
 import dev.phantom.ac.State;
@@ -390,7 +391,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private void scheduleValidations(){
     for(Capture capture:captures.values()){
       if(!capture.validationRunning.compareAndSet(false,true))continue;
-      List<RawPacket> raw=capture.copy();
+      List<RawPacket> raw=capture.copySince(capture.movementRunner.lastProcessedSequence());
       if(raw.isEmpty()){capture.validationRunning.set(false);continue;}
       Player player=getServer().getPlayer(capture.playerId);
       if(player==null){capture.validationRunning.set(false);continue;}
@@ -402,18 +403,30 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       getServer().getScheduler().runTaskAsynchronously(this,()->{
         try{
           WorldSnapshot liveWorld=validationSnapshot(capture,snapshotCenterX,snapshotCenterZ);
-          Timeline.Snapshot timeline=Timeline.assign(new Packets.Normalizer().normalize(raw),epoch,50_000_000L);
-          Phase8LiveValidation.Report report=Phase8LiveValidation.analyze(playerName,timeline,validationBudget,Phase7Timing.Config.defaultConfig(),liveWorld,capture.initialState);
+          Phase8IncrementalRunner.Report incremental=capture.movementRunner.process(
+              playerName,raw,liveWorld,capture.initialState);
+          Phase8LiveValidation.Report report=new Phase8LiveValidation.Report(
+              incremental.results(),incremental.movementObservations(),incremental.possible(),
+              incremental.uncertain(),incremental.impossible());
 
           if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
-            logPhase8Timing(playerName,capture,timeline,Phase7Timing.reconstruct(timeline,Phase7Timing.Config.defaultConfig()),report);
+            getLogger().info("[PhantomAC][PHASE8][INCREMENTAL] player="+playerName
+                +" packets="+incremental.packetsProcessed()
+                +" movements="+incremental.movementObservations()
+                +" clientTick="+incremental.relativeClientTick()
+                +" candidates="+capture.movementRunner.candidateCount()
+                +" continuation="+incremental.continuation()
+                +" frontierRetained="+incremental.candidateFrontierRetained());
           }
 
           getServer().getScheduler().runTask(this,()->applyResult(capture,report));
         }catch(RuntimeException failure){
+          if(capture.initialState!=null){
+            capture.movementRunner.reset(capture.initialState,capture.epochNanos);
+          }
           capture.validationRunning.set(false);
           getLogger().log(java.util.logging.Level.WARNING,
-              "[PhantomAC][PHASE8] validation failed for "+capture.playerId,failure);
+              "[PhantomAC][PHASE8] incremental validation failed for "+capture.playerId,failure);
         }
       });
     }
@@ -583,6 +596,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final ClientTickTracker clientTickTracker=new ClientTickTracker();
     final AtomicBoolean validationRunning=new AtomicBoolean();
     final LiveClientWorldReplica clientWorld=new LiveClientWorldReplica(Contracts.TARGET_VERSION,-64,319);
+    final Phase8IncrementalRunner movementRunner=new Phase8IncrementalRunner(validationBudget,epoch);
     volatile State.Player initialState;
     final Set<Short> outstandingTransactions=ConcurrentHashMap.newKeySet();
     final Set<Short> reservedTransactions=ConcurrentHashMap.newKeySet();
@@ -616,6 +630,12 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       synchronized(packets){
         int start=Math.max(0,packets.size()-MAX_VALIDATION_PACKETS);
         return List.copyOf(packets.subList(start,packets.size()));
+      }
+    }
+
+    List<RawPacket> copySince(long sequenceExclusive){
+      synchronized(packets){
+        return packets.stream().filter(packet->packet.sequence()>sequenceExclusive).toList();
       }
     }
   }
