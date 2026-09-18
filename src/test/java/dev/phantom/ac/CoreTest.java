@@ -7,6 +7,13 @@ class CoreTest {
   @Test void timelineKeepsMultiplePacketsPerTick(){var t=Timeline.assign(new Normalizer().normalize(List.of(new RawPacket(1,1,new Velocity(Vec3.ZERO)),new RawPacket(2,49_999_999,new Velocity(Vec3.ZERO)))),0,50_000_000);assertEquals(2,t.events().size());assertEquals(0,t.events().get(1).serverTick());}
   @Test void inputProjectionPersistsChangedInputAndMarksEarlierMovementUnknown(){var t=Timeline.assign(new Normalizer().normalize(List.of(new RawPacket(1,1,new Move(Vec3.ZERO,0f,0f,true,null)),new RawPacket(2,2,new ClientInput(true,false,false,true,false,false,false)),new RawPacket(3,3,new Move(Vec3.ZERO,0f,0f,true,null)))),0,50_000_000);var samples=Timeline.projectInputs(t);assertTrue(samples.getFirst().input().isEmpty());assertEquals(new Input(1,1,false),samples.get(1).input().orElseThrow());}
   @Test void replayRoundTripAndDeterminism(){var t=Timeline.assign(new Normalizer().normalize(List.of(new RawPacket(1,0,new Velocity(new Vec3(1,2,3))),new RawPacket(2,1,new Gamemode("creative")))),0,50_000_000);var bytes=new Timeline.Codec().encode(t);var decoded=new Timeline.Codec().decode(bytes);assertEquals(t,decoded);assertEquals(Replay.reconstruct(State.Player.initial(Vec3.ZERO),t),Replay.reconstruct(State.Player.initial(Vec3.ZERO),decoded));}
+  @Test void replayRoundTripPreservesClientTickEndBoundary(){
+    var t=Timeline.assign(new Normalizer().normalize(List.of(
+        new RawPacket(1,0,new ClientTickEnd()),
+        new RawPacket(2,50_000_000L,new Move(new Vec3(0,0,0),0f,0f,true,null))
+    )),0,50_000_000L);
+    assertEquals(t,new Timeline.Codec().decode(new Timeline.Codec().encode(t)));
+  }
   @Test void malformedReplayFails(){assertThrows(IllegalArgumentException.class,()->new Timeline.Codec().decode(new byte[]{1,2,3}));}
   @Test void stateDoesNotInventMissingInformation(){var s=State.Player.initial(Vec3.ZERO);var out=State.apply(s,new NormalizedPacket(1,1,new Move(new Vec3(1,2,3),5f,6f,false,null),EnumSet.of(PacketFlag.DUPLICATE)));assertTrue(out.uncertain());assertEquals(new Vec3(1,2,3),out.position());}
   @Test void absentGroundBitPropagatesUncertaintyInsteadOfGuessing(){var out=State.apply(State.Player.initial(Vec3.ZERO),new NormalizedPacket(1,1,new Move(new Vec3(1,2,3),0f,0f,null,null),EnumSet.of(PacketFlag.NORMAL)));assertTrue(out.uncertain());assertTrue(out.onGround());}
