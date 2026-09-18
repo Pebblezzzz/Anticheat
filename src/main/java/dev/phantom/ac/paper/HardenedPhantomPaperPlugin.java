@@ -50,6 +50,8 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
 
@@ -207,6 +209,57 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     Capture capture=new Capture(event.getPlayer().getUniqueId(),System.nanoTime(),validationBudget);
     capture.updateServerPosition(event.getPlayer());
     captures.put(event.getPlayer().getUniqueId(),capture);
+  }
+
+  @EventHandler public void onTeleport(PlayerTeleportEvent event){
+    Player player=event.getPlayer();
+    Capture capture=captures.get(player.getUniqueId());
+    if(capture==null || event.getTo()==null)return;
+
+    /*
+     * PlayerTeleportEvent supplies a server-authoritative destination. Re-anchor
+     * the prediction epoch from that destination after the event rather than
+     * copying the client's next reported position into the baseline.
+     */
+    getServer().getScheduler().runTask(this,()->{
+      if(!player.isOnline() || !captures.containsKey(player.getUniqueId()))return;
+      State.Player template=capture.initialState;
+      if(template==null)return;
+      org.bukkit.Location location=player.getLocation();
+      org.bukkit.util.Vector velocity=player.getVelocity();
+      State.Player authoritativeAnchor=new State.Player(
+          new Vec3(location.getX(),location.getY(),location.getZ()),
+          new Vec3(velocity.getX(),velocity.getY(),velocity.getZ()),
+          location.getYaw(),location.getPitch(),player.isOnGround(),
+          player.getGameMode().name().toLowerCase(Locale.ROOT),
+          template.effects(),OptionalInt.empty(),false,Optional.empty(),
+          template.attributes(),template.pose(),template.environment(),
+          State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
+      long receivedNanos=System.nanoTime();
+      capture.initialState=authoritativeAnchor;
+      capture.initialStateReceivedNanos=receivedNanos;
+      capture.movementRunner.reset(
+          authoritativeAnchor,receivedNanos,capture.sequence.get());
+      if(Boolean.TRUE.equals(debugPlayers.get(player.getUniqueId()))){
+        getLogger().info("[PhantomAC][PHASE8][REANCHOR] player="+player.getName()
+            +" reason=PLAYER_TELEPORT_EVENT"
+            +" sequenceBoundary="+capture.sequence.get()
+            +" position="+authoritativeAnchor.position());
+      }
+    });
+  }
+
+  @EventHandler public void onRespawn(PlayerRespawnEvent event){
+    Player player=event.getPlayer();
+    getServer().getScheduler().runTask(this,()->{
+      Capture capture=new Capture(player.getUniqueId(),System.nanoTime(),validationBudget);
+      captures.put(player.getUniqueId(),capture);
+      State.Player anchor=State.Player.initial(
+          new Vec3(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()));
+      capture.initialState=anchor;
+      capture.initialStateReceivedNanos=System.nanoTime();
+      capture.movementRunner.reset(anchor,capture.initialStateReceivedNanos,-1L);
+    });
   }
 
   @EventHandler public void onWorldChange(PlayerChangedWorldEvent event){
