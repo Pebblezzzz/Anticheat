@@ -33,11 +33,18 @@ public final class Packets {
   public record Gamemode(String value) implements Packet { public Gamemode { if(value==null||value.isBlank()) throw new IllegalArgumentException("gamemode is required"); } }
   public record PlayerContext(String gamemode, Simulation.Attributes attributes, Map<String,Integer> effects,
                               Phase5Mechanics.Pose pose, Phase5Mechanics.MovementEnvironment movementEnvironment,
-                              boolean sleeping, List<dev.phantom.ac.world.EntityCollisions.EntityBox> entityBoxes) implements Packet {
+                              boolean sleeping, List<dev.phantom.ac.world.EntityCollisions.EntityBox> entityBoxes,
+                              Simulation.MovementCapabilities movementCapabilities) implements Packet {
     public PlayerContext {
       if(gamemode==null||gamemode.isBlank()) throw new IllegalArgumentException("gamemode is required");
       Objects.requireNonNull(attributes); effects=Map.copyOf(effects); Objects.requireNonNull(pose);
       Objects.requireNonNull(movementEnvironment); entityBoxes=List.copyOf(entityBoxes);
+      Objects.requireNonNull(movementCapabilities);
+    }
+    public PlayerContext(String gamemode, Simulation.Attributes attributes, Map<String,Integer> effects,
+                         Phase5Mechanics.Pose pose, Phase5Mechanics.MovementEnvironment movementEnvironment,
+                         boolean sleeping, List<dev.phantom.ac.world.EntityCollisions.EntityBox> entityBoxes) {
+      this(gamemode,attributes,effects,pose,movementEnvironment,sleeping,entityBoxes,Simulation.MovementCapabilities.NONE);
     }
   }
   public record BlockChange(World.Pos position, World.Block block) implements Packet { public BlockChange { Objects.requireNonNull(position,"position"); Objects.requireNonNull(block,"block"); } }
