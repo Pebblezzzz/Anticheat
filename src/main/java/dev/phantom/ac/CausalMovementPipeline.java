@@ -300,6 +300,24 @@ public final class CausalMovementPipeline {
           movement.move().clientTick() != null
               && previousExplicitClientTick != null
               && movement.move().clientTick().longValue() == previousExplicitClientTick.longValue();
+      if (!frontier.candidates().isEmpty() && movement.authority().snapshot().isPresent()) {
+        /*
+         * PlayerContext carries the entity boxes observed by the server at the
+         * authoritative capture point. Refresh the prediction frontier from that
+         * snapshot when it is available; never replace a previously complete
+         * provider with NONE_TRACKED merely because this movement lacks a new
+         * authority packet.
+         */
+        EntityCollisions entityCollisions = entityCollisionsFor(movement);
+        frontier = new Frontier(
+            refreshEntityCollisions(frontier.candidates(), entityCollisions, maximumCandidates),
+            frontier.lastMovementTick(),
+            frontier.anchored());
+        trace.add("ENTITY_COLLISION_CONTEXT authoritativeSnapshot="
+            + movement.authority().snapshot().get().sequence()
+            + " boxes=" + movement.authority().snapshot().get().context().entityBoxes().size());
+      }
+
       if ((previousPositionPacketTick >= 0
               && eventTiming.simulationClientTicks().isExact()
               && movementTick == previousPositionPacketTick)
@@ -362,7 +380,6 @@ public final class CausalMovementPipeline {
         }
         Optional<Candidate> root = rootCandidate(
             initialAnchor,
-            inputByTick,
             movement,
             maximumCandidates);
         if (root.isEmpty()) {
@@ -1005,7 +1022,6 @@ public final class CausalMovementPipeline {
 
   private static Optional<Candidate> rootCandidate(
       Player anchor,
-      Map<Long, InputConstraint> inputs,
       MovementEvent movement,
       int maximumCandidates) {
     long target = movement.timing().simulationClientTicks().min();
@@ -1021,7 +1037,7 @@ public final class CausalMovementPipeline {
         anchor.pose(),
         MovementEnvironment.dry(anchor.onGround(), false, false),
         anchor.pose() == Pose.SLEEPING,
-        EntityCollisions.NONE_TRACKED);
+        entityCollisionsFor(movement));
     return Optional.of(new Candidate(
         0,
         context,
@@ -1035,6 +1051,36 @@ public final class CausalMovementPipeline {
             List.of("explicit authoritative server anchor"),
             1,
             List.of())));
+  }
+
+  private static EntityCollisions entityCollisionsFor(MovementEvent movement) {
+    return movement.authority().snapshot()
+        .map(snapshot -> EntityCollisions.of(snapshot.context().entityBoxes()))
+        .orElse(EntityCollisions.NONE_TRACKED);
+  }
+
+  private static Set<Candidate> refreshEntityCollisions(
+      Set<Candidate> candidates,
+      EntityCollisions entityCollisions,
+      int maximumCandidates) {
+    if (candidates.isEmpty() || candidates.size() > maximumCandidates) return Set.of();
+    LinkedHashSet<Candidate> refreshed = new LinkedHashSet<>();
+    for (Candidate candidate : candidates) {
+      Context old = candidate.context();
+      Context updated = new Context(
+          old.simulationTick(),
+          old.player(),
+          old.environment(),
+          old.attributes(),
+          old.effects(),
+          old.pose(),
+          old.movementEnvironment(),
+          old.sleeping(),
+          entityCollisions,
+          old.uncertainty());
+      refreshed.add(new Candidate(candidate.id(), updated, candidate.provenance()));
+    }
+    return Set.copyOf(refreshed);
   }
 
   private static boolean containsChronologyProblem(
