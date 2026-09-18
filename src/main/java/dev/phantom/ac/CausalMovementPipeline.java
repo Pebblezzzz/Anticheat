@@ -1307,6 +1307,7 @@ public final class CausalMovementPipeline {
         .filter(snapshot -> snapshot.receivedNanos() <= received)
         .filter(snapshot -> snapshot.serverTick() < serverTick)
         .filter(snapshot -> serverTick - snapshot.serverTick() <= 1L)
+        .filter(snapshot -> !isPlaceholderAuthority(snapshot, initialAnchor))
         .max(Comparator.comparingLong(AuthoritativeSnapshot::serverTick)
             .thenComparingLong(AuthoritativeSnapshot::receivedNanos)
             .thenComparingLong(AuthoritativeSnapshot::sequence));
@@ -1322,15 +1323,16 @@ public final class CausalMovementPipeline {
         .filter(snapshot -> snapshot.sequence() < sequence)
         .filter(snapshot -> snapshot.receivedNanos() <= received)
         .filter(snapshot -> snapshot.serverTick() == serverTick)
+        .filter(snapshot -> !isPlaceholderAuthority(snapshot, initialAnchor))
         .max(Comparator.comparingLong(AuthoritativeSnapshot::receivedNanos)
             .thenComparingLong(AuthoritativeSnapshot::sequence));
     if (sameTick.isPresent()) return sameTick;
 
     /*
-     * Very early captures may have no server-side context packet yet. Retain the
-     * immutable join anchor as a final fallback. Use sequence zero because it is
-     * the synthetic start of the causal epoch; it remains eligible before every
-     * normal movement packet.
+     * Very early captures may have no usable server-side context packet yet.
+     * Retain the immutable join anchor as a final fallback. This also covers
+     * legacy/test PlayerContext packets constructed through the compact overload
+     * whose position and velocity intentionally default to zero.
      */
     if (initialAnchor != null
         && !initialAnchor.uncertain()
@@ -1344,6 +1346,16 @@ public final class CausalMovementPipeline {
     }
 
     return Optional.empty();
+  }
+
+  private static boolean isPlaceholderAuthority(
+      AuthoritativeSnapshot snapshot,
+      Player initialAnchor) {
+    if (initialAnchor == null || initialAnchor.uncertain()) return false;
+    Packets.PlayerContext context = snapshot.context();
+    return context.serverPosition().equals(Vec3.ZERO)
+        && context.serverVelocity().equals(Vec3.ZERO)
+        && context.entityBoxes().isEmpty();
   }
 
   private static boolean frontierFarFromLocalAuthority(
