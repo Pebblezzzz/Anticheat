@@ -61,7 +61,7 @@ class Phase8IncrementalRunnerTest {
   }
 
   @Test
-  void sameTickMovementIsUncertainAndPoisonsContinuation() {
+  void sameTickMovementIsUncertainButDoesNotPoisonLaterTicks() {
     Phase8IncrementalRunner runner=new Phase8IncrementalRunner(4096,0);
     Player anchor=anchor();
     List<RawPacket> raw=List.of(
@@ -75,7 +75,16 @@ class Phase8IncrementalRunnerTest {
     assertEquals(2,report.movementObservations(),report.results().toString());
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,report.results().getFirst().verdict(),report.results().toString());
     assertEquals(Phase8MovementValidation.Verdict.UNCERTAIN,report.results().get(1).verdict(),report.results().toString());
-    assertEquals(Phase8IncrementalRunner.Continuation.UNCERTAIN,report.continuation());
+    assertEquals(Phase8IncrementalRunner.Continuation.ACTIVE,report.continuation());
+
+    List<RawPacket> later=List.of(
+        new RawPacket(5,120,new ClientTickEnd()),
+        new RawPacket(6,160,new Move(new Maths.Vec3(5.0,64,.5),0f,0f,true,null))
+    );
+    var laterReport=runner.process("subtick",later,floorWorld(),anchor);
+    assertEquals(1,laterReport.movementObservations(),laterReport.results().toString());
+    assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE,laterReport.results().getFirst().verdict(),laterReport.results().toString());
+    assertEquals(Phase8IncrementalRunner.Continuation.IMPOSSIBLE,laterReport.continuation());
   }
 
   @Test
