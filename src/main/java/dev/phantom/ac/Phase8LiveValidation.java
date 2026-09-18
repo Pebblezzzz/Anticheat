@@ -503,7 +503,11 @@ public final class Phase8LiveValidation {
 
   private enum Continuation { UNANCHORED, ACTIVE, UNCERTAIN_EMPTY, IMPOSSIBLE }
   private static boolean worldCoverageExhaustive(WorldSnapshot world,Candidate parent){Maths.Aabb box=Maths.Aabb.playerAt(parent.context().player().position(),parent.context().pose());return world.fullyKnown(new dev.phantom.ac.geometry.BlockBox(box.minX(),box.minY(),box.minZ(),box.maxX(),box.maxY(),box.maxZ()));}
-  private static boolean matchesObserved(Player candidate,Player observed){return candidate.position().equals(observed.position())&&Float.compare(candidate.yaw(),observed.yaw())==0&&Float.compare(candidate.pitch(),observed.pitch())==0&&candidate.onGround()==observed.onGround();}
+  private static boolean matchesObserved(Player candidate,Player observed){
+    return candidate.position().equals(observed.position())
+        && Float.compare(candidate.yaw(),observed.yaw())==0
+        && Float.compare(candidate.pitch(),observed.pitch())==0;
+  }
   private static Player simulationSafe(Player player){
     Objects.requireNonNull(player);
     return player;
