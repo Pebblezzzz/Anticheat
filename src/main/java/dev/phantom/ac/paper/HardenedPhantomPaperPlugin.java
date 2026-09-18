@@ -224,9 +224,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   /**
    * Paper has already performed its authoritative movement validation when this
-   * event fires. Treat repeated server-rejected movement as independent hard
-   * evidence, rather than trying to reconstruct the rejection from a later
-   * asynchronous server-location snapshot.
+   * event fires. Keep the rejection as corroboration/telemetry only; Phantom
+   * must not manufacture an IMPOSSIBLE verdict from Paper's own rejection.
    */
   @EventHandler public void onPlayerToggleFlight(org.bukkit.event.player.PlayerToggleFlightEvent event){
     Player player=event.getPlayer();
@@ -296,6 +295,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           +" to="+event.getTo()
           +" NOTE=Paper rejection is telemetry only; Phantom will not emit an IMPOSSIBLE result from this event");
     }
+  }
 
   private State.Player paperMovementState(State.Player template,org.bukkit.Location location,Player player){
     org.bukkit.util.Vector velocity=player.getVelocity();
