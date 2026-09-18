@@ -130,6 +130,7 @@ class Phase8IncrementalRunnerTest {
         State.Environment.DRY,State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
     List<RawPacket> raw=new ArrayList<>();
     long seq=1, nanos=10;
+    raw.add(new RawPacket(seq++,nanos++,new ClientTickEnd()));
     for(int i=0;i<5;i++){
       raw.add(new RawPacket(seq++,nanos++,new PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
           Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(false,false,false),
