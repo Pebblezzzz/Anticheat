@@ -405,7 +405,15 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       double snapshotCenterX=player.getLocation().getX();
       double snapshotCenterZ=player.getLocation().getZ();
 
+      if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
+        getLogger().info("[PhantomAC][PHASE8][VALIDATION_START] player="+playerName
+            +" rawPackets="+raw.size()
+            +" lastProcessedSequence="+capture.movementRunner.lastProcessedSequence()
+            +" candidateCount="+capture.movementRunner.candidateCount()
+            +" continuation="+capture.movementRunner.continuation());
+      }
       getServer().getScheduler().runTaskAsynchronously(this,()->{
+        long validationStartedNanos=System.nanoTime();
         try{
           WorldSnapshot liveWorld=validationSnapshot(capture,snapshotCenterX,snapshotCenterZ);
           Phase8IncrementalRunner.Report incremental=capture.movementRunner.process(
