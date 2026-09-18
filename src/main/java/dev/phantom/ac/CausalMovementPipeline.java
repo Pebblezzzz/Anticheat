@@ -597,6 +597,7 @@ public final class CausalMovementPipeline {
         trace.add("FRONTIER_RESET reason=IMPOSSIBLE; next movement may use exact authoritative local root");
       } else {
         recoveryRequired = recoveryRequired || eventTiming.uncertain();
+        uncertainty.addAll(advance.reasons());
         trace.add("EVIDENCE UNCERTAIN " + advance.reasons());
       }
 
