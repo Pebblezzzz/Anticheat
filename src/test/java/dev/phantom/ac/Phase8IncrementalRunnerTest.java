@@ -101,6 +101,35 @@ class Phase8IncrementalRunnerTest {
   }
 
   @Test
+  void authoritativeServerPositionDivergenceProducesHardEvidenceDuringReplayUncertainty() {
+    Phase8IncrementalRunner runner=new Phase8IncrementalRunner(4096,0);
+    Player anchor=anchor();
+    List<RawPacket> raw=List.of(
+        new RawPacket(1,10,new PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+            Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
+        new RawPacket(2,20,new ClientTickEnd()),
+        new RawPacket(3,60,new Move(new Maths.Vec3(5.5,64,.5),0f,0f,true,null)),
+        new RawPacket(4,110,new ClientTickEnd()),
+        new RawPacket(5,160,new Move(new Maths.Vec3(10.5,64,.5),0f,0f,true,null)),
+        new RawPacket(6,210,new ClientTickEnd()),
+        new RawPacket(7,260,new Move(new Maths.Vec3(15.5,64,.5),0f,0f,true,null))
+    );
+    var report=runner.process(
+        "server-divergence",raw,WorldSnapshot.builder(Contracts.TARGET_VERSION).build(),anchor,
+        new Maths.Vec3(.5,64,.5));
+    assertTrue(report.results().stream().anyMatch(result ->
+        result.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE
+            && result.evidence().rule().equals("AUTHORITATIVE_SERVER_POSITION_DIVERGENCE")),
+        report.results().toString());
+
+    var config=new Phase8MovementValidation.Config(1,0,true,true);
+    var hardEvidence=report.results().stream()
+        .filter(result -> result.evidence().rule().equals("AUTHORITATIVE_SERVER_POSITION_DIVERGENCE"))
+        .findFirst().orElseThrow().evidence();
+    assertTrue(Phase8MovementValidation.Accumulator.empty().accept(hardEvidence,config).alert().isPresent());
+  }
+
+  @Test
   void sameTickMovementIsUncertainButDoesNotPoisonLaterTicks() {
     Phase8IncrementalRunner runner=new Phase8IncrementalRunner(4096,0);
     Player anchor=anchor();
