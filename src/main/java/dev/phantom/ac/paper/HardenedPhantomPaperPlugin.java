@@ -1,5 +1,6 @@
 package dev.phantom.ac.paper;
 
+import io.papermc.paper.event.player.PlayerFailMoveEvent;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
@@ -62,6 +63,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private static final int MAX_CAPTURE_PACKETS=12_000,MAX_VALIDATION_PACKETS=6_000;
   private static final int LOCAL_SNAPSHOT_RADIUS_CHUNKS=2;
   private static final long WORLD_TRANSACTION_MIN_INTERVAL_NANOS=2_000_000L;
+  private static final long PAPER_MOVE_FAILURE_WINDOW_NANOS=1_000_000_000L;
+  private static final int PAPER_MOVE_FAILURE_THRESHOLD=2;
 
   private final Map<UUID,Capture> captures=new ConcurrentHashMap<>();
   private final Map<UUID,Boolean> debugPlayers=new ConcurrentHashMap<>();
@@ -213,6 +216,97 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     captures.remove(event.getPlayer().getUniqueId());
     debugPlayers.remove(event.getPlayer().getUniqueId());
     setbackOverrides.remove(event.getPlayer().getUniqueId());
+  }
+
+  /**
+   * Paper has already performed its authoritative movement validation when this
+   * event fires. Treat repeated server-rejected movement as independent hard
+   * evidence, rather than trying to reconstruct the rejection from a later
+   * asynchronous server-location snapshot.
+   */
+  @EventHandler public void onPlayerFailMove(PlayerFailMoveEvent event){
+    if(event.isAllowed())return;
+    Player player=event.getPlayer();
+    PlayerFailMoveEvent.FailReason reason=event.getFailReason();
+    if(reason!=PlayerFailMoveEvent.FailReason.MOVED_TOO_QUICKLY
+        &&reason!=PlayerFailMoveEvent.FailReason.MOVED_WRONGLY)return;
+
+    Capture capture=captures.computeIfAbsent(player.getUniqueId(),
+        ignored->new Capture(player.getUniqueId(),System.nanoTime(),validationBudget));
+    long now=System.nanoTime();
+    if(capture.paperMoveFailureWindowStartNanos<0L
+        ||now-capture.paperMoveFailureWindowStartNanos>PAPER_MOVE_FAILURE_WINDOW_NANOS){
+      capture.paperMoveFailureWindowStartNanos=now;
+      capture.paperMoveFailureCount=1;
+    }else{
+      capture.paperMoveFailureCount++;
+    }
+
+    if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
+      getLogger().info("[PhantomAC][PHASE8][PAPER_MOVE_FAIL] player="+player.getName()
+          +" reason="+reason
+          +" allowed="+event.isAllowed()
+          +" failuresInWindow="+capture.paperMoveFailureCount
+          +" from="+event.getFrom()
+          +" to="+event.getTo()
+          +" logWarning="+event.getLogWarning());
+    }
+
+    if(capture.paperMoveFailureCount<PAPER_MOVE_FAILURE_THRESHOLD)return;
+
+    State.Player template=capture.initialState!=null
+        ?capture.initialState
+        :State.Player.initial(vector(event.getFrom().getX(),event.getFrom().getY(),event.getFrom().getZ()));
+    State.Player prior=paperMovementState(template,event.getFrom(),player);
+    State.Player observed=paperMovementState(template,event.getTo(),player);
+    long serverTick=Math.max(0L,(now-capture.epochNanos)/50_000_000L);
+    String rule="PAPER_"+reason.name();
+    String replayReference="live:paper-move-failure:"+capture.paperMoveFailureSequence.incrementAndGet();
+    Phase8MovementValidation.Result result=Phase8MovementValidation.authoritativeImpossible(
+        player.getName(),serverTick,prior,observed,
+        WorldSnapshot.builder(Contracts.TARGET_VERSION).build(),"paper-authoritative-move-failure",
+        new Validation.SyncWindow(0,0,true,List.of("Paper PlayerFailMoveEvent is authoritative server-side rejection")),
+        rule,
+        "Paper prevented this movement attempt as "+reason.name()+" after "
+            +capture.paperMoveFailureCount+" rejected movement attempts within 1 second",
+        List.of(
+            "paperFailMoveReason="+reason.name(),
+            "from="+event.getFrom(),
+            "to="+event.getTo(),
+            "failuresInWindow="+capture.paperMoveFailureCount,
+            "this signal comes from Paper's authoritative movement rejection path",
+            "this signal is independent of finite candidate-search completeness"),
+        replayReference);
+
+    applyAuthoritativeEventResult(capture,result);
+  }
+
+  private State.Player paperMovementState(State.Player template,org.bukkit.Location location,Player player){
+    org.bukkit.util.Vector velocity=player.getVelocity();
+    return new State.Player(
+        vector(location.getX(),location.getY(),location.getZ()),
+        vector(velocity.getX(),velocity.getY(),velocity.getZ()),
+        location.getYaw(),location.getPitch(),player.isOnGround(),
+        template.gamemode(),template.effects(),java.util.OptionalInt.empty(),false,
+        template.input(),template.attributes(),template.pose(),template.environment(),
+        State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
+  }
+
+  private void applyAuthoritativeEventResult(Capture capture,Phase8MovementValidation.Result result){
+    Phase8MovementValidation.Evidence evidence=result.evidence();
+    if(!capture.validationGate.accept(evidence.replayReference(),result.verdict()))return;
+    var accumulated=capture.accumulator.accept(evidence,
+        new Phase8MovementValidation.Config(1,20,alertsEnabled,true));
+    capture.processedResults++;
+    accumulated.alert().ifPresent(alert->{
+      getLogger().warning(alert.message());
+      if(broadcastAlerts){
+        getServer().broadcastMessage(alert.message());
+      }else{
+        Player player=getServer().getPlayer(capture.playerId);
+        if(player!=null&&player.hasPermission("phantom.admin"))player.sendMessage(alert.message());
+      }
+    });
   }
 
   @Override public boolean onCommand(CommandSender sender,Command command,String label,String[] args){
@@ -716,6 +810,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final Set<Short> outstandingTransactions=ConcurrentHashMap.newKeySet();
     final Set<Short> reservedTransactions=ConcurrentHashMap.newKeySet();
     final AtomicLong transactionCounter=new AtomicLong(1);
+    final AtomicLong paperMoveFailureSequence=new AtomicLong();
+    volatile long paperMoveFailureWindowStartNanos=-1L;
+    volatile int paperMoveFailureCount;
     Phase8MovementValidation.Accumulator accumulator=Phase8MovementValidation.Accumulator.empty();
     final ValidationResultGate validationGate=new ValidationResultGate();
     int processedResults;
