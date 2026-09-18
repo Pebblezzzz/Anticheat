@@ -231,7 +231,7 @@ public final class Phase8IncrementalRunner {
         trackedState = after;
         resetGroundContradiction();
         reanchorRequired = true;
-        pendingReanchorState = after;
+        pendingReanchorState = authoritativeGroundState(after);
         reanchorReason = "server velocity was observed; live application timing is not yet represented by the incremental core";
         continuation = Continuation.UNCERTAIN;
         continue;
@@ -586,6 +586,14 @@ public final class Phase8IncrementalRunner {
       return new AdvanceResult(Set.of(), true, List.of("incremental candidate frontier produced no deterministic state"));
     }
     return new AdvanceResult(Set.copyOf(nextAll), false, List.of());
+  }
+
+  private Player authoritativeGroundState(Player state) {
+    if (authoritativeOnGround == null || state.onGround() == authoritativeOnGround) return state;
+    return new Player(state.position(), state.velocity(), state.yaw(), state.pitch(), authoritativeOnGround,
+        state.gamemode(), state.effects(), state.awaitingTeleport(), state.uncertain(), state.input(),
+        state.attributes(), state.pose(), state.environment(), state.clientTickRange(),
+        state.provenance(), state.uncertaintyReasons());
   }
 
   private boolean recordGroundContradiction(Boolean clientReportedGround, long movementTick) {
