@@ -1442,6 +1442,9 @@ public final class CausalMovementPipeline {
 
     Player anchor = fallbackAnchor;
     long rootTick = 0L;
+    if (anchor == null && movement.simulationAuthority().isEmpty()) {
+      return Optional.empty();
+    }
     Optional<AuthoritativeSnapshot> simulationAuthority =
         movement.simulationAuthority();
     boolean localAuthoritativeRoot = useLocalAuthoritativeRoot
