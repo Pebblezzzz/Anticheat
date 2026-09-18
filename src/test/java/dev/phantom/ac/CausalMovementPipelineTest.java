@@ -117,4 +117,61 @@ class CausalMovementPipelineTest {
     }
     return Map.copyOf(states);
   }
+
+  @Test
+  void unauthorizedFlightIsIndependentAuthoritativeEvidence() {
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 0, new ChunkStates(
+            new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
+        new RawPacket(2, 10, authority()),
+        new RawPacket(3, 20, new FlightToggle(true, false)));
+
+    var report = CausalMovementPipeline.analyze(
+        "flight-evidence",
+        Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L),
+        4096,
+        exactTiming(),
+        floorWorld(),
+        anchor(),
+        0L);
+
+    assertTrue(report.results().stream().anyMatch(result ->
+        result.evidence().rule().equals("UNAUTHORIZED_FLIGHT_TOGGLE_ATTEMPT")
+            && result.verdict() == Verdict.IMPOSSIBLE),
+        report.results().toString());
+  }
+
+  @Test
+  void untimedVelocityTransitionForcesUncertainInsteadOfFalseReachabilityContradiction() {
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 0, new ChunkStates(
+            new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
+        new RawPacket(2, 10, authority()),
+        new RawPacket(3, 20, new Move(
+            new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
+        new RawPacket(4, 30, new Velocity(new Maths.Vec3(0.0, 1.0, 0.0))),
+        new RawPacket(5, 70, new Move(
+            new Maths.Vec3(.5, 64.1, .5), 0f, 0f, false, 1L)));
+
+    var report = CausalMovementPipeline.analyze(
+        "velocity-timing",
+        Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L),
+        4096,
+        Phase7Timing.Config.defaultConfig(),
+        floorWorld(),
+        anchor(),
+        0L);
+
+    assertTrue(report.results().stream().anyMatch(result ->
+        result.verdict() == Verdict.UNCERTAIN
+            && result.evidence().uncertaintySources().stream()
+                .anyMatch(reason -> reason.contains("velocity/teleport")
+                    || reason.contains("simulation tick"))),
+        report.results().toString());
+    assertFalse(report.results().stream().anyMatch(result ->
+        result.verdict() == Verdict.IMPOSSIBLE
+            && result.evidence().rule().equals("MOVEMENT_REACHABILITY")),
+        report.results().toString());
+  }
+
 }
