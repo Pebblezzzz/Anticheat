@@ -352,6 +352,20 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           new dev.phantom.ac.Simulation.Attributes(movementSpeed),
           effects,pose,env,player.isSleeping(),entityBoxes);
 
+      if(capture.initialState==null){
+        State.Environment stateEnvironment=switch(env.fluid()){
+          case WATER -> State.Environment.WATER;
+          case LAVA -> State.Environment.LAVA;
+          case NONE -> env.climbable()?State.Environment.CLIMBABLE:State.Environment.DRY;
+        };
+        capture.initialState=new State.Player(
+            vector(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()),
+            Vec3.ZERO,player.getLocation().getYaw(),player.getLocation().getPitch(),player.isOnGround(),
+            player.getGameMode().name().toLowerCase(Locale.ROOT),effects,java.util.OptionalInt.empty(),false,
+            java.util.Optional.empty(),new dev.phantom.ac.Simulation.Attributes(movementSpeed),pose,stateEnvironment,
+            State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
+      }
+
       appendPacket(capture,new RawPacket(capture.sequence.incrementAndGet(),System.nanoTime(),context,
           Packets.CaptureProvenance.fromAdapter("paper-live",context,null)));
     }
@@ -373,7 +387,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         try{
           WorldSnapshot liveWorld=capture.clientWorld.snapshotAround(snapshotCenterX,snapshotCenterZ,LOCAL_SNAPSHOT_RADIUS_CHUNKS);
           Timeline.Snapshot timeline=Timeline.assign(new Packets.Normalizer().normalize(raw),epoch,50_000_000L);
-          Phase8LiveValidation.Report report=Phase8LiveValidation.analyze(playerName,timeline,validationBudget,Phase7Timing.Config.defaultConfig(),liveWorld);
+          Phase8LiveValidation.Report report=Phase8LiveValidation.analyze(playerName,timeline,validationBudget,Phase7Timing.Config.defaultConfig(),liveWorld,capture.initialState);
 
           if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
             logPhase8Timing(playerName,capture,timeline,Phase7Timing.reconstruct(timeline,Phase7Timing.Config.defaultConfig()),report);
@@ -553,6 +567,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final ClientTickTracker clientTickTracker=new ClientTickTracker();
     final AtomicBoolean validationRunning=new AtomicBoolean();
     final LiveClientWorldReplica clientWorld=new LiveClientWorldReplica(Contracts.TARGET_VERSION,-64,319);
+    volatile State.Player initialState;
     final Set<Short> outstandingTransactions=ConcurrentHashMap.newKeySet();
     final Set<Short> reservedTransactions=ConcurrentHashMap.newKeySet();
     final AtomicLong transactionCounter=new AtomicLong(1);
