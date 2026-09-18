@@ -78,18 +78,28 @@ public final class Phase8IncrementalRunner {
   }
 
   public synchronized void reset(Player authoritativeAnchor, long ignoredEpochNanos) {
+    reset(authoritativeAnchor, -1L, -1L);
+  }
+
+  /**
+   * Establishes a new trusted epoch from explicit authoritative server state.
+   * The sequence boundary prevents pre-teleport packets retained by the outer
+   * capture journal from being replayed into the new epoch.
+   */
+  public synchronized void reset(
+      Player authoritativeAnchor,
+      long authoritativeReceivedNanos,
+      long sequenceBoundary) {
     Objects.requireNonNull(authoritativeAnchor, "authoritativeAnchor");
     history.clear();
     seen.clear();
     emitted.clear();
     anchor = authoritativeAnchor;
-    anchorReceivedNanos = -1L;
-    lastProcessedSequence = -1L;
+    anchorReceivedNanos = authoritativeReceivedNanos;
+    lastProcessedSequence = sequenceBoundary;
     latestRelativeClientTick = -1L;
     latestCandidateCount = 0;
-    latestContinuation = anchor == null
-        ? Continuation.UNANCHORED
-        : Continuation.ACTIVE;
+    latestContinuation = Continuation.ACTIVE;
   }
 
   public synchronized Report process(
