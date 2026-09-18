@@ -749,10 +749,10 @@ public final class Phase8IncrementalRunner {
           minX, maxX, minY, maxY, minZ, maxZ);
     }
     if (packet instanceof Packets.ChunkData chunk) {
-      return chunkIntersectsSweep(chunk.chunk(), minX, maxX, minZ, maxZ);
+      return chunkIntersectsSweep(chunk.chunk().x(), chunk.chunk().z(), minX, maxX, minZ, maxZ);
     }
     if (packet instanceof Packets.ChunkStates chunk) {
-      return chunkIntersectsSweep(chunk.chunk(), minX, maxX, minZ, maxZ);
+      return chunkIntersectsSweep(chunk.chunk().x(), chunk.chunk().z(), minX, maxX, minZ, maxZ);
     }
     if (packet instanceof Packets.ChunkUnload chunk) {
       return chunkIntersectsSweep(chunk.chunk(), minX, maxX, minZ, maxZ);
@@ -769,13 +769,13 @@ public final class Phase8IncrementalRunner {
         && z + 1.0 > minZ && z < maxZ;
   }
 
-  private boolean chunkIntersectsSweep(World.Chunk chunk, double minX, double maxX, double minZ, double maxZ) {
+  private boolean chunkIntersectsSweep(int chunkX, int chunkZ, double minX, double maxX, double minZ, double maxZ) {
     int minChunkX = Math.floorDiv((int) Math.floor(minX), 16);
     int maxChunkX = Math.floorDiv((int) Math.floor(Math.nextDown(maxX)), 16);
     int minChunkZ = Math.floorDiv((int) Math.floor(minZ), 16);
     int maxChunkZ = Math.floorDiv((int) Math.floor(Math.nextDown(maxZ)), 16);
-    return chunk.x() >= minChunkX && chunk.x() <= maxChunkX
-        && chunk.z() >= minChunkZ && chunk.z() <= maxChunkZ;
+    return chunkX >= minChunkX && chunkX <= maxChunkX
+        && chunkZ >= minChunkZ && chunkZ <= maxChunkZ;
   }
 
   private long currentCandidateTick() {
