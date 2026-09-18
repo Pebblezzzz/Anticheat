@@ -300,16 +300,11 @@ public final class Phase8IncrementalRunner {
 
       if (move.position() != null
           && futureRelevantWorldMutation(normalized, packetIndex + 1, before, after)) {
-        results.add(uncertainResult(
-            playerId, packet.sequence(), serverTick, before, after, world, "incremental-client-world:chunks="+world.loadedChunks().size(),
-            new Validation.SyncWindow(0, 0, true, List.of("future relevant world mutation in the same capture batch")),
-            "movement precedes a later world mutation that can affect its collision volume; the current snapshot is not historically valid for this movement",
-            "live:incremental:"+packet.sequence()));
-        trackedState = after;
-        continuation = Continuation.UNCERTAIN;
+        // Mark the normal replay path uncertain, but do not skip the movement.
+        // Independent authoritative contradictions below must still be evaluated.
         reanchorRequired = true;
         reanchorReason = "future relevant world mutation makes the current movement snapshot temporally non-causal";
-        continue;
+        continuation = Continuation.UNCERTAIN;
       }
 
       if (move.yaw() != null || move.pitch() != null) {
