@@ -1114,6 +1114,7 @@ public final class CausalMovementPipeline {
       case LAVA -> MovementEnvironment.vanillaLava(player.onGround(), false, false);
       case CLIMBABLE -> MovementEnvironment.vanillaClimbable(player.onGround(), false, false);
       case DRY -> MovementEnvironment.dry(player.onGround(), false, false);
+      case UNKNOWN -> throw new IllegalStateException("authoritative local root has unknown environment");
     };
   }
 
