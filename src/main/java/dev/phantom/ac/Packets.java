@@ -7,7 +7,7 @@ import static dev.phantom.ac.Maths.Vec3;
 public final class Packets {
   private Packets() {}
 
-  public sealed interface Packet extends Serializable permits Move, ClientInput, Teleport, TeleportConfirm,
+  public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm,
       Velocity, Effect, Gamemode, PlayerContext, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange,
       WorldTransactionSend, WorldTransactionAck {
     default boolean mutatesWorld() {
@@ -17,6 +17,8 @@ public final class Packets {
   }
 
   public record Move(Vec3 position, Float yaw, Float pitch, Boolean onGround, Long clientTick) implements Packet { public Move { if(clientTick!=null&&clientTick<0) throw new IllegalArgumentException("clientTick must be non-negative"); } }
+  /** Protocol-observed end of a client tick. This is a boundary signal, not a movement timestamp. */
+  public record ClientTickEnd() implements Packet {}
   public record ClientInput(boolean forward, boolean backward, boolean left, boolean right, boolean jump, boolean sneak, boolean sprint) implements Packet {}
   public record Teleport(int id, Vec3 position, float yaw, float pitch, boolean relativeX, boolean relativeY, boolean relativeZ, boolean relativeYaw, boolean relativePitch) implements Packet { public Teleport { Objects.requireNonNull(position,"position"); }
     public Teleport(int id, Vec3 position, float yaw, float pitch) { this(id,position,yaw,pitch,false,false,false,false,false); }
@@ -56,7 +58,7 @@ public final class Packets {
     public static CaptureProvenance forPacket(Packet packet){Objects.requireNonNull(packet);return new CaptureProvenance("unknown-capture-source",directionFor(packet),packet.getClass().getSimpleName(),null);}
     public static CaptureProvenance fromAdapter(String sourceId,Packet packet,Long authoritativeServerTick){Objects.requireNonNull(packet);return new CaptureProvenance(sourceId,directionFor(packet),packet.getClass().getSimpleName(),authoritativeServerTick);}
     public static String directionFor(Packet packet){
-      if(packet instanceof Move||packet instanceof ClientInput||packet instanceof TeleportConfirm||packet instanceof WorldTransactionAck)return "CLIENT_TO_SERVER";
+      if(packet instanceof Move||packet instanceof ClientInput||packet instanceof ClientTickEnd||packet instanceof TeleportConfirm||packet instanceof WorldTransactionAck)return "CLIENT_TO_SERVER";
       if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof Effect||packet instanceof Gamemode||packet instanceof PlayerContext||packet instanceof WorldTransactionSend||packet.mutatesWorld())return "SERVER_TO_CLIENT";
       return "UNKNOWN";
     }
