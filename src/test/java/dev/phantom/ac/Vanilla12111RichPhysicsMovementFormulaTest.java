@@ -23,8 +23,12 @@ class Vanilla12111RichPhysicsMovementFormulaTest {
   }
 
   private static Vanilla12111RichPhysics.StepResult step(Player player,AdvancedInput input,WorldSnapshot world) {
+    return step(player,input,world,Attributes.DEFAULT);
+  }
+
+  private static Vanilla12111RichPhysics.StepResult step(Player player,AdvancedInput input,WorldSnapshot world,Attributes attributes) {
     return new Vanilla12111RichPhysics().step(new Vanilla12111RichPhysics.Context(
-        0,player,input,world,Environment.DRY,Attributes.DEFAULT,MovementEffects.NONE,
+        0,player,input,world,Environment.DRY,attributes,MovementEffects.NONE,
         Pose.STANDING,MovementEnvironment.dry(player.onGround(),input.sprint(),input.sneak()),
         false,dev.phantom.ac.world.EntityCollisions.of(java.util.List.of())));
   }
@@ -39,8 +43,10 @@ class Vanilla12111RichPhysicsMovementFormulaTest {
 
   @Test
   void sprintGroundUsesMovementSpeedSprintModifier() {
+    var sprintAttributes=new Attributes(.1,java.util.List.of(new Phase5Mechanics.AttributeModifier(
+        "vanilla:sprinting",0.3,Phase5Mechanics.ModifierOperation.ADD_MULTIPLIED_TOTAL)));
     var result=step(Player.initial(new Vec3(.5,64,.5)),
-        new AdvancedInput(1,0,false,true,false),floor("minecraft:stone"));
+        new AdvancedInput(1,0,false,true,false),floor("minecraft:stone"),sprintAttributes);
     assertEquals(.63,result.state().position().z(),1e-8);
     assertEquals(.07098,result.state().velocity().z(),1e-8);
   }
