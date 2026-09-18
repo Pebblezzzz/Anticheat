@@ -241,9 +241,16 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   @EventHandler public void onJoin(PlayerJoinEvent event){
-    Capture capture=new Capture(event.getPlayer().getUniqueId(),System.nanoTime(),validationBudget);
-    capture.updateServerPosition(event.getPlayer());
-    captures.put(event.getPlayer().getUniqueId(),capture);
+    Player player=event.getPlayer();
+    captures.compute(player.getUniqueId(),(id,existing)->{
+      if(existing!=null){
+        existing.updateServerPosition(player);
+        return existing;
+      }
+      Capture capture=new Capture(id,System.nanoTime(),validationBudget);
+      capture.updateServerPosition(player);
+      return capture;
+    });
   }
 
   @EventHandler public void onTeleport(PlayerTeleportEvent event){

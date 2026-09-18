@@ -220,9 +220,12 @@ public final class WorldSnapshot implements Serializable {
           boolean a=first.hasChunk(sought), b=second.hasChunk(sought);
           if (a && b) {
             Coverage ca=first.coverageAt(x,y,z), cb=second.coverageAt(x,y,z);
-            if (ca==cb && ca!=Coverage.UNLOADED) {
+            if (ca!=cb) {
+              throw new IllegalArgumentException("overlapping world snapshots disagree in coverage at ("+x+","+y+","+z+")");
+            }
+            if (ca!=Coverage.UNLOADED) {
               BlockState sa=first.blockAtOrNull(x,y,z), sb=second.blockAtOrNull(x,y,z);
-              if ((ca==Coverage.KNOWN || ca==Coverage.UNSUPPORTED) && !Objects.equals(sa,sb)) {
+              if (!Objects.equals(sa,sb) && ca==Coverage.KNOWN) {
                 throw new IllegalArgumentException("overlapping world snapshots disagree at ("+x+","+y+","+z+")");
               }
             }
