@@ -561,7 +561,7 @@ public final class CausalMovementPipeline {
   /**
    * Evaluates an explicitly observed server-side flight-toggle authorization
    * transition. This is an authoritative evidence channel, not movement
-   reachability and not a Paper move-rejection heuristic.
+   * reachability and not a Paper move-rejection heuristic.
    */
   public static Optional<Phase8MovementValidation.Result> evaluateFlightToggle(
       String playerId,
