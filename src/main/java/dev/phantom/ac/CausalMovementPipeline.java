@@ -203,11 +203,6 @@ public final class CausalMovementPipeline {
     boolean recoveryRequired = false;
     long lastAmbiguitySequence = -1L;
     boolean haveAuthoritativeSeed = initialAnchor != null && !initialAnchor.uncertain();
-    Map<Long, Phase7Timing.EventTiming> timingsBySequence = new HashMap<>();
-    for (Phase7Timing.Frame frame : timing.frames()) {
-      timingsBySequence.put(frame.timing().sequence(), frame.timing());
-    }
-
     for (MovementEvent movement : movements) {
       Timeline.Event event = movement.event();
       long sequence = event.packet().sequence();
@@ -340,27 +335,17 @@ public final class CausalMovementPipeline {
       }
 
       if (recoveryRequired) {
-        Optional<Frontier> reanchored = tryAuthoritativeReanchor(
-            movement,
-            timingsBySequence,
-            maximumCandidates);
-        if (reanchored.isPresent()) {
-          frontier = reanchored.get();
-          recoveryRequired = false;
-          uncertainty.add("prediction re-anchored only from a timestamped authoritative server snapshot");
-          trace.add("RECOVERY authoritative re-anchor accepted");
-        } else {
-          uncertainty.add("prediction frontier was invalidated by ambiguous chronology and no exact authoritative re-anchor is available");
-          SearchResult uncertain = uncertainSearch(
-              frontier.candidates(),
-              String.join("; ", uncertainty));
-          results.add(Phase8MovementValidation.validate(
-              playerId, serverTick, observedBefore, observedAfter, movement.world(),
-              worldReference, sync, assumptions, uncertain, replayReference, false));
-          frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
-              assumptions, uncertainty, trace));
-          continue;
-        }
+        uncertainty.add(
+            "prediction frontier was invalidated by chronology ambiguity; waiting for an explicit authoritative epoch reset");
+        SearchResult uncertain = uncertainSearch(
+            frontier.candidates(),
+            String.join("; ", uncertainty));
+        results.add(Phase8MovementValidation.validate(
+            playerId, serverTick, observedBefore, observedAfter, movement.world(),
+            worldReference, sync, assumptions, uncertain, replayReference, false));
+        frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+            assumptions, uncertainty, trace));
+        continue;
       }
 
       if (frontier.candidates().isEmpty()) {
@@ -1043,57 +1028,6 @@ public final class CausalMovementPipeline {
             List.of("explicit authoritative server anchor"),
             1,
             List.of())));
-  }
-
-  private static Optional<Frontier> tryAuthoritativeReanchor(
-      MovementEvent movement,
-      Map<Long, Phase7Timing.EventTiming> timingsBySequence,
-      int maximumCandidates) {
-    if (movement.authority().quality() != AuthorityQuality.EXACT
-        || movement.authority().snapshot().isEmpty()) {
-      return Optional.empty();
-    }
-    Phase7Timing.EventTiming authorityTiming =
-        timingsBySequence.get(movement.authority().snapshot().get().sequence());
-    if (authorityTiming == null
-        || !authorityTiming.simulationClientTicks().isExact()) {
-      return Optional.empty();
-    }
-
-    Packets.PlayerContext context = movement.authority().snapshot().get().context();
-    Player player = playerFromAuthority(context);
-    long tick = authorityTiming.simulationClientTicks().min();
-    WorldSnapshot world = movement.world();
-    Maths.Aabb box = Maths.Aabb.playerAt(player.position(), context.pose());
-    if (!world.fullyKnown(new dev.phantom.ac.geometry.BlockBox(
-        box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()))) {
-      return Optional.empty();
-    }
-
-    InputConstraint input = InputConstraint.any();
-    Candidate candidate = new Candidate(
-        0,
-        new Context(
-            tick,
-            player,
-            simulationEnvironmentFor(context.movementEnvironment()),
-            context.attributes(),
-            movementEffects(player),
-            context.pose(),
-            context.movementEnvironment(),
-            context.sleeping(),
-            EntityCollisions.of(context.entityBoxes())),
-        new Phase6Reachability.Provenance(
-            0,
-            -1,
-            tick,
-            "ROOT_AUTHORITATIVE_REANCHOR",
-            "AUTHORITY",
-            "None",
-            List.of("timestamped authoritative server snapshot after chronology ambiguity"),
-            1,
-            List.of()));
-    return Optional.of(new Frontier(Set.of(candidate), tick - 1L, true));
   }
 
   private static boolean containsChronologyProblem(
