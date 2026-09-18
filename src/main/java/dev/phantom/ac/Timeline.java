@@ -9,7 +9,7 @@ import static dev.phantom.ac.Simulation.Input;
 public final class Timeline {
   private Timeline() {}
   private static final int MAGIC=0x50484143; // PHAC
-  private static final short FORMAT_VERSION=4;
+  private static final short FORMAT_VERSION=5;
 
   public record Metadata(String modelVersion,long captureEpochNanos,long serverTickNanos) implements Serializable {
     public Metadata { Contracts.requireTargetVersion(modelVersion); if(captureEpochNanos<0||serverTickNanos<=0) throw new IllegalArgumentException("invalid timeline clock metadata"); }
