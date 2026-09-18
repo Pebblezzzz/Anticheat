@@ -71,8 +71,17 @@ public final class Phase6Reachability {
         boolean externalUncertain=false;
         for(ExternalTransition event:external){pre=applyExternal(pre,event,tick);if(pre.player().uncertain()){externalUncertain=true;break;}}
         if(externalUncertain){uncertainTransitions++;continue;}
-        for(AdvancedInput input:allowed){MovementEnvironment env=adjustEnvironment(pre.movementEnvironment(),pre.player(),input);Vanilla12111RichPhysics.Context rc=new Vanilla12111RichPhysics.Context(tick,pre.player(),input,branch.world(),pre.environment(),pre.attributes(),pre.effects(),pre.pose(),env,pre.sleeping(),pre.entityCollisions());Vanilla12111RichPhysics.StepResult stepped=physics.step(rc);if(stepped.state().uncertain()){uncertainTransitions++;continue;}
-            Pose nextPose=Phase5Mechanics.nextPose(pre.pose(),env,pre.sleeping());Context after=new Context(tick+1,stepped.state(),pre.environment(),pre.attributes(),pre.effects(),nextPose,adjustEnvironment(env,stepped.state(),input),pre.sleeping(),pre.entityCollisions(),pre.uncertainty());Candidate existing=next.get(after);
+        for(AdvancedInput input:allowed){
+          MovementEnvironment env=inferEnvironment(branch.world(),pre.player(),input);
+          Simulation.Environment simulationEnvironment=environmentFor(env);
+          Vanilla12111RichPhysics.Context rc=new Vanilla12111RichPhysics.Context(tick,pre.player(),input,branch.world(),
+              simulationEnvironment,pre.attributes(),pre.effects(),pre.pose(),env,pre.sleeping(),pre.entityCollisions());
+          Vanilla12111RichPhysics.StepResult stepped=physics.step(rc);
+          if(stepped.state().uncertain()){uncertainTransitions++;continue;}
+          MovementEnvironment nextEnvironment=inferEnvironment(branch.world(),stepped.state(),input);
+          Pose nextPose=Phase5Mechanics.nextPose(pre.pose(),nextEnvironment,pre.sleeping());
+          Context after=new Context(tick+1,stepped.state(),environmentFor(nextEnvironment),pre.attributes(),pre.effects(),nextPose,
+              nextEnvironment,pre.sleeping(),pre.entityCollisions(),pre.uncertainty());Candidate existing=next.get(after);
             if(existing==null){long id=nextId++;next.put(after,new Candidate(id,after,new Provenance(id,parent.id(),tick,input.toString(),branch.id(),external.toString(),List.of(stepped.diagnostic()),1,List.of(parent.id()))));}
             else{merged++;provenanceMerges++;Provenance old=existing.provenance();List<Long> ps=new ArrayList<>(old.mergedParentIds());if(!ps.contains(parent.id())&&ps.size()<MAX_PROVENANCE_PARENTS)ps.add(parent.id());int paths=old.mergedPathCount()==Integer.MAX_VALUE?Integer.MAX_VALUE:old.mergedPathCount()+1;next.put(after,new Candidate(existing.id(),existing.context(),new Provenance(existing.id(),old.parentId(),old.tick(),old.input(),old.worldBranch(),old.externalTransition(),old.causes(),paths,ps)));}
             if(next.size()>maximumCandidates)return uncertain(offset+1,Math.max(peak,next.size()),"candidate budget exceeded; no provisional subset is exposed");
@@ -109,6 +118,31 @@ public final class Phase6Reachability {
   public Evidence compare(SearchResult result,Observation observation){if(result.verdict()==Verdict.UNCERTAIN)return new Evidence(Verdict.UNCERTAIN,0,List.of(),result.reasons());List<Provenance> matches=new ArrayList<>();for(Candidate c:result.candidates())if(matches(c.context().player(),observation))matches.add(c.provenance());if(!matches.isEmpty())return new Evidence(Verdict.POSSIBLE,matches.size(),matches,List.of("observed facts are reachable","candidate provenance is retained"));return new Evidence(Verdict.IMPOSSIBLE,0,List.of(),List.of("no exact candidate matches the declared observed facts","all declared branches were exhausted"));}
   private static boolean matches(Player c,Observation o){Player x=o.observed();for(ObservedField f:o.known())switch(f){case POSITION->{if(!c.position().equals(x.position()))return false;}case VELOCITY->{if(!c.velocity().equals(x.velocity()))return false;}case ROTATION->{if(Float.compare(c.yaw(),x.yaw())!=0||Float.compare(c.pitch(),x.pitch())!=0)return false;}case GROUND->{if(c.onGround()!=x.onGround())return false;}case GAMEMODE->{if(!c.gamemode().equals(x.gamemode()))return false;}case EFFECTS->{if(!c.effects().equals(x.effects()))return false;}case TELEPORT_PENDING->{if(c.awaitingTeleport().isPresent()!=x.awaitingTeleport().isPresent())return false;}}return true;}
   private static Context applyExternal(Context c,ExternalTransition e,long tick){Player s=c.player();if(e instanceof None)return c.withTick(tick);if(e instanceof VelocityImpulse v){Player n=Phase5Mechanics.applyVelocityImpulse(s,new Phase5Mechanics.Vec3Like(v.impulse().x(),v.impulse().y(),v.impulse().z()));return new Context(tick,n,c.environment(),c.attributes(),c.effects(),c.pose(),c.movementEnvironment(),c.sleeping(),c.entityCollisions(),c.uncertainty());}if(e instanceof TeleportCorrection t){OptionalInt p=t.awaitingConfirmation()?OptionalInt.of(t.id()):OptionalInt.empty();Player n=new Player(t.position(),t.velocity(),s.yaw(),s.pitch(),false,s.gamemode(),s.effects(),p,false);return new Context(tick,n,c.environment(),c.attributes(),c.effects(),t.pose(),c.movementEnvironment(),c.sleeping(),c.entityCollisions(),c.uncertainty());}if(e instanceof TeleportConfirmation t){boolean ok=s.awaitingTeleport().isPresent()&&s.awaitingTeleport().getAsInt()==t.id();Player n=new Player(s.position(),s.velocity(),s.yaw(),s.pitch(),s.onGround(),s.gamemode(),s.effects(),ok?OptionalInt.empty():s.awaitingTeleport(),s.uncertain()||!ok);return new Context(tick,n,c.environment(),c.attributes(),c.effects(),c.pose(),c.movementEnvironment(),c.sleeping(),c.entityCollisions(),c.uncertainty());}throw new IllegalStateException("unhandled external transition "+e.getClass());}
-  private static MovementEnvironment adjustEnvironment(MovementEnvironment e,Player p,AdvancedInput i){return new MovementEnvironment(e.fluid(),e.submerged(),e.climbable(),p.onGround(),i.sprint(),i.sneak(),e.swimmingInput(),e.gliding(),e.fluidSpeedMultiplier(),e.fluidDrag(),e.gravityMultiplier());}
+  private static MovementEnvironment inferEnvironment(WorldSnapshot world,Player player,AdvancedInput input){
+    Maths.Aabb box=Maths.Aabb.playerAt(player.position(),player.pose());
+    int minX=(int)Math.floor(box.minX()),maxX=(int)Math.floor(Math.nextDown(box.maxX()));
+    int minY=(int)Math.floor(box.minY()),maxY=(int)Math.floor(Math.nextDown(box.maxY()));
+    int minZ=(int)Math.floor(box.minZ()),maxZ=(int)Math.floor(Math.nextDown(box.maxZ()));
+    boolean water=false,lava=false,climb=false;
+    for(int y=minY;y<=maxY;y++)for(int x=minX;x<=maxX;x++)for(int z=minZ;z<=maxZ;z++){
+      dev.phantom.ac.world.BlockState state=world.blockAtOrNull(x,y,z);
+      if(state==null)continue;
+      if(state.variant()==dev.phantom.ac.world.BlockState.Variant.LADDER)climb=true;
+      var fluid=dev.phantom.ac.world.v12111.BlockCatalogue12111.fluid(state);
+      if(fluid.type()==dev.phantom.ac.world.FluidState.Type.WATER)water=true;
+      if(fluid.type()==dev.phantom.ac.world.FluidState.Type.LAVA)lava=true;
+    }
+    boolean sprint=input.sprint(),sneak=input.sneak(),swim=player.pose()==Pose.SWIMMING;
+    if(water)return MovementEnvironment.vanillaWater(player.onGround(),sprint,sneak,swim);
+    if(lava)return MovementEnvironment.vanillaLava(player.onGround(),sprint,sneak);
+    if(climb)return MovementEnvironment.vanillaClimbable(player.onGround(),sprint,sneak);
+    return MovementEnvironment.dry(player.onGround(),sprint,sneak);
+  }
+  private static Simulation.Environment environmentFor(MovementEnvironment env){
+    if(env.fluid()==Phase5Mechanics.Fluid.WATER)return Simulation.Environment.WATER;
+    if(env.fluid()==Phase5Mechanics.Fluid.LAVA)return Simulation.Environment.LAVA;
+    if(env.climbable())return Simulation.Environment.CLIMBABLE;
+    return Simulation.Environment.DRY;
+  }
   private static SearchResult uncertain(int ticks,int peak,String reason){return new SearchResult(Verdict.UNCERTAIN,Set.of(),ticks,peak,0,0,0,0,List.of(reason));}
 }
