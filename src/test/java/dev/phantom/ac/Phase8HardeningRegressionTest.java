@@ -101,7 +101,7 @@ class Phase8HardeningRegressionTest {
     );
     var timeline=capture(packets);
     var anchor=Player.initial(new Vec3(0.5,64.0,0.5));
-    var report=Phase8LiveValidation.analyze("flight-anchor",timeline,4096,exactTiming(),null,anchor);
+    var report=Phase8LiveValidation.analyze("flight-anchor",timeline,4096,exactTiming(),null,anchor,1L);
     assertEquals(1,report.movementObservations(),report.results().toString());
     assertEquals(Verdict.IMPOSSIBLE,report.results().getFirst().verdict(),report.results().toString());
     assertEquals(0,report.results().getFirst().evidence().matchingCandidateCount());
@@ -158,7 +158,7 @@ class Phase8HardeningRegressionTest {
         new RawPacket(9,260_000_000L,new Move(new Vec3(.5,65.0,.5),0f,0f,false,null))
     );
     Player anchor=Player.initial(new Vec3(.5,64.0,.5));
-    var report=Phase8LiveValidation.analyze("sustained-flight",capture(packets),4096,exactTiming(),null,anchor);
+    var report=Phase8LiveValidation.analyze("sustained-flight",capture(packets),4096,exactTiming(),null,anchor,1L);
     assertEquals(3,report.movementObservations(),report.results().toString());
     assertEquals(Verdict.IMPOSSIBLE,report.results().getFirst().verdict(),report.results().toString());
     assertEquals(0,report.results().getFirst().evidence().matchingCandidateCount());
