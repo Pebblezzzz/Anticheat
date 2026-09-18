@@ -413,10 +413,25 @@ public final class CausalMovementPipeline {
         trace.add("RECOVERY_CLEARED reason=clean causally aligned movement after fresh authority");
       }
 
+      boolean initialAnchorWorldStale = initialAnchor != null
+          && !initialAnchor.uncertain()
+          && !movement.world().fullyKnown(playerCollisionBox(initialAnchor));
+      boolean initialAnchorFarFromObservation = initialAnchor != null
+          && distance(initialAnchor.position(), observedAfter.position()) > 32.0;
       boolean preferLocalAuthoritativeRoot = localAuthoritativeRootAvailable
           && (initialAnchor == null
               || justRecovered
+              || initialAnchorWorldStale
+              || initialAnchorFarFromObservation
               || movement.timing().simulationClientTicks().max() > Phase6Reachability.MAX_HORIZON_TICKS);
+      if (preferLocalAuthoritativeRoot && initialAnchorWorldStale) {
+        uncertainty.add("original authoritative anchor is outside the retained client-world window; re-anchoring from the exact local server snapshot");
+        trace.add("ROOT_REFRESH reason=INITIAL_ANCHOR_WORLD_STALE");
+      }
+      if (preferLocalAuthoritativeRoot && initialAnchorFarFromObservation) {
+        trace.add("ROOT_REFRESH reason=INITIAL_ANCHOR_FAR_FROM_OBSERVED distance="
+            +String.format(Locale.ROOT,"%.3f",distance(initialAnchor.position(),observedAfter.position())));
+      }
 
       if (recoveryRequired) {
         uncertainty.add(
@@ -1223,6 +1238,12 @@ public final class CausalMovementPipeline {
         .filter(snapshot -> snapshot.receivedNanos() <= movement.event().packet().receivedNanos())
         .filter(snapshot -> snapshot.serverTick() <= movement.event().serverTick())
         .filter(snapshot -> movement.event().serverTick() - snapshot.serverTick() <= maxServerTickAge);
+  }
+
+  private static dev.phantom.ac.geometry.BlockBox playerCollisionBox(Player player) {
+    Maths.Aabb box=Maths.Aabb.playerAt(player.position(),player.pose());
+    return new dev.phantom.ac.geometry.BlockBox(
+        box.minX(),box.minY(),box.minZ(),box.maxX(),box.maxY(),box.maxZ());
   }
 
   private static boolean rangesOverlap(Phase7Timing.Range a, Phase7Timing.Range b) {
