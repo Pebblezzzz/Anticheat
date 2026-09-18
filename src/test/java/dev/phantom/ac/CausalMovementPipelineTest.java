@@ -125,6 +125,62 @@ class CausalMovementPipelineTest {
   }
 
   @Test
+  void populatedFrontierRefreshesWhenFreshAuthorityIsFarAway() {
+    var stone = dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone", Map.of());
+    var worldBuilder = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+        .loadChunk(0, 0)
+        .loadChunk(2, 0);
+    for (int x = -8; x <= 8; x++) for (int z = -8; z <= 8; z++) {
+      worldBuilder.setBlock(x, 63, z, stone);
+    }
+    for (int x = 32; x <= 47; x++) for (int z = 0; z <= 15; z++) {
+      worldBuilder.setBlock(x, 63, z, stone);
+    }
+    WorldSnapshot currentWorld = worldBuilder.build();
+
+    Player initial = anchor();
+    Player current = new Player(
+        new Maths.Vec3(40.5, 64, 0.5), Maths.Vec3.ZERO, 0f, 0f, true,
+        "survival", Map.of(), OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.unknown(), State.Provenance.UNKNOWN, Set.of());
+
+    Packets.PlayerContext firstAuthority = authority();
+    Packets.PlayerContext secondAuthority = new Packets.PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(), Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        current.position(), current.velocity(), false, false, false, List.of());
+
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 0, new ChunkStates(
+            new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
+        new RawPacket(2, 10, firstAuthority),
+        new RawPacket(3, 20, new Move(
+            new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
+        new RawPacket(4, 1_950_000_000L, secondAuthority),
+        new RawPacket(5, 2_000_000_000L, new Move(
+            current.position(), 0f, 0f, true, 40L)));
+
+    var report = CausalMovementPipeline.analyze(
+        "frontier-refresh",
+        Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L),
+        4096,
+        exactTiming(),
+        currentWorld,
+        initial,
+        0L);
+
+    assertEquals(2, report.movementObservations());
+    assertEquals(Verdict.POSSIBLE, report.results().getFirst().verdict(),
+        report.results().toString());
+    assertEquals(Verdict.POSSIBLE, report.results().get(1).verdict(),
+        report.results().toString());
+    assertTrue(report.frames().get(1).trace().stream()
+        .anyMatch(line -> line.contains("FRONTIER_REFRESH reason=FRONTIER_FAR_FROM_LOCAL_AUTHORITY")),
+        report.frames().get(1).trace().toString());
+  }
+
+  @Test
   void PaperMovementRejectionIsPreservedAsCorroborationOnly() {
     List<RawPacket> packets = List.of(
         new RawPacket(1, 0, new ChunkStates(
