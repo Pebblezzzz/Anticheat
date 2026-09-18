@@ -20,6 +20,15 @@ class Phase8IncrementalRunnerTest {
     return builder.build();
   }
 
+  private static Map<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> floorStates() {
+    var stone = dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone", Map.of());
+    Map<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> states = new LinkedHashMap<>();
+    for (int x = -8; x <= 16; x++) for (int z = -8; z <= 16; z++) {
+      states.put(new dev.phantom.ac.world.Pos(x, 63, z), stone);
+    }
+    return Map.copyOf(states);
+  }
+
   private static Player anchor() {
     return new Player(
         new Maths.Vec3(.5, 64, .5),
