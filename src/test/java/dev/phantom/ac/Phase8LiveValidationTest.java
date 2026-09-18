@@ -96,7 +96,9 @@ class Phase8LiveValidationTest {
         new RawPacket(3, 0, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
         new RawPacket(4, 50_000_000L, new Move(new Vec3(100.5, 64, 100.5), 0f, 0f, true, 1L)),
         new RawPacket(5, 100_000_000L, new Move(new Vec3(101.5, 64, 100.5), 0f, 0f, true, 2L)));
-    Phase8LiveValidation.Report report = Phase8LiveValidation.analyze("phase8-test", capture(packets), 256, exactTiming());
+    Phase8LiveValidation.Report report = Phase8LiveValidation.analyze(
+        "phase8-test", capture(packets), 256, exactTiming(), null,
+        Player.initial(new Vec3(.5, 64, .5)), 0L);
     assertEquals(3, report.movementObservations());
     assertEquals(1, report.uncertain());
     assertEquals(2, report.impossible());
@@ -131,7 +133,9 @@ class Phase8LiveValidationTest {
         new RawPacket(3, 0, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
         new RawPacket(4, 50_000_000L, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 1L)),
         new RawPacket(5, 100_000_000L, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 2L)));
-    Phase8LiveValidation.Report report = Phase8LiveValidation.analyze("phase8-possible", capture(packets), 256, exactTiming());
+    Phase8LiveValidation.Report report = Phase8LiveValidation.analyze(
+        "phase8-possible", capture(packets), 256, exactTiming(), null,
+        Player.initial(new Vec3(.5, 64, .5)), 0L);
     assertEquals(3, report.movementObservations());
     assertEquals(1, report.uncertain());
     assertEquals(2, report.possible(), report.results().toString());
