@@ -70,13 +70,13 @@ public final class Phase6Reachability {
     if(inputs.size()>MAX_HORIZON_TICKS)return uncertain(0,1,"simulation horizon exceeds the finite Phase 6 envelope");
     if(start.player().uncertain()||!start.uncertainty().isEmpty())return uncertain(0,1,"initial state carries explicit uncertainty dimensions: "+start.uncertainty());
     Map<Context,Candidate> current=new LinkedHashMap<>();current.put(start,new Candidate(0,start,new Provenance(0,-1,start.simulationTick(),"ROOT","ROOT","None",List.of("initial replay anchor"),1,List.of())));
-    long nextId=1;int peak=1,merged=0,nonExhaustive=0,uncertainTransitions=0,provenanceMerges=0;
+    long nextId=1;int peak=1,merged=0,nonExhaustive=0,uncertainTransitions=0,provenanceMerges=0;String firstCoverageIssue=null;
     for(int offset=0;offset<inputs.size();offset++){
       long tick=start.simulationTick()+offset;List<AdvancedInput> allowed=inputs.get(offset).enumerate();if(allowed.isEmpty())return uncertain(offset,peak,"input constraint has no realizable advanced input");
       List<WorldBranch> branches=Objects.requireNonNull(worlds.apply(tick),"world branches");if(branches.isEmpty())return uncertain(offset,peak,"world hypothesis envelope is empty at tick "+tick);if(branches.stream().anyMatch(b->!b.exhaustive()))nonExhaustive++;
       List<ExternalTransition> external=Objects.requireNonNull(externalTransitions.apply(tick),"external transitions");if(external.isEmpty())external=List.of(new None());
       Map<Context,Candidate> next=new LinkedHashMap<>();
-      for(Candidate parent:current.values())for(WorldBranch branch:branches){Maths.Aabb pb=Maths.Aabb.playerAt(parent.context().player().position(),parent.context().pose());Set<dev.phantom.ac.world.Coverage> coverage=branch.world().coverageIn(new dev.phantom.ac.geometry.BlockBox(pb.minX(),pb.minY(),pb.minZ(),pb.maxX(),pb.maxY(),pb.maxZ()));if(!coverage.equals(Set.of(dev.phantom.ac.world.Coverage.KNOWN))){uncertainTransitions++;continue;}
+      for(Candidate parent:current.values())for(WorldBranch branch:branches){Maths.Aabb pb=Maths.Aabb.playerAt(parent.context().player().position(),parent.context().pose());Set<dev.phantom.ac.world.Coverage> coverage=branch.world().coverageIn(new dev.phantom.ac.geometry.BlockBox(pb.minX(),pb.minY(),pb.minZ(),pb.maxX(),pb.maxY(),pb.maxZ()));if(!coverage.equals(Set.of(dev.phantom.ac.world.Coverage.KNOWN))){uncertainTransitions++;if(firstCoverageIssue==null)firstCoverageIssue="coverage="+coverage+" candidateAabb="+pb;continue;}
         Context pre=parent.context().withTick(tick);
         boolean externalUncertain=false;
         for(ExternalTransition event:external){pre=applyExternal(pre,event,tick);if(pre.player().uncertain()){externalUncertain=true;break;}}
@@ -97,7 +97,7 @@ public final class Phase6Reachability {
             if(next.size()>maximumCandidates)return uncertain(offset+1,Math.max(peak,next.size()),"candidate budget exceeded; no provisional subset is exposed");
           }
       }
-      if(next.isEmpty())return new SearchResult(Verdict.UNCERTAIN,Set.of(),offset+1,Math.max(peak,1),merged,nonExhaustive,uncertainTransitions,provenanceMerges,List.of("all transitions became uncertain or were eliminated by incomplete world coverage"));
+      if(next.isEmpty()){String reason="all transitions became uncertain or were eliminated by incomplete world coverage";if(firstCoverageIssue!=null)reason+="; first observed coverage issue: "+firstCoverageIssue;return new SearchResult(Verdict.UNCERTAIN,Set.of(),offset+1,Math.max(peak,1),merged,nonExhaustive,uncertainTransitions,provenanceMerges,List.of(reason));}
       peak=Math.max(peak,next.size());current=next;if(nonExhaustive>0)return new SearchResult(Verdict.UNCERTAIN,Set.of(),offset+1,peak,merged,nonExhaustive,uncertainTransitions,provenanceMerges,List.of("world hypothesis envelope is not exhaustive at tick "+tick));
     }
     return new SearchResult(Verdict.POSSIBLE,Set.copyOf(current.values()),inputs.size(),peak,merged,nonExhaustive,uncertainTransitions,provenanceMerges,List.of("exhaustive finite search completed with exact full-context merging"));
