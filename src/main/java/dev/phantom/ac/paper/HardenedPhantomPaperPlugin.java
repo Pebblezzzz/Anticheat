@@ -617,6 +617,12 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
                 +" candidates="+capture.movementRunner.candidateCount()
                 +" continuation="+incremental.continuation()
                 +" frontierRetained="+incremental.candidateFrontierRetained());
+            for(CausalMovementPipeline.Frame frame:incremental.frames()){
+              for(String traceLine:frame.trace()){
+                getLogger().info("[PhantomAC][PHASE8][TRACE] player="+playerName
+                    +" seq="+frame.sequence()+" "+traceLine);
+              }
+            }
           }
 
           if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))
