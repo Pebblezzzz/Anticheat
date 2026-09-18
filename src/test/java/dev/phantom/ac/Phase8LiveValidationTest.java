@@ -100,7 +100,7 @@ class Phase8LiveValidationTest {
         "phase8-test", capture(packets), 256, exactTiming(), null,
         Player.initial(new Vec3(.5, 64, .5)), 0L);
     assertEquals(3, report.movementObservations());
-    assertEquals(1, report.uncertain());
+    assertEquals(1, report.possible());
     assertEquals(2, report.impossible());
     assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE, report.results().get(1).verdict());
     assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE, report.results().get(2).verdict());
@@ -137,8 +137,7 @@ class Phase8LiveValidationTest {
         "phase8-possible", capture(packets), 256, exactTiming(), null,
         Player.initial(new Vec3(.5, 64, .5)), 0L);
     assertEquals(3, report.movementObservations());
-    assertEquals(1, report.uncertain());
-    assertEquals(2, report.possible(), report.results().toString());
+    assertEquals(3, report.possible(), report.results().toString());
     assertEquals(0, report.impossible(), report.results().toString());
   }
 
@@ -147,10 +146,12 @@ class Phase8LiveValidationTest {
     List<RawPacket> packets = List.of(
         new RawPacket(1, 0, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
         new RawPacket(2, 50_000_000L, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 1L)));
-    Phase8LiveValidation.Report report = Phase8LiveValidation.analyze("phase8-unknown", capture(packets), 256, exactTiming());
+    Phase8LiveValidation.Report report = Phase8LiveValidation.analyze(
+        "phase8-unknown", capture(packets), 256, exactTiming(), null,
+        Player.initial(new Vec3(.5, 64, .5)), 0L);
     assertEquals(2, report.movementObservations());
-    assertEquals(0, report.possible());
-    assertEquals(2, report.uncertain());
+    assertEquals(1, report.possible());
+    assertEquals(1, report.uncertain());
     assertEquals(0, report.impossible(), report.results().toString());
     assertTrue(report.results().get(1).evidence().uncertaintySources().stream()
         .anyMatch(reason -> reason.toLowerCase(Locale.ROOT).contains("world") || reason.toLowerCase(Locale.ROOT).contains("coverage")),
