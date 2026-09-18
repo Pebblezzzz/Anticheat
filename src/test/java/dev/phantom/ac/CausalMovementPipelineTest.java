@@ -57,7 +57,7 @@ class CausalMovementPipelineTest {
         new RawPacket(3, 20, new Move(
             new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
         new RawPacket(4, 70, new Move(
-            new Maths.Vec3(20.5, 64, .5), 0f, 0f, true, 1L)));
+            new Maths.Vec3(10.5, 64, .5), 0f, 0f, true, 1L)));
 
     var report = CausalMovementPipeline.analyze(
         "independent",
