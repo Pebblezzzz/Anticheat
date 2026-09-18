@@ -1033,8 +1033,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           if (!core.isAir()) states.put(new dev.phantom.ac.world.Pos(baseX + localX, baseY + localY, baseZ + localZ), core);
         }
       }
-      appendPacket(capture,new RawPacket(pending.sequence(),pending.receivedNanos(),new Packets.ChunkStates(new dev.phantom.ac.world.Chunk(pending.column.getX(),pending.column.getZ()),states),
-          Packets.CaptureProvenance.fromAdapter("paper-client-chunk",null,null)));
+      Packets.ChunkStates chunkStates=new Packets.ChunkStates(
+          new dev.phantom.ac.world.Chunk(pending.column.getX(),pending.column.getZ()),states);
+      appendPacket(capture,new RawPacket(pending.sequence(),pending.receivedNanos(),chunkStates,
+          Packets.CaptureProvenance.fromAdapter("paper-client-chunk",chunkStates,null)));
       long decoded = capture.decodedChunks.incrementAndGet();
       capture.worldBackfillGeneration.incrementAndGet();
       if (debugFor(capture.playerId)) {
