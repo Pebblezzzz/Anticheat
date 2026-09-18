@@ -341,10 +341,9 @@ public final class CausalMovementPipeline {
         uncertainty.add("capture chronology is incomplete; missing or reordered packets cannot be treated as inactivity");
       }
 
-      boolean exactLocalAuthority = movement.authority().quality() == AuthorityQuality.EXACT
-          && movement.authority().snapshot().isPresent()
-          && eventTiming.simulationClientTicks().isExact();
-      if (!haveAuthoritativeSeed && !exactLocalAuthority && frontier.candidates().isEmpty()) {
+      boolean localAuthoritativeRootAvailable = movement.authority().quality() == AuthorityQuality.EXACT
+          && movement.authority().snapshot().isPresent();
+      if (!haveAuthoritativeSeed && !localAuthoritativeRootAvailable && frontier.candidates().isEmpty()) {
         uncertainty.add("no trusted authoritative replay anchor exists");
         SearchResult uncertain = uncertainSearch(frontier.candidates(),
             String.join("; ", uncertainty));
@@ -370,8 +369,9 @@ public final class CausalMovementPipeline {
         continue;
       }
 
+      boolean rootedFromLocalAuthority = false;
       if (frontier.candidates().isEmpty()) {
-        if (!exactLocalAuthority && (initialAnchor == null || initialAnchor.uncertain())) {
+        if (!localAuthoritativeRootAvailable && (initialAnchor == null || initialAnchor.uncertain())) {
           uncertainty.add("first movement cannot be proven without an authoritative server anchor");
           SearchResult uncertain = uncertainSearch(Set.of(), String.join("; ", uncertainty));
           results.add(Phase8MovementValidation.validate(
@@ -397,7 +397,8 @@ public final class CausalMovementPipeline {
         }
         Candidate rootCandidate = root.orElseThrow();
         frontier = new Frontier(Set.of(rootCandidate), rootCandidate.context().simulationTick(), true);
-        if (exactLocalAuthority) {
+        rootedFromLocalAuthority = localAuthoritativeRootAvailable;
+        if (localAuthoritativeRootAvailable) {
           AuthoritativeSnapshot snapshot = movement.authority().snapshot().orElseThrow();
           trace.add("ROOT LOCAL_AUTHORITATIVE snapshotSeq=" + snapshot.sequence()
               + " serverTick=" + snapshot.serverTick()
@@ -410,15 +411,26 @@ public final class CausalMovementPipeline {
 
       Optional<Advance> advanced;
       if (!eventTiming.simulationClientTicks().isExact()) {
-        advanced = Optional.ofNullable(advanceAcrossTimingRange(
-            frontier,
-            eventTiming.simulationClientTicks().min(),
-            eventTiming.simulationClientTicks().max(),
-            inputByTick,
-            externalByTick,
-            worldHistory,
-            movement,
-            maximumCandidates));
+        if (rootedFromLocalAuthority) {
+          advanced = Optional.ofNullable(advanceAcrossLocalAuthorityTimingRange(
+              eventTiming.simulationClientTicks().min(),
+              eventTiming.simulationClientTicks().max(),
+              inputByTick,
+              externalByTick,
+              worldHistory,
+              movement,
+              maximumCandidates));
+        } else {
+          advanced = Optional.ofNullable(advanceAcrossTimingRange(
+              frontier,
+              eventTiming.simulationClientTicks().min(),
+              eventTiming.simulationClientTicks().max(),
+              inputByTick,
+              externalByTick,
+              worldHistory,
+              movement,
+              maximumCandidates));
+        }
       } else {
         advanced = Optional.of(advanceTo(
             frontier.candidates(),
@@ -877,6 +889,57 @@ public final class CausalMovementPipeline {
     return Map.copyOf(immutable);
   }
 
+  /**
+   * Replays each possible client simulation tick independently from the same
+   * exact pre-movement authoritative snapshot. This keeps the 0..1 tick packet
+   * delay envelope exhaustive without inventing a single client tick for the
+   * server-side authority capture.
+   */
+  private static Advance advanceAcrossLocalAuthorityTimingRange(
+      long earliest,
+      long latest,
+      NavigableMap<Long, InputConstraint> inputs,
+      Map<Long, List<ExternalTransition>> external,
+      World.VisibilityHistory worldHistory,
+      MovementEvent movement,
+      int maximumCandidates) {
+    if (latest < earliest || earliest < 0
+        || latest - earliest + 1 > Phase6Reachability.MAX_TIMING_OFFSETS) {
+      return null;
+    }
+
+    Set<Candidate> union = new LinkedHashSet<>();
+    LinkedHashSet<String> reasons = new LinkedHashSet<>();
+    boolean exhaustive = true;
+
+    for (long target = earliest; target <= latest; target++) {
+      Optional<Candidate> root = rootCandidateForTarget(movement, target);
+      if (root.isEmpty()) {
+        exhaustive = false;
+        reasons.add("authoritative local root could not be represented for client simulation tick " + target);
+        continue;
+      }
+      Advance one = advanceTo(
+          Set.of(root.get()),
+          target,
+          inputs,
+          external,
+          worldHistory,
+          movement,
+          maximumCandidates);
+      if (!one.exhaustive()) exhaustive = false;
+      union.addAll(one.candidates());
+      reasons.addAll(one.reasons());
+      if (union.size() > maximumCandidates) {
+        return new Advance(Set.of(),
+            List.of("local-authority timing candidate budget exceeded"),
+            false);
+      }
+    }
+
+    return new Advance(Set.copyOf(union), List.copyOf(reasons), exhaustive);
+  }
+
   private static Advance advanceAcrossTimingRange(
       Frontier frontier,
       long earliest,
@@ -1040,6 +1103,47 @@ public final class CausalMovementPipeline {
     return history.statesAt(simulationTick);
   }
 
+  private static Optional<Candidate> rootCandidateForTarget(
+      MovementEvent movement,
+      long target) {
+    if (target <= 0 || movement.authority().quality() != AuthorityQuality.EXACT
+        || movement.authority().snapshot().isEmpty()) {
+      return Optional.empty();
+    }
+    AuthoritativeSnapshot snapshot = movement.authority().snapshot().orElseThrow();
+    Player authoritative = playerFromAuthority(snapshot.context());
+    Player observedBefore = movement.stateFrame().before();
+    Player anchor = withClientRotation(authoritative, observedBefore.yaw(), observedBefore.pitch());
+    long rootTick = target - 1L;
+    if (rootTick < 0 || target - rootTick > Phase6Reachability.MAX_HORIZON_TICKS) {
+      return Optional.empty();
+    }
+    MovementEnvironment movementEnvironment = movementEnvironmentOf(anchor);
+    Context context = new Context(
+        rootTick,
+        anchor,
+        simulationEnvironmentFor(movementEnvironment),
+        anchor.attributes(),
+        movementEffects(anchor),
+        anchor.pose(),
+        movementEnvironment,
+        anchor.pose() == Pose.SLEEPING,
+        entityCollisionsFor(movement));
+    return Optional.of(new Candidate(
+        0,
+        context,
+        new Phase6Reachability.Provenance(
+            0,
+            snapshot.sequence(),
+            rootTick,
+            "LOCAL_AUTHORITATIVE_ROOT",
+            "ROOT",
+            "None",
+            List.of("exact same-tick authoritative snapshot before movement; timing offset modeled independently"),
+            1,
+            List.of())));
+  }
+
   private static Optional<Candidate> rootCandidate(
       Player fallbackAnchor,
       MovementEvent movement,
@@ -1050,8 +1154,7 @@ public final class CausalMovementPipeline {
     Player anchor = fallbackAnchor;
     long rootTick = 0L;
     boolean localAuthoritativeRoot = movement.authority().quality() == AuthorityQuality.EXACT
-        && movement.authority().snapshot().isPresent()
-        && movement.timing().simulationClientTicks().isExact();
+        && movement.authority().snapshot().isPresent();
 
     if (localAuthoritativeRoot) {
       AuthoritativeSnapshot snapshot = movement.authority().snapshot().orElseThrow();
