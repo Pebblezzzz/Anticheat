@@ -181,6 +181,48 @@ class CausalMovementPipelineTest {
   }
 
   @Test
+  void simulationRootPrefersPrecedingAuthoritativeTickOverSameTickSnapshot() {
+    Player previous = anchor();
+    Player sameTick = new Player(
+        new Maths.Vec3(20.5, 64, 0.5), Maths.Vec3.ZERO, 0f, 0f, true,
+        "survival", Map.of(), OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.unknown(), State.Provenance.UNKNOWN, Set.of());
+
+    Packets.PlayerContext previousAuthority = new Packets.PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(), Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        previous.position(), previous.velocity(), false, false, false, List.of());
+    Packets.PlayerContext sameTickAuthority = new Packets.PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(), Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        sameTick.position(), sameTick.velocity(), false, false, false, List.of());
+
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 0, previousAuthority),
+        new RawPacket(2, 60_000_000L, sameTickAuthority),
+        new RawPacket(3, 70_000_000L, new Move(
+            previous.position(), 0f, 0f, true, 1L)));
+
+    WorldSnapshot world = floorWorld();
+    var report = CausalMovementPipeline.analyze(
+        "preceding-authority-root",
+        Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L),
+        4096,
+        exactTiming(),
+        world,
+        previous,
+        0L);
+
+    assertEquals(1, report.movementObservations());
+    assertEquals(Verdict.POSSIBLE, report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("serverTick=0") && line.contains("LOCAL_AUTHORITATIVE_ROOT")),
+        report.frames().getFirst().trace().toString());
+  }
+
+  @Test
   void PaperMovementRejectionIsPreservedAsCorroborationOnly() {
     List<RawPacket> packets = List.of(
         new RawPacket(1, 0, new ChunkStates(
