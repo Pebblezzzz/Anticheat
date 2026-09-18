@@ -121,7 +121,7 @@ public final class Phase7Timing {
       if(duplicate){windows.add(new SynchronizationWindow(WindowKind.DUPLICATE,event.serverTick(),event.serverTick(),packetTicks,"duplicate capture sequence is retained as evidence but has no semantic effect",normalized.sequence()));uncertain=true;reasons.add("duplicate capture sequence");}
       if(normalized.flags().contains(PacketFlag.OUT_OF_ORDER)){windows.add(new SynchronizationWindow(WindowKind.REORDERING,event.serverTick(),event.serverTick(),packetTicks,"arrival chronology is preserved and reordering remains explicit",normalized.sequence()));uncertain=true;reasons.add("out-of-order capture sequence");}
       if(normalized.flags().contains(PacketFlag.SEQUENCE_GAP)){uncertain=true;reasons.add("capture sequence gap; absent records remain unknown");}
-      if(kind==EventKind.MOVEMENT&&!duplicate&&movementPacketsInClientInterval>1){
+      if(kind==EventKind.MOVEMENT&&!duplicate&&clientBoundarySeen&&explicit.isEmpty()&&movementPacketsInClientInterval>1){
         windows.add(new SynchronizationWindow(WindowKind.MULTIPLE_MOVEMENT_IN_CLIENT_TICK,event.serverTick(),event.serverTick(),packetTicks,
             "multiple movement packets arrived within one client-tick interval; this observation is not treated as a separate exact physics tick",
             normalized.sequence()));
