@@ -127,6 +127,25 @@ class Phase8HardeningRegressionTest {
   }
 
   @Test
+  void sustainedHoverFromGroundIsExhaustivelyImpossible(){
+    List<RawPacket> packets=new ArrayList<>();
+    packets.add(new RawPacket(1,0,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())));
+    packets.add(new RawPacket(2,0,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+        Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())));
+    long sequence=3;
+    long nanos=0;
+    for(int i=0;i<6;i++){
+      packets.add(new RawPacket(sequence++,nanos+=50_000_000L,new Packets.ClientTickEnd()));
+      packets.add(new RawPacket(sequence++,nanos+1_000_000L,new Move(new Vec3(.5,65.0,.5),0f,0f,false,null)));
+    }
+    var report=Phase8LiveValidation.analyze("sustained-hover",capture(packets),4096,exactTiming(),
+        null,Player.initial(new Vec3(.5,64.0,.5)));
+    assertEquals(6,report.movementObservations(),report.results().toString());
+    assertEquals(Verdict.IMPOSSIBLE,report.results().getFirst().verdict(),report.results().toString());
+    assertTrue(report.results().stream().allMatch(r->r.verdict()==Verdict.IMPOSSIBLE),report.results().toString());
+  }
+
+  @Test
   void validationResultGateCountsAnImpossibleObservationOnlyOnce() {
     var gate=new ValidationResultGate();
     assertTrue(gate.accept("move:42",Verdict.IMPOSSIBLE));
