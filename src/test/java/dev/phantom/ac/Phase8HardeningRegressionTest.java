@@ -149,6 +149,26 @@ class Phase8HardeningRegressionTest {
   }
 
   @Test
+  void longRunningImpossibleMovementUsesFreshAuthoritativeLocalRoot(){
+    var packets=List.of(
+        new RawPacket(1,0,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
+        new RawPacket(2,0,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+            Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),
+            new Vec3(.5,64,.5),Vec3.ZERO,false,false,false,List.of())),
+        new RawPacket(3,0,new Packets.ClientInput(false,false,false,false,false,false,false)),
+        new RawPacket(4,0,new Move(new Vec3(5.5,64,.5),0f,0f,true,900L)),
+        new RawPacket(5,50_000_000L,new Move(new Vec3(5.5,64,.5),0f,0f,true,901L)));
+    var report=Phase8LiveValidation.analyze(
+        "long-running",capture(packets),256,exactTiming(),null,
+        Player.initial(new Vec3(.5,64,.5)),0L);
+    assertEquals(2,report.movementObservations(),report.results().toString());
+    assertEquals(Verdict.IMPOSSIBLE,report.results().getFirst().verdict(),report.results().toString());
+    assertEquals(Verdict.IMPOSSIBLE,report.results().get(1).verdict(),report.results().toString());
+    assertEquals(0,report.results().getFirst().evidence().matchingCandidateCount());
+    assertEquals(0,report.results().get(1).evidence().matchingCandidateCount());
+  }
+
+  @Test
   void sustainedHoverFromGroundBecomesImpossibleAfterDeterministicTicks(){
     var packets=List.of(
         new RawPacket(1,0,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
