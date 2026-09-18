@@ -245,6 +245,11 @@ public final class CausalMovementPipeline {
         uncertainty.add("no exact authoritative snapshot exists for this movement and no authoritative seed was supplied");
       }
 
+      String replayReference = "causal:phase8:" + playerId + ":" + sequence;
+      String worldReference = (movement.liveWorldUsed() ? "live-ack:" : "timeline:")
+          + "serverTick=" + serverTick
+          + ":chunks=" + movement.world().loadedChunks().size();
+
       boolean hasUnmodeledExternalBefore = unmodeledExternalSequences.stream()
           .anyMatch(transitionSequence -> transitionSequence < sequence);
       if (hasUnmodeledExternalBefore) {
@@ -262,10 +267,7 @@ public final class CausalMovementPipeline {
         continue;
       }
 
-      String replayReference = "causal:phase8:" + playerId + ":" + sequence;
-      String worldReference = (movement.liveWorldUsed() ? "live-ack:" : "timeline:")
-          + "serverTick=" + serverTick
-          + ":chunks=" + movement.world().loadedChunks().size();
+
 
       // Rotation-only packets are observations, not physics ticks. They may update
       // candidate rotation for the next real simulation tick, but never establish
