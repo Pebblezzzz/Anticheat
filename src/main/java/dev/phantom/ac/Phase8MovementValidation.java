@@ -71,6 +71,42 @@ public final class Phase8MovementValidation {
     return EnumSet.of(ObservedField.POSITION, ObservedField.ROTATION, ObservedField.GROUND);
   }
 
+  /**
+   * Creates decisive evidence from an authoritative server/client contradiction
+   * that does not depend on the finite movement search being currently usable.
+   *
+   * <p>This is intentionally emitted as a Phase 8 IMPOSSIBLE result so the
+   * operator accumulator can surface it, but its elimination reason does not
+   * claim exhaustive candidate elimination. Strict setbacks therefore continue
+   * to reject it.</p>
+   */
+  public static Result authoritativeImpossible(String playerId, long serverTick,
+                                               Player prior, Player observed,
+                                               WorldSnapshot world, String worldReference,
+                                               Validation.SyncWindow timing,
+                                               String rule, String eliminationReason,
+                                               List<String> diagnostics,
+                                               String replayReference) {
+    Objects.requireNonNull(rule);
+    Objects.requireNonNull(eliminationReason);
+    Objects.requireNonNull(diagnostics);
+
+    List<String> uncertainty = new ArrayList<>();
+    if (timing.uncertain()) uncertainty.addAll(timing.reasons());
+
+    Evidence evidence = new Evidence(
+        VERSION, Verdict.IMPOSSIBLE, playerId, serverTick,
+        timing.earliestClientTick(), timing.latestClientTick(),
+        prior, observed, Contracts.TARGET_VERSION, worldReference,
+        List.of("authoritative server state observed",
+            "client packet state observed"),
+        timing.reasons(), 0, 0, 0,
+        eliminationReason, OptionalLong.of(serverTick), Optional.empty(),
+        diagnostics, uncertainty, PHASE5_VERSION, PHASE6_VERSION,
+        PHASE7_VERSION, replayReference, rule);
+    return new Result(Verdict.IMPOSSIBLE, evidence);
+  }
+
   public static Result validate(String playerId, long serverTick, Player prior, Player observed,
                                 WorldSnapshot world, String worldReference,
                                 Validation.SyncWindow timing, List<String> inputAssumptions,
