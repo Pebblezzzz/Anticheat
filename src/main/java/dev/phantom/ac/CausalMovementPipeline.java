@@ -157,7 +157,7 @@ public final class CausalMovementPipeline {
     }
 
     List<AuthoritativeSnapshot> authorities = collectAuthorities(timeline);
-    Map<Long, InputConstraint> inputByTick = collectInputs(timeline, timing);
+    NavigableMap<Long, InputConstraint> inputByTick = collectInputs(timeline, timing);
     Set<Long> unmodeledExternalSequences = new HashSet<>();
     Map<Long, List<ExternalTransition>> externalByTick =
         collectExternalTransitions(
