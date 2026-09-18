@@ -135,10 +135,17 @@ class CausalMovementPipelineTest {
         anchor(),
         0L);
 
-    assertTrue(report.results().stream().anyMatch(result ->
-        result.evidence().rule().equals("UNAUTHORIZED_FLIGHT_TOGGLE_ATTEMPT")
-            && result.verdict() == Verdict.IMPOSSIBLE),
-        report.results().toString());
+    var timeline = Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L);
+    var timing = Phase7Timing.reconstruct(timeline, exactTiming());
+    var event = timeline.events().stream()
+        .filter(e -> e.packet().packet() instanceof FlightToggle)
+        .findFirst()
+        .orElseThrow();
+    var result = CausalMovementPipeline.evaluateFlightToggle(
+        "flight-evidence", event, timeline, timing, floorWorld(), anchor());
+    assertTrue(result.isPresent());
+    assertEquals(Verdict.IMPOSSIBLE, result.get().verdict());
+    assertEquals("UNAUTHORIZED_FLIGHT_TOGGLE_ATTEMPT", result.get().evidence().rule());
   }
 
   @Test
