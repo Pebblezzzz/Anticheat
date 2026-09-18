@@ -69,8 +69,6 @@ public final class Phase8LiveValidation {
     Continuation continuation=Continuation.UNANCHORED;
     Integer pendingTeleportId=null;
     InputConstraint currentInput=InputConstraint.any();
-    Map<Long,InputConstraint> inputByClientTick=inputConstraintsByClientTick(timeline);
-    boolean hasClientTickBoundaries=timeline.events().stream().anyMatch(e->e.packet().packet() instanceof Packets.ClientTickEnd);
     EntityCollisions currentEntityCollisions=EntityCollisions.NONE_TRACKED;
     List<Phase8MovementValidation.Result> results=new ArrayList<>();
     int movements=0;
@@ -191,7 +189,7 @@ public final class Phase8LiveValidation {
                   && e.serverTick()>0
                   && e.serverTick()<=event.serverTick());
           long anchorTick=0L;
-          InputConstraint anchorInput=inputForTick(inputByClientTick,anchorTick);
+          InputConstraint anchorInput=InputConstraint.any();
           Phase6Reachability.Context root=anchorContext(safeInitial,world,anchorInput,anchorTick,currentEntityCollisions);
 
           List<SearchResult> searches=new ArrayList<>();
@@ -206,8 +204,7 @@ public final class Phase8LiveValidation {
             long steps=targetTick-anchorTick;
             List<InputConstraint> inputs=new ArrayList<>((int)Math.min(Integer.MAX_VALUE,steps));
             for(long i=anchorTick;i<targetTick;i++){
-              if(hasClientTickBoundaries) inputs.add(inputForTick(inputByClientTick,i));
-              else inputs.add(currentInput);
+                inputs.add(InputConstraint.any());
             }
             SearchResult search=engine.search(root,inputs,
                 tick->List.of(new WorldBranch("initial-client-visible-"+event.serverTick(),world,worldStable,
@@ -378,30 +375,6 @@ public final class Phase8LiveValidation {
     int uncertain=(int)results.stream().filter(r->r.verdict()==Phase8MovementValidation.Verdict.UNCERTAIN).count();
     int impossible=(int)results.stream().filter(r->r.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE).count();
     return new Report(results,movements,possible,uncertain,impossible);
-  }
-
-  private static Map<Long,InputConstraint> inputConstraintsByClientTick(Timeline.Snapshot timeline){
-    TreeMap<Long,InputConstraint> out=new TreeMap<>();
-    long clientTick=0;
-    for(Timeline.Event event:timeline.events()){
-      Packets.Packet packet=event.packet().packet();
-      if(packet instanceof Packets.ClientTickEnd){
-        if(!event.packet().flags().contains(Packets.PacketFlag.DUPLICATE))clientTick++;
-      }else if(packet instanceof Packets.ClientInput input && !event.packet().flags().contains(Packets.PacketFlag.DUPLICATE)){
-        out.put(clientTick,InputConstraint.fromClientInput(input));
-      }
-    }
-    return Map.copyOf(out);
-  }
-
-  private static InputConstraint inputForTick(Map<Long,InputConstraint> inputByClientTick,long tick){
-    if(inputByClientTick.isEmpty())return InputConstraint.any();
-    long best=Long.MIN_VALUE;
-    InputConstraint selected=null;
-    for(var entry:inputByClientTick.entrySet()){
-      if(entry.getKey()<=tick&&entry.getKey()>best){best=entry.getKey();selected=entry.getValue();}
-    }
-    return selected==null?InputConstraint.any():selected;
   }
 
   static ParentAggregation aggregateDirectSearches(List<SearchResult> searches,int maximumCandidates,boolean timingOffsetsExhaustive){
