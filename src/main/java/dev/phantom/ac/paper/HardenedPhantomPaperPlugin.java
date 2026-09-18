@@ -21,6 +21,7 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerMu
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerPositionAndLook;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPing;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUnloadChunk;
+import dev.phantom.ac.CausalMovementPipeline;
 import dev.phantom.ac.ClientTickTracker;
 import dev.phantom.ac.Contracts;
 import dev.phantom.ac.Maths.Vec3;
