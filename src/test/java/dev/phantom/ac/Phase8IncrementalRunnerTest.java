@@ -101,6 +101,50 @@ class Phase8IncrementalRunnerTest {
   }
 
   @Test
+  void rotationOnlyPacketsDoNotAdvanceGroundContradiction() {
+    Phase8IncrementalRunner runner=new Phase8IncrementalRunner(4096,0);
+    Player anchor=new Player(new Maths.Vec3(.5,65,.5),Maths.Vec3.ZERO,0f,0f,false,"survival",Map.of(),
+        OptionalInt.empty(),false,Optional.empty(),Simulation.Attributes.DEFAULT,Phase5Mechanics.Pose.STANDING,
+        State.Environment.DRY,State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
+    List<RawPacket> raw=List.of(
+        new RawPacket(1,10,new PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+            Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(false,false,false),false,List.of())),
+        new RawPacket(2,20,new ClientTickEnd()),
+        new RawPacket(3,60,new Move(null,10f,0f,true,null)),
+        new RawPacket(4,110,new ClientTickEnd()),
+        new RawPacket(5,160,new Move(null,10f,0f,true,null)),
+        new RawPacket(6,210,new ClientTickEnd()),
+        new RawPacket(7,260,new Move(null,10f,0f,true,null))
+    );
+    var report=runner.process("rotation-only-ground",raw,WorldSnapshot.builder(Contracts.TARGET_VERSION).build(),anchor);
+    assertTrue(report.results().stream().noneMatch(result ->
+        result.evidence().rule().equals("AUTHORITATIVE_GROUND_CONTRADICTION")),
+        report.results().toString());
+  }
+
+  @Test
+  void stationaryAirborneStateCanProduceFlightEvidenceWithoutClientInput() {
+    Phase8IncrementalRunner runner=new Phase8IncrementalRunner(4096,0);
+    Player anchor=new Player(new Maths.Vec3(.5,67,.5),Maths.Vec3.ZERO,0f,0f,false,"survival",Map.of(),
+        OptionalInt.empty(),false,Optional.empty(),Simulation.Attributes.DEFAULT,Phase5Mechanics.Pose.STANDING,
+        State.Environment.DRY,State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
+    List<RawPacket> raw=new ArrayList<>();
+    long seq=1, nanos=10;
+    for(int i=0;i<5;i++){
+      raw.add(new RawPacket(seq++,nanos++,new PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+          Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(false,false,false),
+          new Maths.Vec3(.5,64,.5),Maths.Vec3.ZERO,false,false,false,List.of())));
+      raw.add(new RawPacket(seq++,nanos++,new Move(null,null,null,true,null)));
+      raw.add(new RawPacket(seq++,nanos++,new ClientTickEnd()));
+    }
+    var report=runner.process("stationary-flight",raw,WorldSnapshot.builder(Contracts.TARGET_VERSION).build(),anchor);
+    assertTrue(report.results().stream().anyMatch(result ->
+        result.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE
+            && result.evidence().rule().equals("AUTHORITATIVE_FLIGHT_STATE_CONTRADICTION")),
+        report.results().toString());
+  }
+
+  @Test
   void authoritativeServerPositionDivergenceProducesHardEvidenceDuringReplayUncertainty() {
     Phase8IncrementalRunner runner=new Phase8IncrementalRunner(4096,0);
     Player anchor=anchor();
