@@ -37,9 +37,6 @@ final class LiveClientWorldReplica {
     ChunkMutation {
       Objects.requireNonNull(column, "column");
       Objects.requireNonNull(clientVersion, "clientVersion");
-      if (column.getX() != column.getX() || column.getZ() != column.getZ()) {
-        throw new IllegalArgumentException("invalid chunk coordinate");
-      }
     }
   }
 
@@ -193,21 +190,21 @@ final class LiveClientWorldReplica {
         }
       }
 
+      Map<Pos, BlockState> mergedStates = new HashMap<>(decoded.states());
       Map<Pos, BlockState> overlay = overlays.get(key);
       if (overlay != null) {
         for (Map.Entry<Pos, BlockState> block : overlay.entrySet()) {
-          Pos pos = block.getKey();
-          BlockState state = block.getValue();
-          if (state.isUnsupported()) builder.setUnsupportedBlock(pos.x(), pos.y(), pos.z(), state.blockId());
-          else if (state.isAir()) {
-            // Removing the state from the builder requires rebuilding the chunk,
-            // so use the overlay as the authoritative value by writing only the
-            // non-air replacement below. A later snapshot decode sees the same
-            // overlay and therefore never resurrects a removed block.
-          } else {
-            builder.setBlock(pos.x(), pos.y(), pos.z(), state);
-          }
+          if (block.getValue().isAir()) mergedStates.remove(block.getKey());
+          else mergedStates.put(block.getKey(), block.getValue());
         }
+      }
+      List<Map.Entry<Pos, BlockState>> orderedStates = new ArrayList<>(mergedStates.entrySet());
+      orderedStates.sort(Map.Entry.comparingByKey(WorldSnapshot.POS_ORDER));
+      for (Map.Entry<Pos, BlockState> block : orderedStates) {
+        Pos pos = block.getKey();
+        BlockState state = block.getValue();
+        if (state.isUnsupported()) builder.setUnsupportedBlock(pos.x(), pos.y(), pos.z(), state.blockId());
+        else builder.setBlock(pos.x(), pos.y(), pos.z(), state);
       }
     }
 
