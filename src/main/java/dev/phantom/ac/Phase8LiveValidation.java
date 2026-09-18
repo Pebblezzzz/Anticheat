@@ -34,7 +34,7 @@ public final class Phase8LiveValidation {
   }
 
   public static Report analyze(String playerId,Timeline.Snapshot timeline,int maximumCandidates,Phase7Timing.Config timingConfig){
-    return analyze(playerId,timeline,maximumCandidates,timingConfig,null);
+    return analyze(playerId,timeline,maximumCandidates,timingConfig,null,null);
   }
 
   /**
@@ -43,6 +43,16 @@ public final class Phase8LiveValidation {
    * world. Earlier observations continue to use the historical replay world.
    */
   public static Report analyze(String playerId,Timeline.Snapshot timeline,int maximumCandidates,Phase7Timing.Config timingConfig,WorldSnapshot liveWorld){
+    return analyze(playerId,timeline,maximumCandidates,timingConfig,liveWorld,null);
+  }
+
+  /**
+   * Live entry point with an optional authoritative server-state seed captured at
+   * player join/world-change time. Supplying this seed lets the first observed
+   * movement be validated against a real starting state instead of automatically
+   * declaring that first movement an untestable replay anchor.
+   */
+  public static Report analyze(String playerId,Timeline.Snapshot timeline,int maximumCandidates,Phase7Timing.Config timingConfig,WorldSnapshot liveWorld,Player initialAnchor){
     Objects.requireNonNull(playerId);Objects.requireNonNull(timeline);Objects.requireNonNull(timingConfig);Contracts.requireCandidateBudget(maximumCandidates);
 
     World.VisibilityHistory history=World.fromTimeline(timeline);
@@ -59,6 +69,8 @@ public final class Phase8LiveValidation {
     Continuation continuation=Continuation.UNANCHORED;
     Integer pendingTeleportId=null;
     InputConstraint currentInput=InputConstraint.any();
+    Map<Long,InputConstraint> inputByClientTick=inputConstraintsByClientTick(timeline);
+    boolean hasClientTickBoundaries=timeline.events().stream().anyMatch(e->e.packet().packet() instanceof Packets.ClientTickEnd);
     EntityCollisions currentEntityCollisions=EntityCollisions.NONE_TRACKED;
     List<Phase8MovementValidation.Result> results=new ArrayList<>();
     int movements=0;
@@ -153,14 +165,86 @@ public final class Phase8LiveValidation {
       }
 
       if(continuation==Continuation.UNANCHORED){
-        // The first movement packet defines the observed replay anchor because there
-        // is no preceding client state in the capture from which to prove it.
+        Player safeObserved=simulationSafe(observed);
+        if(initialAnchor!=null&&!initialAnchor.uncertain()){
+          Player safeInitial=simulationSafe(initialAnchor);
+          long earliest=Math.max(0,sync.earliestClientTick());
+          long latest=Math.max(earliest,sync.latestClientTick());
+          long timingSpan=latest-earliest+1;
+          if(timingSpan>timingConfig.maxTimingCandidates()){
+            SearchResult uncertain=new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,Set.of(),0,1,0,0,1,0,
+                List.of("first movement timing window exceeds the configured exhaustive envelope"));
+            results.add(Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
+                worldReference,sync,inputAssumptions,uncertain,replayReference));
+            continuation=Continuation.UNCERTAIN_EMPTY;
+            continue;
+          }
+
+          // For the first movement only, a server-captured anchor removes the artificial
+          // "first packet is always the root" blind spot. The snapshot is exhaustive
+          // only when no world mutations occurred before this observation; otherwise a
+          // historical client-world trace is required before IMPOSSIBLE is safe.
+          boolean worldStable=!timeline.events().stream().anyMatch(e->
+              e.packet().packet() instanceof Packets.ClientTickEnd==false
+                  && e.packet().packet().mutatesWorld()
+                  && e.serverTick()<=event.serverTick());
+          long anchorTick=0L;
+          InputConstraint anchorInput=inputForTick(inputByClientTick,anchorTick);
+          Phase6Reachability.Context root=anchorContext(safeInitial,world,anchorInput,anchorTick,currentEntityCollisions);
+
+          List<SearchResult> searches=new ArrayList<>();
+          boolean exhaustive=worldStable;
+          for(long targetTick=earliest;targetTick<=latest;targetTick++){
+            if(targetTick<anchorTick){
+              exhaustive=false;
+              searches.add(new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,Set.of(),0,1,0,0,1,0,
+                  List.of("first observed client simulation tick precedes the server join anchor")));
+              continue;
+            }
+            long steps=targetTick-anchorTick;
+            List<InputConstraint> inputs=new ArrayList<>((int)Math.min(Integer.MAX_VALUE,steps));
+            for(long i=anchorTick;i<targetTick;i++){
+              if(hasClientTickBoundaries) inputs.add(inputForTick(inputByClientTick,i));
+              else inputs.add(currentInput);
+            }
+            SearchResult search=engine.search(root,inputs,
+                tick->List.of(new WorldBranch("initial-client-visible-"+event.serverTick(),world,worldStable,
+                    worldStable?"world remained unchanged before the first movement":"world changed before the first movement; historical client-world replay required")),
+                tick->externalByClientTick.getOrDefault(tick,List.of(new Phase6Reachability.None())),
+                maximumCandidates);
+            searches.add(search);
+            if(search.verdict()!=Phase6Reachability.Verdict.POSSIBLE)exhaustive=false;
+          }
+
+          ParentAggregation aggregated=aggregateDirectSearches(searches,maximumCandidates,exhaustive);
+          SearchResult reachable=aggregated.result();
+          Phase8MovementValidation.Result validation=Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
+              worldReference,sync,inputAssumptions,reachable,replayReference,aggregated.timingOffsetsExhaustive());
+          results.add(validation);
+
+          if(reachable.verdict()==Phase6Reachability.Verdict.POSSIBLE){
+            Set<Candidate> matching=new LinkedHashSet<>();
+            for(Candidate candidate:aggregated.candidates())
+              if(matchesObserved(candidate.context().player(),observed))matching.add(candidate);
+            if(matching.isEmpty()){continuation=Continuation.IMPOSSIBLE;candidates=Set.of();}
+            else {candidates=Set.copyOf(matching);continuation=Continuation.ACTIVE;}
+          }else if(reachable.verdict()==Phase6Reachability.Verdict.UNCERTAIN){
+            candidates=aggregated.candidates();
+            continuation=candidates.isEmpty()?Continuation.UNCERTAIN_EMPTY:Continuation.ACTIVE;
+          }else{
+            candidates=Set.of();
+            continuation=Continuation.IMPOSSIBLE;
+          }
+          continue;
+        }
+
+        // Without an authoritative seed, preserve the original conservative contract:
+        // the first packet becomes a replay anchor and cannot itself prove a violation.
         SearchResult anchor=new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,Set.of(),0,0,
-            0,0,0,0,List.of("first movement observation establishes the Phase 6 replay anchor"));
+            0,0,0,0,List.of("first movement observation establishes the Phase 6 replay anchor because no authoritative seed was captured"));
         results.add(Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
             worldReference,sync,inputAssumptions,anchor,replayReference));
-        Player safeObserved=simulationSafe(observed);
-        if(safeObserved.uncertain()) {
+        if(safeObserved.uncertain()){
           continuation=Continuation.UNANCHORED;
           continue;
         }
@@ -292,6 +376,26 @@ public final class Phase8LiveValidation {
     int uncertain=(int)results.stream().filter(r->r.verdict()==Phase8MovementValidation.Verdict.UNCERTAIN).count();
     int impossible=(int)results.stream().filter(r->r.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE).count();
     return new Report(results,movements,possible,uncertain,impossible);
+  }
+
+  private static Map<Long,InputConstraint> inputConstraintsByClientTick(Timeline.Snapshot timeline){
+    TreeMap<Long,InputConstraint> out=new TreeMap<>();
+    long clientTick=0;
+    for(Timeline.Event event:timeline.events()){
+      Packets.Packet packet=event.packet().packet();
+      if(packet instanceof Packets.ClientTickEnd){
+        if(!event.packet().flags().contains(Packets.PacketFlag.DUPLICATE))clientTick++;
+      }else if(packet instanceof Packets.ClientInput input && !event.packet().flags().contains(Packets.PacketFlag.DUPLICATE)){
+        out.put(clientTick,InputConstraint.fromClientInput(input));
+      }
+    }
+    return Map.copyOf(out);
+  }
+
+  private static InputConstraint inputForTick(Map<Long,InputConstraint> inputByClientTick,long tick){
+    if(inputByClientTick.isEmpty())return InputConstraint.any();
+    var entry=((TreeMap<Long,InputConstraint>)new TreeMap<>(inputByClientTick)).floorEntry(tick);
+    return entry==null?InputConstraint.any():entry.getValue();
   }
 
   static ParentAggregation aggregateDirectSearches(List<SearchResult> searches,int maximumCandidates,boolean timingOffsetsExhaustive){
