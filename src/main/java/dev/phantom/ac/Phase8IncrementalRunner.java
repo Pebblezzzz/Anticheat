@@ -110,9 +110,11 @@ public final class Phase8IncrementalRunner {
    * frontier instead of silently replaying across a missing interval.
    */
   public synchronized Report process(
+      String playerId,
       List<Packets.RawPacket> raw,
       WorldSnapshot world,
       Player currentAnchor) {
+    Objects.requireNonNull(playerId);
     Objects.requireNonNull(raw);
     Objects.requireNonNull(world);
 
@@ -352,7 +354,7 @@ public final class Phase8IncrementalRunner {
               : List.of("incremental deterministic candidate frontier advanced"));
 
       Phase8MovementValidation.Result validation = Phase8MovementValidation.validate(
-          "incremental", serverTick, before, after, world, worldReference, timing,
+          playerId, serverTick, before, after, world, worldReference, timing,
           List.of(
               "input is held until replacement",
               "movementTick=" + movementTick,
