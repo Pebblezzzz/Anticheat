@@ -140,7 +140,9 @@ final class LiveClientWorldReplica {
   }
 
   int decodedCacheSize() {
-    return decodedCache.size();
+    int decodedStates = 0;
+    for (ConcurrentHashMap<Integer, BlockState> cache : stateCache.values()) decodedStates += cache.size();
+    return decodedStates;
   }
 
   /**
@@ -302,7 +304,6 @@ final class LiveClientWorldReplica {
       case UnloadMutation unload -> {
         chunks.remove(unload.chunk());
         blockOverlays.remove(unload.chunk());
-        decodedCache.remove(unload.chunk());
       }
     }
   }
@@ -333,7 +334,6 @@ final class LiveClientWorldReplica {
     Column combined = new Column(
         key.x(), key.z(), true, merged, new TileEntity[0]);
     chunks.put(key, new ChunkEntry(combined, old.complete(), mutation.clientVersion(), revision));
-    decodedCache.remove(key);
   }
 
   private static BlockState toCoreState(WrappedBlockState state) {
