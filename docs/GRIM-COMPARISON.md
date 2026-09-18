@@ -6,7 +6,7 @@ This document records a clean-room technical comparison with the public [Grim re
 
 ## Shared principles
 - **Simulation before policy.** Both designs treat movement validation as a prediction/simulation problem rather than a primary speed/distance threshold. Grim describes a predictive movement engine; Phantom exposes deterministic `PhysicsEngine`, reachable states, evidence, and a separate operator policy layer.
-- **Per-player client-visible world.** Grim documents per-player world replication and latency compensation. Phantom's `VisibilityHistory` and immutable `WorldSnapshot` follow the same essential principle: server truth is not automatically client truth.
+- **Per-player client-visible world.** Grim documents per-player world replication and latency compensation. Phantom now retains PacketEvents palette-backed `Column` objects per player, applies them behind transaction acknowledgement, and exposes them to deterministic physics through a lazy immutable `WorldSnapshot` backend. The older `VisibilityHistory`/map representation remains for legacy replay compatibility rather than as the hot-path chunk storage.
 - **Version-specific mechanics.** Grim emphasizes version-specific collision ordering and bounding boxes. Phantom isolates the 1.21.11 model in `Vanilla12111Physics` and the 1.21.11 block catalogue rather than importing cross-version constants.
 - **Asynchronous boundary awareness.** Grim emphasizes asynchronous/multithreaded processing. Phantom retains platform packet capture outside the deterministic core and uses immutable values so a future worker pipeline can replay safely.
 - **Evidence buffering.** Grim's design philosophy rejects an automatic-ban dependency on a single transient event. Phantom's `OperatorValidation.Aggregator` requires repeated impossible evidence and debounces alerts.
@@ -53,7 +53,7 @@ A flight client can still remain `UNCERTAIN` when the initial state is not ancho
 
 ## Current compensated-world implementation
 
-The live adapter now mirrors Grim's core world-visibility idea without copying Grim source: each player owns a compensated client-world journal; outbound chunk/block/unload mutations are associated with a synthetic negative PING transaction; the mutation is not committed to the player's simulation world until the matching PONG is received. Replay carries the transaction send/ack records and applies committed world state at the acknowledgement tick. The deterministic core continues to expose immutable WorldSnapshot values to physics.
+The live adapter now mirrors Grim's core world-visibility and storage idea without copying Grim source: each player owns a compensated client-world cache of the original palette-backed PacketEvents `Column` values; outbound chunk/block/unload mutations are associated with a synthetic negative PING transaction; the mutation is not committed to the player's simulation world until the matching PONG is received. Each lazy world snapshot carries the acknowledgement sequence that bounds what the client could have known. Replay still retains transaction records and the legacy state timeline for deterministic historical captures. The deterministic core continues to consume immutable `WorldSnapshot` values and never reaches into Paper's live world.
 
 This is intentionally a semantic reimplementation rather than a source-level copy. Grim uses the same transaction-backed client-world concept and its CompensatedWorld is advanced through LatencyUtils transaction barriers.
 

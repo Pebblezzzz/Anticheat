@@ -79,6 +79,21 @@ import dev.phantom.ac.geometry.BlockBox;
   }
 
   @Test
+  void backedSnapshotCarriesItsCausalVisibilityBoundary() {
+    WorldSnapshot.Backend backend = new WorldSnapshot.Backend() {
+      @Override public String version() { return Contracts.TARGET_VERSION; }
+      @Override public int minY() { return MIN_Y; }
+      @Override public int maxY() { return MAX_Y; }
+      @Override public Set<Chunk> loadedChunks() { return Set.of(); }
+      @Override public Coverage coverageAt(int x, int y, int z) { return Coverage.UNLOADED; }
+      @Override public BlockState blockAtOrNull(int x, int y, int z) { return null; }
+      @Override public long causalSequence() { return 42L; }
+    };
+    WorldSnapshot world = WorldSnapshot.backed(Contracts.TARGET_VERSION, MIN_Y, MAX_Y, backend);
+    assertEquals(42L, world.causalSequence());
+  }
+
+  @Test
   void mergeCombinesDisjointCoverageAndRejectsConflictingOverlap(){
     BlockState stone=dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone",Map.of());
     WorldSnapshot left=WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0,0).setBlock(0,64,0,stone).build();
