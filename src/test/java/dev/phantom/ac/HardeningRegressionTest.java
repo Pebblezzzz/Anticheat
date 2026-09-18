@@ -51,8 +51,11 @@ class HardeningRegressionTest {
   @Test void playerContextReplayRoundTripsThroughTimelineCodec() {
     var context = new Packets.PlayerContext("survival", new Simulation.Attributes(0.1),
         Map.of("minecraft:speed", 1), Phase5Mechanics.Pose.SWIMMING,
-        Phase5Mechanics.MovementEnvironment.vanillaWater(false, true, false, true), false,
+        Phase5Mechanics.MovementEnvironment.vanillaWater(false, true, false, true),
+        new Maths.Vec3(10.5, 64.0, -2.5), new Maths.Vec3(0.25, -0.08, 0.12),
+        false, false, false,
         List.of(new EntityCollisions.EntityBox(7, new dev.phantom.ac.geometry.BlockBox(1, 2, 3, 2, 3, 4))));
+
     var timeline = Timeline.assign(List.of(new Packets.NormalizedPacket(0, 1, context,
         java.util.EnumSet.of(Packets.PacketFlag.NORMAL), Packets.CaptureProvenance.fromAdapter("test", context, null))), 0, 50_000_000L);
     var codec = new Timeline.Codec();
