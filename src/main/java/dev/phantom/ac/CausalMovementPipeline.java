@@ -904,18 +904,19 @@ public final class CausalMovementPipeline {
           InputConstraint input = inputs.getOrDefault(
               localTick, InputConstraint.any());
 
+          long simulationTick = localTick;
           WorldSnapshot world = worldForTick(
-              localTick, targetTick, worldHistory, movement);
+              simulationTick, targetTick, worldHistory, movement);
 
           List<ExternalTransition> transitions =
-              external.getOrDefault(localTick, List.of(new Phase6Reachability.None()));
+              external.getOrDefault(simulationTick, List.of(new Phase6Reachability.None()));
 
           SearchResult result = new Phase6Reachability(
               new Vanilla12111RichPhysics()).search(
                   context,
                   List.of(input),
                   ignored -> List.of(new WorldBranch(
-                      "causal-world@" + localTick,
+                      "causal-world@" + simulationTick,
                       world,
                       true,
                       "client-visible world selected for the simulated tick")),
