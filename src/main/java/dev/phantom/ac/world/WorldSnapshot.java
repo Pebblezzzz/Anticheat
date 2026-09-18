@@ -181,6 +181,11 @@ public final class WorldSnapshot implements Serializable {
 
   public int maxY() { return maxY; }
 
+  /** Highest capture sequence for which this snapshot's client-visible state is causally bounded. */
+  public long causalSequence() {
+    return backend == null ? -1L : backend.causalSequence();
+  }
+
   /** Canonical position order: x, then y, then z. */
   public static final java.util.Comparator<Pos> POS_ORDER =
       java.util.Comparator.comparingInt(Pos::x).thenComparingInt(Pos::y).thenComparingInt(Pos::z);
