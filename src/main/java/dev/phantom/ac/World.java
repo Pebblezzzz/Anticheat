@@ -404,6 +404,8 @@ public final class World {
       if (eventTiming.kind() == Phase7Timing.EventKind.WORLD) {
         Phase7Timing.Range visibility = eventTiming.packetGenerationClientTicks();
         clientTick = visibility.max();
+      } else if (packet instanceof Packets.WorldTransactionSend) {
+        clientTick = eventTiming.packetGenerationClientTicks().max();
       } else if (packet instanceof Packets.WorldTransactionAck) {
         clientTick = eventTiming.simulationClientTicks().max();
       } else {
