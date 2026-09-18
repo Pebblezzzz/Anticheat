@@ -38,6 +38,7 @@ class Phase8IncrementalRunnerTest {
     var first = runner.process(
         "flight",
         List.of(
+            new RawPacket(0, 0, new ChunkStates(new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
             new RawPacket(1, 20, new PlayerContext(
                 "survival", Simulation.Attributes.DEFAULT, Map.of(),
                 Pose.STANDING, MovementEnvironment.dry(true, false, false),
@@ -74,6 +75,7 @@ class Phase8IncrementalRunnerTest {
     var report = runner.process(
         "ground-corroboration",
         List.of(
+            new RawPacket(0, 0, new ChunkStates(new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
             new RawPacket(1, 20, new PlayerContext(
                 "survival", Simulation.Attributes.DEFAULT, Map.of(),
                 Pose.STANDING, MovementEnvironment.dry(false, false, false),
@@ -95,6 +97,7 @@ class Phase8IncrementalRunnerTest {
     var report = runner.process(
         "position-corroboration",
         List.of(
+            new RawPacket(0, 0, new ChunkStates(new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
             new RawPacket(1, 20, new PlayerContext(
                 "survival", Simulation.Attributes.DEFAULT, Map.of(),
                 Pose.STANDING, MovementEnvironment.dry(true, false, false),
@@ -120,6 +123,7 @@ class Phase8IncrementalRunnerTest {
     var first = runner.process(
         "subtick",
         List.of(
+            new RawPacket(0, 0, new ChunkStates(new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
             new RawPacket(1, 20, new PlayerContext(
                 "survival", Simulation.Attributes.DEFAULT, Map.of(),
                 Pose.STANDING, MovementEnvironment.dry(true, false, false),
