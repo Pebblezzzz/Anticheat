@@ -647,7 +647,7 @@ public final class Phase8IncrementalRunner {
   }
 
   private boolean hardMovementEvidenceEligible(Player state) {
-    if (state == null || state.sleeping()) return false;
+    if (state == null || state.pose() == Phase5Mechanics.Pose.SLEEPING) return false;
     String mode = state.gamemode();
     if (!"survival".equals(mode) && !"adventure".equals(mode)) return false;
     if (state.pose() == Phase5Mechanics.Pose.FALL_FLYING
