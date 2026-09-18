@@ -199,7 +199,7 @@ public final class Phase8IncrementalRunner {
     int movements = 0;
     int latestMovementIndex = -1;
     for (int i = normalized.size() - 1; i >= 0; i--) {
-      if (normalized.get(i).packet() instanceof Packets.Move move && move.position() != null) {
+      if (normalized.get(i).packet() instanceof Packets.Move) {
         latestMovementIndex = i;
         break;
       }
@@ -399,6 +399,7 @@ public final class Phase8IncrementalRunner {
             List.of(
                 "authoritativeServerPosition=" + authoritativeServerPosition,
                 "clientReportedPosition=" + move.position(),
+                "positionBearingPacket=" + (move.position() != null),
                 "positionDistance=" + String.format(Locale.ROOT, "%.6f", distance),
                 "consecutiveDivergenceTicks=" + serverDivergenceStreak,
                 "thresholdBlocks=" + HARD_SERVER_DIVERGENCE_BLOCKS,
