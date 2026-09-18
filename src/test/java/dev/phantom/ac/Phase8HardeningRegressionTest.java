@@ -168,6 +168,24 @@ class Phase8HardeningRegressionTest {
   }
 
   @Test
+  void firstMovementCanUseAuthoritativeAnchorVelocity(){
+    var packets=List.of(
+        new RawPacket(1,0,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
+        new RawPacket(2,0,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+            Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
+        new RawPacket(3,0,new Packets.ClientInput(false,false,false,false,false,false,false)),
+        new RawPacket(4,10_000_000L,new Packets.ClientTickEnd()),
+        new RawPacket(5,60_000_000L,new Move(new Vec3(.6,64,.5),0f,0f,true,null))
+    );
+    var timeline=capture(packets);
+    var anchor=new Player(new Vec3(.5,64,.5),new Vec3(.1,0,0),0f,0f,true,
+        "survival",Map.of(),OptionalInt.empty(),false);
+    var report=Phase8LiveValidation.analyze("anchor-velocity",timeline,4096,exactTiming(),null,anchor,1L);
+    assertEquals(Verdict.POSSIBLE,report.results().getFirst().verdict(),report.results().toString());
+    assertTrue(report.results().getFirst().evidence().matchingCandidateCount()>0,report.results().toString());
+  }
+
+  @Test
   void validationResultGateCountsAnImpossibleObservationOnlyOnce() {
     var gate=new ValidationResultGate();
     assertTrue(gate.accept("move:42",Verdict.IMPOSSIBLE));
