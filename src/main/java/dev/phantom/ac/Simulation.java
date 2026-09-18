@@ -11,7 +11,7 @@ public final class Simulation {
 
   /** Compatibility adapter. All movement mechanics live in Vanilla12111RichPhysics. */
   public static final class Vanilla12111Physics implements Contracts.PhysicsEngine {
-    public static final double GRAVITY=Vanilla12111RichPhysics.GRAVITY,AIR_DRAG=Vanilla12111RichPhysics.AIR_DRAG,AIR_HORIZONTAL_FRICTION=Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION,AIR_VERTICAL_DRAG=Vanilla12111RichPhysics.AIR_VERTICAL_DRAG,AIR_ACCEL=Vanilla12111RichPhysics.AIR_ACCEL,GROUND_FRICTION=Vanilla12111RichPhysics.GROUND_FRICTION,WALK_ACCEL=Vanilla12111RichPhysics.FRICTION_SPEED_FACTOR,JUMP=Vanilla12111RichPhysics.JUMP,STEP_HEIGHT=Vanilla12111RichPhysics.STEP_HEIGHT;
+    public static final double GRAVITY=Vanilla12111RichPhysics.GRAVITY,AIR_DRAG=Vanilla12111RichPhysics.AIR_DRAG,AIR_HORIZONTAL_FRICTION=Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION,AIR_VERTICAL_DRAG=Vanilla12111RichPhysics.AIR_VERTICAL_DRAG,AIR_ACCEL=Vanilla12111RichPhysics.AIR_ACCEL,GROUND_FRICTION=Vanilla12111RichPhysics.GROUND_FRICTION,WALK_ACCEL=Vanilla12111RichPhysics.WALK_ACCEL,JUMP=Vanilla12111RichPhysics.JUMP,STEP_HEIGHT=Vanilla12111RichPhysics.STEP_HEIGHT;
     private final Vanilla12111RichPhysics rich=new Vanilla12111RichPhysics();
 
     public Player tick(Player state,Input input,World.Snapshot world){
@@ -56,18 +56,7 @@ public final class Simulation {
 
   public record TickContext(long simulationTick,Player state,Input input,World.Snapshot world) implements Serializable { public TickContext { Objects.requireNonNull(state);Objects.requireNonNull(input);Objects.requireNonNull(world);if(simulationTick<0)throw new IllegalArgumentException("simulationTick must be non-negative"); } }
   public enum Environment { DRY, WATER, LAVA, CLIMBABLE, UNKNOWN }
-  public record Attributes(double movementSpeed,List<Phase5Mechanics.AttributeModifier> modifiers,boolean effectiveSnapshot) implements Serializable {
-    public static final Attributes DEFAULT=new Attributes(0.1,List.of(),false);
-    public Attributes(double movementSpeed){this(movementSpeed,List.of(),false);}
-    public Attributes(double movementSpeed,List<Phase5Mechanics.AttributeModifier> modifiers){this(movementSpeed,modifiers,false);}
-    public Attributes(double movementSpeed,List<Phase5Mechanics.AttributeModifier> modifiers,boolean effectiveSnapshot) {
-      if(!Double.isFinite(movementSpeed)||movementSpeed<0)throw new IllegalArgumentException("invalid movement speed");
-      this.movementSpeed=movementSpeed;
-      this.modifiers=List.copyOf(modifiers);
-      this.effectiveSnapshot=effectiveSnapshot;
-    }
-    public double value(){return Phase5Mechanics.resolveAttribute(movementSpeed,modifiers);}
-  }
+  public record Attributes(double movementSpeed,List<Phase5Mechanics.AttributeModifier> modifiers) implements Serializable { public static final Attributes DEFAULT=new Attributes(1.0,List.of()); public Attributes(double movementSpeed){this(movementSpeed,List.of());} public Attributes { if(!Double.isFinite(movementSpeed)||movementSpeed<0)throw new IllegalArgumentException("invalid movement speed");modifiers=List.copyOf(modifiers); } public double value(){return Phase5Mechanics.resolveAttribute(movementSpeed,modifiers);} }
   public record AdvancedInput(int forward,int strafe,boolean jump,boolean sprint,boolean sneak) implements Serializable { public AdvancedInput(int forward,int strafe,boolean jump){this(forward,strafe,jump,false,false);} public AdvancedInput {if(Math.abs(forward)>1||Math.abs(strafe)>1)throw new IllegalArgumentException("input must be -1..1");} public static AdvancedInput basic(Input input){return new AdvancedInput(input.forward(),input.strafe(),input.jump(),false,false);} public Input asBasic(){return new Input(forward,strafe,jump);} }
   public record PhysicsContext(long simulationTick,Player state,AdvancedInput input,World.Snapshot world,Environment environment,Attributes attributes,Phase5Mechanics.MovementEffects effects,Phase5Mechanics.Pose pose,Phase5Mechanics.MovementEnvironment movementEnvironment) implements Serializable { public PhysicsContext(long tick,Player state,AdvancedInput input,World.Snapshot world,Environment environment,Attributes attributes){this(tick,state,input,world,environment,attributes,Phase5Mechanics.MovementEffects.NONE,Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(state.onGround(),input.sprint(),input.sneak()));} public PhysicsContext { Objects.requireNonNull(state);Objects.requireNonNull(input);Objects.requireNonNull(world);Objects.requireNonNull(environment);Objects.requireNonNull(attributes);Objects.requireNonNull(effects);Objects.requireNonNull(pose);Objects.requireNonNull(movementEnvironment);if(simulationTick<0)throw new IllegalArgumentException("simulationTick must be non-negative"); } }
   public record StepResult(long simulationTick,Player state,boolean collided,Phase5Mechanics.Pose pose,String diagnostic) implements Serializable { public StepResult(long tick,Player state,boolean collided,String diagnostic){this(tick,state,collided,Phase5Mechanics.Pose.STANDING,diagnostic);} public StepResult {Objects.requireNonNull(state);Objects.requireNonNull(pose);Objects.requireNonNull(diagnostic);} }

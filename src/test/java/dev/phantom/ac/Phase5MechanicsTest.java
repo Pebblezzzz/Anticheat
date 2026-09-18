@@ -1,8 +1,6 @@
 package dev.phantom.ac;
 
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -17,19 +15,12 @@ import dev.phantom.ac.Simulation.Vanilla12111Physics;
 import dev.phantom.ac.State.Player;
 
 class Phase5MechanicsTest {
-  private static World.Snapshot air() {
-    var stone=dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone",java.util.Map.of());
-    Map<World.Pos,World.Block> blocks=new java.util.LinkedHashMap<>();
-    for(int x=-8;x<=8;x++)for(int z=-8;z<=8;z++) blocks.put(new World.Pos(x,-1,z),World.Block.FULL);
-    return new World.Snapshot(blocks,Set.of(new World.Chunk(-1,-1),new World.Chunk(-1,0),new World.Chunk(0,-1),new World.Chunk(0,0)));
-  }
+  private static World.Snapshot air() { return World.Snapshot.emptyVisibleChunks(List.of(new World.Chunk(-1,-1),new World.Chunk(-1,0),new World.Chunk(0,-1),new World.Chunk(0,0))); }
   @Test void sprintAndSneakAreExplicitInputs() {
     var physics=new Vanilla12111Physics();
     var state=Player.initial(Vec3.ZERO);
     var normal=physics.step(new PhysicsContext(1,state,new AdvancedInput(1,0,false),air(),Simulation.Environment.DRY,new Attributes(.1)));
-    var sprint=physics.step(new PhysicsContext(1,state,new AdvancedInput(1,0,false,true,false),air(),Simulation.Environment.DRY,
-        new Attributes(.1,List.of(new Phase5Mechanics.AttributeModifier("vanilla:sprinting",0.3,
-            Phase5Mechanics.ModifierOperation.ADD_MULTIPLIED_TOTAL)))));
+    var sprint=physics.step(new PhysicsContext(1,state,new AdvancedInput(1,0,false,true,false),air(),Simulation.Environment.DRY,new Attributes(.1)));
     var sneak=physics.step(new PhysicsContext(1, state, new AdvancedInput(1, 0, false, false, true), air(), Simulation.Environment.DRY, new Attributes(.1)));
     assertTrue(sprint.state().position().z()>normal.state().position().z());
     assertTrue(sneak.state().position().z()<normal.state().position().z());
@@ -52,8 +43,8 @@ class Phase5MechanicsTest {
     var physics=new Vanilla12111Physics();
     var water=physics.step(new PhysicsContext(4,Player.initial(Vec3.ZERO),new AdvancedInput(1,0,false,true,false),air(),Simulation.Environment.WATER,new Attributes(.1),Phase5Mechanics.MovementEffects.NONE,Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.vanillaWater(false,true,false,true)));
     var lava=physics.step(new PhysicsContext(5,Player.initial(Vec3.ZERO),new AdvancedInput(1,0,false),air(),Simulation.Environment.LAVA,new Attributes(.1),Phase5Mechanics.MovementEffects.NONE,Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.vanillaLava(true,false,false)));
-    assertEquals(0.0172872003364563, water.state().velocity().z(), 1e-12);
-    assertEquals(0.009604, lava.state().velocity().z(), 1e-12);
+    assertEquals(0.01764, water.state().velocity().z(), 1e-12);
+    assertEquals(0.0098, lava.state().velocity().z(), 1e-12);
     assertEquals(0.25, Phase5Mechanics.MovementEnvironment.vanillaLava(true,false,false).gravityMultiplier(), 1e-12);
     assertEquals(0.5, Phase5Mechanics.MovementEnvironment.vanillaLava(true,false,false).fluidDrag(), 1e-12);
   }

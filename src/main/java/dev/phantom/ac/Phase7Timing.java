@@ -104,7 +104,7 @@ public final class Phase7Timing {
             && config.clientTickMinNanos()==config.clientTickMaxNanos()
             && !isWithinDerivedWindow(packetTicks,bounds.clientEventNanos,anchorGeneration,anchorTick,config)){
           consistency=Consistency.INCONSISTENT;
-          consistencyReasons.add("explicit client tick "+explicit.getAsLong()+" is outside exact wall-clock timing bounds for sequence "+normalized.sequence());
+          consistencyReasons.add("explicit client tick "+explicit.getAsLong()+" is outside timing bounds; exact wall-clock comparison failed for sequence "+normalized.sequence());
         }}
       else if(anchorSet&&direction!=Direction.UNKNOWN){TimeRange clockTime=direction==Direction.CLIENT_TO_SERVER?bounds.packetGenerationNanos:bounds.clientProcessingNanos;packetTicks=relativeClientTicks(clockTime,anchorGeneration,anchorTick,config);source=TimingSource.RELATIVE_CLIENT_ANCHOR;}
       else{packetTicks=Range.empty();source=TimingSource.SERVER_CAPTURE_ONLY;}
