@@ -149,7 +149,7 @@ class Phase8HardeningRegressionTest {
   void worldMutationAfterAuthoritativeAnchorMakesFirstMovementUncertain(){
     var packets=List.of(
         new RawPacket(1,10_000_000L,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
-        new RawPacket(2,0,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+        new RawPacket(2,10_000_000L,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
             Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
         new RawPacket(2,20_000_000L,new Packets.ClientTickEnd()),
         new RawPacket(3,70_000_000L,new Move(new Vec3(.5,65,.5),0f,0f,false,null))
