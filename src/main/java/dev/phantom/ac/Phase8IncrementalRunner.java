@@ -831,33 +831,6 @@ public final class Phase8IncrementalRunner {
     lastServerDivergenceTick = -1L;
   }
 
-  private boolean recordAirHover(Maths.Vec3 clientPosition, long movementTick) {
-    if (clientPosition == null || authoritativeServerPosition == null
-        || authoritativeOnGround == null || authoritativeOnGround
-        || authoritativeCanFly || authoritativeFlying
-        || clientPosition.y() - authoritativeServerPosition.y() < 1.0) {
-      resetAirHover();
-      return false;
-    }
-    if (lastAirHoverTick == movementTick) return false;
-    double y = clientPosition.y();
-    double delta = Double.isNaN(lastAirHoverY) ? Double.POSITIVE_INFINITY : Math.abs(y - lastAirHoverY);
-    if (lastAirHoverTick < 0 || movementTick == lastAirHoverTick + 1L) {
-      airHoverStreak = delta <= 0.005 ? airHoverStreak + 1 : 1;
-    } else {
-      airHoverStreak = 1;
-    }
-    lastAirHoverTick = movementTick;
-    lastAirHoverY = y;
-    return airHoverStreak >= 4;
-  }
-
-  private void resetAirHover() {
-    airHoverStreak = 0;
-    lastAirHoverTick = -1L;
-    lastAirHoverY = Double.NaN;
-  }
-
   private void resetGroundContradiction() {
     groundContradictionStreak = 0;
     lastGroundContradictionTick = -1L;
