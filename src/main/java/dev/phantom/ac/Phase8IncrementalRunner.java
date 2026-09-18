@@ -6,6 +6,7 @@ import dev.phantom.ac.State.Player;
 import dev.phantom.ac.world.WorldSnapshot;
 
 import java.util.*;
+import java.util.function.LongFunction;
 
 /**
  * Stateful live adapter for the pure {@link CausalMovementPipeline}.
@@ -141,6 +142,27 @@ public final class Phase8IncrementalRunner {
       Player currentAnchor,
       long currentAnchorReceivedNanos,
       Maths.Vec3 ignoredLatestServerPosition) {
+    return processWithWorldProvider(
+        playerId,
+        raw,
+        liveWorld == null ? null : ignored -> liveWorld,
+        currentAnchor,
+        currentAnchorReceivedNanos,
+        ignoredLatestServerPosition);
+  }
+
+  /**
+   * Processes a capture batch using a live-world snapshot selected by movement
+   * sequence. This prevents an asynchronously captured current world from being
+   * reused for an earlier movement in the same batch.
+   */
+  public synchronized Report processWithWorldProvider(
+      String playerId,
+      List<Packets.RawPacket> raw,
+      LongFunction<WorldSnapshot> liveWorldProvider,
+      Player currentAnchor,
+      long currentAnchorReceivedNanos,
+      Maths.Vec3 ignoredLatestServerPosition) {
     Objects.requireNonNull(playerId);
     Objects.requireNonNull(raw);
 
@@ -190,12 +212,12 @@ public final class Phase8IncrementalRunner {
         epochNanos,
         50_000_000L);
 
-    CausalMovementPipeline.Report pipeline = CausalMovementPipeline.analyze(
+    CausalMovementPipeline.Report pipeline = CausalMovementPipeline.analyzeWithWorldProvider(
         playerId,
         timeline,
         maximumCandidates,
         Phase7Timing.Config.defaultConfig(),
-        liveWorld,
+        liveWorldProvider,
         anchor,
         anchorReceivedNanos);
 
