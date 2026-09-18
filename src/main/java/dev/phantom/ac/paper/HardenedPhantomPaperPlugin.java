@@ -277,7 +277,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     Phase8MovementValidation.Result result=Phase8MovementValidation.authoritativeImpossible(
         player.getName(),serverTick,prior,observed,
         WorldSnapshot.builder(Contracts.TARGET_VERSION).build(),"paper-authoritative-move-failure",
-        new Validation.SyncWindow(0,0,true,List.of("Paper PlayerFailMoveEvent is authoritative server-side rejection")),
+        new dev.phantom.ac.Validation.SyncWindow(0,0,true,List.of("Paper PlayerFailMoveEvent is authoritative server-side rejection")),
         rule,
         "Paper prevented this movement attempt as "+reason.name()+" after "
             +capture.paperMoveFailureCount+" rejected movement attempts within 1 second",
@@ -480,7 +480,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           new dev.phantom.ac.Simulation.Attributes(movementSpeed),
           effects,pose,env,
           new Vec3(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()),
-          new Vec3(velocity.getX(),velocity.getY(),velocity.getZ()),
+          new Vec3(authoritativeVelocity.getX(),authoritativeVelocity.getY(),authoritativeVelocity.getZ()),
           player.getAllowFlight(),player.isFlying(),player.isSleeping(),entityBoxes);
 
       if(capture.initialState==null){
@@ -491,7 +491,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         };
         capture.initialState=new State.Player(
             vector(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()),
-            vector(velocity.getX(),velocity.getY(),velocity.getZ()),player.getLocation().getYaw(),player.getLocation().getPitch(),player.isOnGround(),
+            vector(authoritativeVelocity.getX(),authoritativeVelocity.getY(),authoritativeVelocity.getZ()),player.getLocation().getYaw(),player.getLocation().getPitch(),player.isOnGround(),
             player.getGameMode().name().toLowerCase(Locale.ROOT),effects,java.util.OptionalInt.empty(),false,
             java.util.Optional.empty(),new dev.phantom.ac.Simulation.Attributes(movementSpeed),pose,stateEnvironment,
             State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
@@ -868,7 +868,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     volatile boolean lastAuthoritativeOnGround;
     volatile boolean lastAuthoritativeCanFly;
     volatile boolean lastAuthoritativeFlying;
-    final AtomicLong authoritativeServerTick=new AtomicLong(-1L);
     volatile long paperMoveFailureWindowStartNanos=-1L;
     volatile int paperMoveFailureCount;
     Phase8MovementValidation.Accumulator accumulator=Phase8MovementValidation.Accumulator.empty();
