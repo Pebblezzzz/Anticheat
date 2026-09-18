@@ -228,6 +228,29 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
    * evidence, rather than trying to reconstruct the rejection from a later
    * asynchronous server-location snapshot.
    */
+  @EventHandler public void onPlayerToggleFlight(org.bukkit.event.player.PlayerToggleFlightEvent event){
+    Player player=event.getPlayer();
+    Capture capture=captures.computeIfAbsent(player.getUniqueId(),
+        ignored->new Capture(player.getUniqueId(),System.nanoTime(),validationBudget));
+    boolean attemptedFlying=event.isFlying();
+    Long authoritativeTick=capture.authoritativeServerTick.get()>=0
+        ?capture.authoritativeServerTick.get():null;
+    Packets.FlightToggle toggle=new Packets.FlightToggle(attemptedFlying,event.isCancelled());
+    long sequence=capture.sequence.incrementAndGet();
+    long receivedNanos=System.nanoTime();
+    if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
+      getLogger().info("[PhantomAC][PHASE8][FLIGHT_TOGGLE] player="+player.getName()
+          +" attemptedFlying="+attemptedFlying
+          +" cancelled="+event.isCancelled()
+          +" canFly="+player.getAllowFlight()
+          +" flyingNow="+player.isFlying()
+          +" gamemode="+player.getGameMode()
+          +" authorityTick="+authoritativeTick);
+    }
+    appendPacket(capture,new RawPacket(sequence,receivedNanos,toggle,
+        Packets.CaptureProvenance.fromAdapter("paper-flight-toggle",toggle,authoritativeTick)));
+  }
+
   @EventHandler public void onPlayerFailMove(PlayerFailMoveEvent event){
     Player player=event.getPlayer();
     if(Boolean.TRUE.equals(debugPlayers.get(player.getUniqueId()))){
