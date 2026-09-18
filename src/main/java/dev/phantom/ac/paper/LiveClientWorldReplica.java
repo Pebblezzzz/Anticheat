@@ -63,6 +63,8 @@ final class LiveClientWorldReplica {
       long revision
   ) {}
 
+  private static final int MAX_CHECKPOINTS = 64;
+
   private final String version;
   private final int minY;
   private final int maxY;
@@ -71,7 +73,13 @@ final class LiveClientWorldReplica {
   private final List<Mutation> unassigned = new ArrayList<>();
   private final Map<Short, List<Mutation>> pending = new LinkedHashMap<>();
   private final Deque<Short> sentOrder = new ArrayDeque<>();
+  private record VisibleCheckpoint(
+      long sequence,
+      Map<ChunkKey, ChunkEntry> chunks,
+      Map<ChunkKey, Map<Pos, BlockState>> blockOverlays) {}
+
   private final Map<ClientVersion, ConcurrentHashMap<Integer, BlockState>> stateCache = new ConcurrentHashMap<>();
+  private final Deque<VisibleCheckpoint> checkpoints = new ArrayDeque<>();
   private long revisionCounter;
   private long lastVisibleSequence=-1L;
 
@@ -126,6 +134,7 @@ final class LiveClientWorldReplica {
       if (head == transactionId) break;
     }
     lastVisibleSequence=Math.max(lastVisibleSequence,acknowledgementSequence);
+    recordCheckpoint(lastVisibleSequence);
     return true;
   }
 
@@ -191,6 +200,31 @@ final class LiveClientWorldReplica {
         minY,
         maxY,
         new BackendView(version, minY, maxY, local, overlays, visibleSequence));
+  }
+
+  /**
+   * Returns the latest acknowledged world state whose capture sequence is no
+   * later than the supplied movement sequence. A null result means no
+   * acknowledged checkpoint can yet prove client knowledge for that movement.
+   */
+  synchronized WorldSnapshot snapshotAtOrBefore(long sequence) {
+    if (sequence < 0) return null;
+    VisibleCheckpoint chosen = null;
+    Iterator<VisibleCheckpoint> iterator = checkpoints.descendingIterator();
+    while (iterator.hasNext()) {
+      VisibleCheckpoint checkpoint = iterator.next();
+      if (checkpoint.sequence() <= sequence) {
+        chosen = checkpoint;
+        break;
+      }
+    }
+    if (chosen == null) return null;
+    return WorldSnapshot.backed(
+        version,
+        minY,
+        maxY,
+        new BackendView(version, minY, maxY,
+            chosen.chunks(), chosen.blockOverlays(), chosen.sequence()));
   }
 
   /** A full current cache view, still lazy and therefore cheap to capture. */
@@ -339,6 +373,21 @@ final class LiveClientWorldReplica {
       BlockState existing = versionCache.putIfAbsent(globalId, fresh);
       return existing != null ? existing : fresh;
     }
+  }
+
+  private synchronized void recordCheckpoint(long sequence) {
+    Map<ChunkKey, ChunkEntry> chunkCopy = new LinkedHashMap<>(chunks);
+    Map<ChunkKey, Map<Pos, BlockState>> overlayCopy = new LinkedHashMap<>();
+    for (Map.Entry<ChunkKey, Map<Pos, BlockState>> entry : blockOverlays.entrySet()) {
+      if (!entry.getValue().isEmpty()) {
+        overlayCopy.put(entry.getKey(), Map.copyOf(entry.getValue()));
+      }
+    }
+    checkpoints.addLast(new VisibleCheckpoint(
+        sequence,
+        Map.copyOf(chunkCopy),
+        Map.copyOf(overlayCopy)));
+    while (checkpoints.size() > MAX_CHECKPOINTS) checkpoints.removeFirst();
   }
 
   private void apply(Mutation mutation) {
