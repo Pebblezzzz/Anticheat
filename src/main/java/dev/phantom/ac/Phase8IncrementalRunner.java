@@ -239,6 +239,7 @@ public final class Phase8IncrementalRunner {
         waitingForTeleport = true;
         reanchorRequired = false;
         resetGroundContradiction();
+        resetServerDivergence();
         poison("server correction received; awaiting correction acknowledgement and a fresh replay anchor");
         continuation = Continuation.UNCERTAIN;
         continue;
@@ -260,6 +261,7 @@ public final class Phase8IncrementalRunner {
       if (event instanceof Packets.Velocity) {
         trackedState = after;
         resetGroundContradiction();
+        resetServerDivergence();
         reanchorRequired = true;
         pendingReanchorState = authoritativeGroundState(after);
         reanchorReason = "server velocity was observed; live application timing is not yet represented by the incremental core";
@@ -271,6 +273,7 @@ public final class Phase8IncrementalRunner {
         trackedState = after;
         if (worldMutationAffectsPlayer(event, before, after)) {
           resetGroundContradiction();
+          resetServerDivergence();
           reanchorRequired = true;
           reanchorReason = "relevant client-world mutation observed; historical collision state must be replayed before continuing";
           continuation = Continuation.UNCERTAIN;
@@ -302,6 +305,7 @@ public final class Phase8IncrementalRunner {
           && futureRelevantWorldMutation(normalized, packetIndex + 1, before, after)) {
         // Mark the normal replay path uncertain, but do not skip the movement.
         // Independent authoritative contradictions below must still be evaluated.
+        resetServerDivergence();
         reanchorRequired = true;
         reanchorReason = "future relevant world mutation makes the current movement snapshot temporally non-causal";
         continuation = Continuation.UNCERTAIN;
