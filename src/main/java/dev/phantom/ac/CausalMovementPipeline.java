@@ -558,6 +558,78 @@ public final class CausalMovementPipeline {
         merged);
   }
 
+  /**
+   * Evaluates an explicitly observed server-side flight-toggle authorization
+   * transition. This is an authoritative evidence channel, not movement
+   reachability and not a Paper move-rejection heuristic.
+   */
+  public static Optional<Phase8MovementValidation.Result> evaluateFlightToggle(
+      String playerId,
+      Timeline.Event event,
+      Timeline.Snapshot timeline,
+      Phase7Timing.Reconstruction timing,
+      WorldSnapshot world,
+      Player anchor) {
+    if (!(event.packet().packet() instanceof Packets.FlightToggle toggle) || !toggle.flying()) {
+      return Optional.empty();
+    }
+
+    List<AuthoritativeSnapshot> authorities = collectAuthorities(timeline);
+    AuthoritativeSnapshot authority = authorities.stream()
+        .filter(snapshot -> snapshot.serverTick() <= event.serverTick())
+        .filter(snapshot -> snapshot.receivedNanos() <= event.packet().receivedNanos())
+        .max(Comparator.comparingLong(AuthoritativeSnapshot::serverTick)
+            .thenComparingLong(AuthoritativeSnapshot::receivedNanos)
+            .thenComparingLong(AuthoritativeSnapshot::sequence))
+        .orElse(null);
+
+    if (authority == null) return Optional.empty();
+    Packets.PlayerContext context = authority.context();
+    String mode = context.gamemode();
+    if (context.canFly() || context.flying()
+        || (!"survival".equals(mode) && !"adventure".equals(mode))) {
+      return Optional.empty();
+    }
+
+    State.Player seed = anchor == null ? State.Player.initial(context.serverPosition()) : anchor;
+    State.Reconstruction reconstruction =
+        State.reconstruct(State.Seed.serverAnchor(seed), timeline);
+    State.StateFrame frame = reconstruction.frames().stream()
+        .filter(value -> value.event().packet().sequence() == event.packet().sequence())
+        .findFirst()
+        .orElse(null);
+    if (frame == null) return Optional.empty();
+
+    Phase7Timing.EventTiming eventTiming =
+        timing.timingFor(event.packet().sequence()).orElse(null);
+    Validation.SyncWindow sync = eventTiming == null
+        ? new Validation.SyncWindow(
+            0, 0, true,
+            List.of("server flight-toggle event has no client simulation tick"))
+        : Phase7Timing.toPhase6Window(eventTiming);
+
+    return Optional.of(Phase8MovementValidation.authoritativeImpossible(
+        playerId,
+        event.serverTick(),
+        frame.before(),
+        frame.after(),
+        world,
+        "timeline:flight-toggle:serverTick=" + event.serverTick(),
+        sync,
+        "UNAUTHORIZED_FLIGHT_TOGGLE_ATTEMPT",
+        "authoritative server state says flight is not permitted but a flight-on transition was observed",
+        List.of(
+            "authoritativeCanFly=false",
+            "authoritativeFlying=" + context.flying(),
+            "authoritativeGamemode=" + context.gamemode(),
+            "flightToggle.flying=true",
+            "flightToggle.cancelled=" + toggle.cancelled(),
+            "authoritySnapshotSequence=" + authority.sequence(),
+            "authoritySnapshotServerTick=" + authority.serverTick(),
+            "this evidence is independent of Paper movement rejection events"),
+        "causal:flight:" + playerId + ":" + event.packet().sequence()));
+  }
+
   private static List<AuthoritativeSnapshot> collectAuthorities(Timeline.Snapshot timeline) {
     List<AuthoritativeSnapshot> snapshots = new ArrayList<>();
     for (Timeline.Event event : timeline.events()) {
