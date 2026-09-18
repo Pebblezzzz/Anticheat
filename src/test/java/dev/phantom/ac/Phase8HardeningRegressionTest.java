@@ -162,8 +162,9 @@ class Phase8HardeningRegressionTest {
     assertEquals(3,report.movementObservations(),report.results().toString());
     assertEquals(Verdict.IMPOSSIBLE,report.results().getFirst().verdict(),report.results().toString());
     assertEquals(0,report.results().getFirst().evidence().matchingCandidateCount());
-    assertEquals(Verdict.UNCERTAIN,report.results().get(1).verdict(),report.results().toString());
-    assertEquals(Verdict.UNCERTAIN,report.results().get(2).verdict(),report.results().toString());
+    assertEquals(Verdict.IMPOSSIBLE,report.results().get(1).verdict(),report.results().toString());
+    assertEquals(Verdict.IMPOSSIBLE,report.results().get(2).verdict(),report.results().toString());
+    assertEquals(3,report.impossible());
   }
 
   @Test
