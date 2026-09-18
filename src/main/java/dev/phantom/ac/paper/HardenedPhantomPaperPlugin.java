@@ -28,6 +28,7 @@ import dev.phantom.ac.Packets.RawPacket;
 import dev.phantom.ac.Phase5Mechanics;
 import dev.phantom.ac.Phase7Timing;
 import dev.phantom.ac.Phase8LiveValidation;
+import dev.phantom.ac.Phase8IncrementalRunner;
 import dev.phantom.ac.Phase8MovementValidation;
 import dev.phantom.ac.SetbackPolicy;
 import dev.phantom.ac.State;
@@ -73,7 +74,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     @Override public void onPacketReceive(PacketReceiveEvent event){
       Object sender=event.getPlayer();
       if(!(sender instanceof Player player))return;
-      Capture capture=captures.computeIfAbsent(player.getUniqueId(),ignored->new Capture(player.getUniqueId(),System.nanoTime()));
+      Capture capture=captures.computeIfAbsent(player.getUniqueId(),ignored->new Capture(player.getUniqueId(),System.nanoTime(),validationBudget));
 
       if(event.getPacketType()==PacketType.Play.Client.CLIENT_TICK_END){
         capture.clientTickTracker.onClientTickEnd();
@@ -119,7 +120,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     @Override public void onPacketSend(PacketSendEvent event){
       Object sender=event.getPlayer();
       if(!(sender instanceof Player player))return;
-      Capture capture=captures.computeIfAbsent(player.getUniqueId(),ignored->new Capture(player.getUniqueId(),System.nanoTime()));
+      Capture capture=captures.computeIfAbsent(player.getUniqueId(),ignored->new Capture(player.getUniqueId(),System.nanoTime(),validationBudget));
 
       if(event.getPacketType()==PacketType.Play.Server.PLAYER_POSITION_AND_LOOK){
         var packet=new WrapperPlayServerPlayerPositionAndLook(event);
@@ -192,13 +193,13 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   @EventHandler public void onJoin(PlayerJoinEvent event){
-    Capture capture=new Capture(event.getPlayer().getUniqueId(),System.nanoTime());
+    Capture capture=new Capture(event.getPlayer().getUniqueId(),System.nanoTime(),validationBudget);
     capture.updateServerPosition(event.getPlayer());
     captures.put(event.getPlayer().getUniqueId(),capture);
   }
 
   @EventHandler public void onWorldChange(PlayerChangedWorldEvent event){
-    Capture capture=new Capture(event.getPlayer().getUniqueId(),System.nanoTime());
+    Capture capture=new Capture(event.getPlayer().getUniqueId(),System.nanoTime(),validationBudget);
     capture.updateServerPosition(event.getPlayer());
     captures.put(event.getPlayer().getUniqueId(),capture);
     setbackOverrides.remove(event.getPlayer().getUniqueId());
@@ -359,9 +360,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           case LAVA -> State.Environment.LAVA;
           case NONE -> env.climbable()?State.Environment.CLIMBABLE:State.Environment.DRY;
         };
+        org.bukkit.util.Vector velocity=player.getVelocity();
         capture.initialState=new State.Player(
             vector(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()),
-            Vec3.ZERO,player.getLocation().getYaw(),player.getLocation().getPitch(),player.isOnGround(),
+            vector(velocity.getX(),velocity.getY(),velocity.getZ()),player.getLocation().getYaw(),player.getLocation().getPitch(),player.isOnGround(),
             player.getGameMode().name().toLowerCase(Locale.ROOT),effects,java.util.OptionalInt.empty(),false,
             java.util.Optional.empty(),new dev.phantom.ac.Simulation.Attributes(movementSpeed),pose,stateEnvironment,
             State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
@@ -390,7 +392,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private void scheduleValidations(){
     for(Capture capture:captures.values()){
       if(!capture.validationRunning.compareAndSet(false,true))continue;
-      List<RawPacket> raw=capture.copy();
+      List<RawPacket> raw=capture.copySince(capture.movementRunner.lastProcessedSequence());
       if(raw.isEmpty()){capture.validationRunning.set(false);continue;}
       Player player=getServer().getPlayer(capture.playerId);
       if(player==null){capture.validationRunning.set(false);continue;}
@@ -402,11 +404,20 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       getServer().getScheduler().runTaskAsynchronously(this,()->{
         try{
           WorldSnapshot liveWorld=validationSnapshot(capture,snapshotCenterX,snapshotCenterZ);
-          Timeline.Snapshot timeline=Timeline.assign(new Packets.Normalizer().normalize(raw),epoch,50_000_000L);
-          Phase8LiveValidation.Report report=Phase8LiveValidation.analyze(playerName,timeline,validationBudget,Phase7Timing.Config.defaultConfig(),liveWorld,capture.initialState,capture.epochNanos);
+          Phase8IncrementalRunner.Report incremental=capture.movementRunner.process(
+              playerName,raw,liveWorld,capture.initialState);
+          Phase8LiveValidation.Report report=new Phase8LiveValidation.Report(
+              incremental.results(),incremental.movementObservations(),incremental.possible(),
+              incremental.uncertain(),incremental.impossible());
 
           if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
-            logPhase8Timing(playerName,capture,timeline,Phase7Timing.reconstruct(timeline,Phase7Timing.Config.defaultConfig()),report);
+            getLogger().info("[PhantomAC][PHASE8][INCREMENTAL] player="+playerName
+                +" packets="+incremental.packetsProcessed()
+                +" movements="+incremental.movementObservations()
+                +" clientTick="+incremental.relativeClientTick()
+                +" candidates="+capture.movementRunner.candidateCount()
+                +" continuation="+incremental.continuation()
+                +" frontierRetained="+incremental.candidateFrontierRetained());
           }
 
           getServer().getScheduler().runTask(this,()->applyResult(capture,report));
@@ -516,7 +527,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   private void record(Player player,Packets.Packet packet){
     Capture capture=captures.computeIfAbsent(player.getUniqueId(),
-        ignored->new Capture(player.getUniqueId(),System.nanoTime()));
+        ignored->new Capture(player.getUniqueId(),System.nanoTime(),validationBudget));
     appendPacket(capture,new RawPacket(capture.sequence.incrementAndGet(),System.nanoTime(),packet));
   }
 
@@ -583,6 +594,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final ClientTickTracker clientTickTracker=new ClientTickTracker();
     final AtomicBoolean validationRunning=new AtomicBoolean();
     final LiveClientWorldReplica clientWorld=new LiveClientWorldReplica(Contracts.TARGET_VERSION,-64,319);
+    final Phase8IncrementalRunner movementRunner;
     volatile State.Player initialState;
     final Set<Short> outstandingTransactions=ConcurrentHashMap.newKeySet();
     final Set<Short> reservedTransactions=ConcurrentHashMap.newKeySet();
@@ -593,7 +605,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     volatile int minY=-64,maxY=319;
     volatile double lastServerX,lastServerY,lastServerZ;
 
-    Capture(UUID id,long epoch){playerId=id;epochNanos=epoch;}
+    Capture(UUID id,long epoch,int candidateBudget){playerId=id;epochNanos=epoch;movementRunner=new Phase8IncrementalRunner(candidateBudget,epoch);}
 
     void updateServerPosition(Player player){
       org.bukkit.Location location=player.getLocation();
@@ -616,6 +628,12 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       synchronized(packets){
         int start=Math.max(0,packets.size()-MAX_VALIDATION_PACKETS);
         return List.copyOf(packets.subList(start,packets.size()));
+      }
+    }
+
+    List<RawPacket> copySince(long sequenceExclusive){
+      synchronized(packets){
+        return packets.stream().filter(packet->packet.sequence()>sequenceExclusive).toList();
       }
     }
   }
