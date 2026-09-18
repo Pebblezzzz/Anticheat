@@ -251,6 +251,40 @@ public final class Phase8IncrementalRunner {
         continue;
       }
 
+      if (event instanceof Packets.FlightToggle toggle) {
+        trackedState = after;
+        if (toggle.flying()
+            && !authoritativeCanFly
+            && authoritativeOnGround != null
+            && ("survival".equals(after.gamemode()) || "adventure".equals(after.gamemode()))) {
+          String worldReference = "incremental-client-world:chunks=" + world.loadedChunks().size();
+          Validation.SyncWindow timing = new Validation.SyncWindow(
+              Math.max(0, relativeClientTick),
+              Math.max(0, relativeClientTick),
+              true,
+              List.of("server-side PlayerToggleFlightEvent state transition; no movement packet is required"));
+          results.add(Phase8MovementValidation.authoritativeImpossible(
+              playerId, serverTick, before, after, world, worldReference, timing,
+              "UNAUTHORIZED_FLIGHT_TOGGLE_ATTEMPT",
+              "player attempted to start flying while the authoritative server state does not permit flight",
+              List.of(
+                  "attemptedFlying=true",
+                  "eventCancelled=" + toggle.cancelled(),
+                  "authoritativeCanFly=" + authoritativeCanFly,
+                  "authoritativeFlying=" + authoritativeFlying,
+                  "authoritativeGamemode=" + after.gamemode(),
+                  "authoritativeOnGround=" + authoritativeOnGround,
+                  "serverPosition=" + authoritativeServerPosition,
+                  "serverVelocity=" + after.velocity(),
+                  "this evidence comes from an authoritative server-side flight-toggle event",
+                  "no ClientInput or position movement is required"),
+              "live:flight-toggle:" + packet.sequence()));
+        }
+        continue;
+      }
+
+
+
       if (event instanceof Packets.Teleport) {
         trackedState = after;
         candidates = Set.of();
