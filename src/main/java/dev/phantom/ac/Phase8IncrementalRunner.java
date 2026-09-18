@@ -612,10 +612,15 @@ public final class Phase8IncrementalRunner {
           a.fluid(), a.submerged(), a.climbable(), old.onGround(),
           a.sprinting(), a.sneaking(), a.swimmingInput(), a.gliding(),
           a.fluidSpeedMultiplier(), a.fluidDrag(), a.gravityMultiplier());
+      State.Environment stateEnvironment = env.fluid() == Phase5Mechanics.Fluid.WATER
+          ? State.Environment.WATER
+          : env.fluid() == Phase5Mechanics.Fluid.LAVA
+              ? State.Environment.LAVA
+              : env.climbable() ? State.Environment.CLIMBABLE : State.Environment.DRY;
       Player updated = new Player(
           old.position(), old.velocity(), old.yaw(), old.pitch(), old.onGround(),
           context.gamemode(), context.effects(), old.awaitingTeleport(), old.uncertain(),
-          old.input(), context.attributes(), context.pose(), environmentFor(env),
+          old.input(), context.attributes(), context.pose(), stateEnvironment,
           old.clientTickRange(), old.provenance(), old.uncertaintyReasons());
       Phase6Reachability.Context next = new Phase6Reachability.Context(
           c.simulationTick(), updated, environmentFor(env), context.attributes(),
