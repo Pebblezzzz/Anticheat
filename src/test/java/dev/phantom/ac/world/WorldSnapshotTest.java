@@ -48,6 +48,37 @@ import dev.phantom.ac.geometry.BlockBox;
   // ------------------------------------------------------------------
 
   @Test
+  void backedSnapshotsAnswerQueriesWithoutMaterializingTheWholeWorld() {
+    java.util.concurrent.atomic.AtomicInteger queries = new java.util.concurrent.atomic.AtomicInteger();
+    dev.phantom.ac.world.BlockState stone = stoneBlock();
+
+    WorldSnapshot.Backend backend = new WorldSnapshot.Backend() {
+      @Override public String version() { return Contracts.TARGET_VERSION; }
+      @Override public int minY() { return MIN_Y; }
+      @Override public int maxY() { return MAX_Y; }
+      @Override public java.util.Set<Chunk> loadedChunks() { return java.util.Set.of(new Chunk(0, 0)); }
+      @Override public boolean hasChunk(int chunkX, int chunkZ) { return chunkX == 0 && chunkZ == 0; }
+      @Override public Coverage coverageAt(int x, int y, int z) {
+        queries.incrementAndGet();
+        if (x == 0 && y == 64 && z == 0) return Coverage.KNOWN;
+        return Coverage.KNOWN;
+      }
+      @Override public BlockState blockAtOrNull(int x, int y, int z) {
+        queries.incrementAndGet();
+        return x == 0 && y == 64 && z == 0 ? stone : null;
+      }
+    };
+
+    WorldSnapshot world = WorldSnapshot.backed(Contracts.TARGET_VERSION, MIN_Y, MAX_Y, backend);
+    assertEquals(0, queries.get());
+    assertTrue(world.hasChunk(0, 0));
+    assertEquals(0, queries.get());
+    assertEquals(Coverage.KNOWN, world.coverageAt(0, 64, 0));
+    assertEquals(stone, world.blockAtOrNull(0, 64, 0));
+    assertTrue(queries.get() > 0);
+  }
+
+  @Test
   void mergeCombinesDisjointCoverageAndRejectsConflictingOverlap(){
     BlockState stone=dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone",Map.of());
     WorldSnapshot left=WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0,0).setBlock(0,64,0,stone).build();

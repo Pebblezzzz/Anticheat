@@ -54,6 +54,11 @@ public final class WorldSnapshot implements Serializable {
     int minY();
     int maxY();
     Set<Chunk> loadedChunks();
+
+    default boolean hasChunk(int chunkX, int chunkZ) {
+      return loadedChunks().contains(new Chunk(chunkX, chunkZ));
+    }
+
     Coverage coverageAt(int x, int y, int z);
     BlockState blockAtOrNull(int x, int y, int z);
 
@@ -196,6 +201,9 @@ public final class WorldSnapshot implements Serializable {
           result.addAll(second.loadedChunks());
           return Set.copyOf(result);
         }
+        @Override public boolean hasChunk(int chunkX,int chunkZ) {
+          return first.hasChunk(chunkX,chunkZ) || second.hasChunk(chunkX,chunkZ);
+        }
         @Override public Coverage coverageAt(int x,int y,int z) {
           Chunk sought=Chunk.containing(x,z);
           boolean a=first.hasChunk(sought), b=second.hasChunk(sought);
@@ -278,12 +286,12 @@ public final class WorldSnapshot implements Serializable {
 
   public boolean hasChunk(int chunkX, int chunkZ) {
     return backend != null
-        ? backend.loadedChunks().contains(new Chunk(chunkX, chunkZ))
+        ? backend.hasChunk(chunkX, chunkZ)
         : chunks.containsKey(new Chunk(chunkX, chunkZ));
   }
 
   public boolean hasChunk(Chunk chunk) {
-    return backend != null ? backend.loadedChunks().contains(chunk) : chunks.containsKey(chunk);
+    return hasChunk(chunk.x(), chunk.z());
   }
 
   public Set<Chunk> loadedChunks() {

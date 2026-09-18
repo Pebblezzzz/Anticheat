@@ -24,9 +24,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * acknowledgement barrier. The deterministic core still receives only an
  * immutable {@link WorldSnapshot}.</p>
  *
- * <p>Unlike the old implementation, chunk payloads are not decoded on arrival.
- * The snapshot builder decodes only the local chunk window needed by the newest
- * movement validation, off the Paper main thread.</p>
+ * <p>Chunk payloads are not decoded on arrival. PacketEvents' palette-backed
+ * columns remain the storage representation; the backend converts individual
+ * states only when a deterministic world query asks for them.</p>
  */
 final class LiveClientWorldReplica {
   record ChunkKey(int x, int z) {}
@@ -224,6 +224,10 @@ final class LiveClientWorldReplica {
       Set<Chunk> result = new LinkedHashSet<>();
       for (ChunkKey key : localChunks.keySet()) result.add(new Chunk(key.x(), key.z()));
       return Set.copyOf(result);
+    }
+
+    @Override public boolean hasChunk(int chunkX, int chunkZ) {
+      return localChunks.containsKey(new ChunkKey(chunkX, chunkZ));
     }
 
     @Override public Coverage coverageAt(int x, int y, int z) {
