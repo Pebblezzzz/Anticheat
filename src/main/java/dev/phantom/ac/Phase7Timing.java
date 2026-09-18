@@ -140,8 +140,10 @@ public final class Phase7Timing {
           sync=withWindow(sync,windows.getLast()); uncertain=true;
         } else if(kind==EventKind.WORLD){
           windows.add(new SynchronizationWindow(WindowKind.WORLD_UPDATE,event.serverTick(),safeAdd(event.serverTick(),1),packetTicks,"world data becomes available to the client after network transit, not server capture",normalized.sequence()));
-          // World visibility is compensated separately. Variable downstream latency
-          // on a chunk/block packet must not poison the exact client movement clock.
+          // A world update is still a synchronization hazard when the subsequent
+          // movement has no explicit client tick. An explicit client movement tick
+          // can recover exact chronology without relying on this server-send time.
+          sync=withWindow(sync,windows.getLast()); uncertain=true;
         }
         if(sync.status()==SyncStatus.RECOVERING&&direction==Direction.CLIENT_TO_SERVER&&!uncertain&&kind==EventKind.MOVEMENT&&sync.pendingTeleportId().isEmpty()){
           int stable=sync.stableEvents()+1;
@@ -156,7 +158,9 @@ public final class Phase7Timing {
         sync=new SynchronizationState(SyncStatus.AMBIGUOUS,sync.possibleClientTicks(),sync.observedLatency(),sync.pendingTeleportId(),0,sync.synchronizationEpoch(),sync.activeWindows(),List.of("duplicate capture prevents strong semantic synchronization"));
       }
 
-      boolean syncUncertainForEvent=affectsMovementSynchronization(kind)&&sync.status()!=SyncStatus.SYNCHRONIZED;
+      boolean syncUncertainForEvent=affectsMovementSynchronization(kind)
+          &&sync.status()!=SyncStatus.SYNCHRONIZED
+          &&!(kind==EventKind.MOVEMENT&&explicit.isPresent());
       EventTiming timing=new EventTiming(index++,normalized.sequence(),event.serverTick(),capture,direction,kind,bounds.packetGenerationNanos,bounds.clientProcessingNanos,packetTicks,simulationTicks,inputTicks,explicit,source,uncertain||syncUncertainForEvent,windows,reasons);frames.add(new Frame(timing,before,sync));previousCapture=capture;previousServerTick=event.serverTick();
     }
     if(consistency!=Consistency.INCONSISTENT&&frames.stream().anyMatch(f->f.timing().uncertain())){consistency=Consistency.UNCERTAIN;consistencyReasons.add("one or more events have bounded but non-exact timing");}
