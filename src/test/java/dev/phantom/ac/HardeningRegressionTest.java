@@ -48,6 +48,16 @@ class HardeningRegressionTest {
     assertFalse(context.entityCollisions().boxesIn(new dev.phantom.ac.geometry.BlockBox(-1, -1, -1, 1, 2, 1)).complete());
   }
 
+  @Test void flightToggleReplayRoundTripsThroughTimelineCodec() {
+    var toggle = new Packets.FlightToggle(true, true);
+    var timeline = Timeline.assign(List.of(new Packets.NormalizedPacket(1, 1, toggle,
+        java.util.EnumSet.of(Packets.PacketFlag.NORMAL),
+        Packets.CaptureProvenance.fromAdapter("test", toggle, 4L))), 0, 50_000_000L);
+    var codec = new Timeline.Codec();
+    var decoded = codec.decode(codec.encode(timeline));
+    assertEquals(toggle, decoded.events().getFirst().packet().packet());
+  }
+
   @Test void playerContextReplayRoundTripsThroughTimelineCodec() {
     var context = new Packets.PlayerContext("survival", new Simulation.Attributes(0.1),
         Map.of("minecraft:speed", 1), Phase5Mechanics.Pose.SWIMMING,
