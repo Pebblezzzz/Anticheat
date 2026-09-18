@@ -61,7 +61,7 @@ public final class Phase8LiveValidation {
         .mapToLong(e->e.packet().sequence()).max().orElse(-1L);
     Phase7Timing.Reconstruction timing=Phase7Timing.reconstruct(timeline,timingConfig);
     Phase6Reachability engine=new Phase6Reachability(new Vanilla12111RichPhysics());
-    State.Reconstruction observedStates=reconstructObservedStates(timeline);
+    State.Reconstruction observedStates=reconstructObservedStates(timeline,initialAnchor);
     Map<Long,State.StateFrame> observedBySequence=observedStatesBySequence(observedStates);
     Map<Long,List<ExternalTransition>> externalByClientTick=externalTransitions(timeline,timing);
 
@@ -74,6 +74,7 @@ public final class Phase8LiveValidation {
     EntityCollisions currentEntityCollisions=EntityCollisions.NONE_TRACKED;
     List<Phase8MovementValidation.Result> results=new ArrayList<>();
     int movements=0;
+    long previousMovementTick=-1;
 
     for(Timeline.Event event:timeline.events()){
       Packets.NormalizedPacket normalized=event.packet();
@@ -105,7 +106,7 @@ public final class Phase8LiveValidation {
           ?liveWorld
           :history.statesAt(event.serverTick());
           Validation.SyncWindow sync=Phase7Timing.toPhase6Window(teleportTiming);
-          Player safe=simulationSafe(anchored,false);
+          Player safe=simulationSafe(anchored);
           if(!safe.uncertain()){
             long anchorTick=Math.max(0,sync.earliestClientTick());
             candidates=Set.of(new Candidate(0,anchorContext(safe,world,currentInput,anchorTick,currentEntityCollisions),
@@ -146,12 +147,36 @@ public final class Phase8LiveValidation {
       Player observed=stateFrame.after();
       Validation.SyncWindow sync=Phase7Timing.toPhase6Window(eventTiming);
       String replayReference="live:phase8:"+playerId+":"+normalized.sequence();
+
+      // Multiple movement packets within one client tick are sub-tick observations.
+      // Grim retains these separately instead of pretending each packet consumed a
+      // complete physics tick. Our core currently has one deterministic step per tick,
+      // so such an observation is explicitly uncertain rather than falsely impossible.
+      long movementTick=eventTiming.simulationClientTicks().min();
+      String worldReference="timeline-world:serverTick="+event.serverTick()+":chunks="+world.loadedChunks().size();
+      if(previousMovementTick>=0
+          &&eventTiming.simulationClientTicks().isExact()
+          &&movementTick==previousMovementTick){
+        SearchResult subTick=new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,candidates,0,candidates.size(),
+            0,0,1,0,List.of("multiple movement packets occurred in the same client simulation tick; sub-tick motion is not yet modeled"));
+        results.add(Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
+            worldReference,sync,List.of("sub-tick movement packet; no full physics tick was advanced"),subTick,replayReference));
+        // We cannot safely consume the next full-tick observation until the missing
+        // sub-tick trajectory is modeled or a fresh authoritative anchor arrives.
+        continuation=Continuation.UNCERTAIN_EMPTY;
+        previousMovementTick=movementTick;
+        continue;
+      }
+      // Record before any early-return validation path, including the initial anchor.
+      if(eventTiming.simulationClientTicks().isExact()) previousMovementTick=movementTick;
+      // Record the last exact movement tick before any early-return path so the
+      // next movement packet in the same client tick is recognized correctly.
+      if(eventTiming.simulationClientTicks().isExact()) previousMovementTick=movementTick;
       String inputDescription="client-input="+currentInput
           +", input-held-until-replacement=true"
           +", timing-offsets="+sync.earliestClientTick()+".."+sync.latestClientTick();
       List<String> inputAssumptions=List.of(inputDescription);
 
-      String worldReference="timeline-world:serverTick="+event.serverTick()+":chunks="+world.loadedChunks().size();
       boolean chronologyUncertain=normalized.flags().stream().anyMatch(flag ->
           flag==Packets.PacketFlag.DUPLICATE
               ||flag==Packets.PacketFlag.OUT_OF_ORDER
@@ -165,9 +190,9 @@ public final class Phase8LiveValidation {
       }
 
       if(continuation==Continuation.UNANCHORED){
-        Player safeObserved=simulationSafe(observed,eventTiming.simulationClientTicks().isExact()&&!eventTiming.uncertain());
+        Player safeObserved=simulationSafe(observed);
         if(initialAnchor!=null&&!initialAnchor.uncertain()){
-          Player safeInitial=simulationSafe(initialAnchor,true);
+          Player safeInitial=simulationSafe(initialAnchor);
           long earliest=Math.max(0,sync.earliestClientTick());
           long latest=Math.max(earliest,sync.latestClientTick());
           long timingSpan=latest-earliest+1;
@@ -216,7 +241,8 @@ public final class Phase8LiveValidation {
             if(search.verdict()!=Phase6Reachability.Verdict.POSSIBLE)exhaustive=false;
           }
 
-          ParentAggregation aggregated=aggregateDirectSearches(searches,maximumCandidates,exhaustive);
+          previousMovementTick=movementTick;
+      ParentAggregation aggregated=aggregateDirectSearches(searches,maximumCandidates,exhaustive);
           SearchResult reachable=aggregated.result();
           Phase8MovementValidation.Result validation=Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
               worldReference,sync,inputAssumptions,reachable,replayReference,aggregated.timingOffsetsExhaustive());
@@ -319,7 +345,10 @@ public final class Phase8LiveValidation {
           }
 
           List<InputConstraint> perTickInput=new ArrayList<>((int)steps);
-          for(long i=0;i<steps;i++) perTickInput.add(currentInput);
+          for(long i=0;i<steps;i++){
+            long simulationTick=parentTick+i;
+            perTickInput.add(hasClientTickBoundaries?inputForTick(inputByClientTick,simulationTick):currentInput);
+          }
 
           Phase6Reachability.Context prepared=withObservedEnvironment(parent.context(),world,currentInput,parentTick,currentEntityCollisions);
           List<InputConstraint> inputs=List.copyOf(perTickInput);
@@ -358,7 +387,7 @@ public final class Phase8LiveValidation {
         candidates=aggregated.candidates();
         if(candidates.isEmpty()&&canReanchorAfterUncertainty(observed,world,reachable)){
           long anchorTick=Math.max(0,sync.earliestClientTick());
-          Player safe=simulationSafe(observed,false);
+          Player safe=simulationSafe(observed);
           candidates=Set.of(new Candidate(0,anchorContext(safe,world,currentInput,anchorTick,currentEntityCollisions),
               new Phase6Reachability.Provenance(0,-1,event.serverTick(),"RECOVERY","UNCERTAIN_WORLD","None",
                   List.of("re-anchored after previously incomplete client-visible world became exhaustive"),1,List.of())));
@@ -448,7 +477,7 @@ public final class Phase8LiveValidation {
 
   private static boolean canReanchorAfterUncertainty(Player observed,WorldSnapshot world,SearchResult reachable){
     if(observed==null||world==null||reachable==null||!reachable.candidates().isEmpty()) return false;
-    Player safe=simulationSafe(observed,false);
+    Player safe=simulationSafe(observed);
     if(safe.uncertain()) return false;
     Maths.Aabb box=Maths.Aabb.playerAt(safe.position(),safe.pose());
     // A temporary missing-world window must not permanently poison the live candidate chain.
@@ -461,10 +490,20 @@ public final class Phase8LiveValidation {
   private enum Continuation { UNANCHORED, ACTIVE, UNCERTAIN_EMPTY, IMPOSSIBLE }
   private static boolean worldCoverageExhaustive(WorldSnapshot world,Candidate parent){Maths.Aabb box=Maths.Aabb.playerAt(parent.context().player().position(),parent.context().pose());return world.fullyKnown(new dev.phantom.ac.geometry.BlockBox(box.minX(),box.minY(),box.minZ(),box.maxX(),box.maxY(),box.maxZ()));}
   private static boolean matchesObserved(Player candidate,Player observed){return candidate.position().equals(observed.position())&&Float.compare(candidate.yaw(),observed.yaw())==0&&Float.compare(candidate.pitch(),observed.pitch())==0&&candidate.onGround()==observed.onGround();}
-  private static Player simulationSafe(Player player,boolean exactTiming){EnumSet<State.UncertaintyReason> reasons=EnumSet.noneOf(State.UncertaintyReason.class);reasons.addAll(player.uncertaintyReasons());if(exactTiming)reasons.remove(State.UncertaintyReason.UNKNOWN_CLIENT_TICK);boolean uncertain=!reasons.isEmpty();if(!uncertain&&!player.uncertain())return player;return new Player(player.position(),player.velocity(),player.yaw(),player.pitch(),player.onGround(),player.gamemode(),player.effects(),player.awaitingTeleport(),uncertain,player.input(),player.attributes(),player.pose(),player.environment(),player.clientTickRange(),player.provenance(),reasons);}
+  private static Player simulationSafe(Player player){
+    Objects.requireNonNull(player);
+    return player;
+  }
   private static Player teleportAnchorState(Player player){EnumSet<State.UncertaintyReason> reasons=EnumSet.noneOf(State.UncertaintyReason.class);reasons.addAll(player.uncertaintyReasons());reasons.remove(State.UncertaintyReason.TELEPORT_CORRECTION);reasons.remove(State.UncertaintyReason.EXPLICIT_UNCERTAINTY);return new Player(player.position(),player.velocity(),player.yaw(),player.pitch(),player.onGround(),player.gamemode(),player.effects(),OptionalInt.empty(),!reasons.isEmpty(),player.input(),player.attributes(),player.pose(),player.environment(),player.clientTickRange(),player.provenance(),reasons);}
   private static Phase8MovementValidation.Result anchorUncertain(String playerId,long serverTick,State.StateFrame frame,WorldSnapshot world,String reason,String replayReference){Player state=frame==null?Player.initial(Maths.Vec3.ZERO):frame.after();Player prior=frame==null?state:frame.before();Validation.SyncWindow sync=new Validation.SyncWindow(Math.max(0,serverTick),Math.max(0,serverTick),true,List.of(reason));SearchResult uncertain=new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,Set.of(),0,0,0,0,1,0,List.of(reason));return Phase8MovementValidation.validate(playerId,serverTick,prior,state,world,"timeline-world:tick="+serverTick,sync,List.of("input unavailable"),uncertain,replayReference);}
-  private static State.Reconstruction reconstructObservedStates(Timeline.Snapshot timeline){for(Timeline.Event event:timeline.events())if(event.packet().packet() instanceof Packets.Move move&&move.position()!=null)return State.reconstruct(State.Seed.serverAnchor(Player.initial(move.position())),timeline);return new State.Reconstruction(List.of());}
+  private static State.Reconstruction reconstructObservedStates(Timeline.Snapshot timeline,Player initialAnchor){
+    if(initialAnchor!=null&&!initialAnchor.uncertain())
+      return State.reconstruct(State.Seed.serverAnchor(initialAnchor),timeline);
+    for(Timeline.Event event:timeline.events())
+      if(event.packet().packet() instanceof Packets.Move move&&move.position()!=null)
+        return State.reconstruct(State.Seed.serverAnchor(Player.initial(move.position())),timeline);
+    return new State.Reconstruction(List.of());
+  }
   private static Map<Long,State.StateFrame> observedStatesBySequence(State.Reconstruction reconstruction){Map<Long,State.StateFrame> map=new HashMap<>();for(State.StateFrame frame:reconstruction.frames())map.put(frame.event().packet().sequence(),frame);return map;}
   private static Phase6Reachability.Context anchorContext(Player player,WorldSnapshot world,InputConstraint input,long tick,EntityCollisions entityCollisions){MovementEnvironment env=inferEnvironment(world,player,input);MovementEffects effects=movementEffects(player);Pose pose=player.pose();return new Phase6Reachability.Context(tick,player,environmentFor(env),player.attributes(),effects,pose,env,pose==Pose.SLEEPING,entityCollisions);}
   private static Phase6Reachability.Context withObservedEnvironment(Phase6Reachability.Context context,WorldSnapshot world,InputConstraint input,long tick,EntityCollisions entityCollisions){MovementEnvironment env=inferEnvironment(world,context.player(),input);return new Phase6Reachability.Context(tick,context.player(),environmentFor(env),context.player().attributes(),movementEffects(context.player()),context.player().pose(),env,context.player().pose()==Pose.SLEEPING,entityCollisions,context.uncertainty());}

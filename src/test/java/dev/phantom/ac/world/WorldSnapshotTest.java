@@ -47,6 +47,21 @@ import dev.phantom.ac.geometry.BlockBox;
   // Construction and validation
   // ------------------------------------------------------------------
 
+  @Test
+  void mergeCombinesDisjointCoverageAndRejectsConflictingOverlap(){
+    BlockState stone=dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone",Map.of());
+    WorldSnapshot left=WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0,0).setBlock(0,64,0,stone).build();
+    WorldSnapshot right=WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(1,0).setBlock(16,64,0,stone).build();
+    WorldSnapshot merged=WorldSnapshot.merge(left,right);
+    assertTrue(merged.hasChunk(0,0));
+    assertTrue(merged.hasChunk(1,0));
+    assertEquals(stone,merged.blockAtOrNull(16,64,0));
+
+    WorldSnapshot conflict=WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0,0)
+        .setBlock(0,64,0,dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:dirt",Map.of())).build();
+    assertThrows(IllegalArgumentException.class,()->WorldSnapshot.merge(left,conflict));
+  }
+
   @Test void emptySnapshotReportsEveryPositionAsUnloadedAndNeverAir() {
     WorldSnapshot world = WorldSnapshot.emptyOverworld12111();
     assertEquals(Coverage.UNLOADED, world.coverageAt(0, 64, 0));
