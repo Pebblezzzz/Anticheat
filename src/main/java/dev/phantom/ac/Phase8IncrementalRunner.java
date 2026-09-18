@@ -575,7 +575,7 @@ public final class Phase8IncrementalRunner {
         0, 0, 1, 0,
         List.of(reason));
     return Phase8MovementValidation.validate(
-        "incremental", serverTick, prior, observed, world, worldReference,
+        playerId, serverTick, prior, observed, world, worldReference,
         timing, List.of(reason), uncertain, replayReference, false);
   }
 
@@ -596,7 +596,7 @@ public final class Phase8IncrementalRunner {
         0, 0, 0, 0,
         List.of("candidate frontier was previously exhaustively eliminated"));
     return Phase8MovementValidation.validate(
-        "incremental", serverTick, prior, observed, world, worldReference,
+        playerId, serverTick, prior, observed, world, worldReference,
         timing, List.of("previous movement established an impossible observed state"),
         impossible, replayReference, true);
   }
