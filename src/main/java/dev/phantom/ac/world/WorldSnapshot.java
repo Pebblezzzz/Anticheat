@@ -69,6 +69,13 @@ public final class WorldSnapshot implements Serializable {
     Coverage coverageAt(int x, int y, int z);
     BlockState blockAtOrNull(int x, int y, int z);
 
+    /** Diagnostic-only description; never used to make a verdict. */
+    default String coverageDetailAt(int x, int y, int z) {
+      Coverage coverage = coverageAt(x, y, z);
+      BlockState state = blockAtOrNull(x, y, z);
+      return state == null ? coverage.toString() : coverage + " block=" + state.blockId();
+    }
+
     /**
      * Materializes the backend only when a caller explicitly requests the full
      * map representation (for example replay serialization or diagnostic APIs).
@@ -329,6 +336,11 @@ public final class WorldSnapshot implements Serializable {
    * @return the state when covered, otherwise {@code null}. Callers must consult
    *         {@link #coverageAt} rather than substituting air.
    */
+  /** Diagnostic-only coverage/state description for debug traces. */
+  public String coverageDetailAt(int x, int y, int z) {
+    return backend != null ? backend.coverageDetailAt(x, y, z) : Backend.super.coverageDetailAt(x, y, z);
+  }
+
   public BlockState blockAtOrNull(int x, int y, int z) {
     if (backend != null) return backend.blockAtOrNull(x, y, z);
     if (y < minY || y > maxY) return null;
