@@ -433,6 +433,36 @@ public final class CausalMovementPipeline {
             +String.format(Locale.ROOT,"%.3f",distance(initialAnchor.position(),observedAfter.position())));
       }
 
+      /*
+       * A populated frontier can outlive the original join anchor. The previous
+       * implementation only logged ROOT_REFRESH while continuing to simulate
+       * from the stale frontier. Once that frontier drifts far from a fresh
+       * authoritative position, continuing the old replay is no longer causal.
+       * Re-anchor only when the frontier itself is far away; this avoids replacing
+       * a healthy frontier on every movement after the original anchor becomes old.
+       */
+      boolean frontierFarFromLocalAuthority =
+          localAuthoritativeRootAvailable
+              && frontierFarFromLocalAuthority(frontier, movement, 32.0);
+      if (!frontier.candidates().isEmpty()
+          && preferLocalAuthoritativeRoot
+          && frontierFarFromLocalAuthority
+          && !recoveryRequired) {
+        Optional<Candidate> refreshedRoot =
+            rootCandidate(initialAnchor, movement, maximumCandidates, true);
+        if (refreshedRoot.isPresent()) {
+          Candidate root = refreshedRoot.get();
+          double oldDistance = nearestFrontierAuthorityDistance(frontier, movement);
+          frontier = new Frontier(Set.of(root), root.context().simulationTick(), true);
+          trace.add("FRONTIER_REFRESH reason=FRONTIER_FAR_FROM_LOCAL_AUTHORITY distance="
+              +String.format(Locale.ROOT, "%.3f", oldDistance));
+          assumptions.add("stale prediction frontier was re-anchored from the fresh local authoritative snapshot");
+        } else {
+          uncertainty.add("fresh local authoritative state exists but cannot be represented inside the finite Phase 6 horizon");
+          trace.add("FRONTIER_REFRESH_FAILED reason=LOCAL_AUTHORITY_ROOT_UNREPRESENTABLE");
+        }
+      }
+
       if (recoveryRequired) {
         uncertainty.add(
             "prediction frontier was invalidated by chronology ambiguity; waiting for a clean causally aligned movement");
@@ -1238,6 +1268,35 @@ public final class CausalMovementPipeline {
         .filter(snapshot -> snapshot.receivedNanos() <= movement.event().packet().receivedNanos())
         .filter(snapshot -> snapshot.serverTick() <= movement.event().serverTick())
         .filter(snapshot -> movement.event().serverTick() - snapshot.serverTick() <= maxServerTickAge);
+  }
+
+  private static boolean frontierFarFromLocalAuthority(
+      Frontier frontier,
+      MovementEvent movement,
+      double threshold) {
+    if (frontier.candidates().isEmpty()) return false;
+    Optional<AuthoritativeSnapshot> snapshot = movement.authority().snapshot();
+    if (snapshot.isEmpty()) return false;
+    Vec3 authorityPosition = snapshot.get().context().serverPosition();
+    return frontier.candidates().stream()
+        .noneMatch(candidate -> {
+          double distance = distance(candidate.context().player().position(), authorityPosition);
+          return Double.isFinite(distance) && distance <= threshold;
+        });
+  }
+
+  private static double nearestFrontierAuthorityDistance(
+      Frontier frontier,
+      MovementEvent movement) {
+    Optional<AuthoritativeSnapshot> snapshot = movement.authority().snapshot();
+    if (snapshot.isEmpty() || frontier.candidates().isEmpty()) return Double.NaN;
+    Vec3 authorityPosition = snapshot.get().context().serverPosition();
+    return frontier.candidates().stream()
+        .mapToDouble(candidate ->
+            distance(candidate.context().player().position(), authorityPosition))
+        .filter(Double::isFinite)
+        .min()
+        .orElse(Double.NaN);
   }
 
   private static dev.phantom.ac.geometry.BlockBox playerCollisionBox(Player player) {
