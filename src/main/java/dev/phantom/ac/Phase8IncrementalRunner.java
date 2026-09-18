@@ -65,6 +65,12 @@ public final class Phase8IncrementalRunner {
   private boolean poisoned;
   private String poisonReason = "";
   private String reanchorReason = "";
+  // Authoritative server-side ground state is kept separately from the client
+  // movement packet's reported onGround bit. The latter is evidence, not truth.
+  private Boolean authoritativeOnGround;
+  private int groundContradictionStreak;
+  private long lastGroundContradictionTick = -1L;
+  private static final int HARD_GROUND_CONTRADICTION_TICKS = 3;
   private Continuation continuation = Continuation.UNINITIALIZED;
 
   public Phase8IncrementalRunner(int maximumCandidates, long epochNanos) {
@@ -105,6 +111,9 @@ public final class Phase8IncrementalRunner {
     this.poisoned = false;
     this.poisonReason = "";
     this.reanchorReason = "";
+    this.authoritativeOnGround = anchor.onGround();
+    this.groundContradictionStreak = 0;
+    this.lastGroundContradictionTick = -1L;
     this.continuation = Continuation.UNINITIALIZED;
   }
 
@@ -151,12 +160,9 @@ public final class Phase8IncrementalRunner {
     List<Packets.NormalizedPacket> normalized = new Packets.Normalizer().normalize(unseen);
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     int movements = 0;
-    long latestFutureWorldSequence = normalized.stream()
-        .filter(packet -> packet.packet().mutatesWorld())
-        .mapToLong(Packets.NormalizedPacket::sequence)
-        .max().orElse(Long.MIN_VALUE);
 
-    for (Packets.NormalizedPacket packet : normalized) {
+    for (int packetIndex = 0; packetIndex < normalized.size(); packetIndex++) {
+      Packets.NormalizedPacket packet = normalized.get(packetIndex);
       Packets.Packet event = packet.packet();
 
       if (packet.flags().contains(Packets.PacketFlag.DUPLICATE)
@@ -192,6 +198,7 @@ public final class Phase8IncrementalRunner {
       if (event instanceof Packets.PlayerContext context) {
         entityCollisions = EntityCollisions.of(context.entityBoxes());
         retargetCandidateEntityCollisions(entityCollisions);
+        authoritativeOnGround = context.movementEnvironment().onGround();
         trackedState = after;
         continue;
       }
@@ -201,6 +208,7 @@ public final class Phase8IncrementalRunner {
         candidates = Set.of();
         waitingForTeleport = true;
         reanchorRequired = false;
+        resetGroundContradiction();
         poison("server correction received; awaiting correction acknowledgement and a fresh replay anchor");
         continuation = Continuation.UNCERTAIN;
         continue;
@@ -221,6 +229,7 @@ public final class Phase8IncrementalRunner {
 
       if (event instanceof Packets.Velocity) {
         trackedState = after;
+        resetGroundContradiction();
         reanchorRequired = true;
         pendingReanchorState = after;
         reanchorReason = "server velocity was observed; live application timing is not yet represented by the incremental core";
@@ -230,9 +239,12 @@ public final class Phase8IncrementalRunner {
 
       if (event.mutatesWorld()) {
         trackedState = after;
-        reanchorRequired = true;
-        reanchorReason = "client-world mutation observed; historical collision state must be replayed before continuing";
-        continuation = Continuation.UNCERTAIN;
+        if (worldMutationAffectsPlayer(event, before, after)) {
+          resetGroundContradiction();
+          reanchorRequired = true;
+          reanchorReason = "relevant client-world mutation observed; historical collision state must be replayed before continuing";
+          continuation = Continuation.UNCERTAIN;
+        }
         continue;
       }
 
@@ -257,16 +269,16 @@ public final class Phase8IncrementalRunner {
       if (move.position() != null) movements++;
 
       if (move.position() != null
-          && packet.sequence() < latestFutureWorldSequence) {
+          && futureRelevantWorldMutation(normalized, packetIndex + 1, before, after)) {
         results.add(uncertainResult(
             playerId, packet.sequence(), serverTick, before, after, world, "incremental-client-world:chunks="+world.loadedChunks().size(),
-            new Validation.SyncWindow(0, 0, true, List.of("future world/entity context in the same capture batch")),
-            "movement precedes a later world/entity update in the same validation batch; current snapshot is not historically valid for this movement",
+            new Validation.SyncWindow(0, 0, true, List.of("future relevant world mutation in the same capture batch")),
+            "movement precedes a later world mutation that can affect its collision volume; the current snapshot is not historically valid for this movement",
             "live:incremental:"+packet.sequence()));
         trackedState = after;
         continuation = Continuation.UNCERTAIN;
         reanchorRequired = true;
-        reanchorReason = "future world/entity context makes the current movement snapshot temporally non-causal";
+        reanchorReason = "future relevant world mutation makes the current movement snapshot temporally non-causal";
         continue;
       }
 
@@ -318,7 +330,27 @@ public final class Phase8IncrementalRunner {
         continue;
       }
 
+      // A persistent contradiction between authoritative server collision state
+      // and the client-reported ground bit is independently actionable evidence.
+      // It must not be swallowed merely because world/timing replay is uncertain.
+      if (recordGroundContradiction(move.onGround(), movementTick)) {
+        results.add(Phase8MovementValidation.authoritativeImpossible(
+            playerId, serverTick, before, after, world, worldReference, timing,
+            "AUTHORITATIVE_GROUND_CONTRADICTION",
+            "authoritative server ground=" + authoritativeOnGround
+                + " contradicts client-reported onGround=" + move.onGround()
+                + " for " + groundContradictionStreak + " consecutive 1:1 client ticks",
+            List.of(
+                "authoritativeServerOnGround=" + authoritativeOnGround,
+                "clientReportedOnGround=" + move.onGround(),
+                "consecutiveContradictionTicks=" + groundContradictionStreak,
+                "movementTick=" + movementTick,
+                "this signal is independent of finite candidate-search completeness"),
+            replayReference));
+      }
+
       if (lastMovementTick >= 0 && movementTick == lastMovementTick) {
+        resetGroundContradiction();
         results.add(uncertainResult(
             playerId, packet.sequence(), serverTick, before, after, world, worldReference,
             new Validation.SyncWindow(
@@ -336,6 +368,7 @@ public final class Phase8IncrementalRunner {
       }
 
       if (movementTick < lastMovementTick) {
+        resetGroundContradiction();
         results.add(uncertainResult(
             playerId, packet.sequence(), serverTick, before, after, world, worldReference, timing,
             "movement client tick regressed; chronology cannot be inverted",
@@ -553,6 +586,92 @@ public final class Phase8IncrementalRunner {
       return new AdvanceResult(Set.of(), true, List.of("incremental candidate frontier produced no deterministic state"));
     }
     return new AdvanceResult(Set.copyOf(nextAll), false, List.of());
+  }
+
+  private boolean recordGroundContradiction(Boolean clientReportedGround, long movementTick) {
+    if (authoritativeOnGround == null || clientReportedGround == null) {
+      resetGroundContradiction();
+      return false;
+    }
+    if (Objects.equals(authoritativeOnGround, clientReportedGround)) {
+      resetGroundContradiction();
+      return false;
+    }
+    if (lastGroundContradictionTick == movementTick) return false;
+    if (lastGroundContradictionTick < 0 || movementTick == lastGroundContradictionTick + 1L) {
+      groundContradictionStreak++;
+    } else {
+      groundContradictionStreak = 1;
+    }
+    lastGroundContradictionTick = movementTick;
+    return groundContradictionStreak >= HARD_GROUND_CONTRADICTION_TICKS;
+  }
+
+  private void resetGroundContradiction() {
+    groundContradictionStreak = 0;
+    lastGroundContradictionTick = -1L;
+  }
+
+  private boolean futureRelevantWorldMutation(
+      List<Packets.NormalizedPacket> normalized,
+      int startIndex,
+      Player before,
+      Player after) {
+    for (int i = Math.max(0, startIndex); i < normalized.size(); i++) {
+      Packets.Packet future = normalized.get(i).packet();
+      if (future.mutatesWorld() && worldMutationAffectsPlayer(future, before, after)) return true;
+    }
+    return false;
+  }
+
+  private boolean worldMutationAffectsPlayer(Packets.Packet packet, Player before, Player after) {
+    double minX = Math.min(before.position().x(), after.position().x()) - 1.0;
+    double maxX = Math.max(before.position().x(), after.position().x()) + 1.0;
+    double minY = Math.min(before.position().y(), after.position().y()) - 1.0;
+    double maxY = Math.max(before.position().y(), after.position().y()) + 2.0;
+    double minZ = Math.min(before.position().z(), after.position().z()) - 1.0;
+    double maxZ = Math.max(before.position().z(), after.position().z()) + 1.0;
+
+    if (packet instanceof Packets.BlockChange block) {
+      return pointInExpandedSweep(block.position().x(), block.position().y(), block.position().z(),
+          minX, maxX, minY, maxY, minZ, maxZ);
+    }
+    if (packet instanceof Packets.BlockStateChange block) {
+      return pointInExpandedSweep(block.position().x(), block.position().y(), block.position().z(),
+          minX, maxX, minY, maxY, minZ, maxZ);
+    }
+    if (packet instanceof Packets.UnsupportedBlockStateChange block) {
+      return pointInExpandedSweep(block.position().x(), block.position().y(), block.position().z(),
+          minX, maxX, minY, maxY, minZ, maxZ);
+    }
+    if (packet instanceof Packets.ChunkData chunk) {
+      return chunkIntersectsSweep(chunk.chunk(), minX, maxX, minZ, maxZ);
+    }
+    if (packet instanceof Packets.ChunkStates chunk) {
+      return chunkIntersectsSweep(chunk.chunk(), minX, maxX, minZ, maxZ);
+    }
+    if (packet instanceof Packets.ChunkUnload chunk) {
+      return chunkIntersectsSweep(chunk.chunk(), minX, maxX, minZ, maxZ);
+    }
+    return false;
+  }
+
+  private boolean pointInExpandedSweep(
+      int x, int y, int z,
+      double minX, double maxX, double minY, double maxY,
+      double minZ, double maxZ) {
+    return x + 1.0 > minX && x < maxX
+        && y + 1.0 > minY && y < maxY
+        && z + 1.0 > minZ && z < maxZ;
+  }
+
+  private boolean chunkIntersectsSweep(World.Chunk chunk, double minX, double maxX, double minZ, double maxZ) {
+    int minChunkX = Math.floorDiv((int) Math.floor(minX), 16);
+    int maxChunkX = Math.floorDiv((int) Math.floor(Math.nextDown(maxX)), 16);
+    int minChunkZ = Math.floorDiv((int) Math.floor(minZ), 16);
+    int maxChunkZ = Math.floorDiv((int) Math.floor(Math.nextDown(maxZ)), 16);
+    return chunk.x() >= minChunkX && chunk.x() <= maxChunkX
+        && chunk.z() >= minChunkZ && chunk.z() <= maxChunkZ;
   }
 
   private long currentCandidateTick() {
