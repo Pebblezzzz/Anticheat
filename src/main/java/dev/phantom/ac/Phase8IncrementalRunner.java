@@ -380,8 +380,8 @@ public final class Phase8IncrementalRunner {
 
       if (hardMovementEvidenceEligible(after)
           && !waitingForTeleport
-          && packetIndex == latestMovementIndex
           && !hasFutureAuthoritativeTransition(normalized, packetIndex + 1)
+          && exactTick
           && recordAirHover(after.position(), movementTick)) {
         double verticalOffset = authoritativeServerPosition == null
             ? Double.NaN
