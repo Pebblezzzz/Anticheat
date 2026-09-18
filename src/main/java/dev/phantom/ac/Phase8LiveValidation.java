@@ -161,9 +161,11 @@ public final class Phase8LiveValidation {
             0,0,1,0,List.of("multiple movement packets occurred in the same client simulation tick; sub-tick motion is not yet modeled"));
         results.add(Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
             worldReference,sync,List.of("sub-tick movement packet; no full physics tick was advanced"),subTick,replayReference));
-        previousMovementTick=movementTick;
         continue;
       }
+      // Record the last exact movement tick before any early-return path so the
+      // next movement packet in the same client tick is recognized correctly.
+      if(eventTiming.simulationClientTicks().isExact()) previousMovementTick=movementTick;
       String inputDescription="client-input="+currentInput
           +", input-held-until-replacement=true"
           +", timing-offsets="+sync.earliestClientTick()+".."+sync.latestClientTick();
