@@ -414,7 +414,7 @@ public final class Phase8IncrementalRunner {
           && packetIndex == latestMovementIndex
           && !hasFutureAuthoritativeTransition(normalized, packetIndex + 1)
           && recordServerDivergence(after.position(), movementTick)) {
-        double distance = authoritativeServerDistance(move.position());
+        double distance = authoritativeServerDistance(after.position());
         results.add(Phase8MovementValidation.authoritativeImpossible(
             playerId, serverTick, before, after, world, worldReference, timing,
             "AUTHORITATIVE_SERVER_POSITION_DIVERGENCE",
@@ -425,7 +425,6 @@ public final class Phase8IncrementalRunner {
             List.of(
                 "authoritativeServerPosition=" + authoritativeServerPosition,
                 "clientReportedPosition=" + after.position(),
-                "positionBearingPacket=" + (move.position() != null),
                 "positionBearingPacket=" + (move.position() != null),
                 "positionDistance=" + String.format(Locale.ROOT, "%.6f", distance),
                 "consecutiveDivergenceTicks=" + serverDivergenceStreak,
