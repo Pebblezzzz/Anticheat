@@ -63,7 +63,19 @@ class Phase7TimingTest {
     assertFalse(second.uncertain(),second.reasons().toString());
   }
 
-  @Test void serverTickGapIsExplicit(){var r=Phase7Timing.reconstruct(timeline(new RawPacket(1,0,new Move(Vec3.ZERO,0f,0f,true,0L)),new RawPacket(2,200_000_000L,new Move(new Vec3(.2,0,0),0f,0f,true,4L))),exactConfig());assertTrue(r.frames().get(1).timing().windows().stream().anyMatch(w->w.kind()==WindowKind.SERVER_TICK_GAP));}
+  @Test void multipleMovementPacketsWithinOneClientTickRemainExplicitlyNonExact(){
+    var r=Phase7Timing.reconstruct(timeline(
+        new RawPacket(1,0,new ClientTickEnd()),
+        new RawPacket(2,10_000_000L,new Move(Vec3.ZERO,0f,0f,true,null)),
+        new RawPacket(3,20_000_000L,new Move(new Vec3(.1,0,0),0f,0f,true,null)),
+        new RawPacket(4,50_000_000L,new ClientTickEnd())
+    ),exactConfig());
+    var second=r.timingFor(3).orElseThrow();
+    assertTrue(second.uncertain(),second.reasons().toString());
+    assertTrue(second.windows().stream().anyMatch(w->w.kind()==WindowKind.MULTIPLE_MOVEMENT_IN_CLIENT_TICK));
+  }
+
+  @Test void serverTickGapIsExplicit(){var r=Phase7Timing.reconstruct(timeline(new RawPacket(1,0,new Move(Vec3.ZERO,0f,0f,true,null)),new RawPacket(2,200_000_000L,new Move(new Vec3(.2,0,0),0f,0f,true,null))),exactConfig());assertTrue(r.frames().get(1).timing().windows().stream().anyMatch(w->w.kind()==WindowKind.SERVER_TICK_GAP));}
   @Test void explicitClientTickContradictionIsIdentifiedAsInconsistentTiming(){var r=Phase7Timing.reconstruct(timeline(new RawPacket(1,0,new Move(Vec3.ZERO,0f,0f,true,0L)),new RawPacket(2,50_000_000L,new Move(new Vec3(.1,0,0),0f,0f,true,10L))),exactConfig());assertEquals(Consistency.INCONSISTENT,r.consistency());}
   @Test void impossibleTimingIsExplainableAndNotAPlayerViolation(){var r=Phase7Timing.reconstruct(timeline(new RawPacket(1,0,new Move(Vec3.ZERO,0f,0f,true,0L)),new RawPacket(2,50_000_000L,new Move(new Vec3(.1,0,0),0f,0f,true,10L))),exactConfig());assertEquals(Consistency.INCONSISTENT,r.consistency());assertTrue(r.consistencyReasons().getFirst().contains("outside timing bounds"));}
   @Test void worldTimingIsNotAssumedExactWhenNetworkTimingIsVariable(){Config c=new Config(50_000_000L,50_000_000L,50_000_000L,new LatencyBounds(0,25_000_000L),new LatencyBounds(0,25_000_000L),new TickDelayBounds(0,0),new TickDelayBounds(0,0),250_000_000L,3,128);var r=Phase7Timing.reconstruct(timeline(new RawPacket(1,0,new Move(Vec3.ZERO,0f,0f,true,0L)),new RawPacket(2,50_000_000L,new ChunkData(new World.Chunk(0,0),Map.of()))),c);assertFalse(Phase7Timing.worldTimingExhaustive(r,2));assertTrue(r.timingFor(2).orElseThrow().windows().stream().anyMatch(w->w.kind()==WindowKind.WORLD_UPDATE));}

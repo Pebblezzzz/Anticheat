@@ -48,6 +48,37 @@ public final class Phase6Reachability {
   public record Candidate(long id,Context context,Provenance provenance) implements Serializable{public Candidate{if(id<0)throw new IllegalArgumentException("candidate id must be non-negative");Objects.requireNonNull(context);Objects.requireNonNull(provenance);}}
   public record SearchResult(Verdict verdict,Set<Candidate> candidates,int simulatedTicks,int peakCandidates,int mergedStates,int nonExhaustiveWorldBranches,int uncertainTransitions,int provenanceMerges,List<String> reasons) implements Serializable{public SearchResult{candidates=Set.copyOf(candidates);reasons=List.copyOf(reasons);}}
   public record TimingSearchResult(Verdict verdict,Set<Candidate> candidates,Map<Long,SearchResult> byFirstTick,int evaluatedOffsets,int skippedOffsets,List<String> reasons) implements Serializable{public TimingSearchResult{candidates=Set.copyOf(candidates);byFirstTick=Map.copyOf(byFirstTick);reasons=List.copyOf(reasons);}}
+
+  /**
+   * Physical state identity used by the search frontier. Transient capture
+   * provenance, last-input bookkeeping, and client-clock metadata do not affect
+   * the next physics step and therefore must not prevent equivalent states from
+   * merging.
+   */
+  private record SearchKey(long simulationTick, Maths.Vec3 position, Maths.Vec3 velocity,
+                           float yaw, float pitch, boolean onGround, String gamemode,
+                           Map<String,Integer> effects, OptionalInt awaitingTeleport,
+                           boolean uncertain, Simulation.Attributes attributes,
+                           Pose pose, Simulation.Environment environment,
+                           MovementEnvironment movementEnvironment, boolean sleeping,
+                           EntityCollisionKey entityCollisions, Set<UncertainDimension> uncertainty) implements Serializable {
+    static SearchKey of(Context c){
+      Player p=c.player();
+      Maths.Aabb box=Maths.Aabb.playerAt(p.position(),c.pose());
+      var entity=c.entityCollisions().boxesIn(new dev.phantom.ac.geometry.BlockBox(
+          box.minX(),box.minY(),box.minZ(),box.maxX(),box.maxY(),box.maxZ()));
+      List<EntityCollisionValue> boxes=entity.boxes().stream()
+          .map(e->new EntityCollisionValue(e.entityId(),e.box()))
+          .sorted(Comparator.comparingInt(EntityCollisionValue::entityId))
+          .toList();
+      return new SearchKey(c.simulationTick(),p.position(),p.velocity(),p.yaw(),p.pitch(),p.onGround(),
+          p.gamemode(),p.effects(),p.awaitingTeleport(),p.uncertain(),c.attributes(),c.pose(),c.environment(),
+          c.movementEnvironment(),c.sleeping(),new EntityCollisionKey(entity.complete(),boxes),c.uncertainty());
+    }
+  }
+  private record EntityCollisionKey(boolean complete,List<EntityCollisionValue> boxes) implements Serializable{EntityCollisionKey{boxes=List.copyOf(boxes);}}
+  private record EntityCollisionValue(int entityId,dev.phantom.ac.geometry.BlockBox box) implements Serializable{}
+
   public enum ObservedField{POSITION,VELOCITY,ROTATION,GROUND,GAMEMODE,EFFECTS,TELEPORT_PENDING}
   public record Observation(Player observed,Set<ObservedField> known) implements Serializable{public Observation{Objects.requireNonNull(observed);known=Set.copyOf(known);if(known.isEmpty())throw new IllegalArgumentException("known observations required");}}
   public record Evidence(Verdict verdict,int matchingCandidates,List<Provenance> witnesses,List<String> reasons) implements Serializable{public Evidence{witnesses=List.copyOf(witnesses);reasons=List.copyOf(reasons);}}
@@ -59,13 +90,13 @@ public final class Phase6Reachability {
     Contracts.requireCandidateBudget(maximumCandidates);Objects.requireNonNull(start);Objects.requireNonNull(inputs);Objects.requireNonNull(worlds);Objects.requireNonNull(externalTransitions);
     if(inputs.size()>MAX_HORIZON_TICKS)return uncertain(0,1,"simulation horizon exceeds the finite Phase 6 envelope");
     if(start.player().uncertain()||!start.uncertainty().isEmpty())return uncertain(0,1,"initial state carries explicit uncertainty dimensions: "+start.uncertainty());
-    Map<Context,Candidate> current=new LinkedHashMap<>();current.put(start,new Candidate(0,start,new Provenance(0,-1,start.simulationTick(),"ROOT","ROOT","None",List.of("initial replay anchor"),1,List.of())));
+    Map<SearchKey,Candidate> current=new LinkedHashMap<>();current.put(SearchKey.of(start),new Candidate(0,start,new Provenance(0,-1,start.simulationTick(),"ROOT","ROOT","None",List.of("initial replay anchor"),1,List.of())));
     long nextId=1;int peak=1,merged=0,nonExhaustive=0,uncertainTransitions=0,provenanceMerges=0;
     for(int offset=0;offset<inputs.size();offset++){
       long tick=start.simulationTick()+offset;List<AdvancedInput> allowed=inputs.get(offset).enumerate();if(allowed.isEmpty())return uncertain(offset,peak,"input constraint has no realizable advanced input");
       List<WorldBranch> branches=Objects.requireNonNull(worlds.apply(tick),"world branches");if(branches.isEmpty())return uncertain(offset,peak,"world hypothesis envelope is empty at tick "+tick);if(branches.stream().anyMatch(b->!b.exhaustive()))nonExhaustive++;
       List<ExternalTransition> external=Objects.requireNonNull(externalTransitions.apply(tick),"external transitions");if(external.isEmpty())external=List.of(new None());
-      Map<Context,Candidate> next=new LinkedHashMap<>();
+      Map<SearchKey,Candidate> next=new LinkedHashMap<>();
       for(Candidate parent:current.values())for(WorldBranch branch:branches){Maths.Aabb pb=Maths.Aabb.playerAt(parent.context().player().position(),parent.context().pose());if(!branch.world().fullyKnown(new dev.phantom.ac.geometry.BlockBox(pb.minX(),pb.minY(),pb.minZ(),pb.maxX(),pb.maxY(),pb.maxZ()))){uncertainTransitions++;continue;}
         Context pre=parent.context().withTick(tick);
         boolean externalUncertain=false;
@@ -81,9 +112,9 @@ public final class Phase6Reachability {
           MovementEnvironment nextEnvironment=inferEnvironment(branch.world(),stepped.state(),input);
           Pose nextPose=Phase5Mechanics.nextPose(pre.pose(),nextEnvironment,pre.sleeping());
           Context after=new Context(tick+1,stepped.state(),environmentFor(nextEnvironment),pre.attributes(),pre.effects(),nextPose,
-              nextEnvironment,pre.sleeping(),pre.entityCollisions(),pre.uncertainty());Candidate existing=next.get(after);
-            if(existing==null){long id=nextId++;next.put(after,new Candidate(id,after,new Provenance(id,parent.id(),tick,input.toString(),branch.id(),external.toString(),List.of(stepped.diagnostic()),1,List.of(parent.id()))));}
-            else{merged++;provenanceMerges++;Provenance old=existing.provenance();List<Long> ps=new ArrayList<>(old.mergedParentIds());if(!ps.contains(parent.id())&&ps.size()<MAX_PROVENANCE_PARENTS)ps.add(parent.id());int paths=old.mergedPathCount()==Integer.MAX_VALUE?Integer.MAX_VALUE:old.mergedPathCount()+1;next.put(after,new Candidate(existing.id(),existing.context(),new Provenance(existing.id(),old.parentId(),old.tick(),old.input(),old.worldBranch(),old.externalTransition(),old.causes(),paths,ps)));}
+              nextEnvironment,pre.sleeping(),pre.entityCollisions(),pre.uncertainty());SearchKey afterKey=SearchKey.of(after);Candidate existing=next.get(afterKey);
+            if(existing==null){long id=nextId++;next.put(afterKey,new Candidate(id,after,new Provenance(id,parent.id(),tick,input.toString(),branch.id(),external.toString(),List.of(stepped.diagnostic()),1,List.of(parent.id()))));}
+            else{merged++;provenanceMerges++;Provenance old=existing.provenance();List<Long> ps=new ArrayList<>(old.mergedParentIds());if(!ps.contains(parent.id())&&ps.size()<MAX_PROVENANCE_PARENTS)ps.add(parent.id());int paths=old.mergedPathCount()==Integer.MAX_VALUE?Integer.MAX_VALUE:old.mergedPathCount()+1;next.put(afterKey,new Candidate(existing.id(),existing.context(),new Provenance(existing.id(),old.parentId(),old.tick(),old.input(),old.worldBranch(),old.externalTransition(),old.causes(),paths,ps)));}
             if(next.size()>maximumCandidates)return uncertain(offset+1,Math.max(peak,next.size()),"candidate budget exceeded; no provisional subset is exposed");
           }
       }

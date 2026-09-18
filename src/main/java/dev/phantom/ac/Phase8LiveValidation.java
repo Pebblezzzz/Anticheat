@@ -81,8 +81,9 @@ public final class Phase8LiveValidation {
 
       if(packet instanceof Packets.ClientInput input){
         if(!normalized.flags().contains(Packets.PacketFlag.DUPLICATE)) {
-          // Minecraft input state is held until the client sends a replacement.
-          // Missing input packets are therefore not converted into "no input".
+          // On modern clients the server receives a persistent known-input state.
+          // Grim uses this state to constrain forward/strafe/jump possibilities for
+          // end-tick prediction; it is not a vehicle-only signal.
           currentInput=InputConstraint.fromClientInput(input);
         }
         continue;
@@ -189,7 +190,7 @@ public final class Phase8LiveValidation {
                   && e.serverTick()>0
                   && e.serverTick()<=event.serverTick());
           long anchorTick=0L;
-          InputConstraint anchorInput=inputForTick(inputByClientTick,anchorTick);
+          InputConstraint anchorInput=hasClientTickBoundaries?inputForTick(inputByClientTick,anchorTick):currentInput;
           Phase6Reachability.Context root=anchorContext(safeInitial,world,anchorInput,anchorTick,currentEntityCollisions);
 
           List<SearchResult> searches=new ArrayList<>();
@@ -204,8 +205,7 @@ public final class Phase8LiveValidation {
             long steps=targetTick-anchorTick;
             List<InputConstraint> inputs=new ArrayList<>((int)Math.min(Integer.MAX_VALUE,steps));
             for(long i=anchorTick;i<targetTick;i++){
-              if(hasClientTickBoundaries) inputs.add(inputForTick(inputByClientTick,i));
-              else inputs.add(currentInput);
+              inputs.add(hasClientTickBoundaries?inputForTick(inputByClientTick,i):currentInput);
             }
             SearchResult search=engine.search(root,inputs,
                 tick->List.of(new WorldBranch("initial-client-visible-"+event.serverTick(),world,worldStable,
