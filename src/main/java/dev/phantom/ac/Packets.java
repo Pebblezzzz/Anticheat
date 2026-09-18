@@ -31,13 +31,25 @@ public final class Packets {
   public record Velocity(Vec3 velocity) implements Packet { public Velocity { Objects.requireNonNull(velocity,"velocity"); } }
   public record Effect(String id, int amplifier, boolean removed) implements Packet { public Effect { Objects.requireNonNull(id,"id"); } }
   public record Gamemode(String value) implements Packet { public Gamemode { if(value==null||value.isBlank()) throw new IllegalArgumentException("gamemode is required"); } }
+  /** Main-thread authoritative server snapshot, deliberately separate from client movement claims. */
   public record PlayerContext(String gamemode, Simulation.Attributes attributes, Map<String,Integer> effects,
                               Phase5Mechanics.Pose pose, Phase5Mechanics.MovementEnvironment movementEnvironment,
+                              Vec3 serverPosition, Vec3 serverVelocity, boolean canFly, boolean flying,
                               boolean sleeping, List<dev.phantom.ac.world.EntityCollisions.EntityBox> entityBoxes) implements Packet {
     public PlayerContext {
       if(gamemode==null||gamemode.isBlank()) throw new IllegalArgumentException("gamemode is required");
       Objects.requireNonNull(attributes); effects=Map.copyOf(effects); Objects.requireNonNull(pose);
-      Objects.requireNonNull(movementEnvironment); entityBoxes=List.copyOf(entityBoxes);
+      Objects.requireNonNull(movementEnvironment); Objects.requireNonNull(serverPosition); Objects.requireNonNull(serverVelocity);
+      if(!Double.isFinite(serverPosition.x())||!Double.isFinite(serverPosition.y())||!Double.isFinite(serverPosition.z()))
+        throw new IllegalArgumentException("serverPosition must be finite");
+      if(!Double.isFinite(serverVelocity.x())||!Double.isFinite(serverVelocity.y())||!Double.isFinite(serverVelocity.z()))
+        throw new IllegalArgumentException("serverVelocity must be finite");
+      entityBoxes=List.copyOf(entityBoxes);
+    }
+    public PlayerContext(String gamemode, Simulation.Attributes attributes, Map<String,Integer> effects,
+                         Phase5Mechanics.Pose pose, Phase5Mechanics.MovementEnvironment movementEnvironment,
+                         boolean sleeping, List<dev.phantom.ac.world.EntityCollisions.EntityBox> entityBoxes) {
+      this(gamemode,attributes,effects,pose,movementEnvironment,Vec3.ZERO,Vec3.ZERO,false,false,sleeping,entityBoxes);
     }
   }
   public record BlockChange(World.Pos position, World.Block block) implements Packet { public BlockChange { Objects.requireNonNull(position,"position"); Objects.requireNonNull(block,"block"); } }
