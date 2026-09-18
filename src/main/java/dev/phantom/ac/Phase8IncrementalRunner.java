@@ -260,8 +260,10 @@ public final class Phase8IncrementalRunner {
   private static Continuation continuationFor(
       CausalMovementPipeline.Report pipeline,
       List<Result> fresh) {
-    if (pipeline.results().isEmpty()) return Continuation.UNANCHORED;
-    Result latest = pipeline.results().getLast();
+    if (fresh.isEmpty()) {
+      return pipeline.results().isEmpty() ? Continuation.UNANCHORED : Continuation.ACTIVE;
+    }
+    Result latest = fresh.getLast();
     return switch (latest.verdict()) {
       case POSSIBLE -> Continuation.ACTIVE;
       case UNCERTAIN -> Continuation.UNCERTAIN_EMPTY;
