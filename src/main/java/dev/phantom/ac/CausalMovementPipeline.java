@@ -158,8 +158,10 @@ public final class CausalMovementPipeline {
 
     List<AuthoritativeSnapshot> authorities = collectAuthorities(timeline);
     Map<Long, InputConstraint> inputByTick = collectInputs(timeline, timing);
+    Set<Long> unmodeledExternalSequences = new HashSet<>();
     Map<Long, List<ExternalTransition>> externalByTick =
-        collectExternalTransitions(timeline, timing, authorities, initialAnchor);
+        collectExternalTransitions(
+            timeline, timing, authorities, initialAnchor, unmodeledExternalSequences);
     World.VisibilityHistory worldHistory = World.fromTimeline(timeline);
 
     List<MovementEvent> movements = new ArrayList<>();
@@ -245,6 +247,13 @@ public final class CausalMovementPipeline {
       if (movement.authority().quality() != AuthorityQuality.EXACT
           && initialAnchor == null) {
         uncertainty.add("no exact authoritative snapshot exists for this movement and no authoritative seed was supplied");
+      }
+
+      boolean hasUnmodeledExternalBefore = unmodeledExternalSequences.stream()
+          .anyMatch(transitionSequence -> transitionSequence < sequence);
+      if (hasUnmodeledExternalBefore) {
+        uncertainty.add("an authoritative velocity/teleport transition before this movement could not be assigned to an exact client simulation tick");
+        recoveryRequired = true;
       }
 
       String replayReference = "causal:phase8:" + playerId + ":" + sequence;
@@ -777,7 +786,8 @@ public final class CausalMovementPipeline {
       Timeline.Snapshot timeline,
       Phase7Timing.Reconstruction timing,
       List<AuthoritativeSnapshot> authorities,
-      Player initialAnchor) {
+      Player initialAnchor,
+      Set<Long> unmodeledSequences) {
     Map<Long, List<ExternalTransition>> result = new HashMap<>();
     for (Timeline.Event event : timeline.events()) {
       Packets.Packet packet = event.packet().packet();
@@ -786,7 +796,10 @@ public final class CausalMovementPipeline {
           && !(packet instanceof Packets.TeleportConfirm)) continue;
       Phase7Timing.EventTiming eventTiming =
           timing.timingFor(event.packet().sequence()).orElse(null);
-      if (eventTiming == null || !eventTiming.simulationClientTicks().isExact()) continue;
+      if (eventTiming == null || !eventTiming.simulationClientTicks().isExact()) {
+        unmodeledSequences.add(event.packet().sequence());
+        continue;
+      }
 
       long tick = eventTiming.simulationClientTicks().min();
       ExternalTransition transition;
@@ -899,8 +912,7 @@ public final class CausalMovementPipeline {
         Set<Candidate> next = new LinkedHashSet<>();
 
         for (Candidate candidate : local) {
-          Context context = applyAuthoritativeContext(
-              candidate.context(), movement.authority(), localTick);
+          Context context = candidate.context().withTick(localTick);
           InputConstraint input = inputs.getOrDefault(
               localTick, InputConstraint.any());
 
@@ -980,67 +992,6 @@ public final class CausalMovementPipeline {
       return movement.world();
     }
     return history.statesAt(simulationTick);
-  }
-
-  private static Context applyAuthoritativeContext(
-      Context context,
-      AuthorityAlignment alignment,
-      long tick) {
-    if (alignment.snapshot().isEmpty()) return context;
-    AuthoritativeSnapshot snapshot = alignment.snapshot().get();
-    if (snapshot.serverTick() > tick) return context;
-
-    Packets.PlayerContext authority = snapshot.context();
-    MovementEnvironment a = authority.movementEnvironment();
-    MovementEnvironment environment = new MovementEnvironment(
-        a.fluid(),
-        a.submerged(),
-        a.climbable(),
-        context.player().onGround(),
-        a.sprinting(),
-        a.sneaking(),
-        a.swimmingInput(),
-        a.gliding(),
-        a.fluidSpeedMultiplier(),
-        a.fluidDrag(),
-        a.gravityMultiplier());
-
-    Player old = context.player();
-    Player updated = new Player(
-        old.position(),
-        old.velocity(),
-        old.yaw(),
-        old.pitch(),
-        old.onGround(),
-        authority.gamemode(),
-        authority.effects(),
-        old.awaitingTeleport(),
-        old.uncertain(),
-        old.input(),
-        authority.attributes(),
-        authority.pose(),
-        environment.fluid() == Phase5Mechanics.Fluid.WATER
-            ? State.Environment.WATER
-            : environment.fluid() == Phase5Mechanics.Fluid.LAVA
-                ? State.Environment.LAVA
-                : environment.climbable()
-                    ? State.Environment.CLIMBABLE
-                    : State.Environment.DRY,
-        old.clientTickRange(),
-        old.provenance(),
-        old.uncertaintyReasons());
-
-    return new Context(
-        tick,
-        updated,
-        simulationEnvironmentFor(environment),
-        authority.attributes(),
-        movementEffects(updated),
-        authority.pose(),
-        environment,
-        authority.sleeping(),
-        EntityCollisions.of(authority.entityBoxes()),
-        context.uncertainty());
   }
 
   private static Optional<Candidate> rootCandidate(
