@@ -364,6 +364,7 @@ public final class Phase8IncrementalRunner {
       // and the client-reported ground bit is independently actionable evidence.
       // It must not be swallowed merely because world/timing replay is uncertain.
       if (packetIndex == latestMovementIndex
+          && !hasFutureAuthoritativeTransition(normalized, packetIndex + 1)
           && recordServerDivergence(move.position(), packet.sequence())) {
         double distance = authoritativeServerDistance(move.position());
         results.add(Phase8MovementValidation.authoritativeImpossible(
@@ -383,7 +384,8 @@ public final class Phase8IncrementalRunner {
             replayReference));
       }
 
-      if (recordGroundContradiction(move.onGround(), movementTick)) {
+      if (!hasFutureAuthoritativeTransition(normalized, packetIndex + 1)
+          && recordGroundContradiction(move.onGround(), movementTick)) {
         results.add(Phase8MovementValidation.authoritativeImpossible(
             playerId, serverTick, before, after, world, worldReference, timing,
             "AUTHORITATIVE_GROUND_CONTRADICTION",
@@ -700,6 +702,16 @@ public final class Phase8IncrementalRunner {
   private void resetGroundContradiction() {
     groundContradictionStreak = 0;
     lastGroundContradictionTick = -1L;
+  }
+
+  private boolean hasFutureAuthoritativeTransition(
+      List<Packets.NormalizedPacket> normalized,
+      int startIndex) {
+    for (int i = Math.max(0, startIndex); i < normalized.size(); i++) {
+      Packets.Packet future = normalized.get(i).packet();
+      if (future instanceof Packets.Teleport || future instanceof Packets.Velocity) return true;
+    }
+    return false;
   }
 
   private boolean futureRelevantWorldMutation(
