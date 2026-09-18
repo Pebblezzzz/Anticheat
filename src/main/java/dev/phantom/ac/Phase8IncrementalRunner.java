@@ -382,7 +382,7 @@ public final class Phase8IncrementalRunner {
                 "consecutiveDivergenceTicks=" + serverDivergenceStreak,
                 "thresholdBlocks=" + HARD_SERVER_DIVERGENCE_BLOCKS,
                 "this signal is independent of finite candidate-search completeness"),
-            replayReference));
+            replayReference + ":hard-server-position"));
       }
 
       if (hardMovementEvidenceEligible(after)
@@ -401,7 +401,7 @@ public final class Phase8IncrementalRunner {
                 "consecutiveContradictionTicks=" + groundContradictionStreak,
                 "movementTick=" + movementTick,
                 "this signal is independent of finite candidate-search completeness"),
-            replayReference));
+            replayReference + ":hard-ground"));
       }
 
       if (lastMovementTick >= 0 && movementTick == lastMovementTick) {
