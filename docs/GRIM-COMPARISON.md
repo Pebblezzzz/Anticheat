@@ -57,6 +57,13 @@ The live adapter now mirrors Grim's core world-visibility idea without copying G
 
 This is intentionally a semantic reimplementation rather than a source-level copy. Grim uses the same transaction-backed client-world concept and its CompensatedWorld is advanced through LatencyUtils transaction barriers.
 
+## Current state-evidence improvements
+
+Phantom now keeps the client's movement claims separate from the server-authoritative movement context at the adapter boundary. Each live PlayerContext records the server position, server velocity, physical ground state, and flight permissions/state with capture provenance. The live predictor does not use the client's ground bit as a physical simulation truth; ground spoofing is evaluated as a separate evidence channel.
+
+Live validation also distinguishes position-bearing movement packets from rotation-only/heartbeat packets. Rotation-only packets no longer advance the ground-contradiction streak, while sustained airborne hover can produce an authoritative flight-state contradiction without requiring a ClientInput packet first. Paper's authoritative PlayerFailMoveEvent path is surfaced as its own evidence source.
+
+This follows the same broad architectural lesson visible in Grim's current player model: client claims, authoritative movement state, flying capability/status, prediction state, and compensated world state are tracked as separate concepts rather than collapsing them into one boolean. Grim also uses tick-boundary and packet-order information as independent movement evidence. This is an architectural comparison, not a claim of feature parity.
 ## Validation still missing
 Phantom still lacks equivalent validation in several areas:
 
