@@ -100,7 +100,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             packet.isOnGround(),
             clientTick);
         String sourceId=tickObservation.hasSeenTickEnd()?"paper-client-tick-boundary":"paper-relative-first-tick";
-        appendPacket(capture,new RawPacket(capture.sequence.incrementAndGet(),System.nanoTime(),move,
+        long sequence=capture.sequence.incrementAndGet();
+        long receivedNanos=System.nanoTime();
+        if(Boolean.TRUE.equals(debugPlayers.get(player.getUniqueId())))
+          logMovementPacketDebug(player,capture,sequence,receivedNanos,event.getPacketType().toString(),location,packet,move,tickObservation);
+        appendPacket(capture,new RawPacket(sequence,receivedNanos,move,
             Packets.CaptureProvenance.fromAdapter(sourceId,move,null)));
       }else if(event.getPacketType()==PacketType.Play.Client.PLAYER_INPUT){
         var input=new WrapperPlayClientPlayerInput(event);
@@ -418,6 +422,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
                 +" candidates="+capture.movementRunner.candidateCount()
                 +" continuation="+incremental.continuation()
                 +" frontierRetained="+incremental.candidateFrontierRetained());
+            for(Phase8MovementValidation.Result result:report.results())
+              logValidationDebug(playerName,result);
           }
 
           getServer().getScheduler().runTask(this,()->applyResult(capture,report));
@@ -431,6 +437,12 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   private void applyResult(Capture capture,Phase8LiveValidation.Report report){
+    if(Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
+      for(Phase8MovementValidation.Result result:report.results())
+        logValidationDebug(getServer().getPlayer(capture.playerId)==null
+            ?capture.playerId.toString()
+            :getServer().getPlayer(capture.playerId).getName(),result);
+    }
     Phase8MovementValidation.Evidence latestSetbackEvidence=null;
     long latestSetbackTick=Long.MIN_VALUE;
 
@@ -487,6 +499,68 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   private boolean setbackEnabled(UUID playerId){
     return setbackOverrides.getOrDefault(playerId,setbacksEnabled);
+  }
+
+  private void logMovementPacketDebug(Player player,Capture capture,long sequence,long receivedNanos,
+                                        String packetType,com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying packet,
+                                        Packets.Move move,ClientTickTracker.MovementObservation tickObservation){
+    Vec3 position=move.position();
+    String delta="n/a";
+    if(position!=null&&capture.lastDebugMovePosition!=null){
+      Vec3 previous=capture.lastDebugMovePosition;
+      delta=vector(position.x()-previous.x(),position.y()-previous.y(),position.z()-previous.z()).toString();
+    }
+    if(position!=null) capture.lastDebugMovePosition=position;
+    getLogger().info("[PhantomAC][PHASE8][PACKET] player="+player.getName()
+        +" packetType="+packetType
+        +" seq="+sequence
+        +" receivedNanos="+receivedNanos
+        +" posChanged="+packet.hasPositionChanged()
+        +" rotChanged="+packet.hasRotationChanged()
+        +" onGround="+move.onGround()
+        +" tickInterval="+tickObservation.clientTick()
+        +" packetsInTick="+tickObservation.packetsInTick()
+        +" oneToOne="+tickObservation.oneToOne()
+        +" hasSeenTickEnd="+tickObservation.hasSeenTickEnd()
+        +" decodedPos="+position
+        +" decodedYaw="+move.yaw()
+        +" decodedPitch="+move.pitch()
+        +" observedDelta="+delta);
+  }
+
+  private void logValidationDebug(String playerName,Phase8MovementValidation.Result result){
+    Phase8MovementValidation.Evidence e=result.evidence();
+    String observedDelta=vector(
+        e.observedState().position().x()-e.priorState().position().x(),
+        e.observedState().position().y()-e.priorState().position().y(),
+        e.observedState().position().z()-e.priorState().position().z()).toString();
+    String closest=e.closestCandidate().map(c->"id="+c.candidateId()
+        +" simTick="+c.simulationTick()
+        +" pos="+c.position()
+        +" vel="+c.velocity()
+        +" ground="+c.onGround()
+        +" pose="+c.pose()
+        +" provenance="+c.provenance()).orElse("none");
+    getLogger().info("[PhantomAC][PHASE8][RESULT] player="+playerName
+        +" verdict="+result.verdict()
+        +" serverTick="+e.serverTick()
+        +" clientTick="+e.clientTickMin()+".."+e.clientTickMax()
+        +" priorPos="+e.priorState().position()
+        +" observedPos="+e.observedState().position()
+        +" observedDelta="+observedDelta
+        +" priorVelocity="+e.priorState().velocity()
+        +" observedVelocity="+e.observedState().velocity()
+        +" reachableCandidates="+e.reachableCandidateCount()
+        +" matchingCandidates="+e.matchingCandidateCount()
+        +" candidatesEliminated="+e.candidatesEliminated()
+        +" firstInconsistentTick="+(e.firstInconsistentTick().isPresent()?Long.toString(e.firstInconsistentTick().getAsLong()):"none")
+        +" rule="+e.rule()
+        +" eliminationReason="+e.eliminationReason()
+        +" timingAssumptions="+e.timingAssumptions()
+        +" uncertaintySources="+e.uncertaintySources()
+        +" simulationDiagnostics="+e.simulationDiagnostics()
+        +" closestCandidate={"+closest+"}"
+        +" replay="+e.replayReference());
   }
 
   private void logPhase8Timing(String playerName,Capture capture,Timeline.Snapshot timeline,
@@ -590,6 +664,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final AtomicLong chunkPackets=new AtomicLong();
     final AtomicLong multiMovementPackets=new AtomicLong();
     final AtomicLong lastWorldBarrierNanos=new AtomicLong(Long.MIN_VALUE);
+    volatile Vec3 lastDebugMovePosition;
     final List<RawPacket> packets=new ArrayList<>();
     final ClientTickTracker clientTickTracker=new ClientTickTracker();
     final AtomicBoolean validationRunning=new AtomicBoolean();
