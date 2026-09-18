@@ -425,6 +425,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       String playerName=player.getName();
       long epoch=capture.epochNanos;
       double snapshotCenterX=player.getLocation().getX();
+      double snapshotCenterY=player.getLocation().getY();
       double snapshotCenterZ=player.getLocation().getZ();
       Vec3 latestObservedPosition=null;
       for(int i=raw.size()-1;i>=0;i--){
@@ -449,7 +450,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           WorldSnapshot liveWorld=validationSnapshot(
               capture,snapshotCenterX,snapshotCenterZ,observedCenterX,observedCenterZ);
           Phase8IncrementalRunner.Report incremental=capture.movementRunner.process(
-              playerName,raw,liveWorld,capture.initialState);
+              playerName,raw,liveWorld,capture.initialState,
+              new Vec3(snapshotCenterX,snapshotCenterY,snapshotCenterZ));
           Phase8LiveValidation.Report report=new Phase8LiveValidation.Report(
               incremental.results(),incremental.movementObservations(),incremental.possible(),
               incremental.uncertain(),incremental.impossible());
