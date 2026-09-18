@@ -71,7 +71,7 @@ class Phase5ParityToolTest {
       new Simulation.AdvancedInput(1,0,false,false,false),
       world,
       Simulation.Environment.DRY,
-      new Simulation.Attributes(0.10000000149011612)
+      new Simulation.Attributes(0.10000000149011612,List.of(new Phase5Mechanics.AttributeModifier("vanilla:sprinting",0.3,Phase5Mechanics.ModifierOperation.ADD_MULTIPLIED_TOTAL)))
     );
 
     var result = new Simulation.Vanilla12111Physics().step(context);
