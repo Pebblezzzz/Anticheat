@@ -33,7 +33,11 @@ public final class Phase8IncrementalRunner {
       long lastProcessedSequence,
       long relativeClientTick,
       Continuation continuation,
-      boolean candidateFrontierRetained) {
+      boolean candidateFrontierRetained,
+      List<CausalMovementPipeline.Frame> frames) {
+    public Report {
+      frames = List.copyOf(frames);
+    }
     public Report {
       results = List.copyOf(results);
     }
@@ -166,7 +170,7 @@ public final class Phase8IncrementalRunner {
       return new Report(
           List.of(), 0, movementCount(raw), 0, 0, 0,
           lastProcessedSequence, latestRelativeClientTick, latestContinuation,
-          latestCandidateCount > 0);
+          latestCandidateCount > 0, List.of());
     }
 
     history.sort(Comparator
@@ -254,7 +258,8 @@ public final class Phase8IncrementalRunner {
         lastProcessedSequence,
         relativeTick,
         continuation,
-        frontier);
+        frontier,
+        pipeline.frames());
   }
 
   private static Continuation continuationFor(
