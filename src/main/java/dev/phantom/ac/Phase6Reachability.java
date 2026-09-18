@@ -76,7 +76,7 @@ public final class Phase6Reachability {
       List<WorldBranch> branches=Objects.requireNonNull(worlds.apply(tick),"world branches");if(branches.isEmpty())return uncertain(offset,peak,"world hypothesis envelope is empty at tick "+tick);if(branches.stream().anyMatch(b->!b.exhaustive()))nonExhaustive++;
       List<ExternalTransition> external=Objects.requireNonNull(externalTransitions.apply(tick),"external transitions");if(external.isEmpty())external=List.of(new None());
       Map<Context,Candidate> next=new LinkedHashMap<>();
-      for(Candidate parent:current.values())for(WorldBranch branch:branches){Maths.Aabb pb=Maths.Aabb.playerAt(parent.context().player().position(),parent.context().pose());if(!branch.world().fullyKnown(new dev.phantom.ac.geometry.BlockBox(pb.minX(),pb.minY(),pb.minZ(),pb.maxX(),pb.maxY(),pb.maxZ()))){uncertainTransitions++;continue;}
+      for(Candidate parent:current.values())for(WorldBranch branch:branches){Maths.Aabb pb=Maths.Aabb.playerAt(parent.context().player().position(),parent.context().pose());Set<dev.phantom.ac.world.Coverage> coverage=branch.world().coverageIn(new dev.phantom.ac.geometry.BlockBox(pb.minX(),pb.minY(),pb.minZ(),pb.maxX(),pb.maxY(),pb.maxZ()));if(!coverage.equals(Set.of(dev.phantom.ac.world.Coverage.KNOWN))){uncertainTransitions++;continue;}
         Context pre=parent.context().withTick(tick);
         boolean externalUncertain=false;
         for(ExternalTransition event:external){pre=applyExternal(pre,event,tick);if(pre.player().uncertain()){externalUncertain=true;break;}}
