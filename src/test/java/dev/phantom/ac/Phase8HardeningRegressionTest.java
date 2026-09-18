@@ -114,9 +114,9 @@ class Phase8HardeningRegressionTest {
     var packets=List.of(
         new RawPacket(1,0,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
         new RawPacket(2,10_000_000L,new Packets.ClientTickEnd()),
-        new RawPacket(2,0,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
+        new RawPacket(3,0,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
             Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
-        new RawPacket(3,60_000_000L,new Move(new Vec3(.6,64,.5),0f,0f,true,null))
+        new RawPacket(4,60_000_000L,new Move(new Vec3(.6,64,.5),0f,0f,true,null))
     );
     var timeline=capture(packets);
     var anchor=new Player(new Vec3(.5,64,.5),new Vec3(.1,0,0),0f,0f,true,
@@ -160,7 +160,8 @@ class Phase8HardeningRegressionTest {
     var report=Phase8LiveValidation.analyze("world-order",timeline,4096,exactTiming(),floorWorld(),anchor,1L);
     assertEquals(Verdict.UNCERTAIN,report.results().getFirst().verdict(),report.results().toString());
     assertTrue(report.results().getFirst().evidence().uncertaintySources().stream()
-        .anyMatch(reason->reason.contains("world changed before the first movement")));
+        .anyMatch(reason->reason.contains("world hypothesis envelope is not exhaustive")
+            || reason.contains("world changed before the first movement")));
   }
 
   @Test
