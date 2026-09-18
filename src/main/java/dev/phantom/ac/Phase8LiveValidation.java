@@ -161,11 +161,14 @@ public final class Phase8LiveValidation {
             0,0,1,0,List.of("multiple movement packets occurred in the same client simulation tick; sub-tick motion is not yet modeled"));
         results.add(Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
             worldReference,sync,List.of("sub-tick movement packet; no full physics tick was advanced"),subTick,replayReference));
-        // We cannot safely consume a later full-tick movement until the missing
+        // We cannot safely consume the next full-tick observation until the missing
         // sub-tick trajectory is modeled or a fresh authoritative anchor arrives.
         continuation=Continuation.UNCERTAIN_EMPTY;
+        previousMovementTick=movementTick;
         continue;
       }
+      // Record before any early-return validation path, including the initial anchor.
+      if(eventTiming.simulationClientTicks().isExact()) previousMovementTick=movementTick;
       // Record the last exact movement tick before any early-return path so the
       // next movement packet in the same client tick is recognized correctly.
       if(eventTiming.simulationClientTicks().isExact()) previousMovementTick=movementTick;
