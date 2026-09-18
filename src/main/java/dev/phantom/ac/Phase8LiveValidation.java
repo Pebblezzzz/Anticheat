@@ -469,7 +469,7 @@ public final class Phase8LiveValidation {
 
   private static boolean canReanchorAfterUncertainty(Player observed,WorldSnapshot world,SearchResult reachable){
     if(observed==null||world==null||reachable==null||!reachable.candidates().isEmpty()) return false;
-    Player safe=simulationSafe(observed,false);
+    Player safe=simulationSafe(observed);
     if(safe.uncertain()) return false;
     Maths.Aabb box=Maths.Aabb.playerAt(safe.position(),safe.pose());
     // A temporary missing-world window must not permanently poison the live candidate chain.
