@@ -140,7 +140,8 @@ public final class Phase7Timing {
           sync=withWindow(sync,windows.getLast()); uncertain=true;
         } else if(kind==EventKind.WORLD){
           windows.add(new SynchronizationWindow(WindowKind.WORLD_UPDATE,event.serverTick(),safeAdd(event.serverTick(),1),packetTicks,"world data becomes available to the client after network transit, not server capture",normalized.sequence()));
-          sync=withWindow(sync,windows.getLast()); uncertain=true;
+          // World visibility is compensated separately. Variable downstream latency
+          // on a chunk/block packet must not poison the exact client movement clock.
         }
         if(sync.status()==SyncStatus.RECOVERING&&direction==Direction.CLIENT_TO_SERVER&&!uncertain&&kind==EventKind.MOVEMENT&&sync.pendingTeleportId().isEmpty()){
           int stable=sync.stableEvents()+1;
@@ -148,14 +149,15 @@ public final class Phase7Timing {
           else sync=new SynchronizationState(SyncStatus.RECOVERING,packetTicks,sync.observedLatency(),OptionalInt.empty(),stable,sync.synchronizationEpoch(),sync.activeWindows(),List.of("recovery requires additional stable movement observations"));
         } else if(sync.status()!=SyncStatus.RECOVERING&&direction==Direction.CLIENT_TO_SERVER&&!uncertain){
           int stable=sync.stableEvents()+1; sync=new SynchronizationState(stable>=2?SyncStatus.SYNCHRONIZED:SyncStatus.PARTIALLY_SYNCHRONIZED,packetTicks,latencyRange(bounds.latency),sync.pendingTeleportId(),stable,sync.synchronizationEpoch(),sync.activeWindows(),List.of("clean client observation incorporated"));
-        } else if(uncertain&&sync.status()==SyncStatus.SYNCHRONIZED){
+        } else if(uncertain&&sync.status()==SyncStatus.SYNCHRONIZED&&affectsMovementSynchronization(kind)){
           sync=new SynchronizationState(SyncStatus.AMBIGUOUS,packetTicks,sync.observedLatency(),sync.pendingTeleportId(),0,sync.synchronizationEpoch(),sync.activeWindows(),List.of("timing ambiguity prevents strong synchronization"));
         }
       } else if(uncertain&&sync.status()==SyncStatus.SYNCHRONIZED){
         sync=new SynchronizationState(SyncStatus.AMBIGUOUS,sync.possibleClientTicks(),sync.observedLatency(),sync.pendingTeleportId(),0,sync.synchronizationEpoch(),sync.activeWindows(),List.of("duplicate capture prevents strong semantic synchronization"));
       }
 
-      EventTiming timing=new EventTiming(index++,normalized.sequence(),event.serverTick(),capture,direction,kind,bounds.packetGenerationNanos,bounds.clientProcessingNanos,packetTicks,simulationTicks,inputTicks,explicit,source,uncertain||sync.status()!=SyncStatus.SYNCHRONIZED,windows,reasons);frames.add(new Frame(timing,before,sync));previousCapture=capture;previousServerTick=event.serverTick();
+      boolean syncUncertainForEvent=affectsMovementSynchronization(kind)&&sync.status()!=SyncStatus.SYNCHRONIZED;
+      EventTiming timing=new EventTiming(index++,normalized.sequence(),event.serverTick(),capture,direction,kind,bounds.packetGenerationNanos,bounds.clientProcessingNanos,packetTicks,simulationTicks,inputTicks,explicit,source,uncertain||syncUncertainForEvent,windows,reasons);frames.add(new Frame(timing,before,sync));previousCapture=capture;previousServerTick=event.serverTick();
     }
     if(consistency!=Consistency.INCONSISTENT&&frames.stream().anyMatch(f->f.timing().uncertain())){consistency=Consistency.UNCERTAIN;consistencyReasons.add("one or more events have bounded but non-exact timing");}
     return new Reconstruction(Contracts.TARGET_VERSION,config,anchorSequence,anchorTick,anchorGeneration,frames,consistency,consistencyReasons);
@@ -173,6 +175,19 @@ public final class Phase7Timing {
   private static List<SynchronizationWindow> append(List<SynchronizationWindow> current,SynchronizationWindow window){List<SynchronizationWindow> result=new ArrayList<>(current);result.add(window);if(result.size()>16)result=result.subList(result.size()-16,result.size());return List.copyOf(result);}
   private static SynchronizationState enterRecovery(SynchronizationState old,SynchronizationWindow window){return new SynchronizationState(SyncStatus.RECOVERING,window.possibleClientTicks(),old.observedLatency(),old.pendingTeleportId(),0,old.synchronizationEpoch(),append(old.activeWindows(),window),List.of("synchronization recovery entered"));}
   private static SynchronizationState withWindow(SynchronizationState old,SynchronizationWindow window){SyncStatus status=old.status()==SyncStatus.RECOVERING?SyncStatus.RECOVERING:SyncStatus.AMBIGUOUS;return new SynchronizationState(status,old.possibleClientTicks(),old.observedLatency(),old.pendingTeleportId(),0,old.synchronizationEpoch(),append(old.activeWindows(),window),List.of(window.reason()));}
+  /**
+   * Only events that can change the client movement chronology or the causal state
+   * used by prediction are allowed to downgrade synchronization. Server-side
+   * observation metadata and compensated world delivery have their own uncertainty
+   * and must not make an exact client movement tick ambiguous.
+   */
+  private static boolean affectsMovementSynchronization(EventKind kind){
+    return switch(kind){
+      case MOVEMENT,INPUT,TELEPORT_CORRECTION,TELEPORT_ACK,VELOCITY -> true;
+      case WORLD,EFFECT,GAMEMODE,OTHER -> false;
+    };
+  }
+
   private static Direction direction(Packet packet){if(packet instanceof Move||packet instanceof ClientInput||packet instanceof TeleportConfirm)return Direction.CLIENT_TO_SERVER;if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof Effect||packet instanceof Gamemode||packet.mutatesWorld())return Direction.SERVER_TO_CLIENT;return Direction.UNKNOWN;}
   private static EventKind kind(Packet packet){if(packet instanceof Move)return EventKind.MOVEMENT;if(packet instanceof ClientInput)return EventKind.INPUT;if(packet instanceof Teleport)return EventKind.TELEPORT_CORRECTION;if(packet instanceof TeleportConfirm)return EventKind.TELEPORT_ACK;if(packet instanceof Velocity)return EventKind.VELOCITY;if(packet instanceof ChunkData||packet instanceof ChunkStates||packet instanceof ChunkUnload||packet instanceof BlockChange||packet instanceof BlockStateChange||packet instanceof UnsupportedBlockStateChange)return EventKind.WORLD;if(packet instanceof Effect)return EventKind.EFFECT;if(packet instanceof Gamemode)return EventKind.GAMEMODE;return EventKind.OTHER;}
   private static String formatSync(SynchronizationState s){return s.status()+" ticks="+s.possibleClientTicks()+" latency="+s.observedLatency()+" pendingTeleport="+s.pendingTeleportId()+" stable="+s.stableEvents()+" epoch="+s.synchronizationEpoch()+" windows="+formatWindows(s.activeWindows())+" reasons="+s.reasons();}
