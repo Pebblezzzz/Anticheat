@@ -71,9 +71,12 @@ public final class Phase8LiveValidation {
     InputConstraint currentInput=InputConstraint.any();
     Map<Long,InputConstraint> inputByClientTick=inputConstraintsByClientTick(timeline);
     boolean hasClientTickBoundaries=timeline.events().stream().anyMatch(e->e.packet().packet() instanceof Packets.ClientTickEnd);
+    Map<Long,InputConstraint> inputByClientTick=inputConstraintsByClientTick(timeline);
+    boolean hasClientTickBoundaries=timeline.events().stream().anyMatch(e->e.packet().packet() instanceof Packets.ClientTickEnd);
     EntityCollisions currentEntityCollisions=EntityCollisions.NONE_TRACKED;
     List<Phase8MovementValidation.Result> results=new ArrayList<>();
     int movements=0;
+    long previousMovementTick=-1;
 
     for(Timeline.Event event:timeline.events()){
       Packets.NormalizedPacket normalized=event.packet();
@@ -146,6 +149,22 @@ public final class Phase8LiveValidation {
       Player observed=stateFrame.after();
       Validation.SyncWindow sync=Phase7Timing.toPhase6Window(eventTiming);
       String replayReference="live:phase8:"+playerId+":"+normalized.sequence();
+
+      // Multiple movement packets within one client tick are sub-tick observations.
+      // Grim retains these separately instead of pretending each packet consumed a
+      // complete physics tick. Our core currently has one deterministic step per tick,
+      // so such an observation is explicitly uncertain rather than falsely impossible.
+      long movementTick=eventTiming.simulationClientTicks().min();
+      if(previousMovementTick>=0
+          &&eventTiming.simulationClientTicks().isExact()
+          &&movementTick==previousMovementTick){
+        SearchResult subTick=new SearchResult(Phase6Reachability.Verdict.UNCERTAIN,candidates,0,candidates.size(),
+            0,0,1,0,List.of("multiple movement packets occurred in the same client simulation tick; sub-tick motion is not yet modeled"));
+        results.add(Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
+            worldReference,sync,List.of("sub-tick movement packet; no full physics tick was advanced"),subTick,replayReference));
+        previousMovementTick=movementTick;
+        continue;
+      }
       String inputDescription="client-input="+currentInput
           +", input-held-until-replacement=true"
           +", timing-offsets="+sync.earliestClientTick()+".."+sync.latestClientTick();
@@ -216,7 +235,8 @@ public final class Phase8LiveValidation {
             if(search.verdict()!=Phase6Reachability.Verdict.POSSIBLE)exhaustive=false;
           }
 
-          ParentAggregation aggregated=aggregateDirectSearches(searches,maximumCandidates,exhaustive);
+          previousMovementTick=movementTick;
+      ParentAggregation aggregated=aggregateDirectSearches(searches,maximumCandidates,exhaustive);
           SearchResult reachable=aggregated.result();
           Phase8MovementValidation.Result validation=Phase8MovementValidation.validate(playerId,event.serverTick(),prior,observed,world,
               worldReference,sync,inputAssumptions,reachable,replayReference,aggregated.timingOffsetsExhaustive());
@@ -319,7 +339,10 @@ public final class Phase8LiveValidation {
           }
 
           List<InputConstraint> perTickInput=new ArrayList<>((int)steps);
-          for(long i=0;i<steps;i++) perTickInput.add(currentInput);
+          for(long i=0;i<steps;i++){
+            long simulationTick=parentTick+i;
+            perTickInput.add(hasClientTickBoundaries?inputForTick(inputByClientTick,simulationTick):currentInput);
+          }
 
           Phase6Reachability.Context prepared=withObservedEnvironment(parent.context(),world,currentInput,parentTick,currentEntityCollisions);
           List<InputConstraint> inputs=List.copyOf(perTickInput);
@@ -398,6 +421,33 @@ public final class Phase8LiveValidation {
     InputConstraint selected=null;
     for(var entry:inputByClientTick.entrySet()){
       if(entry.getKey()<=tick&&entry.getKey()>best){best=entry.getKey();selected=entry.getValue();}
+    }
+    return selected==null?InputConstraint.any():selected;
+  }
+
+  private static Map<Long,InputConstraint> inputConstraintsByClientTick(Timeline.Snapshot timeline){
+    TreeMap<Long,InputConstraint> out=new TreeMap<>();
+    long clientTick=0;
+    for(Timeline.Event event:timeline.events()){
+      Packets.Packet packet=event.packet().packet();
+      if(packet instanceof Packets.ClientTickEnd){
+        if(!event.packet().flags().contains(Packets.PacketFlag.DUPLICATE))clientTick++;
+      }else if(packet instanceof Packets.ClientInput input&&!event.packet().flags().contains(Packets.PacketFlag.DUPLICATE)){
+        out.put(clientTick,InputConstraint.fromClientInput(input));
+      }
+    }
+    return Map.copyOf(out);
+  }
+
+  private static InputConstraint inputForTick(Map<Long,InputConstraint> inputByClientTick,long tick){
+    if(inputByClientTick.isEmpty())return InputConstraint.any();
+    long best=Long.MIN_VALUE;
+    InputConstraint selected=null;
+    for(var entry:inputByClientTick.entrySet()){
+      if(entry.getKey()<=tick&&entry.getKey()>best){
+        best=entry.getKey();
+        selected=entry.getValue();
+      }
     }
     return selected==null?InputConstraint.any():selected;
   }
