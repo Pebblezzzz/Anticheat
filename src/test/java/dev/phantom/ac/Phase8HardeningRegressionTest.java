@@ -63,7 +63,8 @@ class Phase8HardeningRegressionTest {
             Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
         new RawPacket(3,0,new Packets.ClientInput(false,false,false,false,false,false,false)),
         new RawPacket(4,0,new Move(new Vec3(.5,64,.5),0f,0f,true,0L)),
-        new RawPacket(5,100_000_000L,new Move(new Vec3(.5,64,.5),0f,0f,true,2L)));
+        new RawPacket(5,50_000_000L,new Move(new Vec3(.5,64,.5),0f,0f,true,1L)),
+        new RawPacket(6,100_000_000L,new Move(new Vec3(.5,64,.5),0f,0f,true,2L)));
     var timeline=Timeline.assign(new Normalizer().normalize(packets),0,50_000_000L);
     var report=Phase8LiveValidation.analyze("gap-test",timeline,256,exactTiming());
     assertEquals(2,report.movementObservations(),report.results().toString());
@@ -103,7 +104,7 @@ class Phase8HardeningRegressionTest {
     );
     var timeline=capture(packets);
     var anchor=Player.initial(new Vec3(0.5,64.0,0.5));
-    var report=Phase8LiveValidation.analyze("flight-anchor",timeline,4096,exactTiming(),null,anchor);
+    var report=Phase8LiveValidation.analyze("flight-anchor",timeline,4096,exactTiming(),null,anchor,1L);
     assertEquals(1,report.movementObservations(),report.results().toString());
     assertEquals(Verdict.IMPOSSIBLE,report.results().getFirst().verdict(),report.results().toString());
     assertEquals(0,report.results().getFirst().evidence().matchingCandidateCount());
