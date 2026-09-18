@@ -77,7 +77,16 @@ public final class Phase8IncrementalRunner {
       List<Packets.RawPacket> raw,
       WorldSnapshot liveWorld,
       Player currentAnchor) {
-    return process(playerId, raw, liveWorld, currentAnchor, null);
+    return process(playerId, raw, liveWorld, currentAnchor, -1L, null);
+  }
+
+  public synchronized Report process(
+      String playerId,
+      List<Packets.RawPacket> raw,
+      WorldSnapshot liveWorld,
+      Player currentAnchor,
+      long currentAnchorReceivedNanos) {
+    return process(playerId, raw, liveWorld, currentAnchor, currentAnchorReceivedNanos, null);
   }
 
   /**
@@ -92,16 +101,25 @@ public final class Phase8IncrementalRunner {
       WorldSnapshot liveWorld,
       Player currentAnchor,
       Maths.Vec3 ignoredLatestServerPosition) {
+    return process(playerId, raw, liveWorld, currentAnchor, -1L, ignoredLatestServerPosition);
+  }
+
+  private Report process(
+      String playerId,
+      List<Packets.RawPacket> raw,
+      WorldSnapshot liveWorld,
+      Player currentAnchor,
+      long currentAnchorReceivedNanos,
+      Maths.Vec3 ignoredLatestServerPosition) {
     Objects.requireNonNull(playerId);
     Objects.requireNonNull(raw);
 
     if (currentAnchor != null && !currentAnchor.equals(anchor)) {
       anchor = currentAnchor;
-      // Joining/world-changing is an explicit authoritative boundary. The
-      // packet journal remains useful for diagnostics, but prediction must start
-      // from the new anchor rather than carrying candidates across worlds.
       emitted.clear();
-      anchorReceivedNanos = -1L;
+    }
+    if (currentAnchor != null && currentAnchorReceivedNanos >= 0) {
+      anchorReceivedNanos = currentAnchorReceivedNanos;
     }
 
     int newlyCaptured = 0;
@@ -185,15 +203,10 @@ public final class Phase8IncrementalRunner {
   }
 
   private Continuation continuationForLatest() {
-    if (emitted.isEmpty()) return anchor == null
-        ? Continuation.UNANCHORED
-        : Continuation.UNCERTAIN_EMPTY;
-    Verdict latest = emitted.values().stream().reduce((a, b) -> b).orElse(Verdict.UNCERTAIN);
-    return switch (latest) {
-      case POSSIBLE -> Continuation.ACTIVE;
-      case UNCERTAIN -> Continuation.UNCERTAIN_EMPTY;
-      case IMPOSSIBLE -> Continuation.IMPOSSIBLE;
-    };
+    if (emitted.isEmpty()) {
+      return anchor == null ? Continuation.UNANCHORED : Continuation.UNCERTAIN_EMPTY;
+    }
+    return Continuation.UNCERTAIN_EMPTY;
   }
 
   private static Continuation continuationFor(
