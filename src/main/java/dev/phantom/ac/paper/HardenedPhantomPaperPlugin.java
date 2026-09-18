@@ -120,7 +120,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     @Override public void onPacketSend(PacketSendEvent event){
       Object sender=event.getPlayer();
       if(!(sender instanceof Player player))return;
-      Capture capture=captures.computeIfAbsent(player.getUniqueId(),ignored->new Capture(player.getUniqueId(),System.nanoTime()));
+      Capture capture=captures.computeIfAbsent(player.getUniqueId(),ignored->new Capture(player.getUniqueId(),System.nanoTime(),validationBudget));
 
       if(event.getPacketType()==PacketType.Play.Server.PLAYER_POSITION_AND_LOOK){
         var packet=new WrapperPlayServerPlayerPositionAndLook(event);
@@ -199,7 +199,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   @EventHandler public void onWorldChange(PlayerChangedWorldEvent event){
-    Capture capture=new Capture(event.getPlayer().getUniqueId(),System.nanoTime());
+    Capture capture=new Capture(event.getPlayer().getUniqueId(),System.nanoTime(),validationBudget);
     capture.updateServerPosition(event.getPlayer());
     captures.put(event.getPlayer().getUniqueId(),capture);
     setbackOverrides.remove(event.getPlayer().getUniqueId());
@@ -529,7 +529,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   private void record(Player player,Packets.Packet packet){
     Capture capture=captures.computeIfAbsent(player.getUniqueId(),
-        ignored->new Capture(player.getUniqueId(),System.nanoTime()));
+        ignored->new Capture(player.getUniqueId(),System.nanoTime(),validationBudget));
     appendPacket(capture,new RawPacket(capture.sequence.incrementAndGet(),System.nanoTime(),packet));
   }
 
