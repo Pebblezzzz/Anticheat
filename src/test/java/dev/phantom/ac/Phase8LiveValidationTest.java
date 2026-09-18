@@ -93,9 +93,10 @@ class Phase8LiveValidationTest {
     List<RawPacket> packets = List.of(
         new RawPacket(1, 0, new ChunkStates(new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
         new RawPacket(2, 0, dryContext()),
-        new RawPacket(3, 0, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
-        new RawPacket(4, 50_000_000L, new Move(new Vec3(6.5, 64, 0.5), 0f, 0f, true, 1L)),
-        new RawPacket(5, 100_000_000L, new Move(new Vec3(7.5, 64, 0.5), 0f, 0f, true, 2L)));
+        new RawPacket(3, 0, new Packets.ClientInput(false, false, false, false, false, false, false)),
+        new RawPacket(4, 0, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
+        new RawPacket(5, 50_000_000L, new Move(new Vec3(6.5, 64, 0.5), 0f, 0f, true, 1L)),
+        new RawPacket(6, 100_000_000L, new Move(new Vec3(7.5, 64, 0.5), 0f, 0f, true, 2L)));
     Phase8LiveValidation.Report report = Phase8LiveValidation.analyze(
         "phase8-test", capture(packets), 256, exactTiming(), null,
         Player.initial(new Vec3(.5, 64, .5)), 0L);
