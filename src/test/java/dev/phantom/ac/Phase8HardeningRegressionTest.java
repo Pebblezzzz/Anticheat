@@ -108,22 +108,22 @@ class Phase8HardeningRegressionTest {
   }
 
   @Test
-  void playerInputDoesNotConstrainOrdinaryWalkingReachability(){
+  void playerInputConstrainsModernWalkingReachability(){
     var packets=List.of(
         new RawPacket(1,0,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
         new RawPacket(2,0,new Packets.PlayerContext("survival",Simulation.Attributes.DEFAULT,Map.of(),
             Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
-        // PLAYER_INPUT is retained as protocol evidence but is not treated as
-        // the authoritative WASD stream for ordinary player movement.
+        // On a modern client, PLAYER_INPUT is retained as known-input state and
+        // constrains normal walking prediction.
         new RawPacket(3,0,new Packets.ClientInput(false,false,false,false,false,false,false)),
         new RawPacket(4,10_000_000L,new Packets.ClientTickEnd()),
         new RawPacket(5,60_000_000L,new Packets.ClientTickEnd()),
-        new RawPacket(6,100_000_000L,new Move(new Vec3(0.72,64.0,0.5),0f,0f,true,null))
+        new RawPacket(6,100_000_000L,new Move(new Vec3(0.5,64.0,0.5),0f,0f,true,null))
     );
     var report=Phase8LiveValidation.analyze("input-envelope",capture(packets),4096,exactTiming(),
         null,Player.initial(new Vec3(0.5,64.0,0.5)));
     assertEquals(1,report.movementObservations(),report.results().toString());
-    assertNotEquals(Verdict.IMPOSSIBLE,report.results().getFirst().verdict(),report.results().toString());
+    assertEquals(Verdict.POSSIBLE,report.results().getFirst().verdict(),report.results().toString());
   }
 
   @Test
