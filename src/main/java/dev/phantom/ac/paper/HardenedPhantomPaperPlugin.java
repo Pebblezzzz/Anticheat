@@ -77,7 +77,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private static final int PAPER_MOVE_FAILURE_THRESHOLD=1;
 
   private final Map<UUID,Capture> captures=new ConcurrentHashMap<>();
-  private enum DebugLevel { OFF, SUMMARY, TRACE }
+  private enum DebugLevel { OFF, SUMMARY, TRACE; boolean summary(){return this==SUMMARY;} boolean trace(){return this==TRACE;} }
 
   private final Map<UUID,DebugLevel> debugPlayers=new ConcurrentHashMap<>();
   private org.bukkit.scheduler.BukkitTask stateTask,validationTask;
@@ -391,7 +391,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
 
     if(capture.paperMoveFailureCount>=PAPER_MOVE_FAILURE_THRESHOLD
-        &&Boolean.TRUE.equals(debugPlayers.get(capture.playerId))){
+        &&debugLevel(capture.playerId).summary()){
       getLogger().warning("[PhantomAC][PHASE8][PAPER_CORROBORATION_ONLY] player="+player.getName()
           +" reason="+reason
           +" rejectedAttemptsIn1s="+capture.paperMoveFailureCount
