@@ -200,7 +200,7 @@ public final class CausalMovementPipeline {
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     List<Frame> frames = new ArrayList<>();
     long previousPositionPacketTick = -1L;
-    Phase7Timing.Range previousPositionPacketRange = null;
+    Phase7Timing.Range previousPositionPacketGenerationRange = null;
     Long previousExplicitClientTick = null;
     boolean recoveryRequired = false;
     long lastAmbiguitySequence = -1L;
@@ -324,12 +324,12 @@ public final class CausalMovementPipeline {
           movement.move().clientTick() != null
               && previousExplicitClientTick != null
               && movement.move().clientTick().longValue() != previousExplicitClientTick.longValue();
-      boolean overlappingTimingWindow =
-          previousPositionPacketRange != null
+      boolean overlappingGenerationWindow =
+          previousPositionPacketGenerationRange != null
               && !distinctExplicitClientTicks
-              && (!previousPositionPacketRange.isExact()
-                  || !eventTiming.simulationClientTicks().isExact())
-              && rangesOverlap(previousPositionPacketRange, eventTiming.simulationClientTicks());
+              && rangesOverlap(
+                  previousPositionPacketGenerationRange,
+                  eventTiming.packetGenerationClientTicks());
       if (!frontier.candidates().isEmpty() && movement.authority().snapshot().isPresent()) {
         /*
          * PlayerContext carries the entity boxes observed by the server at the
@@ -352,13 +352,13 @@ public final class CausalMovementPipeline {
               && eventTiming.simulationClientTicks().isExact()
               && movementTick == previousPositionPacketTick)
           || sameExplicitClientTick
-          || overlappingTimingWindow) {
+          || overlappingGenerationWindow) {
         uncertainty.add("multiple position-bearing movement packets occurred in one client tick; sub-tick motion is not modeled");
         lastAmbiguitySequence = sequence;
         recoveryRequired = true;
         frontier = Frontier.empty();
         previousPositionPacketTick = -1L;
-        previousPositionPacketRange = null;
+        previousPositionPacketGenerationRange = null;
         trace.add("FRONTIER_RESET reason=SUB_TICK_AMBIGUITY");
         SearchResult uncertain = uncertainSearch(
             frontier.candidates(),
@@ -567,7 +567,7 @@ public final class CausalMovementPipeline {
               .orElse(movementTick);
           frontier = new Frontier(Set.copyOf(matching), resultingTick, true);
           previousPositionPacketTick = resultingTick;
-          previousPositionPacketRange = eventTiming.simulationClientTicks();
+          previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
           if (movement.move().clientTick() != null) {
             previousExplicitClientTick = movement.move().clientTick();
           }
@@ -576,7 +576,7 @@ public final class CausalMovementPipeline {
         }
       } else if (validation.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
         previousPositionPacketTick = movementTick;
-        previousPositionPacketRange = eventTiming.simulationClientTicks();
+        previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
         if (movement.move().clientTick() != null) {
           previousExplicitClientTick = movement.move().clientTick();
         }
