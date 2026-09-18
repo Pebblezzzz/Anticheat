@@ -200,6 +200,7 @@ public final class CausalMovementPipeline {
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     List<Frame> frames = new ArrayList<>();
     long previousPositionPacketTick = -1L;
+    Long previousExplicitClientTick = null;
     boolean recoveryRequired = false;
     long lastAmbiguitySequence = -1L;
     boolean haveAuthoritativeSeed = initialAnchor != null && !initialAnchor.uncertain();
@@ -300,9 +301,14 @@ public final class CausalMovementPipeline {
       }
 
       long movementTick = eventTiming.simulationClientTicks().min();
-      if (previousPositionPacketTick >= 0
-          && eventTiming.simulationClientTicks().isExact()
-          && movementTick == previousPositionPacketTick) {
+      boolean sameExplicitClientTick =
+          movement.move().clientTick() != null
+              && previousExplicitClientTick != null
+              && movement.move().clientTick().longValue() == previousExplicitClientTick.longValue();
+      if ((previousPositionPacketTick >= 0
+              && eventTiming.simulationClientTicks().isExact()
+              && movementTick == previousPositionPacketTick)
+          || sameExplicitClientTick) {
         uncertainty.add("multiple position-bearing movement packets occurred in one client tick; sub-tick motion is not modeled");
         lastAmbiguitySequence = sequence;
         recoveryRequired = true;
@@ -478,11 +484,17 @@ public final class CausalMovementPipeline {
               .orElse(movementTick);
           frontier = new Frontier(Set.copyOf(matching), resultingTick, true);
           previousPositionPacketTick = resultingTick;
+          if (movement.move().clientTick() != null) {
+            previousExplicitClientTick = movement.move().clientTick();
+          }
           trace.add("MATCHING candidates=" + matching.size()
               + " frontierTick=" + resultingTick);
         }
       } else if (validation.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
         previousPositionPacketTick = movementTick;
+        if (movement.move().clientTick() != null) {
+          previousExplicitClientTick = movement.move().clientTick();
+        }
         trace.add("EVIDENCE REACHABILITY_CONTRADICTION");
       } else {
         recoveryRequired = recoveryRequired || eventTiming.uncertain();
