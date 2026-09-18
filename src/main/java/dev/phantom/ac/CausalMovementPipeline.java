@@ -1273,7 +1273,7 @@ public final class CausalMovementPipeline {
         .filter(snapshot -> snapshot.sequence() > minimumSequenceExclusive)
         .filter(snapshot -> snapshot.sequence() < movement.event().packet().sequence())
         .filter(snapshot -> snapshot.receivedNanos() <= movement.event().packet().receivedNanos())
-        .filter(snapshot -> snapshot.serverTick() < movement.event().serverTick())
+        .filter(snapshot -> snapshot.serverTick() <= movement.event().serverTick())
         .filter(snapshot -> movement.event().serverTick() - snapshot.serverTick() <= maxServerTickAge);
   }
 
