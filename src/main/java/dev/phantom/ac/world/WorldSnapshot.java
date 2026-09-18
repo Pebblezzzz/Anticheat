@@ -338,7 +338,10 @@ public final class WorldSnapshot implements Serializable {
    */
   /** Diagnostic-only coverage/state description for debug traces. */
   public String coverageDetailAt(int x, int y, int z) {
-    return backend != null ? backend.coverageDetailAt(x, y, z) : Backend.super.coverageDetailAt(x, y, z);
+    if (backend != null) return backend.coverageDetailAt(x, y, z);
+    Coverage coverage = coverageAt(x, y, z);
+    BlockState state = blockAtOrNull(x, y, z);
+    return state == null ? coverage.toString() : coverage + " block=" + state.blockId();
   }
 
   public BlockState blockAtOrNull(int x, int y, int z) {
