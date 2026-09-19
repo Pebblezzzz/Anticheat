@@ -1510,13 +1510,21 @@ public final class Phase8PredictionRunner {
       SearchResult search,
       boolean timingExhaustivelyModeled,
       Set<Phase6Reachability.ObservedField> observedFields) {
+    List<String> timingReasons = new ArrayList<>();
+    if (tick.timingUncertain()) {
+      timingReasons.add(tick.uncertaintyReason());
+    }
+    if (!tick.exact()) {
+      timingReasons.add("client simulation tick is not represented by one exact timing state");
+    }
+    if (timingReasons.isEmpty()) {
+      timingReasons.add("persistent client-tick clock is exact for this packet");
+    }
     Validation.SyncWindow timing = new Validation.SyncWindow(
         Math.max(0L, tick.clientTick()),
         Math.max(0L, tick.clientTick()),
-        !tick.exact(),
-        tick.exact()
-            ? List.of("persistent client-tick clock is exact for this packet")
-            : List.of(tick.source()));
+        tick.timingUncertain() || !tick.exact(),
+        List.copyOf(timingReasons));
     List<String> assumptions = new ArrayList<>();
     assumptions.add("client input is retained as held state until the next ClientInput packet");
     assumptions.add("server position is used only for anchor/correction state, never as the predicted client position");
