@@ -1516,7 +1516,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     Map<String,String> properties=new LinkedHashMap<>();
     for(StateValue value:StateValue.values()){
       Object raw=state.getData(value);
-      if(raw!=null)properties.put(value.name().toLowerCase(Locale.ROOT),raw.toString().toLowerCase(Locale.ROOT));
+      if(raw!=null)properties.put(value.getName(),raw.toString().toLowerCase(Locale.ROOT));
     }
     return dev.phantom.ac.world.v12111.BlockCatalogue12111.decode(name,properties);
   }
