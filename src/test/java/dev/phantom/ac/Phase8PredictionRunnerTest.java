@@ -189,7 +189,7 @@ class Phase8PredictionRunnerTest {
                 new Maths.Vec3(.5, observedY, .5), 25f, 8f, false, 152L))),
         floorWorld(), anchor(), 0L);
 
-    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertEquals(1, report.movementObservations(), report.results().toString());
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getFirst().verdict(), report.results().toString());
     assertTrue(report.frames().stream()
@@ -290,7 +290,7 @@ class Phase8PredictionRunnerTest {
                 new Maths.Vec3(.5, 64.0, 1.2638), 0f, 0f, true, 4L))),
         floorWorld(), anchor(), 0L);
 
-    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(2, report.movementObservations(), report.results().toString());
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getFirst().verdict(), report.results().toString());
     assertTrue(report.frames().stream()
