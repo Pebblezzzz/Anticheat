@@ -247,7 +247,8 @@ public final class Vanilla12111RichPhysics {
         for(int i=0;i<problems.size();i++){
             if(i>0)result.append(", ");
             WorldSnapshot.CoverageProblem problem=problems.get(i);
-            result.append(problem.coverage()).append('@').append(problem.position());
+            result.append(problem.coverage()).append('@').append(problem.position())
+          .append(" ").append(problem.detail());
         }
         return result.append(']').toString();
     }
