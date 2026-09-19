@@ -14,7 +14,15 @@ import java.util.Objects;
  */
 public final class Phase5MovementAuthority {
   public static final String VERSION = Vanilla12111RichPhysics.VERSION;
-  private final Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+  private final Vanilla12111RichPhysics physics;
+
+  public Phase5MovementAuthority() {
+    this(new Vanilla12111RichPhysics());
+  }
+
+  public Phase5MovementAuthority(Vanilla12111RichPhysics physics) {
+    this.physics = Objects.requireNonNull(physics, "physics");
+  }
 
   public StepResult simulate(SimulationContext context) {
     Objects.requireNonNull(context, "context");
