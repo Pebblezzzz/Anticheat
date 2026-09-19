@@ -1613,9 +1613,15 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     var existing=cache.putIfAbsent(globalId,core);return existing==null?core:existing;
   }
 
+  /** PacketEvents block-type names are not guaranteed to include the default minecraft namespace. */
+  static String normalizeBlockId(String name){
+    if(name==null||name.isBlank())return name;
+    return name.indexOf(':')>=0?name:"minecraft:"+name;
+  }
+
   private static dev.phantom.ac.world.BlockState toCoreState(WrappedBlockState state){
     if(state==null||state.getType().isAir())return dev.phantom.ac.world.BlockState.air();
-    String name=state.getType().getName();
+    String name=normalizeBlockId(state.getType().getName());
     Map<String,String> properties=new LinkedHashMap<>();
     for(StateValue value:StateValue.values()){
       Object raw=state.getData(value);
