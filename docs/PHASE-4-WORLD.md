@@ -4,7 +4,7 @@
 
 Phase 4 is the authoritative world/collision layer between packet/timeline capture and Phase 5. It reconstructs the world a particular client could have known, rather than reading the current server world.
 
-Model: client-bound packet/timeline history -> per-player replica -> ordered journal -> immutable generations -> WorldSnapshot/WorldQueries -> Phase 5.
+Model: client-bound packet/timeline history -> per-player replica -> ordered journal -> compact packet-style world state -> immutable generations -> WorldSnapshot/WorldQueries -> Phase 5.
 
 There is no global reconstructed world shared by players.
 
@@ -16,14 +16,15 @@ There is no global reconstructed world shared by players.
 - Each replica owns its own ordered event journal and immutable generation history.
 - Two players can receive different block histories and therefore have different snapshots.
 - The replica adapts existing Phase 1–3 timeline packet types for chunk data, chunk unloads, block-state deltas, unsupported states, and legacy chunk/block packets.
+- Live CHUNK_DATA is kept palette/bit-packed at section level; individual client block changes use small immutable overlays instead of expanding a chunk into one Java object per block.
 - Direct Phase 4 events represent dimension changes, world metadata, multi-block changes, and entity spawn/move/despawn.
 - Every event retains source, packet type, sequence, server tick, client tick when available, and provenance.
 
 ## Ordering and history
 
-Events are canonically ordered by server tick, capture receive time, sequence, then deterministic local ordinal. Duplicate capture sequences are ignored. Rebuilding therefore does not depend on hash-map iteration, thread timing, or wall-clock sampling.
+Events are canonically ordered by server tick, capture receive time, sequence, then deterministic local ordinal. Duplicate capture sequences are ignored. The live path applies append-ordered events incrementally; a full journal replay is retained only as the deterministic fallback when an out-of-order event is accepted.
 
-Every applied event publishes a new immutable Generation. Historical generations can be selected by capture sequence or canonical event order. This is a primitive for later Phase 7 temporal selection; Phase 7 synchronization policy is not implemented here.
+Every visible mutation publishes a new immutable Generation. Generations share unchanged compact chunk data through copy-on-write, so history does not duplicate every block. Historical generations can be selected by capture sequence or canonical event order. This is a primitive for later Phase 7 temporal selection; Phase 7 synchronization policy is not implemented here.
 
 ## Coverage semantics
 
@@ -46,7 +47,7 @@ This is IMPLEMENTED and INTERNALLY TESTED, but it is not claimed to be complete 
 
 ## Publication
 
-The current generation is held in an AtomicReference. Readers only see immutable snapshots. Clientbound chunk/block mutations are queued behind the same transaction barriers used by the Paper adapter and become visible to the authoritative Phase 4 generation only after acknowledgement.
+The current generation is held in an AtomicReference. Readers only see immutable snapshots. Clientbound chunk/block mutations are queued behind the same transaction barriers used by the Paper adapter and become visible to the authoritative Phase 4 generation only after acknowledgement. Packet reception and chunk decoding never wait for generation publication: chunk decode runs on a bounded worker pool, while transaction acknowledgement schedules compact publication off the Netty EventLoop.
 
 ## Entity status
 
@@ -71,7 +72,7 @@ Phase 5 should consume WorldSnapshot/WorldView/WorldQueries rather than implemen
 | Per-player CompensatedWorld | Phase4WorldReplica + Phase4WorldRegistry | Yes | Phase 4 |
 | Packet-driven chunk/block replication | Timeline adapter + Phase 4 events | Yes | Phase 1–4 boundary |
 | Transaction/latency-gated visibility | Existing CompensatedClientWorld barrier model plus Phase 4 provenance/generation seam | Yes | Adapter/Phase 4 |
-| Live packet world cache | Phase4WorldReplica transaction-gated journal + immutable generations | Yes | Phase 4 + Paper adapter |
+| Live packet world cache | Phase4WorldReplica compact packet-style sections + transaction-gated immutable generations | Yes | Phase 4 + Paper adapter |
 | Historical/latency world state | Immutable Generation history | Yes | Phase 4; temporal selection belongs to Phase 7 |
 | Version-specific collision shapes | BlockCatalogue12111 + WorldSnapshot | Yes | Phase 4 |
 | Compensated entity state | EntityCollisions generation state | Yes | Phase 4 |
