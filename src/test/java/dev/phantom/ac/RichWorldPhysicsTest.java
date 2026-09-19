@@ -3,6 +3,7 @@ package dev.phantom.ac;
 import dev.phantom.ac.geometry.BlockBox;
 import dev.phantom.ac.world.Coverage;
 import dev.phantom.ac.world.WorldSnapshot;
+import dev.phantom.ac.world.v12111.BlockCatalogue12111;
 import org.junit.jupiter.api.Test;
 import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
@@ -32,6 +33,31 @@ class RichWorldPhysicsTest {
         assertEquals(player.position(), result.state().position());
         assertEquals(0.0, result.state().velocity().y(), 1.0e-12);
     }
+    @Test
+    void knownAirSupportCellDoesNotBecomePhase5Uncertainty() {
+        WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+            .loadChunk(0, 0)
+            .build();
+        var player = State.Player.initial(new Maths.Vec3(0.5, 64.0, 0.5));
+        var input = new Simulation.AdvancedInput(1, 0, false, true, false);
+        var env = Phase5Mechanics.MovementEnvironment.dry(true, true, false);
+        var context = new Vanilla12111RichPhysics.Context(
+            0, player, input, world, Simulation.Environment.DRY,
+            Simulation.Attributes.DEFAULT, Phase5Mechanics.MovementEffects.NONE,
+            Phase5Mechanics.Pose.STANDING, env, false,
+            dev.phantom.ac.world.EntityCollisions.of(java.util.List.of()));
+
+        assertEquals(Coverage.KNOWN, world.coverageAt(0, 63, 0));
+        assertTrue(world.requireBlockAt(0, 63, 0).isAir());
+
+        var result = new Vanilla12111RichPhysics().step(context);
+
+        assertFalse(result.state().uncertain(), result.diagnostic());
+        assertEquals(0.6,
+            BlockCatalogue12111.slipperiness(world.requireBlockAt(0, 63, 0)),
+            1.0e-12);
+    }
+
     @Test
     void exactSnapshotCollisionRefusesAnUnloadedSweep() {
         WorldSnapshot world=WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0,0).setBlock(0,64,0,stone()).build();
