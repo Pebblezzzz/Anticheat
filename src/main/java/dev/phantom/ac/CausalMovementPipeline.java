@@ -787,9 +787,8 @@ public final class CausalMovementPipeline {
       results.add(validation);
 
       // The candidate frontier advances only through a POSSIBLE observation.
-      // IMPOSSIBLE/UNCERTAIN evidence does not turn the client's observed state
-      // into a new trusted baseline, and therefore cannot permanently poison
-      // later validation.
+      // IMPOSSIBLE/UNCERTAIN evidence never becomes a trusted baseline. UNCERTAIN
+      // explicitly clears the frontier so later validation can re-root causally.
       if (validation.verdict() == Phase8MovementValidation.Verdict.POSSIBLE) {
         Set<Candidate> matching = new LinkedHashSet<>();
         for (Candidate candidate : reachable) {
@@ -825,9 +824,21 @@ public final class CausalMovementPipeline {
         trace.add("EVIDENCE REACHABILITY_CONTRADICTION");
         trace.add("FRONTIER_RESET reason=IMPOSSIBLE; next movement may use exact authoritative local root");
       } else {
-        recoveryRequired = recoveryRequired || eventTiming.uncertain();
+        recoveryRequired = true;
+        lastAmbiguitySequence = sequence;
         uncertainty.addAll(advance.reasons());
         trace.add("EVIDENCE UNCERTAIN " + advance.reasons());
+        /*
+         * An uncertain prediction is not a trusted causal state. Retaining it
+         * makes later movement inherit an old frontier even after a fresh
+         * authoritative snapshot exists. Discard it and require the next clean
+         * movement to re-root from current authority.
+         */
+        frontier = Frontier.empty();
+        previousPositionPacketTick = -1L;
+        previousPositionPacketGenerationRange = null;
+        previousExplicitClientTick = movement.move().clientTick();
+        trace.add("FRONTIER_RESET reason=UNCERTAIN_REQUIRES_FRESH_AUTHORITY");
       }
 
       // Explicit client/server ground disagreements remain evidence, not a hard
