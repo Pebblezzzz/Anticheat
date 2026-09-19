@@ -72,13 +72,11 @@ public final class Phase8MovementValidation {
   }
 
   /**
-   * Creates decisive evidence from an authoritative server/client contradiction
-   * that does not depend on the finite movement search being currently usable.
-   *
-   * <p>This is intentionally emitted as a Phase 8 IMPOSSIBLE result so the
-   * operator accumulator can surface it, but its elimination reason does not
-   * claim exhaustive candidate elimination. Strict setbacks therefore continue
-   * to reject it.</p>
+   * Records an authoritative server/client contradiction without manufacturing
+   * a movement-reachability IMPOSSIBLE verdict. The movement verdict contract
+   * reserves IMPOSSIBLE for exhaustive Phase 6 elimination. Authoritative
+   * observations are therefore retained as explicit UNCERTAIN evidence until a
+   * separate non-reachability policy channel consumes them.
    */
   public static Result authoritativeObservation(String playerId, long serverTick,
                                                Player prior, Player observed,
@@ -218,56 +216,3 @@ public final class Phase8MovementValidation {
 
   private static CandidateSummary summary(Candidate c) {
     Player p = c.context().player();
-    return new CandidateSummary(c.id(), c.context().simulationTick(), p.position().toString(),
-        p.velocity().toString(), p.onGround(), c.context().pose().name(),
-        p.yaw(), p.pitch(), c.provenance().toString());
-  }
-
-  public record Accumulator(Map<String, State> players) implements Serializable {
-    public Accumulator { players = Map.copyOf(players); }
-    public static Accumulator empty() { return new Accumulator(Map.of()); }
-
-    public Accumulated accept(Evidence evidence, Config config) {
-      Objects.requireNonNull(evidence); Objects.requireNonNull(config);
-      String key = evidence.playerId() + "/" + evidence.rule();
-      State old = players.getOrDefault(key, State.empty());
-      State next = switch (evidence.verdict()) {
-        case IMPOSSIBLE -> old.impossible(evidence.serverTick());
-        case POSSIBLE -> old.recovered(evidence.serverTick());
-        case UNCERTAIN -> old.uncertain();
-      };
-      Map<String, State> updated = new LinkedHashMap<>(players); updated.put(key, next);
-      Optional<Alert> alert = Optional.empty();
-      if (config.alertsEnabled() && evidence.verdict() == Verdict.IMPOSSIBLE
-          && next.supportingImpossible() >= config.minimumImpossibleObservations()
-          && (next.lastAlertTick() < 0 || evidence.serverTick() - next.lastAlertTick() >= config.alertDebounceTicks())) {
-        double confidence = Math.min(1.0, (double) next.supportingImpossible() / config.minimumImpossibleObservations());
-        alert = Optional.of(new Alert(evidence.playerId(), evidence.serverTick(), evidence.firstInconsistentTick().orElse(evidence.serverTick()),
-            evidence.rule(), evidence.eliminationReason(), confidence, next.supportingImpossible(), evidence.replayReference()));
-        updated.put(key, next.alerted(evidence.serverTick()));
-      }
-      return new Accumulated(new Accumulator(updated), alert);
-    }
-  }
-
-  public record State(int consecutiveImpossible, int supportingImpossible, int uncertaintyPeriods,
-                      int recoveries, long lastObservationTick, long lastAlertTick) implements Serializable {
-    public static State empty() { return new State(0, 0, 0, 0, -1, -1); }
-    State impossible(long tick) { return new State(consecutiveImpossible + 1, supportingImpossible + 1, uncertaintyPeriods, recoveries, tick, lastAlertTick); }
-    State recovered(long tick) { return new State(0, 0, uncertaintyPeriods, recoveries + 1, tick, lastAlertTick); }
-    State uncertain() { return new State(0, 0, uncertaintyPeriods + 1, recoveries, lastObservationTick, lastAlertTick); }
-    State alerted(long tick) { return new State(consecutiveImpossible, supportingImpossible, uncertaintyPeriods, recoveries, lastObservationTick, tick); }
-  }
-
-  public record Accumulated(Accumulator state, Optional<Alert> alert) implements Serializable {}
-
-  public record Alert(String playerId, long serverTick, long firstInconsistentTick, String reason,
-                      String evidence, double confidence, int supportingEvents, String replayReference) implements Serializable {
-    public String message() {
-      return "[PhantomAC][PHASE8] player=" + playerId + " type=MOVEMENT result=IMPOSSIBLE tick=" + serverTick
-          + " first-inconsistent-tick=" + firstInconsistentTick + " reason=" + evidence
-          + " confidence=" + String.format(Locale.ROOT, "%.2f", confidence)
-          + " replay=" + replayReference;
-    }
-  }
-}
