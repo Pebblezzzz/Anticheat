@@ -18,7 +18,7 @@ public final class Replay {
     for(Event event:timeline.events()){
       Player before=current;long sequence=event.packet().sequence();boolean duplicate=event.packet().flags().contains(PacketFlag.DUPLICATE)||!appliedSequences.add(sequence);
       if(!duplicate) current=State.apply(current,event.packet());
-      else current=new Player(current.position(),current.velocity(),current.yaw(),current.pitch(),current.onGround(),current.gamemode(),current.effects(),current.awaitingTeleport(),true);
+      else current=current.withUncertainty(State.UncertaintyReason.DUPLICATE_PACKET);
       frames.add(new Frame(index++,event,before,current));
     }
     return new Result(frames);
@@ -33,12 +33,19 @@ public final class Replay {
   private static Optional<Divergence> stateDifference(int index,Event event,Player expected,Player actual){
     if(!expected.position().equals(actual.position()))return difference(index,event,"position",expected.position(),actual.position());
     if(!expected.velocity().equals(actual.velocity()))return difference(index,event,"velocity",expected.velocity(),actual.velocity());
-    if(expected.yaw()!=actual.yaw())return difference(index,event,"yaw",expected.yaw(),actual.yaw());
-    if(expected.pitch()!=actual.pitch())return difference(index,event,"pitch",expected.pitch(),actual.pitch());
+    if(Float.compare(expected.yaw(),actual.yaw())!=0)return difference(index,event,"yaw",expected.yaw(),actual.yaw());
+    if(Float.compare(expected.pitch(),actual.pitch())!=0)return difference(index,event,"pitch",expected.pitch(),actual.pitch());
     if(expected.onGround()!=actual.onGround())return difference(index,event,"onGround",expected.onGround(),actual.onGround());
     if(!expected.gamemode().equals(actual.gamemode()))return difference(index,event,"gamemode",expected.gamemode(),actual.gamemode());
     if(!expected.effects().equals(actual.effects()))return difference(index,event,"effects",expected.effects(),actual.effects());
     if(!expected.awaitingTeleport().equals(actual.awaitingTeleport()))return difference(index,event,"awaitingTeleport",expected.awaitingTeleport(),actual.awaitingTeleport());
+    if(!expected.input().equals(actual.input()))return difference(index,event,"input",expected.input(),actual.input());
+    if(!expected.attributes().equals(actual.attributes()))return difference(index,event,"attributes",expected.attributes(),actual.attributes());
+    if(!expected.pose().equals(actual.pose()))return difference(index,event,"pose",expected.pose(),actual.pose());
+    if(!expected.environment().equals(actual.environment()))return difference(index,event,"environment",expected.environment(),actual.environment());
+    if(!expected.clientTickRange().equals(actual.clientTickRange()))return difference(index,event,"clientTickRange",expected.clientTickRange(),actual.clientTickRange());
+    if(!expected.provenance().equals(actual.provenance()))return difference(index,event,"provenance",expected.provenance(),actual.provenance());
+    if(!expected.uncertaintyReasons().equals(actual.uncertaintyReasons()))return difference(index,event,"uncertaintyReasons",expected.uncertaintyReasons(),actual.uncertaintyReasons());
     if(expected.uncertain()!=actual.uncertain())return difference(index,event,"uncertain",expected.uncertain(),actual.uncertain());
     return Optional.empty();
   }

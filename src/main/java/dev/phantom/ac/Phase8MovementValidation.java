@@ -72,15 +72,13 @@ public final class Phase8MovementValidation {
   }
 
   /**
-   * Creates decisive evidence from an authoritative server/client contradiction
-   * that does not depend on the finite movement search being currently usable.
-   *
-   * <p>This is intentionally emitted as a Phase 8 IMPOSSIBLE result so the
-   * operator accumulator can surface it, but its elimination reason does not
-   * claim exhaustive candidate elimination. Strict setbacks therefore continue
-   * to reject it.</p>
+   * Records an authoritative server/client contradiction without manufacturing
+   * a movement-reachability IMPOSSIBLE verdict. The movement verdict contract
+   * reserves IMPOSSIBLE for exhaustive Phase 6 elimination. Authoritative
+   * observations are therefore retained as explicit UNCERTAIN evidence until a
+   * separate non-reachability policy channel consumes them.
    */
-  public static Result authoritativeImpossible(String playerId, long serverTick,
+  public static Result authoritativeObservation(String playerId, long serverTick,
                                                Player prior, Player observed,
                                                WorldSnapshot world, String worldReference,
                                                Validation.SyncWindow timing,
@@ -95,16 +93,16 @@ public final class Phase8MovementValidation {
     if (timing.uncertain()) uncertainty.addAll(timing.reasons());
 
     Evidence evidence = new Evidence(
-        VERSION, Verdict.IMPOSSIBLE, playerId, serverTick,
+        VERSION, Verdict.UNCERTAIN, playerId, serverTick,
         timing.earliestClientTick(), timing.latestClientTick(),
         prior, observed, Contracts.TARGET_VERSION, worldReference,
         List.of("authoritative server state observed",
             "client packet state observed"),
         timing.reasons(), 0, 0, 0,
-        eliminationReason, OptionalLong.of(serverTick), Optional.empty(),
+        eliminationReason, OptionalLong.empty(), Optional.empty(),
         diagnostics, uncertainty, PHASE5_VERSION, PHASE6_VERSION,
         PHASE7_VERSION, replayReference, rule);
-    return new Result(Verdict.IMPOSSIBLE, evidence);
+    return new Result(Verdict.UNCERTAIN, evidence);
   }
 
   public static Result validate(String playerId, long serverTick, Player prior, Player observed,
@@ -151,7 +149,7 @@ public final class Phase8MovementValidation {
     }
 
     Observation observation = new Observation(observed, observedFields);
-    Phase6Reachability.Evidence comparison = new Phase6Reachability(new Vanilla12111RichPhysics()).compare(reachable, observation);
+    Phase6Reachability.Evidence comparison = new Phase6Reachability().compare(reachable, observation);
     if (comparison.verdict() == Phase6Reachability.Verdict.POSSIBLE) {
       List<String> diagnostics = new ArrayList<>(comparison.reasons());
       if (timing.uncertain() && timingExhaustivelyModeled) diagnostics.add("Phase 7 timing uncertainty was exhaustively represented across the declared client-tick window");

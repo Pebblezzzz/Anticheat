@@ -554,4 +554,38 @@ class Phase8PredictionRunnerTest {
     assertEquals(0, second.packetsProcessed());
     assertEquals(first.lastProcessedSequence(), second.lastProcessedSequence());
   }
+  @Test
+  void phase7TimingUncertaintyCannotBecomeDecisiveViaExplicitPacketTick() {
+    Phase7Timing.Config timing = new Phase7Timing.Config(
+        50_000_000L, 50_000_000L, 50_000_000L,
+        new Phase7Timing.LatencyBounds(0, 0),
+        new Phase7Timing.LatencyBounds(0, 0),
+        new Phase7Timing.TickDelayBounds(0, 0),
+        new Phase7Timing.TickDelayBounds(0, 0),
+        250_000_000L, 3, 128);
+
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
+    var report = runner.process(
+        "phase7-uncertainty",
+        List.of(
+            new RawPacket(1, 0, new PlayerContext(
+                "survival", Simulation.Attributes.DEFAULT, Map.of(),
+                Pose.STANDING, MovementEnvironment.dry(true, false, false),
+                new Maths.Vec3(.5, 64, .5), Maths.Vec3.ZERO,
+                false, false, false, List.of())),
+            new RawPacket(2, 50_000_000L, new ClientTickEnd()),
+            // Sequence 3 is intentionally missing; the explicit client tick must
+            // not bypass Phase 7's chronology uncertainty.
+            new RawPacket(4, 100_000_000L, new Move(
+                new Maths.Vec3(.6, 64, .5), 0f, 0f, true, 1L))),
+        floorWorld(), anchor(), 0L);
+
+    assertEquals(Phase8MovementValidation.Verdict.UNCERTAIN,
+        report.results().getFirst().verdict(), report.results().toString());
+    assertTrue(report.results().getFirst().evidence().uncertaintySources().stream()
+        .anyMatch(reason -> reason.contains("Phase 7 timing envelope")),
+        report.results().toString());
+  }
+
+
 }

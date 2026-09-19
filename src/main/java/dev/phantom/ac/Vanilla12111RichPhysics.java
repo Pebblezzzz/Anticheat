@@ -52,9 +52,12 @@ public final class Vanilla12111RichPhysics {
             if(!worldCollision.isDefinite()||!entityCollision.isDefinite())return uncertain(context,"pose transition crosses incomplete collision coverage");
             if(!worldCollision.isEmpty()||!entityCollision.isEmpty())pose=context.pose();
         }
-        if(s.gamemode().equals("creative")||s.gamemode().equals("spectator"))return new StepResult(context.simulationTick(),richPlayer(s,s.position(),Vec3.ZERO,false,pose,context,false),false,false,false,false,false,false,false,"non-physical gamemode");
-        if(!s.gamemode().equals("survival")&&!s.gamemode().equals("adventure"))return uncertain(context,"unsupported gamemode movement model");
-        Aabb start=Aabb.playerAt(s.position(),pose);var startEntities=context.entityCollisions().boxesIn(new dev.phantom.ac.geometry.BlockBox(start.minX(),start.minY(),start.minZ(),start.maxX(),start.maxY(),start.maxZ()));if(!startEntities.isDefinite())return uncertain(context,"entity collision history is incomplete");
+        Aabb start=Aabb.playerAt(s.position(),pose);
+        if("spectator".equals(s.gamemode()) || context.flying()) {
+            return flightStep(context, start, "spectator".equals(s.gamemode()));
+        }
+        if(!s.gamemode().equals("survival")&&!s.gamemode().equals("adventure")&&!s.gamemode().equals("creative"))
+            return uncertain(context,"unsupported gamemode movement model");var startEntities=context.entityCollisions().boxesIn(new dev.phantom.ac.geometry.BlockBox(start.minX(),start.minY(),start.minZ(),start.maxX(),start.maxY(),start.maxZ()));if(!startEntities.isDefinite())return uncertain(context,"entity collision history is incomplete");
         if(context.world().hasUnknownOrUnsupported(new dev.phantom.ac.geometry.BlockBox(start.minX(),start.minY(),start.minZ(),start.maxX(),start.maxY(),start.maxZ())))return uncertain(context,"start collision volume is not fully known");
         double radians=Math.toRadians(s.yaw());
         boolean fluid=context.movementEnvironment().fluid()!=Phase5Mechanics.Fluid.NONE,
@@ -126,6 +129,97 @@ public final class Vanilla12111RichPhysics {
         double postTickVerticalVelocity;if(context.effects().levitation())postTickVerticalVelocity=context.effects().levitationVelocity();else if(climbing)postTickVerticalVelocity=velocity.y();else if(context.movementEnvironment().fluid()==Phase5Mechanics.Fluid.WATER||context.movementEnvironment().fluid()==Phase5Mechanics.Fluid.LAVA)postTickVerticalVelocity=velocity.y()*context.movementEnvironment().fluidDrag()-gravity;else if(gliding)postTickVerticalVelocity=velocity.y()-GLIDE_GRAVITY;else postTickVerticalVelocity=(jumped?(velocity.y()-gravity*context.effects().fallGravityMultiplier())*AIR_VERTICAL_DRAG:velocity.y()*AIR_VERTICAL_DRAG-gravity*context.effects().fallGravityMultiplier()*AIR_VERTICAL_DRAG);
         double groundedVerticalVelocity=context.effects().levitation()?context.effects().levitationVelocity():climbing?velocity.y():(context.movementEnvironment().fluid()==Phase5Mechanics.Fluid.WATER||context.movementEnvironment().fluid()==Phase5Mechanics.Fluid.LAVA)?velocity.y()*context.movementEnvironment().fluidDrag()-gravity:(supported&&s.onGround()&&Math.abs(velocity.y())<=1.0E-12?0.0:-gravity*AIR_VERTICAL_DRAG*context.effects().fallGravityMultiplier());double nextY=grounded&& !context.effects().levitation()&&!climbing?groundedVerticalVelocity:postTickVerticalVelocity;Vec3 nextVelocity=new Vec3(collision.collidedX()?0:velocity.x()*horizontalFactor,nextY,collision.collidedZ()?0:velocity.z()*horizontalFactor);
         Phase5Mechanics.Pose nextPose=Phase5Mechanics.nextPose(pose,context.movementEnvironment(),context.sleeping());Player next=richPlayer(s,s.position().add(displacement),nextVelocity,grounded,nextPose,context,false);return new StepResult(context.simulationTick(),next,collision.collidedX()||collision.collidedY()||collision.collidedZ(),collision.stepAttempted(),collision.stepSucceeded(),collision.collidedX(),collision.collidedY(),collision.collidedZ(),collision.collidedX()||collision.collidedY()||collision.collidedZ(),collision.diagnostic());
+    }
+
+
+    /**
+     * Client-side flight is modeled as a first-class movement mode rather than
+     * downgraded to empirical-only uncertainty. The model is version-pinned and
+     * intentionally separated from survival travel:
+     * - creative flight uses horizontal yaw plus jump/sneak vertical control and
+     *   still resolves block/entity collisions;
+     * - spectator flight is noclip and follows the look vector.
+     *
+     * These rules are maintained as source-derived mechanics, in the same
+     * architecture Grim uses: a deterministic client movement replica plus
+     * version-specific collision behavior, with edge cases covered by vectors.
+     */
+    private StepResult flightStep(Context context, Aabb start, boolean spectator) {
+        Player s = context.state();
+        double yaw = Math.toRadians(s.yaw());
+        double pitch = Math.toRadians(s.pitch());
+        double speed = 0.05 * (context.input().sprint() ? 2.0 : 1.0);
+        double forward = context.input().forward();
+        double strafe = context.input().strafe();
+        double magnitude = Math.hypot(forward, strafe);
+        double scale = magnitude > 1.0 ? 1.0 / Math.sqrt(2.0) : 1.0;
+
+        Vec3 velocity;
+        if (spectator) {
+            double horizontalForward = forward * Math.cos(pitch);
+            double verticalLook = -forward * Math.sin(pitch);
+            double x = scale * speed * (
+                    strafe * Math.cos(yaw) - horizontalForward * Math.sin(yaw));
+            double z = scale * speed * (
+                    horizontalForward * Math.cos(yaw) + strafe * Math.sin(yaw));
+            double y = scale * speed * verticalLook;
+            if (context.input().jump()) y += speed;
+            if (context.input().sneak()) y -= speed;
+            velocity = new Vec3(x, y, z);
+        } else {
+            double x = scale * speed * (
+                    strafe * Math.cos(yaw) - forward * Math.sin(yaw));
+            double z = scale * speed * (
+                    forward * Math.cos(yaw) + strafe * Math.sin(yaw));
+            double y = 0.0;
+            if (context.input().jump()) y += speed;
+            if (context.input().sneak()) y -= speed;
+            velocity = new Vec3(x, y, z);
+        }
+
+        Vec3 displacement;
+        boolean collidedX = false;
+        boolean collidedY = false;
+        boolean collidedZ = false;
+        boolean entityCollision = false;
+        boolean stepAttempted = false;
+        boolean stepSucceeded = false;
+        String diagnostic = spectator ? "1.21.11 spectator noclip flight" : "1.21.11 creative flight";
+
+        if (spectator) {
+            displacement = velocity;
+        } else {
+            var collision = RichWorldCollision.resolve(
+                    context.world(), start, velocity, 0.0, context.entityCollisions());
+            if (collision.uncertain()) return uncertain(context, collision.diagnostic());
+            displacement = collision.displacement();
+            collidedX = collision.collidedX();
+            collidedY = collision.collidedY();
+            collidedZ = collision.collidedZ();
+            entityCollision = collidedX || collidedY || collidedZ;
+            stepAttempted = collision.stepAttempted();
+            stepSucceeded = collision.stepSucceeded();
+            if (context.entityCollisions().boxesIn(new dev.phantom.ac.geometry.BlockBox(
+                    start.minX(), start.minY(), start.minZ(), start.maxX(), start.maxY(), start.maxZ())).isEmpty() == false) {
+                entityCollision = true;
+            }
+        }
+
+        Player next = richPlayer(
+                s, s.position().add(displacement),
+                spectator ? velocity : new Vec3(
+                        collidedX ? 0.0 : velocity.x(),
+                        collidedY ? 0.0 : velocity.y(),
+                        collidedZ ? 0.0 : velocity.z()),
+                false, poseForFlight(context, spectator), context, false);
+        return new StepResult(context.simulationTick(), next,
+                collidedX || collidedY || collidedZ, stepAttempted, stepSucceeded,
+                collidedX, collidedY, collidedZ, entityCollision, diagnostic);
+    }
+
+    private Phase5Mechanics.Pose poseForFlight(Context context, boolean spectator) {
+        if (context.sleeping()) return Phase5Mechanics.Pose.SLEEPING;
+        return Phase5Mechanics.Pose.STANDING;
     }
 
     private Player richPlayer(Player source,Vec3 position,Vec3 velocity,boolean onGround,Phase5Mechanics.Pose pose,Context context,boolean uncertain){State.Environment environment=switch(context.environment()){case WATER->State.Environment.WATER;case LAVA->State.Environment.LAVA;case CLIMBABLE->State.Environment.CLIMBABLE;case DRY->State.Environment.DRY;case UNKNOWN->State.Environment.UNKNOWN;};return new Player(position,velocity,source.yaw(),source.pitch(),onGround,source.gamemode(),source.effects(),source.awaitingTeleport(),uncertain,Optional.of(context.input()),context.attributes(),pose,environment,source.clientTickRange(),source.provenance(),source.uncertaintyReasons());}

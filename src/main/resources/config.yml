@@ -9,9 +9,14 @@ debug:
   summary-interval-seconds: 5
 
 enforcement:
-  # Disabled by default. Enable only in a controlled test server after reviewing evidence.
+  # All punitive actions remain disabled by default.
   kick-enabled: false
-  minimum-confidence: 0.90
+  punishment-enabled: false
+  punishment-command: "warn {player} Phantom movement evidence"
+  # A movement IMPOSSIBLE result must be supported by repeated exhaustive evidence.
+  minimum-impossible-observations: 2
+  minimum-confidence: 1.0
+  only-when-exhaustive: true
   permission-exempt: true
   permission: phantom.exempt
 validation:

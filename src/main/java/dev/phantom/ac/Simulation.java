@@ -36,9 +36,15 @@ public final class Simulation {
       int minChunkX=Math.floorDiv((int)Math.floor(box.minX())-1,16),maxChunkX=Math.floorDiv((int)Math.floor(box.maxX())+1,16),minChunkZ=Math.floorDiv((int)Math.floor(box.minZ())-1,16),maxChunkZ=Math.floorDiv((int)Math.floor(box.maxZ())+1,16);
       for(int cx=minChunkX;cx<=maxChunkX;cx++)for(int cz=minChunkZ;cz<=maxChunkZ;cz++)builder.loadChunk(cx,cz);
       for(var e:world.blocks().entrySet()){if(e.getValue()==World.Block.UNKNOWN||e.getValue()==World.Block.UNSUPPORTED)continue;builder.setBlock(e.getKey().x(),e.getKey().y(),e.getKey().z(),World.legacyBlockState(e.getValue()));}
+      /*
+       * Legacy compatibility snapshots use the observed onGround bit as their
+       * environment contract. This branch is retained only for the pre-Phase-4
+       * compatibility API; the authoritative Phase 4/5 path never uses it.
+       */
       if(state.onGround()){
         int supportX=(int)Math.floor(state.position().x()),supportY=(int)Math.floor(state.position().y()-1.0E-4),supportZ=(int)Math.floor(state.position().z());
-        if(world.blocks().get(new World.Pos(supportX,supportY,supportZ))==null){
+        if(world.blocks().get(new World.Pos(supportX,supportY,supportZ))==null
+            && world.visibleChunks().contains(World.Chunk.containing(supportX,supportZ))){
           builder.setBlock(supportX,supportY,supportZ,World.legacyBlockState(World.Block.FULL));
         }
       }

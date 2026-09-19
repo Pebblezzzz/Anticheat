@@ -632,7 +632,7 @@ class CausalMovementPipelineTest {
     var result = CausalMovementPipeline.evaluateFlightToggle(
         "flight-evidence", event, timeline, timing, floorWorld(), anchor());
     assertTrue(result.isPresent());
-    assertEquals(Verdict.IMPOSSIBLE, result.get().verdict());
+    assertEquals(Verdict.UNCERTAIN, result.get().verdict());
     assertEquals("UNAUTHORIZED_FLIGHT_TOGGLE_ATTEMPT", result.get().evidence().rule());
   }
 

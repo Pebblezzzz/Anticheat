@@ -1274,7 +1274,7 @@ public final class CausalMovementPipeline {
             List.of("server flight-toggle event has no client simulation tick"))
         : Phase7Timing.toPhase6Window(eventTiming);
 
-    return Optional.of(Phase8MovementValidation.authoritativeImpossible(
+    return Optional.of(Phase8MovementValidation.authoritativeObservation(
         playerId,
         event.serverTick(),
         frame.before(),
