@@ -23,11 +23,18 @@ public final class Phase4WorldReplica implements Serializable {
   public record Provenance(String sourceId,String packetType,long sequence,long serverTick,Long clientTick,boolean clientVisible,String detail) implements Serializable {
     public Provenance { Objects.requireNonNull(sourceId);Objects.requireNonNull(packetType);Objects.requireNonNull(detail); }
   }
-  public sealed interface Event extends Serializable permits ChunkLoad,ChunkData,ChunkUnload,BlockChange,MultiBlockChange,DimensionChange,WorldMetadata,EntitySpawn,EntityMove,EntityDespawn {
+  public sealed interface Event extends Serializable permits ChunkLoad,ChunkData,ChunkSections,ChunkUnload,BlockChange,MultiBlockChange,DimensionChange,WorldMetadata,EntitySpawn,EntityMove,EntityDespawn {
     Order order(); Provenance provenance();
   }
   public record ChunkLoad(Order order,Provenance provenance,Chunk chunk) implements Event {}
   public record ChunkData(Order order,Provenance provenance,Chunk chunk,Map<Pos,BlockState> states) implements Event { public ChunkData { Objects.requireNonNull(chunk);states=Map.copyOf(states); } }
+  /** Replaces complete protocol sections without assuming omitted blocks are unchanged. */
+  public record ChunkSections(Order order,Provenance provenance,Chunk chunk,Map<Integer,Map<Pos,BlockState>> sections) implements Event {
+    public ChunkSections { Objects.requireNonNull(chunk); if(sections.isEmpty()) throw new IllegalArgumentException("sections must not be empty");
+      TreeMap<Integer,Map<Pos,BlockState>> copy=new TreeMap<>();
+      for(var e:sections.entrySet()){ if(e.getKey()<0) throw new IllegalArgumentException("section index must be non-negative"); copy.put(e.getKey(),Map.copyOf(e.getValue())); }
+      sections=Map.copyOf(copy); }
+  }
   public record ChunkUnload(Order order,Provenance provenance,Chunk chunk) implements Event {}
   public record BlockChange(Order order,Provenance provenance,Pos position,BlockState state) implements Event {}
   public record MultiBlockChange(Order order,Provenance provenance,Map<Pos,BlockState> states) implements Event { public MultiBlockChange { states=Map.copyOf(states); } }
@@ -45,7 +52,10 @@ public final class Phase4WorldReplica implements Serializable {
   private final NavigableMap<Order,Event> journal=new TreeMap<>();
   private final Set<Long> seenSequences=new HashSet<>();
   private final List<Generation> history=new ArrayList<>();
-  private long generationId,ordinal;
+  private final List<Event> unassigned=new ArrayList<>();
+  private final Map<Short,List<Event>> pending=new LinkedHashMap<>();
+  private final Deque<Short> sentOrder=new ArrayDeque<>();
+  private long generationId,ordinal,lastVisibleSequence=-1L;
 
   public Phase4WorldReplica(String version,String worldId,int minY,int maxY) {
     this.version=Objects.requireNonNull(version);
@@ -65,16 +75,54 @@ public final class Phase4WorldReplica implements Serializable {
   public WorldQueries.CollisionResult getCollisionShapes(BlockBox box){return WorldQueries.collisions(snapshot(),box);}
   public FluidState getFluidState(int x,int y,int z){return WorldQueries.fluidAt(snapshot(),x,y,z);}
   public synchronized List<Generation> generations(){return List.copyOf(history);}
-  public synchronized Optional<Generation> generationAtSequence(long sequence){
-    Phase4WorldReplica r=new Phase4WorldReplica(version,current.get().worldId(),current.get().world().minY(),current.get().world().maxY());
-    for(Event e:journal.values()) if(e.order().sequence()<=sequence) r.accept(e);
-    return Optional.ofNullable(r.getWorldGeneration());
-  }
+  public synchronized Optional<Generation> generationAtSequence(long sequence){Generation a=null;for(Generation g:history)if(g.sequence()<=sequence)a=g;return Optional.ofNullable(a);}
   public synchronized Optional<Generation> generationAt(Order point){Generation a=null;for(Generation g:history)if(g.order().compareTo(point)<=0)a=g;return Optional.ofNullable(a);}
-  public synchronized WorldSnapshot snapshotAtSequence(long sequence){return generationAtSequence(sequence).map(Generation::world).orElseGet(this::snapshot);}
+  public synchronized WorldSnapshot snapshotAtSequence(long sequence){return generationAtSequence(sequence).map(Generation::world).orElse(null);}
 
-  /** Adds an event; canonical ordering is tick, receive time, capture sequence, ordinal. */
-  public synchronized void accept(Event event){Objects.requireNonNull(event);if(!seenSequences.add(event.order().sequence()))return;journal.put(event.order(),event);rebuild();}
+  /** Adds an already-visible event; canonical ordering is tick, receive time, capture sequence, ordinal. */
+  public synchronized void accept(Event event){Objects.requireNonNull(event);acceptVisible(List.of(event),event.order().sequence());}
+
+  /** Stages a clientbound event until a transaction barrier proves client visibility. */
+  public synchronized void queue(Event event){Objects.requireNonNull(event);unassigned.add(event);}
+  public synchronized boolean hasUnassignedMutations(){return !unassigned.isEmpty();}
+  public synchronized void openBarrier(short transactionId){
+    if(pending.containsKey(transactionId))throw new IllegalStateException("transaction barrier already open: "+transactionId);
+    if(unassigned.isEmpty())return;
+    pending.put(transactionId,List.copyOf(unassigned)); unassigned.clear(); sentOrder.addLast(transactionId);
+  }
+  public synchronized boolean acknowledge(short transactionId,long acknowledgementSequence){
+    if(acknowledgementSequence<0)throw new IllegalArgumentException("acknowledgementSequence must be non-negative");
+    if(!pending.containsKey(transactionId))return false;
+    List<Event> visible=new ArrayList<>();
+    while(!sentOrder.isEmpty()){
+      short head=sentOrder.removeFirst(); List<Event> batch=pending.remove(head); if(batch!=null)visible.addAll(batch);
+      if(head==transactionId)break;
+    }
+    acceptVisible(visible,acknowledgementSequence); return true;
+  }
+  public synchronized void abortBarrier(short transactionId){
+    List<Event> batch=pending.remove(transactionId); sentOrder.remove(transactionId); if(batch!=null&&!batch.isEmpty())unassigned.addAll(0,batch);
+  }
+  public synchronized int pendingBarrierCount(){return pending.size();}
+  public synchronized long causalSequence(){return lastVisibleSequence;}
+  public synchronized int visibleChunkCount(){return snapshot().loadedChunks().size();}
+  public synchronized int decodedStateCacheSize(){int n=0;for(var states:snapshot().chunks().values())n+=states.size();return n;}
+  public synchronized WorldSnapshot snapshotAround(double centerX,double centerZ,int radiusChunks){
+    if(radiusChunks<0)throw new IllegalArgumentException("radiusChunks must be non-negative");
+    WorldSnapshot source=snapshot(); int cx=Math.floorDiv((int)Math.floor(centerX),16),cz=Math.floorDiv((int)Math.floor(centerZ),16);
+    WorldSnapshot.Builder b=WorldSnapshot.builder(version,source.minY(),source.maxY());
+    for(Chunk chunk:source.loadedChunks()) if(Math.abs(chunk.x()-cx)<=radiusChunks&&Math.abs(chunk.z()-cz)<=radiusChunks){
+      b.loadChunk(chunk); for(var e:source.chunkStates(chunk).entrySet()){Pos p=e.getKey(); BlockState s=e.getValue(); if(s.isUnsupported())b.setUnsupportedBlock(p.x(),p.y(),p.z(),s.blockId()); else b.setBlock(p.x(),p.y(),p.z(),s);}
+    }
+    for(Chunk chunk:source.unknownChunkSet()) if(Math.abs(chunk.x()-cx)<=radiusChunks&&Math.abs(chunk.z()-cz)<=radiusChunks)b.loadUnknownChunk(chunk);
+    return b.build();
+  }
+
+  private void acceptVisible(List<Event> events,long causalSequence){
+    boolean changed=false;
+    for(Event event:events){if(!seenSequences.add(event.order().sequence()))continue;journal.put(event.order(),event);changed=true;}
+    if(changed||causalSequence>lastVisibleSequence){lastVisibleSequence=Math.max(lastVisibleSequence,causalSequence);rebuild(lastVisibleSequence);}
+  }
 
   /** Adapts the existing Phase 1-3 timeline without consulting the server world. */
   public void accept(Timeline.Event event){
@@ -90,7 +138,9 @@ public final class Phase4WorldReplica implements Serializable {
   }
   private long nextOrdinal(){return ordinal++;}
 
-  private void rebuild(){
+  private void rebuild(){ rebuild(lastVisibleSequence); }
+
+  private void rebuild(long causalSequence){
     Generation old=current.get();String worldId=old.worldId();int minY=old.world().minY(),maxY=old.world().maxY();
     Map<Chunk,Map<Pos,BlockState>> chunks=new TreeMap<>(Comparator.comparingInt(Chunk::x).thenComparingInt(Chunk::z));
     Set<Chunk> loaded=new TreeSet<>(Comparator.comparingInt(Chunk::x).thenComparingInt(Chunk::z));
@@ -101,6 +151,7 @@ public final class Phase4WorldReplica implements Serializable {
       if(e instanceof DimensionChange d){worldId=d.worldId();minY=d.minY();maxY=d.maxY();chunks.clear();loaded.clear();unknown.clear();entities.clear();metadata.clear();}
       else if(e instanceof ChunkLoad c){loaded.add(c.chunk());unknown.add(c.chunk());chunks.remove(c.chunk());}
       else if(e instanceof ChunkData c){loaded.add(c.chunk());unknown.remove(c.chunk());TreeMap<Pos,BlockState>s=new TreeMap<>(WorldSnapshot.POS_ORDER);s.putAll(c.states());chunks.put(c.chunk(),s);}
+      else if(e instanceof ChunkSections c){loaded.add(c.chunk());unknown.remove(c.chunk());Map<Pos,BlockState> states=chunks.computeIfAbsent(c.chunk(),k->new TreeMap<>(WorldSnapshot.POS_ORDER));for(var section:c.sections().values()){int sectionIndex=c.sections().entrySet().stream().filter(x->x.getValue()==section).mapToInt(Map.Entry::getKey).findFirst().orElse(-1);if(sectionIndex<0)continue;int y0=minY+sectionIndex*16;states.keySet().removeIf(p->p.y()>=y0&&p.y()<y0+16);states.putAll(section);}}
       else if(e instanceof ChunkUnload c){loaded.remove(c.chunk());unknown.remove(c.chunk());chunks.remove(c.chunk());}
       else if(e instanceof BlockChange c)applyBlock(loaded,unknown,chunks,c.position(),c.state());
       else if(e instanceof MultiBlockChange c){List<Pos> ps=new ArrayList<>(c.states().keySet());ps.sort(WorldSnapshot.POS_ORDER);for(Pos p:ps)applyBlock(loaded,unknown,chunks,p,c.states().get(p));}
@@ -114,7 +165,7 @@ public final class Phase4WorldReplica implements Serializable {
     for(Chunk c:loaded){if(unknown.contains(c))b.loadUnknownChunk(c);else b.loadChunk(c);}
     for(Map<Pos,BlockState>s:chunks.values())for(var e:s.entrySet()){Pos p=e.getKey();BlockState state=e.getValue();if(state.isUnsupported())b.setUnsupportedBlock(p.x(),p.y(),p.z(),state.blockId());else b.setBlock(p.x(),p.y(),p.z(),state);}
     WorldSnapshot world=b.build();
-    Generation next=new Generation(++generationId,worldId,tick,sequence,applied.isEmpty()?old.order():applied.getLast().order(),world,EntityCollisions.of(new ArrayList<>(entities.values())),metadata,applied);
+    Generation next=new Generation(++generationId,worldId,tick,Math.max(sequence,causalSequence),applied.isEmpty()?old.order():applied.getLast().order(),world,EntityCollisions.of(new ArrayList<>(entities.values())),metadata,applied);
     history.add(next);current.set(next);
   }
   private static void applyBlock(Set<Chunk>loaded,Set<Chunk>unknown,Map<Chunk,Map<Pos,BlockState>>chunks,Pos p,BlockState state){Chunk c=p.chunk();if(!loaded.contains(c)||unknown.contains(c))return;Map<Pos,BlockState>s=chunks.computeIfAbsent(c,k->new TreeMap<>(WorldSnapshot.POS_ORDER));if(state.isAir())s.remove(p);else s.put(p,state);}
