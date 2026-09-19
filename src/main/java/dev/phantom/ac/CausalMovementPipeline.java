@@ -1649,30 +1649,19 @@ public final class CausalMovementPipeline {
       World.VisibilityHistory history,
       MovementEvent movement) {
     /*
-     * The live provider is already a causal client-visible replica at the
-     * movement sequence. When it is explicitly available, use it directly for
-     * physics: merging it with an incomplete historical reconstruction can
-     * reintroduce UNKNOWN coverage into an otherwise complete live chunk.
-     * Historical replay remains the fallback when no live causal replica exists.
+     * MovementEvent.world() has already been selected at capture/reconstruction
+     * time using Phase 7's earliest possible simulation tick. It is the strongest
+     * causally available client-world snapshot for this movement. Reusing it for
+     * each Phase 5 step prevents a second, inconsistent reconstruction from
+     * dropping a known chunk and turning known air into UNKNOWN.
+     *
+     * When no client-visible world exists, fall back to the historical Phase 4
+     * reconstruction so unknown/unloaded coverage still propagates correctly.
      */
-    if (movement.liveWorldUsed() && !movement.world().loadedChunks().isEmpty()) {
+    if (movement.world() != null && !movement.world().loadedChunks().isEmpty()) {
       return movement.world();
     }
-
-    WorldSnapshot historical = history.statesAt(simulationTick);
-    if (!movement.world().loadedChunks().isEmpty()) {
-      Player causalRoot = movement.simulationAuthority()
-          .map(snapshot -> playerFromAuthority(snapshot.context()))
-          .orElse(movement.stateFrame().before());
-      boolean historicalCoversRoot =
-          historical.fullyKnown(playerCollisionBox(causalRoot));
-      boolean historicalCoversObserved =
-          historical.fullyKnown(playerCollisionBox(movement.stateFrame().after()));
-      if (!historicalCoversRoot || !historicalCoversObserved) {
-        return WorldSnapshot.merge(historical, movement.world());
-      }
-    }
-    return historical;
+    return history.statesAt(Math.max(0L, simulationTick));
   }
 
   private static Optional<Candidate> rootCandidateForTarget(
