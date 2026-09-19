@@ -2025,7 +2025,8 @@ public final class CausalMovementPipeline {
     if (explicitClientTick) {
       Packets.Move move = (Packets.Move) movement.packet().packet();
       long target = move.clientTick();
-      if (movement.packet().provenance().sourceId().startsWith("paper-")) {
+      boolean liveClientTickMovement = movement.packet().provenance().sourceId().startsWith("paper-client-tick");
+      if (liveClientTickMovement) {
         Optional<AuthoritativeSnapshot> precedingLive = authorities.stream()
             .filter(snapshot -> snapshot.sequence() < sequence)
             .filter(snapshot -> snapshot.receivedNanos() <= received)
