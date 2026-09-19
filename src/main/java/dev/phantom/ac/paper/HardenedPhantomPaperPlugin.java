@@ -32,8 +32,7 @@ import dev.phantom.ac.Packets;
 import dev.phantom.ac.Packets.RawPacket;
 import dev.phantom.ac.Phase5Mechanics;
 import dev.phantom.ac.Phase7Timing;
-import dev.phantom.ac.Phase8LiveValidation;
-import dev.phantom.ac.Phase8IncrementalRunner;
+import dev.phantom.ac.Phase8PredictionRunner;
 import dev.phantom.ac.Phase8MovementValidation;
 import dev.phantom.ac.SetbackPolicy;
 import dev.phantom.ac.State;
@@ -140,7 +139,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           logMovementPacketDebug(capture.playerName,capture,sequence,receivedNanos,event.getPacketType().toString(),packet,move,tickObservation);
         appendPacket(capture,new RawPacket(sequence,receivedNanos,move,
             Packets.CaptureProvenance.fromAdapter(sourceId,move,authoritativeTick)));
-        scheduleNettyValidation(capture,event.getChannel());
+        schedulePredictionValidation(capture,event.getChannel());
       }else if(event.getPacketType()==PacketType.Play.Client.PLAYER_INPUT){
         var input=new WrapperPlayClientPlayerInput(event);
         Packets.ClientInput clientInput=new Packets.ClientInput(
@@ -165,7 +164,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
                 Packets.WorldTransactionAck ack=new Packets.WorldTransactionAck(transaction);
                 appendPacket(capture,new RawPacket(sequence,receivedNanos,ack,
                     Packets.CaptureProvenance.fromAdapter("paper-transaction-ack",ack,null)));
-                scheduleNettyValidation(capture,capture.nettyChannel);
+                schedulePredictionValidation(capture);
               }
             });
           }catch(RejectedExecutionException rejected){
@@ -740,9 +739,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
    * owning the client connection. Packet capture stays lightweight and all
    * Bukkit/Paper actions remain on the server's main thread.
    */
-  private void scheduleNettyValidation(Capture capture,Object rawChannel){
+  private void schedulePredictionValidation(Capture capture){
     if(capture==null)return;
-    if(rawChannel instanceof Channel channel) capture.nettyChannel=channel;
     ExecutorService executor=validationExecutor;
     if(executor==null)return;
 
@@ -751,7 +749,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
      * on the packet connection's Netty EventLoop: doing so turns anti-cheat work
      * into client-visible packet/movement latency.
      *
-     * nettyValidationQueued is deliberately a coalescing gate. While one batch
+     * predictionValidationQueued is deliberately a coalescing gate. While one batch
      * is running, additional movement/world packets only cause a single follow-up
      * batch, rather than one expensive replay per packet.
      */
@@ -759,7 +757,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     try{
       executor.execute(()->{
         try{
-          runNettyValidation(capture);
+          runPredictionValidation(capture);
         }finally{
           capture.nettyValidationQueued.set(false);
           /*
@@ -778,7 +776,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
   }
 
-  private void runNettyValidation(Capture capture){
+  private void runPredictionValidation(Capture capture){
     long startedNanos=System.nanoTime();
     capture.validationRuns.incrementAndGet();
     try{
@@ -790,7 +788,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       Vec3 authoritativePosition=capture.lastAuthoritativePosition;
 
       if(debugLevel(capture.playerId).trace()){
-        getLogger().info("[PhantomAC][PHASE8][NETTY_START] player="+playerName
+        getLogger().info("[PhantomAC][PHASE8][PREDICT_START] player="+playerName
             +" thread="+Thread.currentThread().getName()
             +" rawPackets="+raw.size()
             +" lastProcessedSequence="+capture.movementRunner.lastProcessedSequence()
@@ -798,20 +796,17 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             +" continuation="+capture.movementRunner.continuation());
       }
 
-      Phase8IncrementalRunner.Report incremental=capture.movementRunner.processWithWorldProvider(
+      Phase8PredictionRunner.Report incremental=capture.movementRunner.processWithWorldProvider(
           playerName,
           raw,
           sequence->capture.clientWorld.snapshotAtOrBefore(sequence),
           anchor,
-          capture.initialStateReceivedNanos,
-          authoritativePosition);
+          capture.initialStateReceivedNanos);
 
-      Phase8LiveValidation.Report report=new Phase8LiveValidation.Report(
-          incremental.results(),incremental.movementObservations(),incremental.possible(),
-          incremental.uncertain(),incremental.impossible());
+      Phase8PredictionRunner.Report report=incremental;
 
       if(debugLevel(capture.playerId).trace()){
-        getLogger().info("[PhantomAC][PHASE8][NETTY_DONE] player="+playerName
+        getLogger().info("[PhantomAC][PHASE8][PREDICT_DONE] player="+playerName
             +" thread="+Thread.currentThread().getName()
             +" elapsedMicros="+((System.nanoTime()-startedNanos)/1_000L)
             +" packets="+incremental.packetsProcessed()
@@ -846,7 +841,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
   }
 
-  private void applyResult(Capture capture,Phase8LiveValidation.Report report){
+  private void applyResult(Capture capture,Phase8PredictionRunner.Report report){
     DebugLevel debugLevel=debugLevel(capture.playerId);
     if (debugLevel.trace()) {
       for(Phase8MovementValidation.Result result:report.results())
@@ -933,7 +928,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     return false;
   }
 
-  private void logValidationSummary(Capture capture,String playerName,Phase8LiveValidation.Report report,
+  private void logValidationSummary(Capture capture,String playerName,Phase8PredictionRunner.Report report,
                                      List<CausalMovementPipeline.Frame> frames){
     if(report.results().isEmpty())return;
 
@@ -1115,7 +1110,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   private void logPhase8Timing(String playerName,Capture capture,Timeline.Snapshot timeline,
-                               Phase7Timing.Reconstruction timing,Phase8LiveValidation.Report report){
+                               Phase7Timing.Reconstruction timing,Phase8PredictionRunner.Report report){
     Phase7Timing.EventTiming latestMovement=timing.frames().stream()
         .map(Phase7Timing.Frame::timing)
         .filter(t->t.kind()==Phase7Timing.EventKind.MOVEMENT)
@@ -1377,7 +1372,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final dev.phantom.ac.Phase4WorldReplica clientWorld=new dev.phantom.ac.Phase4WorldReplica(Contracts.TARGET_VERSION);
     volatile Channel nettyChannel;
     volatile String playerName;
-    final AtomicBoolean nettyValidationQueued=new AtomicBoolean();
+    final AtomicBoolean predictionValidationQueued=new AtomicBoolean();
     final Phase8IncrementalRunner movementRunner;
     volatile State.Player initialState;
     volatile long initialStateReceivedNanos=-1L;
@@ -1407,7 +1402,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     volatile int minY=-64,maxY=319;
     volatile double lastServerX,lastServerY,lastServerZ;
 
-    Capture(UUID id,long epoch,int candidateBudget){playerId=id;epochNanos=epoch;movementRunner=new Phase8IncrementalRunner(candidateBudget,epoch);}
+    Capture(UUID id,long epoch,int candidateBudget){playerId=id;epochNanos=epoch;movementRunner=new Phase8PredictionRunner(candidateBudget);}
 
     void updateServerPosition(Player player){
       org.bukkit.Location location=player.getLocation();
