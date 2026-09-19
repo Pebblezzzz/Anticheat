@@ -440,11 +440,23 @@ public final class CausalMovementPipeline {
             + " boxes=" + movement.authority().snapshot().get().context().entityBoxes().size());
       }
 
-      if ((previousPositionPacketTick >= 0
+      boolean observedPositionChanged =
+          !Phase6Reachability.positionMatches(
+              observedBefore.position(), observedAfter.position());
+
+      /*
+       * Multiple packets in one client tick are only a sub-tick ambiguity when
+       * they actually describe different positions. Clients may legitimately
+       * emit repeated position-bearing packets while stationary (for example
+       * to refresh rotation/ground state). Those packets must remain eligible
+       * for the deterministic zero-delta witness below.
+       */
+      if (((previousPositionPacketTick >= 0
               && eventTiming.simulationClientTicks().isExact()
               && movementTick == previousPositionPacketTick)
-          || sameExplicitClientTick) {
-        uncertainty.add("multiple position-bearing movement packets occurred in one client tick; sub-tick motion is not modeled");
+          || sameExplicitClientTick)
+          && observedPositionChanged) {
+        uncertainty.add("multiple position-bearing movement packets changed position within one client tick; sub-tick motion is not modeled");
         lastAmbiguitySequence = sequence;
         recoveryRequired = true;
         frontier = Frontier.empty();
@@ -2451,8 +2463,18 @@ public final class CausalMovementPipeline {
   private static Optional<Candidate> authorityObservationWitness(
       MovementEvent movement,
       long simulationTick) {
-    Optional<AuthoritativeSnapshot> authority = movement.authority().snapshot();
-    if (authority.isEmpty() || simulationTick < 0) return Optional.empty();
+    if (simulationTick < 0) return Optional.empty();
+
+    /*
+     * Prefer the causally safe simulation authority (strictly preceding server
+     * tick for live explicit-tick captures). If it is unavailable, fall back to
+     * the best aligned authority snapshot for an observation-only witness.
+     * A zero-delta witness does not need collision/world coverage because it
+     * does not simulate a physics step.
+     */
+    Optional<AuthoritativeSnapshot> authority =
+        movement.simulationAuthority().or(() -> movement.authority().snapshot());
+    if (authority.isEmpty()) return Optional.empty();
     AuthoritativeSnapshot snapshot = authority.get();
     if (snapshot.sequence() == 0L) return Optional.empty();
     long age = movement.event().serverTick() - snapshot.serverTick();
@@ -2460,7 +2482,6 @@ public final class CausalMovementPipeline {
     Player authoritative = playerFromAuthority(snapshot.context());
     Player observed = movement.stateFrame().after();
     if (!Phase6Reachability.positionMatches(authoritative.position(), observed.position())) return Optional.empty();
-    if (!movement.world().fullyKnown(playerCollisionBox(observed))) return Optional.empty();
     if (authoritative.onGround() != observed.onGround()) return Optional.empty();
     if (movement.move().onGround() != null && authoritative.onGround() != movement.move().onGround()) return Optional.empty();
     /*
