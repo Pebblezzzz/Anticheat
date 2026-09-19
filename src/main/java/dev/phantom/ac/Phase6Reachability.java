@@ -37,6 +37,7 @@ public final class Phase6Reachability {
     public static InputConstraint exact(AdvancedInput i){Objects.requireNonNull(i);return new InputConstraint(OptionalInt.of(i.forward()),OptionalInt.of(i.strafe()),Optional.of(i.jump()),Optional.of(i.sprint()),Optional.of(i.sneak()));}
     public static InputConstraint fromClientInput(Packets.ClientInput i){Objects.requireNonNull(i);return new InputConstraint(OptionalInt.of(axis(i.forward(),i.backward())),OptionalInt.of(axis(i.right(),i.left())),Optional.of(i.jump()),Optional.of(i.sprint()),Optional.of(i.sneak()));}
     public List<AdvancedInput> enumerate(){List<AdvancedInput> out=new ArrayList<>();for(AdvancedInput i:Validation.allInputs())if(matches(i))out.add(i);return List.copyOf(out);}
+    public boolean isExact(){return forward.isPresent()&&strafe.isPresent()&&jump.isPresent()&&sprint.isPresent()&&sneak.isPresent();}
     private boolean matches(AdvancedInput i){return(!forward.isPresent()||forward.getAsInt()==i.forward())&&(!strafe.isPresent()||strafe.getAsInt()==i.strafe())&&(!jump.isPresent()||jump.get()==i.jump())&&(!sprint.isPresent()||sprint.get()==i.sprint())&&(!sneak.isPresent()||sneak.get()==i.sneak());}
     private static int axis(boolean p,boolean n){return p==n?0:p?1:-1;}
   }
@@ -379,7 +380,7 @@ public final class Phase6Reachability {
       LongFunction<List<WorldBranch>> worlds,
       LongFunction<List<ExternalTransition>> externalTransitions,
       int maximumCandidates) {
-    return search(
+    return searchInternal(
         List.of(start), inputs, worlds,
         tick -> List.of(new ExternalPath(
             "ordered-external@" + tick,
@@ -389,12 +390,28 @@ public final class Phase6Reachability {
   }
 
   public SearchResult search(
+      Context start,
+      List<InputConstraint> inputs,
+      LongFunction<List<WorldBranch>> worlds,
+      LongFunction<List<ExternalTransition>> externalTransitions,
+      SearchConfig config) {
+    Objects.requireNonNull(start);
+    return searchInternal(
+        List.of(start), inputs, worlds,
+        tick -> List.of(new ExternalPath(
+            "ordered-external@" + tick,
+            Objects.requireNonNull(externalTransitions.apply(tick), "external transitions"),
+            "ordered external transitions supplied for the simulation tick")),
+        config);
+  }
+
+  public SearchResult search(
       Collection<Context> starts,
       List<InputConstraint> inputs,
       LongFunction<List<WorldBranch>> worlds,
       LongFunction<List<ExternalTransition>> externalTransitions,
       SearchConfig config) {
-    return search(
+    return searchInternal(
         starts, inputs, worlds,
         tick -> List.of(new ExternalPath(
             "ordered-external@" + tick,
@@ -410,15 +427,6 @@ public final class Phase6Reachability {
       LongFunction<List<ExternalPath>> externalPaths,
       SearchConfig config) {
     Objects.requireNonNull(externalPaths);
-    return searchInternal(starts, inputs, worlds, externalPaths, config);
-  }
-
-  private SearchResult search(
-      Collection<Context> starts,
-      List<InputConstraint> inputs,
-      LongFunction<List<WorldBranch>> worlds,
-      LongFunction<List<ExternalPath>> externalPaths,
-      SearchConfig config) {
     return searchInternal(starts, inputs, worlds, externalPaths, config);
   }
 
@@ -474,7 +482,7 @@ public final class Phase6Reachability {
           root.player().uncertain() || !root.uncertainty().isEmpty()
               ? WorldKnowledge.UNKNOWN : WorldKnowledge.KNOWN,
           movementModeFor(root), "ROOT", List.of("initial state"));
-      current.put(candidateKey(candidate), candidate);
+      current.put(candidateKey(candidate).toString(), candidate);
     }
     peak = current.size();
 
@@ -679,7 +687,7 @@ public final class Phase6Reachability {
                   branchKnowledge, mode, input.toString(),
                   List.of(stepped.diagnostic()));
 
-              CandidateKey key = candidateKey(newCandidate);
+              String key = candidateKey(newCandidate).toString();
               Candidate existing = next.get(key);
               if (existing == null) {
                 next.put(key, newCandidate);
@@ -708,9 +716,12 @@ public final class Phase6Reachability {
       }
 
       evaluatedTicks++;
+      long diagnosticTick = current.values().stream()
+          .mapToLong(candidate -> candidate.context().simulationTick())
+          .min().orElse(0L);
       if (next.isEmpty()) {
         uncertain = true;
-        reasons.add("no legitimate Phase 5 candidate survived tick " + tick
+        reasons.add("no legitimate Phase 5 candidate survived tick " + diagnosticTick
             + "; Phase 6 cannot prove impossibility without a complete trusted model");
         break;
       }
@@ -1198,6 +1209,12 @@ public final class Phase6Reachability {
         yawDistance, pitchDistance, details);
   }
 
+  static boolean positionMatches(Maths.Vec3 a, Maths.Vec3 b) {
+    if(a == null || b == null) return a == b;
+    double dx=a.x()-b.x(), dy=a.y()-b.y(), dz=a.z()-b.z();
+    return dx*dx+dy*dy+dz*dz <= POSITION_MATCH_TOLERANCE*POSITION_MATCH_TOLERANCE;
+  }
+
   private static double distance(Maths.Vec3 a, Maths.Vec3 b) {
     double dx = a.x() - b.x();
     double dy = a.y() - b.y();
@@ -1234,6 +1251,12 @@ public final class Phase6Reachability {
       }
     }
     return true;
+  }
+
+  private static SearchMetrics aggregateMetrics(Collection<SearchResult> results) {
+    boolean budgetReached = results.stream().anyMatch(r -> r.metrics().budgetReached());
+    boolean exhaustive = !budgetReached && results.stream().allMatch(r -> r.metrics().exhaustive());
+    return aggregateMetrics(results, exhaustive, budgetReached);
   }
 
   private static SearchMetrics aggregateMetrics(
