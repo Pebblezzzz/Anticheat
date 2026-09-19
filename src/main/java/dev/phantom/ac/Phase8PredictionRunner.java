@@ -180,12 +180,8 @@ public final class Phase8PredictionRunner {
     relativeClientTick = 0L;
     hasClientTickBoundary = false;
     lastProcessedSequence = sequenceBoundary;
+    clearObservedMovementHistory();
     lastPositionClientTick = -1L;
-    previousObservedMovementPosition = null;
-    lastObservedMovementPosition = null;
-    previousObservedMovementClientTick = -1L;
-    lastObservedMovementClientTick = -1L;
-    lastObservedMovementPriorGround = false;
     nextCandidateId = 1L;
     latestContinuation = Continuation.UNANCHORED;
   }
@@ -330,6 +326,7 @@ public final class Phase8PredictionRunner {
             entityCollisions(latestAuthority));
         prediction = Set.of(correction);
         predictionTick = correctionTick;
+        clearObservedMovementHistory();
         lastPositionClientTick = correctionTick;
         latestContinuation = Continuation.ACTIVE;
         continue;
@@ -917,6 +914,14 @@ public final class Phase8PredictionRunner {
         authority.effects(), authority.awaitingTeleport(), authority.uncertain(), authority.input(),
         authority.attributes(), authority.pose(), authority.environment(),
         authority.clientTickRange(), authority.provenance(), authority.uncertaintyReasons());
+  }
+
+  private void clearObservedMovementHistory() {
+    previousObservedMovementPosition = null;
+    lastObservedMovementPosition = null;
+    previousObservedMovementClientTick = -1L;
+    lastObservedMovementClientTick = -1L;
+    lastObservedMovementPriorGround = false;
   }
 
   private void rememberObservedMovement(
