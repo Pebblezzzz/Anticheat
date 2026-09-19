@@ -720,9 +720,9 @@ public final class CausalMovementPipeline {
        * stationary/zero-delta observations without forcing an unnecessary physics
        * step through an incomplete compact world replica.
        */
-      if (eventTiming.simulationClientTicks().isExact()) {
-        Optional<Candidate> authorityWitness = authorityObservationWitness(movement, movementTick);
-        if (authorityWitness.isPresent()) {
+      Optional<Candidate> authorityWitness =
+          authorityObservationWitness(movement, movementTick);
+      if (authorityWitness.isPresent()) {
           Candidate witness = authorityWitness.get();
           SearchResult witnessSearch = new SearchResult(
               Verdict.POSSIBLE,
@@ -744,10 +744,9 @@ public final class CausalMovementPipeline {
           if (movement.move().clientTick() != null) previousExplicitClientTick = movement.move().clientTick();
           trace.add("EVIDENCE POSSIBLE reason=AUTHORITATIVE_ZERO_DELTA_WITNESS");
           trace.add("MATCHING candidates=1 frontierTick=" + movementTick);
-          frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
-              assumptions, uncertainty, trace));
-          continue;
-        }
+        frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+            assumptions, uncertainty, trace));
+        continue;
       }
 
       /*
@@ -850,7 +849,8 @@ public final class CausalMovementPipeline {
               0,
               0,
               0,
-              List.of("conservative kinematic displacement bound exceeded; world collision state is not required to reject this movement"));
+              List.of("conservative kinematic displacement bound exceeded; world collision state is not required to reject this movement",
+                  "all exhaustively modeled legitimate candidates disagree with the observed movement state"));
           results.add(Phase8MovementValidation.validate(
               playerId, serverTick, observedBefore, observedAfter, movement.world(),
               worldReference, sync, assumptions, impossible, replayReference, true));
@@ -858,7 +858,7 @@ public final class CausalMovementPipeline {
           previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
           if (movement.move().clientTick() != null) previousExplicitClientTick = movement.move().clientTick();
           frontier = Frontier.empty();
-          trace.add("EVIDENCE IMPOSSIBLE reason=KINEMATIC_BOUND_EXCEEDED");
+          trace.add("EVIDENCE REACHABILITY_CONTRADICTION reason=KINEMATIC_BOUND_EXCEEDED");
           frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
               assumptions, uncertainty, trace));
           continue;
@@ -2199,11 +2199,17 @@ public final class CausalMovementPipeline {
     Optional<AuthoritativeSnapshot> authority = movement.authority().snapshot();
     if (authority.isEmpty() || simulationTick < 0) return Optional.empty();
     AuthoritativeSnapshot snapshot = authority.get();
+    if (isPlaceholderAuthority(snapshot, null)) return Optional.empty();
     long age = movement.event().serverTick() - snapshot.serverTick();
     if (age < 0 || age > 1L) return Optional.empty();
+    Long explicitClientTick = movement.move().clientTick();
+    if (explicitClientTick != null
+        && snapshot.clientTick() != null
+        && !explicitClientTick.equals(snapshot.clientTick())) return Optional.empty();
     Player authoritative = playerFromAuthority(snapshot.context());
     Player observed = movement.stateFrame().after();
     if (!Phase6Reachability.positionMatches(authoritative.position(), observed.position())) return Optional.empty();
+    if (authoritative.onGround() != observed.onGround()) return Optional.empty();
     if (movement.move().onGround() != null && authoritative.onGround() != movement.move().onGround()) return Optional.empty();
     float yaw = movement.move().yaw() == null ? observed.yaw() : movement.move().yaw();
     float pitch = movement.move().pitch() == null ? observed.pitch() : movement.move().pitch();
