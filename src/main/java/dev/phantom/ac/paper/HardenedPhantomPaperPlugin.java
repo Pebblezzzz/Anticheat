@@ -138,7 +138,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           logMovementPacketDebug(capture.playerName,capture,sequence,receivedNanos,event.getPacketType().toString(),packet,move,tickObservation);
         appendPacket(capture,new RawPacket(sequence,receivedNanos,move,
             Packets.CaptureProvenance.fromAdapter(sourceId,move,authoritativeTick)));
-        schedulePredictionValidation(capture,event.getChannel());
+        schedulePredictionValidation(capture);
       }else if(event.getPacketType()==PacketType.Play.Client.PLAYER_INPUT){
         var input=new WrapperPlayClientPlayerInput(event);
         Packets.ClientInput clientInput=new Packets.ClientInput(
