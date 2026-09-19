@@ -226,7 +226,7 @@ class Phase8AdversarialMatrixTest {
                   1, 0L,
                   new ChunkStates(
                       new dev.phantom.ac.world.Chunk(0, 0),
-                      floorStates(-16, 16, -8, 8))),
+                      floorStates(-8, 12, -8, 8))),
               new RawPacket(
                   2, 0L,
                   new Packets.PlayerContext(
