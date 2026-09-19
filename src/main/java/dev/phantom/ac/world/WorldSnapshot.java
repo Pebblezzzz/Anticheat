@@ -522,6 +522,9 @@ public final class WorldSnapshot implements Serializable {
     // collision geometry. Only UNLOADED and UNSUPPORTED mean "no data".
     BlockState state = blockAtOrNull(x, y, z);
     if (state == null) return VoxelShape.empty();
+    java.util.Optional<VoxelShape> deterministic =
+        dev.phantom.ac.world.v12111.BlockCollisionCatalogue12111.shapeFor(state);
+    if (deterministic.isPresent()) return deterministic.get().toWorld(x, y, z);
     VoxelShape local = BlockCatalogue12111.collisionShape(state, neighboursFor(x, y, z, state));
     return local.isEmpty() ? VoxelShape.empty() : local.toWorld(x, y, z);
   }
