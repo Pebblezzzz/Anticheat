@@ -687,6 +687,18 @@ public final class CausalMovementPipeline {
             movement,
             maximumCandidates,
             preferLocalAuthoritativeRoot);
+        if (root.isEmpty() && initialAnchor != null && !initialAnchor.uncertain()) {
+          Optional<Candidate> fallbackRoot =
+              rootCandidate(initialAnchor, movement, maximumCandidates, false);
+          if (fallbackRoot.isPresent()) {
+            Candidate fallback = fallbackRoot.get();
+            frontier = new Frontier(Set.of(fallback), fallback.context().simulationTick(), true);
+            rootedFromLocalAuthority = false;
+            clientClockLocalAuthority = false;
+            trace.add("ROOT FALLBACK_EXPLICIT_ANCHOR simulationTick=" + fallback.context().simulationTick());
+            root = fallbackRoot;
+          }
+        }
         if (root.isEmpty()) {
           uncertainty.add("authoritative local root is outside the finite causal horizon");
           SearchResult uncertain = uncertainSearch(Set.of(), String.join("; ", uncertainty));
@@ -711,6 +723,49 @@ public final class CausalMovementPipeline {
               + " position=" + rootCandidate.context().player().position());
         } else {
           trace.add("ROOT authoritative anchor=" + initialAnchor.position());
+        }
+      }
+
+      /*
+       * A conservative exact-tick kinematic bound is independent of block collision
+       * coverage, but it must start from a known state. This is placed immediately
+       * after root establishment so recovery validation can reject a deterministic
+       * excessive displacement before Phase 5 encounters an incomplete sweep.
+       */
+      if (!recoveryRequired && eventTiming.simulationClientTicks().isExact()) {
+        Optional<Candidate> kinematicReference = frontier.candidates().stream().findFirst();
+        if (kinematicReference.isEmpty()) {
+          kinematicReference = rootCandidate(initialAnchor, movement, maximumCandidates, true);
+        }
+        if (kinematicReference.isPresent()
+            && movement.world().fullyKnown(
+                playerCollisionBox(kinematicReference.get().context().player()))
+            && exceedsConservativeKinematicBound(
+                kinematicReference.get(), observedAfter, movementTick)) {
+          Candidate reference = kinematicReference.get();
+          SearchResult impossible = new SearchResult(
+              Verdict.IMPOSSIBLE,
+              Set.of(reference),
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              List.of(
+                  "conservative kinematic displacement bound exceeded; world collision state is not required to reject this movement",
+                  "all exhaustively modeled legitimate candidates disagree with the observed movement state"));
+          results.add(Phase8MovementValidation.validate(
+              playerId, serverTick, observedBefore, observedAfter, movement.world(),
+              worldReference, sync, assumptions, impossible, replayReference, true));
+          previousPositionPacketTick = movementTick;
+          previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
+          if (movement.move().clientTick() != null) previousExplicitClientTick = movement.move().clientTick();
+          frontier = Frontier.empty();
+          trace.add("EVIDENCE REACHABILITY_CONTRADICTION reason=KINEMATIC_BOUND_EXCEEDED");
+          frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+              assumptions, uncertainty, trace));
+          continue;
         }
       }
 
