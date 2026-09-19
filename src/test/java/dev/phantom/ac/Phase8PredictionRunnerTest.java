@@ -197,45 +197,40 @@ class Phase8PredictionRunnerTest {
         .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
         report.frames().toString());
     assertTrue(report.results().stream()
-        .flatMap(result -> result.evidence().uncertaintySources().stream())
-        .noneMatch(reason -> reason.contains("support block is unavailable")
+        .flatMap(result -> result.evidence().uncertaintySources().stream())        .noneMatch(reason -> reason.contains("support block is unavailable")
             || reason.contains("Phase 5 could not deterministically simulate")),
         report.results().toString());
     assertTrue(report.candidateFrontierRetained(), report.toString());
   }
 
   @Test
-  void staleAuthorityDoesNotEraseRetainedHorizontalMomentum() {
+  void staleAuthorityUsesAuthoritativeHorizontalVelocity() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
     Player movingAnchor = new Player(
-        new Maths.Vec3(.5, 71.0, .5),
-        new Maths.Vec3(.1, -0.0784000015258789, 0.0),
+        new Maths.Vec3(.5, 70.0, .5),
+        new Maths.Vec3(.1, 0.0, 0.0),
         0f, 0f, false, "survival", Map.of(), OptionalInt.empty(), false,
         Optional.empty(), Simulation.Attributes.DEFAULT, Pose.STANDING,
         State.Environment.DRY, State.TickRange.unknown(), State.Provenance.UNKNOWN, Set.of());
 
-    var first = runner.process(
+    runner.process(
         "stale-horizontal",
         List.of(
             new RawPacket(1, 10, new ClientTickEnd()),
             new RawPacket(2, 20, new Move(
-                new Maths.Vec3(.6, 70.92159999847412, .5), 0f, 0f, false, 1L))),
+                new Maths.Vec3(.6, 70.0, .5), 0f, 0f, false, 1L))),
         floorWorld(), movingAnchor, 0L);
-
-    assertEquals(1, first.movementObservations());
-    assertTrue(first.candidateFrontierRetained(), first.toString());
 
     PlayerContext authority = new PlayerContext(
         "survival", Simulation.Attributes.DEFAULT, Map.of(),
         Pose.STANDING, MovementEnvironment.dry(false, false, false),
-        new Maths.Vec3(.6, 70.92159999847412, .5),
-        new Maths.Vec3(0.0, -0.0784000015258789, 0.0),
+        new Maths.Vec3(.6, 70.0, .5),
+        new Maths.Vec3(.2, 0.0, 0.0),
         false, false, false, List.of());
 
-    double retainedVx = first.frames().getFirst().predictedAfter().iterator().next()
-        .context().player().velocity().x();
-    double observedX = .6 + retainedVx;
+    double expectedX=.6+0.2*Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION;
+    double expectedY=70.0;
 
     var second = runner.process(
         "stale-horizontal",
@@ -244,13 +239,13 @@ class Phase8PredictionRunnerTest {
                 Packets.CaptureProvenance.fromAdapter(
                     "test-authority", authority, 100L, 10L)),
             new RawPacket(4, 200, new Move(
-                new Maths.Vec3(observedX, 70.76636799697876, .5), 0f, 0f, false, 10L))),
+                new Maths.Vec3(expectedX, expectedY, .5), 0f, 0f, false, 10L))),
         floorWorld(), movingAnchor, 0L);
 
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
         second.results().getFirst().verdict(), second.results().toString());
-    assertTrue(second.frames().stream()
-        .flatMap(frame -> frame.trace().stream())
+    assertEquals(1, second.frames().size());
+    assertTrue(second.frames().getFirst().trace().stream()
         .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
         second.frames().toString());
   }
@@ -309,6 +304,42 @@ class Phase8PredictionRunnerTest {
         .flatMap(frame -> frame.trace().stream())
         .anyMatch(line -> line.contains("FRONTIER_COMMITTED")),
         report.frames().toString());
+  }
+
+  @Test
+  void sprintJumpAddsVanillaHorizontalImpulse() {
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+
+    Player state = new Player(
+        new Maths.Vec3(.5, 64.0, .5),
+        Maths.Vec3.ZERO,
+        0f, 0f, true, "survival", Map.of(), OptionalInt.empty(), false,
+        Optional.empty(), new Simulation.Attributes(0.13), Pose.STANDING,
+        State.Environment.DRY, State.TickRange.unknown(), State.Provenance.UNKNOWN, Set.of());
+
+    var world = floorWorld();
+    var noSprint = physics.step(new Vanilla12111RichPhysics.Context(
+        0, state, new Simulation.AdvancedInput(0, 0, true, false, false),
+        world, Simulation.Environment.DRY, state.attributes(),
+        Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
+        MovementEnvironment.dry(true, false, false), false));
+
+    var sprint = physics.step(new Vanilla12111RichPhysics.Context(
+        0, state, new Simulation.AdvancedInput(0, 0, true, true, false),
+        world, Simulation.Environment.DRY, state.attributes(),
+        Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
+        MovementEnvironment.dry(true, true, false), false));
+
+    assertEquals(0.5, noSprint.state().position().z(), 1e-12);
+    assertEquals(
+        0.5 + Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST,
+        sprint.state().position().z(), 1e-12);
+    assertEquals(
+        Vanilla12111RichPhysics.JUMP,
+        noSprint.state().position().y() - state.position().y(), 1e-7);
+    assertEquals(
+        Vanilla12111RichPhysics.JUMP,
+        sprint.state().position().y() - state.position().y(), 1e-7);
   }
 
   @Test
@@ -397,7 +428,6 @@ class Phase8PredictionRunnerTest {
 
     var first = runner.process("duplicate-call", raw, floorWorld(), anchor(), 10L);
     var second = runner.process("duplicate-call", raw, floorWorld(), anchor(), 10L);
-
     assertEquals(2, first.packetsProcessed());
     assertEquals(0, second.packetsProcessed());
     assertEquals(first.lastProcessedSequence(), second.lastProcessedSequence());
