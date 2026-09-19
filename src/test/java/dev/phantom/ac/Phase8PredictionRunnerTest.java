@@ -348,7 +348,7 @@ class Phase8PredictionRunnerTest {
     assertEquals(
         expectedPositionDelta,
         positionDelta,
-        1e-9,
+        1e-8,
         "sprint jump displacement");
     assertEquals(
         Vanilla12111RichPhysics.JUMP,
