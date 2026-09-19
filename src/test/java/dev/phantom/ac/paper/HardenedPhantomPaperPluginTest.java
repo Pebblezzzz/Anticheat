@@ -9,6 +9,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class HardenedPhantomPaperPluginTest {
   @Test
+  void unqualifiedPacketEventsBlockIdsUseTheMinecraftNamespace() {
+    assertEquals("minecraft:stone", HardenedPhantomPaperPlugin.normalizeBlockId("stone"));
+    assertEquals("minecraft:cobblestone", HardenedPhantomPaperPlugin.normalizeBlockId("cobblestone"));
+    assertEquals("minecraft:air", HardenedPhantomPaperPlugin.normalizeBlockId("minecraft:air"));
+    assertEquals("custom:block", HardenedPhantomPaperPlugin.normalizeBlockId("custom:block"));
+  }
+
+  @Test
   void unsupportedBlockChangesAreRecordedAsUnsupportedPackets() {
     Pos position = new Pos(1, 64, 1);
     BlockState unsupported = BlockState.unsupported("minecraft:future_block");
