@@ -2009,15 +2009,43 @@ public final class CausalMovementPipeline {
     long received = movement.packet().receivedNanos();
 
     /*
-     * Explicit client ticks are the strongest chronology signal available. A
-     * PlayerContext is a valid physics root only when it carries the same
-     * capture-local client-tick watermark and was captured before the movement.
-     * A server-tick match without the client watermark is not sufficient.
+     * Explicit client ticks are strong packet chronology, but a live Paper
+     * PlayerContext is still a server-side sample. Its client-tick field is a
+     * capture watermark, not proof that the sampled server position is the
+     * state for that client simulation tick. For live captures, prefer the
+     * latest strictly preceding server-tick authority with a client watermark
+     * no later than the movement tick. This prevents a same-server-tick sample
+     * taken after the server has already processed the movement from becoming
+     * the pre-movement physics root.
+     *
+     * Historical/synthetic captures keep the exact client-tick behavior because
+     * their provenance does not claim the asynchronous live Paper sampling path.
      */
     boolean explicitClientTick = movement.packet().packet() instanceof Packets.Move move && move.clientTick() != null;
     if (explicitClientTick) {
       Packets.Move move = (Packets.Move) movement.packet().packet();
       long target = move.clientTick();
+      boolean liveClientTickMovement = movement.packet().provenance().sourceId().startsWith("paper-client-tick");
+      if (liveClientTickMovement) {
+        Optional<AuthoritativeSnapshot> precedingLive = authorities.stream()
+            .filter(snapshot -> snapshot.sequence() < sequence)
+            .filter(snapshot -> snapshot.receivedNanos() <= received)
+            .filter(snapshot -> snapshot.serverTick() < movement.serverTick())
+            .filter(snapshot -> movement.serverTick() - snapshot.serverTick() <= 1L)
+            .filter(snapshot -> snapshot.clientTick() != null)
+            .filter(snapshot -> snapshot.clientTick() <= target)
+            .filter(snapshot -> !isPlaceholderAuthority(snapshot, initialAnchor))
+            .max(Comparator.comparingLong(AuthoritativeSnapshot::serverTick)
+                .thenComparingLong(AuthoritativeSnapshot::clientTick)
+                .thenComparingLong(AuthoritativeSnapshot::receivedNanos)
+                .thenComparingLong(AuthoritativeSnapshot::sequence));
+        if (precedingLive.isPresent()) return precedingLive;
+
+        // A same-tick live sample is safe only as corroborating authority; it is
+        // never promoted to a physics root when an explicit client tick exists.
+        return Optional.empty();
+      }
+
       Optional<AuthoritativeSnapshot> exactClient = authorities.stream()
           .filter(snapshot -> snapshot.sequence() < sequence)
           .filter(snapshot -> snapshot.receivedNanos() <= received)
@@ -2027,19 +2055,6 @@ public final class CausalMovementPipeline {
           .max(Comparator.comparingLong(AuthoritativeSnapshot::receivedNanos)
               .thenComparingLong(AuthoritativeSnapshot::sequence));
       if (exactClient.isPresent()) return exactClient;
-
-      /*
-       * Live Paper captures have explicit client ticks only after the protocol
-       * tick boundary has been observed. Their authoritative snapshots should
-       * therefore carry the same watermark. A missing live watermark is not
-       * promoted to an exact client-clock root.
-       *
-       * Historical/synthetic captures may contain explicit client ticks without
-       * the live watermark; preserve their legacy server-tick replay semantics.
-       */
-      if (movement.packet().provenance().sourceId().startsWith("paper-")) {
-        return Optional.empty();
-      }
     }
 
     /*
