@@ -309,17 +309,18 @@ class Phase8PredictionRunnerTest {
         (jumpX - .5) * (0.6 * Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION);
     double sprintAirAcceleration =
         Vanilla12111RichPhysics.SPRINT_AIR_ACCEL * Vanilla12111RichPhysics.INPUT_FRICTION;
-    double observedX = jumpX + rootHorizontalX + sprintAirAcceleration;
+    double observedX = authorityX + rootHorizontalX + sprintAirAcceleration;
     double authorityY = 64.41999998688698;
     double authorityVy = 0.41999998688697815;
     double observedY = authorityY
         + (authorityVy - Vanilla12111RichPhysics.GRAVITY)
             * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG;
 
+    double authorityX = jumpX + 0.05;
     PlayerContext staleAuthority = new PlayerContext(
         "survival", new Simulation.Attributes(0.1), Map.of(),
         Pose.STANDING, MovementEnvironment.dry(false, false, false),
-        new Maths.Vec3(jumpX, authorityY, .5),
+        new Maths.Vec3(authorityX, authorityY, .5),
         new Maths.Vec3(0.0, authorityVy, 0.0),
         false, false, false, List.of());
 
