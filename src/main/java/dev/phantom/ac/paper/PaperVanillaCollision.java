@@ -49,7 +49,7 @@ public final class PaperVanillaCollision {
         boxes.add(new BlockBox(box.getMinX(), box.getMinY(), box.getMinZ(),
             box.getMaxX(), box.getMaxY(), box.getMaxZ()));
       }
-      SHAPES.putIfAbsent(key, VoxelShape.local(boxes));
+      SHAPES.putIfAbsent(key, VoxelShape.localUnbounded(boxes));
     } catch (RuntimeException failure) {
       FAILED.add(key);
     }
