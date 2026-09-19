@@ -109,10 +109,16 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         var location=packet.getLocation();
         ClientTickTracker.MovementObservation tickObservation=capture.clientTickTracker.onMovement();
         if(!tickObservation.oneToOne())capture.multiMovementPackets.incrementAndGet();
-        // CLIENT_TICK_END is a boundary signal. Do not serialize the local boundary
-        // counter as Move.clientTick; Phase 7 derives a relative interval from the
-        // retained boundary events and keeps protocol-authoritative ticks distinct.
-        Long clientTick=null;
+        /*
+         * Once CLIENT_TICK_END has been observed, its monotonic relative counter is
+         * a capture-local chronology fact: it comes from the protocol boundary itself,
+         * not from server-tick estimation. Persist it as Move.clientTick so Phase 7
+         * can use an exact client tick instead of widening every movement by latency.
+         * The pre-first-boundary case remains untimed and is handled conservatively.
+         */
+        Long clientTick=tickObservation.hasSeenTickEnd()
+            ?tickObservation.clientTick()
+            :null;
         Long authoritativeTick=capture.authoritativeServerTick.get()>=0
             ?capture.authoritativeServerTick.get():null;
         Packets.Move move=new Packets.Move(
