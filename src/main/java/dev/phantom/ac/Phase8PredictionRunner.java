@@ -1060,11 +1060,14 @@ public final class Phase8PredictionRunner {
     if (lastObservedMovementPriorGround) {
       // Ground friction for the prior movement was determined from the block
       // beneath the pre-movement position, not beneath the post-jump position.
-      dev.phantom.ac.world.BlockState support = world.blockAtOrNull(
-          (int) Math.floor(previousObservedMovementPosition.x()),
-          (int) Math.floor(previousObservedMovementPosition.y() - 1.0E-4),
-          (int) Math.floor(previousObservedMovementPosition.z()));
-      if (support == null || support.isUnsupported()) return Optional.empty();
+      int supportX = (int) Math.floor(previousObservedMovementPosition.x());
+      int supportY = (int) Math.floor(previousObservedMovementPosition.y() - 1.0E-4);
+      int supportZ = (int) Math.floor(previousObservedMovementPosition.z());
+      if (world.coverageAt(supportX, supportY, supportZ) != dev.phantom.ac.world.Coverage.KNOWN) {
+        return Optional.empty();
+      }
+      dev.phantom.ac.world.BlockState support = world.requireBlockAt(supportX, supportY, supportZ);
+      if (support.isUnsupported()) return Optional.empty();
       horizontalFactor =
           dev.phantom.ac.world.v12111.BlockCatalogue12111.slipperiness(support)
               * Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION;
