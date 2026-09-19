@@ -227,6 +227,14 @@ public final class Phase6Reachability {
       Objects.requireNonNull(inputAssumption);
       transitionDiagnostics = List.copyOf(transitionDiagnostics);
     }
+    public Candidate(long id, Context context, Provenance provenance,
+                    Long serverTickAssociation, String timingReference, String worldReference,
+                    WorldKnowledge worldKnowledge, MovementMode movementMode,
+                    String inputAssumption, List<String> transitionDiagnostics) {
+      this(id, context, provenance, serverTickAssociation, timingReference, worldReference,
+          worldKnowledge, movementMode, inputAssumption, transitionDiagnostics, 0L);
+    }
+
     public Candidate(long id, Context context, Provenance provenance) {
       this(id, context, provenance, null, "unspecified",
           provenance.worldBranch(), WorldKnowledge.KNOWN,
