@@ -78,6 +78,11 @@ public final class Phase4WorldReplica implements Serializable {
   public synchronized Optional<Generation> generationAtSequence(long sequence){Generation a=null;for(Generation g:history)if(g.sequence()<=sequence)a=g;return Optional.ofNullable(a);}
   public synchronized Optional<Generation> generationAt(Order point){Generation a=null;for(Generation g:history)if(g.order().compareTo(point)<=0)a=g;return Optional.ofNullable(a);}
   public synchronized WorldSnapshot snapshotAtSequence(long sequence){return generationAtSequence(sequence).map(Generation::world).orElse(null);}
+  /** Returns the latest acknowledged client-visible snapshot whose causal sequence is at or before the query sequence. */
+  public synchronized WorldSnapshot snapshotAtOrBefore(long sequence){
+    if(sequence<0)return null;
+    return generationAtSequence(sequence).map(Generation::world).orElse(null);
+  }
 
   /** Adds an already-visible event; canonical ordering is tick, receive time, capture sequence, ordinal. */
   public synchronized void accept(Event event){Objects.requireNonNull(event);acceptVisible(List.of(event),event.order().sequence());}
