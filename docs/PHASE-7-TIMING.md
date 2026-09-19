@@ -1,12 +1,12 @@
-# Phase 7 — Client/server timing and synchronization
+# Phase 7 — Client/server synchronization and temporal envelopes
 
-Audit/implementation date: 2026-09-17.
+Audit/implementation date: 2026-09-19.
 
-Phase 7 reconstructs **possible client-side timing** from the authoritative Phase 1/3 timeline. It does not assume one server tick equals one client movement tick and it never turns timing ambiguity into a cheating verdict.
+Phase 7 has one responsibility: determine which client/server timing histories remain possible from the packet history and synchronization evidence available to the server. It does not make movement or anti-cheat decisions.
 
-## Exact model
+## Temporal model
 
-The capture layer records a monotonic capture timestamp plus a capture sequence. For serverbound packets the timestamp is the server receive observation; for clientbound packets the same field records the server-side send/capture observation. Phase 7 uses packet direction to interpret the field correctly.
+Phase 7 keeps server tick, capture/arrival time, packet-generation time, client-processing time, client simulation tick, and synchronization state as separate quantities. Server tick is never treated as the client tick. The capture sequence is preserved as chronology evidence, not reinterpreted as an inferred client ordering.
 
 `Timeline.assign(...)` deterministically projects capture chronology onto server ticks:
 
@@ -16,13 +16,15 @@ serverTick = floor((captureNanos - captureEpochNanos) / serverTickNanos)
 
 The canonical ordering remains `(serverTick, captureNanos, sequence)`. Phase 7 never reorders packets by an inferred client tick.
 
-## Client tick reconstruction
+## Temporal envelope and client-tick reconstruction
 
-`Phase7Timing.Reconstruction` anchors relative client chronology on the first client→server event. If `Move.clientTick` exists, that tick is a hard observation. Otherwise the event gets a range derived from its latency-bounded client time relative to the anchor, using the configured client tick-period range.
+Phase7Timing.TickEnvelope is the primary discrete representation. It contains known/unknown state, a complete bounded Range, optionally materialized possible tick candidates, and an exhaustive flag. A wide range is retained rather than narrowed when the discrete candidate budget is insufficient.
+
+Move.clientTick is capture-side timing metadata when present and is the strongest client-tick witness available. The first unwatermarked client event establishes relative tick zero; its network-generation interval remains separately represented. CLIENT_TICK_END is a temporal boundary, not a movement timestamp. Later movement is constrained by boundary timing and latency rather than automatically assigned the boundary tick.
 
 This supports multiple client ticks between observations, multiple movement packets in one server tick, bursts, delayed packets, missing observations, ambiguous alignment, and idle periods without interpreting an observation gap as “client did nothing”.
 
-## Input-to-packet timing
+## Latency and input-to-packet timing
 
 Input, simulation, and packet generation are distinct fields in `EventTiming`:
 
@@ -38,14 +40,14 @@ server arrival
 
 The packet is therefore not treated as the exact instant that its underlying input occurred.
 
-For Minecraft 1.21.2 and newer, the client sends a `CLIENT_TICK_END` packet when it finishes processing a client tick. The Paper adapter now uses those observed boundaries to assign a **relative** tick number to movement packets after the first boundary. This is not a protocol-provided tick number: the first observed boundary establishes relative tick zero, and movements before that boundary remain untimed. Multiple movement packets between two boundaries share the same relative tick. PacketEvents 2.13.0 exposes this packet as `PacketType.Play.Client.CLIENT_TICK_END` / `WrapperPlayClientClientTickEnd`. 
+CLIENT_TICK_END is retained as a boundary observation. It constrains later packet-generation time but is not itself used as a universal movement timestamp. Multiple packets can still share a client tick, and packet arrival time does not establish client emission order.
 
 An exact relative client tick is a timing fact even when upstream latency remains bounded rather than exact. Phase 7 therefore separates **client-tick certainty** from **network-time uncertainty**: bounded upstream jitter no longer poisons an otherwise exact movement tick. Server-to-client world/correction timing remains uncertain while downstream delivery latency is bounded rather than exact.
 
 
 ## Latency and jitter
 
-Latency is represented separately for client→server and server→client directions as explicit `[min,max]` bounds. The difference is the allowed jitter envelope. Variable latency widens possible client time rather than selecting a single tick. The default configuration is conservative and is replay input data, not hidden state.
+Client→server and server→client latency are independent configurable [min,max] envelopes. Serverbound generation time is arrival minus upstream latency; clientbound processing time is send/capture plus downstream latency. Jitter widens the possible time and therefore the possible client tick set. A timing budget never shrinks that range.
 
 ## Chronology, gaps, duplicates, and reordering
 
@@ -59,11 +61,11 @@ For the target 1.21.11 implementation, teleport confirmation is the modeled corr
 
 ## Velocity timing
 
-`Velocity` creates a synchronization window because server packet arrival is not the same as the client tick on which knockback is processed. Live Phase 6 receives the velocity transition on each still-possible client simulation tick represented by Phase 7.
+Velocity is a server-to-client event. Its server observation time, client processing interval, and possible simulation ticks remain separate. The Phase 7→Phase 6 bridge maps every materialized possible simulation tick to the external transition; Phase 5 remains the movement authority.
 
-## World-state timing
+## World-update visibility timing
 
-Historical client-visible world state remains owned by `World.VisibilityHistory`. World updates receive an explicit `WORLD_UPDATE` timing window. When timing is ambiguous, LiveValidation marks the Phase 6 world hypothesis non-exhaustive, so Phase 6 returns `UNCERTAIN` rather than using the latest server world as an assumed historical client world.
+Historical client-visible world state remains owned by World.VisibilityHistory. Server-to-client block/chunk updates use the client-processing/simulation envelope for visibility timing, not packet-generation time. Server knowledge of a change therefore does not imply that the client had already processed it.
 
 ## Synchronization states and recovery
 
@@ -77,13 +79,20 @@ The model exposes:
 
 `SynchronizationWindow` records the event type, server-tick span, possible client ticks, trigger sequence, and explanation. Recovery is explicit and never returns to strong synchronization from a single packet.
 
-## Replay and determinism
+## Deterministic budgets, replay, and divergence
 
-`Phase7Replay` wraps the existing fixed `Timeline.Codec` with the complete immutable Phase 7 configuration. Reconstructing a given replay with the same configuration produces identical timing ranges, synchronization states, windows, and consistency. `Phase7PerformanceBenchmark` measures a deterministic synthetic 10,000-event workload.
+maxTimingCandidates bounds discrete materialization of an individual envelope. maxTimingHistories bounds the Cartesian timing-history upper bound. On exhaustion, Phase 7 retains the original range, marks the envelope non-exhaustive, records a TIMING_BUDGET window, and returns uncertain synchronization information rather than fabricated precision.
+
+Phase7Replay stores the canonical Phase 1 timeline plus complete Phase 7 configuration. Current replay format is phase7-replay-v2 and remains backward-readable for version 1 data. Phase7Replay.verifyAgainst and Phase7Timing.firstDivergence expose the first differing timing event and synchronization state. Wall-clock processing time is never part of the replay signature.
 
 ## Phase 6 boundary
 
-Phase 7 does not duplicate reachable-state simulation. `Phase7Timing.toPhase6Window(...)` exposes the same bounded timing envelope already accepted by `Phase6Reachability.searchWithinTimingWindow(...)`. The live validator reconstructs Phase 7 first and then delegates reachability to the authoritative Phase 6 engine.
+Phase 7 provides a clean Phase7Timing.toPhase6Envelope(...) containing possible simulation ticks, enumeration completeness, synchronization state, active windows, and uncertainty. The live causal bridge also maps materialized possible input and correction/velocity ticks into Phase 6. Phase 7 does not duplicate reachability or physics.
+
+
+## Event association and uncertainty
+
+Every EventTiming preserves sequence, server tick, capture time, capture provenance, optional authoritative server tick, packet-generation interval, client-processing interval, packet-generation/client-processing/simulation/input tick envelopes, ordering constraints, synchronization windows, and reasons. Sequence gaps, duplicates, reordering, packet gaps, and server-tick gaps remain explicit uncertainty. Missing observations are never interpreted as inactivity.
 
 ## Empirical limitation
 
