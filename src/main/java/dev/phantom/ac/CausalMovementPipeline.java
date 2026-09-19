@@ -1543,8 +1543,20 @@ public final class CausalMovementPipeline {
                   ignored -> transitions,
                   maximumCandidates);
 
-          if (result.verdict() == Verdict.POSSIBLE) {
+          if (result.verdict() == Verdict.POSSIBLE
+              || exhaustivelyEnumeratedInputEnvelope(result, input)) {
+            /*
+             * Phase 6 intentionally labels an unknown input envelope UNCERTAIN
+             * at the generic search API boundary, even when every admissible
+             * input combination was actually enumerated. For causal movement
+             * validation, that candidate set is still a complete legitimate
+             * state-space branch, so retain it rather than discarding it.
+             */
             next.addAll(result.candidates());
+            if (result.verdict() != Verdict.POSSIBLE) {
+              reasons.addAll(result.reasons());
+              reasons.add("unknown input was exhaustively enumerated; candidates are complete for this input envelope");
+            }
           } else {
             reasons.addAll(result.reasons());
             if (result.verdict() == Verdict.UNCERTAIN) exhaustive = false;
@@ -1584,6 +1596,41 @@ public final class CausalMovementPipeline {
         Set.copyOf(union),
         List.copyOf(reasons),
         exhaustive);
+  }
+
+  /**
+   * Distinguishes genuine incomplete reachability from Phase 6's deliberate
+   * generic UNCERTAIN label for a fully enumerated unknown-input envelope.
+   *
+   * The latter is exhaustive for the supplied input possibility space: there
+   * is no search budget exhaustion, no non-exhaustive world branch, no
+   * transition uncertainty, and every retained candidate carries only INPUT
+   * uncertainty from the input envelope itself.
+   */
+  private static boolean exhaustivelyEnumeratedInputEnvelope(
+      SearchResult result,
+      InputConstraint input) {
+    if (result.verdict() != Verdict.UNCERTAIN
+        || result.metrics().budgetReached()
+        || result.nonExhaustiveWorldBranches() != 0
+        || result.uncertainTransitions() != 0
+        || result.candidates().isEmpty()
+        || input.enumerate().isEmpty()) {
+      return false;
+    }
+    if (result.reasons().stream().anyMatch(reason ->
+        reason.contains("maximum ")
+            || reason.contains("world hypothesis")
+            || reason.contains("world ")
+            || reason.contains("Phase 5")
+            || reason.contains("physics")
+            || reason.contains("initial state carries explicit uncertainty")
+            || reason.contains("no deterministic candidate survived"))) {
+      return false;
+    }
+    return result.candidates().stream()
+        .allMatch(candidate -> candidate.context().uncertainty().stream()
+            .allMatch(dimension -> dimension == Phase6Reachability.UncertainDimension.INPUT));
   }
 
   private static WorldSnapshot worldForTick(
