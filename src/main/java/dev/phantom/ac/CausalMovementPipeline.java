@@ -527,6 +527,37 @@ public final class CausalMovementPipeline {
           causallyFreshLocalAuthority(movement, 1L, -1L);
       boolean localAuthoritativeRootAvailable = freshLocalAuthority.isPresent();
       boolean justRecovered = false;
+
+      /*
+       * Recovery is established only by an observation that actually matches the
+       * fresh authoritative snapshot. A clean packet alone is not enough: server
+       * authority is sampled independently from the client prediction clock and
+       * must not silently replace the client's causal state.
+       */
+      if (recoveryRequired
+          && movement.chronologyClean()
+          && freshLocalAuthority.isPresent()) {
+        Optional<Candidate> recoveryWitness =
+            authorityObservationWitness(movement, movementTick);
+        if (recoveryWitness.isPresent()
+            && recoveryWitness.get().provenance().parentId()
+                == freshLocalAuthority.get().sequence()) {
+          frontier = new Frontier(
+              Set.of(recoveryWitness.get()), movementTick, true);
+          previousPositionPacketTick = movementTick;
+          previousPositionPacketGenerationRange =
+              eventTiming.packetGenerationClientTicks();
+          if (movement.move().clientTick() != null) {
+            previousExplicitClientTick = movement.move().clientTick();
+          }
+          recoveryRequired = false;
+          contradictionActive = false;
+          justRecovered = true;
+          trace.add("RECOVERY_CLEARED reason=observed state matches fresh authoritative snapshot");
+          trace.add("FRONTIER_REESTABLISHED source=AUTHORITATIVE_OBSERVATION_WITNESS");
+        }
+      }
+
       if (!haveAuthoritativeSeed && !localAuthoritativeRootAvailable && frontier.candidates().isEmpty()) {
         uncertainty.add("no trusted authoritative replay anchor exists");
         SearchResult uncertain = uncertainSearch(frontier.candidates(),
@@ -537,19 +568,6 @@ public final class CausalMovementPipeline {
         frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
             assumptions, uncertainty, trace));
         continue;
-      }
-
-      boolean recoveryCanClear = recoveryRequired
-          && lastAmbiguitySequence >= 0
-          && sequence > lastAmbiguitySequence
-          && freshLocalAuthority.isPresent()
-          && freshLocalAuthority.get().sequence() > lastAmbiguitySequence
-          && movement.chronologyClean()
-          && !sameExplicitClientTick;
-      if (recoveryCanClear) {
-        recoveryRequired = false;
-        justRecovered = true;
-        trace.add("RECOVERY_CLEARED reason=clean causally aligned movement after fresh authority");
       }
 
       boolean initialAnchorWorldStale = initialAnchor != null
@@ -590,46 +608,17 @@ public final class CausalMovementPipeline {
       }
 
       /*
-       * A populated frontier can outlive the original join anchor. The previous
-       * implementation only logged ROOT_REFRESH while continuing to simulate
-       * from the stale frontier. Once that frontier drifts far from a fresh
-       * authoritative position, continuing the old replay is no longer causal.
-       * Re-anchor only when the frontier itself is far away; this avoids replacing
-       * a healthy frontier on every movement after the original anchor becomes old.
+       * Ordinary PlayerContext updates are corroborating server authority, not a
+       * replacement prediction state. The per-player client frontier is retained
+       * exactly like a compensated prediction engine: ordinary movement extends
+       * that frontier, while explicit correction/teleport/chronology recovery can
+       * establish a new root. In particular, do not re-root just because the
+       * server sample is geographically far from the predicted state.
+       *
+       * World coverage is checked below immediately before simulation. A missing
+       * client-visible chunk therefore yields UNCERTAIN rather than silently
+       * replacing client state with the server world.
        */
-      boolean frontierCoverageIncomplete =
-          !frontier.candidates().isEmpty()
-              && frontier.candidates().stream()
-                  .anyMatch(candidate ->
-                      !movement.world().fullyKnown(
-                          playerCollisionBox(candidate.context().player())));
-      boolean frontierFarFromLocalAuthority =
-          localAuthoritativeRootAvailable
-              && frontierFarFromLocalAuthority(frontier, movement, 32.0);
-      if (!frontier.candidates().isEmpty()
-          && preferLocalAuthoritativeRoot
-          && (frontierFarFromLocalAuthority || frontierCoverageIncomplete)
-          && !recoveryRequired) {
-        Optional<Candidate> refreshedRoot =
-            rootCandidate(initialAnchor, movement, maximumCandidates, true);
-        if (refreshedRoot.isPresent()) {
-          Candidate root = refreshedRoot.get();
-          double oldDistance = nearestFrontierAuthorityDistance(frontier, movement);
-          frontier = new Frontier(Set.of(root), root.context().simulationTick(), true);
-          String reason = frontierCoverageIncomplete
-              ? "FRONTIER_WORLD_COVERAGE_INCOMPLETE"
-              : "FRONTIER_FAR_FROM_LOCAL_AUTHORITY";
-          trace.add("FRONTIER_REFRESH reason=" + reason
-              + " distance="
-              +String.format(Locale.ROOT, "%.3f", oldDistance));
-          assumptions.add(frontierCoverageIncomplete
-              ? "prediction frontier was re-anchored because its current client-world coverage was incomplete"
-              : "stale prediction frontier was re-anchored from the fresh local authoritative snapshot");
-        } else {
-          uncertainty.add("fresh local authoritative state exists but cannot be represented inside the finite Phase 6 horizon");
-          trace.add("FRONTIER_REFRESH_FAILED reason=LOCAL_AUTHORITY_ROOT_UNREPRESENTABLE");
-        }
-      }
 
       if (recoveryRequired) {
         /*
