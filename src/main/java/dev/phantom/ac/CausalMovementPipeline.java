@@ -546,14 +546,10 @@ public final class CausalMovementPipeline {
        * authority is sampled independently from the client prediction clock and
        * must not silently replace the client's causal state.
        */
-      if (recoveryRequired
-          && movement.chronologyClean()
-          && freshLocalAuthority.isPresent()) {
+      if (recoveryRequired && movement.chronologyClean()) {
         Optional<Candidate> recoveryWitness =
             authorityObservationWitness(movement, movementTick);
-        if (recoveryWitness.isPresent()
-            && recoveryWitness.get().provenance().parentId()
-                == freshLocalAuthority.get().sequence()) {
+        if (recoveryWitness.isPresent()) {
           frontier = new Frontier(
               Set.of(recoveryWitness.get()), movementTick, true);
           previousPositionPacketTick = movementTick;
@@ -565,8 +561,15 @@ public final class CausalMovementPipeline {
           recoveryRequired = false;
           contradictionActive = false;
           justRecovered = true;
-          trace.add("RECOVERY_CLEARED reason=observed state matches fresh authoritative snapshot");
-          trace.add("FRONTIER_REESTABLISHED source=AUTHORITATIVE_OBSERVATION_WITNESS");
+          trace.add("RECOVERY_CLEARED reason=observed state matches causally aligned authoritative snapshot");
+          trace.add("FRONTIER_REESTABLISHED source=AUTHORITATIVE_OBSERVATION_WITNESS"
+              + " authoritySequence=" + recoveryWitness.get().provenance().parentId());
+        } else {
+          trace.add("RECOVERY_PENDING reason=no causally aligned authority snapshot matches observed state");
+          freshLocalAuthority.ifPresent(snapshot -> trace.add(
+              "RECOVERY_REFERENCE authoritySequence=" + snapshot.sequence()
+                  + " serverTick=" + snapshot.serverTick()
+                  + " position=" + snapshot.context().serverPosition()));
         }
       }
 
@@ -2375,7 +2378,6 @@ public final class CausalMovementPipeline {
     if (initialAnchor == null || initialAnchor.uncertain()
         || initialAnchor.environment() == State.Environment.UNKNOWN
         || simulationTick < 0) return Optional.empty();
-    if (!movement.world().fullyKnown(playerCollisionBox(initialAnchor))) return Optional.empty();
     Player observed = movement.stateFrame().after();
     if (!Phase6Reachability.positionMatches(initialAnchor.position(), observed.position())) return Optional.empty();
     if (initialAnchor.onGround() != observed.onGround()) return Optional.empty();
@@ -2436,7 +2438,6 @@ public final class CausalMovementPipeline {
       long simulationTick) {
     if (frontier.candidates().isEmpty() || simulationTick < 0) return Optional.empty();
     Player observed = movement.stateFrame().after();
-    if (!movement.world().fullyKnown(playerCollisionBox(observed))) return Optional.empty();
     for (Candidate candidate : frontier.candidates()) {
       if (candidate.context().simulationTick() > simulationTick) continue;
       Player player = candidate.context().player();
@@ -2466,74 +2467,89 @@ public final class CausalMovementPipeline {
     if (simulationTick < 0) return Optional.empty();
 
     /*
-     * Prefer the causally safe simulation authority (strictly preceding server
-     * tick for live explicit-tick captures). If it is unavailable, fall back to
-     * the best aligned authority snapshot for an observation-only witness.
-     * A zero-delta witness does not need collision/world coverage because it
-     * does not simulate a physics step.
+     * A zero-delta witness is an observation proof, not a physics root. Prefer the
+     * causally safe simulation authority first, but fall back to the exact
+     * same-server-tick authority that is known to have arrived before this
+     * movement packet. The latter must never be used as a physics root, but it is
+     * sufficient to prove that the observed stationary state was actually seen
+     * by the server.
      */
-    Optional<AuthoritativeSnapshot> authority =
-        movement.simulationAuthority().or(() -> movement.authority().snapshot());
-    if (authority.isEmpty()) return Optional.empty();
-    AuthoritativeSnapshot snapshot = authority.get();
-    if (snapshot.sequence() == 0L) return Optional.empty();
-    long age = movement.event().serverTick() - snapshot.serverTick();
-    if (age < 0 || age > 1L) return Optional.empty();
-    Player authoritative = playerFromAuthority(snapshot.context());
+    LinkedHashMap<Long, AuthoritativeSnapshot> candidates = new LinkedHashMap<>();
+    movement.simulationAuthority().ifPresent(snapshot ->
+        candidates.put(snapshot.sequence(), snapshot));
+    movement.authority().snapshot().ifPresent(snapshot -> {
+      if (snapshot.serverTick() == movement.event().serverTick()
+          && snapshot.sequence() < movement.event().packet().sequence()
+          && snapshot.receivedNanos() <= movement.event().packet().receivedNanos()) {
+        candidates.put(snapshot.sequence(), snapshot);
+      }
+    });
+
     Player observed = movement.stateFrame().after();
-    if (!Phase6Reachability.positionMatches(authoritative.position(), observed.position())) return Optional.empty();
-    if (authoritative.onGround() != observed.onGround()) return Optional.empty();
-    if (movement.move().onGround() != null && authoritative.onGround() != movement.move().onGround()) return Optional.empty();
-    /*
-     * PlayerContext intentionally has no server yaw/pitch. The movement packet's
-     * orientation is therefore the observed client orientation and must not be
-     * compared against the synthetic 0/0 values used by playerFromAuthority().
-     * Likewise, the authority's client-tick watermark identifies its capture
-     * boundary; it need not equal the later movement's reconstructed client tick.
-     */
-    float yaw = movement.move().yaw() == null ? observed.yaw() : movement.move().yaw();
-    float pitch = movement.move().pitch() == null ? observed.pitch() : movement.move().pitch();
-    Player witnessPlayer = new Player(
-        observed.position(),
-        authoritative.velocity(),
-        yaw,
-        pitch,
-        movement.move().onGround() == null ? authoritative.onGround() : movement.move().onGround(),
-        authoritative.gamemode(),
-        authoritative.effects(),
-        authoritative.awaitingTeleport(),
-        false,
-        observed.input(),
-        authoritative.attributes(),
-        authoritative.pose(),
-        authoritative.environment(),
-        observed.clientTickRange(),
-        authoritative.provenance(),
-        authoritative.uncertaintyReasons());
-    MovementEnvironment environment = movementEnvironmentOf(witnessPlayer);
-    Context context = new Context(
-        simulationTick,
-        witnessPlayer,
-        simulationEnvironmentFor(environment),
-        witnessPlayer.attributes(),
-        movementEffects(witnessPlayer),
-        witnessPlayer.pose(),
-        environment,
-        witnessPlayer.pose() == Pose.SLEEPING,
-        entityCollisionsFor(movement));
-    return Optional.of(new Candidate(
-        0,
-        context,
-        new Phase6Reachability.Provenance(
-            0,
-            snapshot.sequence(),
-            simulationTick,
-            "AUTHORITATIVE_ZERO_DELTA",
-            "AUTHORITY",
-            "None",
-            List.of("observed position matches authoritative snapshot; no client physics step required"),
-            1,
-            List.of())));
+    for (AuthoritativeSnapshot snapshot : candidates.values()) {
+      long age = movement.event().serverTick() - snapshot.serverTick();
+      if (snapshot.sequence() == 0L || age < 0 || age > 1L) continue;
+
+      Player authoritative = playerFromAuthority(snapshot.context());
+      if (!Phase6Reachability.positionMatches(authoritative.position(), observed.position())) continue;
+      if (authoritative.onGround() != observed.onGround()) continue;
+      if (movement.move().onGround() != null
+          && authoritative.onGround() != movement.move().onGround()) continue;
+
+      /*
+       * PlayerContext intentionally has no server yaw/pitch. The movement packet's
+       * orientation is therefore the observed client orientation and must not be
+       * compared against synthetic authority yaw/pitch values.
+       */
+      float yaw = movement.move().yaw() == null ? observed.yaw() : movement.move().yaw();
+      float pitch = movement.move().pitch() == null ? observed.pitch() : movement.move().pitch();
+      Player witnessPlayer = new Player(
+          observed.position(),
+          authoritative.velocity(),
+          yaw,
+          pitch,
+          movement.move().onGround() == null ? authoritative.onGround() : movement.move().onGround(),
+          authoritative.gamemode(),
+          authoritative.effects(),
+          authoritative.awaitingTeleport(),
+          false,
+          observed.input(),
+          authoritative.attributes(),
+          authoritative.pose(),
+          authoritative.environment(),
+          observed.clientTickRange(),
+          authoritative.provenance(),
+          authoritative.uncertaintyReasons());
+      MovementEnvironment environment = movementEnvironmentOf(witnessPlayer);
+      Context context = new Context(
+          simulationTick,
+          witnessPlayer,
+          simulationEnvironmentFor(environment),
+          witnessPlayer.attributes(),
+          movementEffects(witnessPlayer),
+          witnessPlayer.pose(),
+          environment,
+          witnessPlayer.pose() == Pose.SLEEPING,
+          entityCollisionsFor(movement));
+      return Optional.of(new Candidate(
+          0,
+          context,
+          new Phase6Reachability.Provenance(
+              0,
+              snapshot.sequence(),
+              simulationTick,
+              "AUTHORITATIVE_ZERO_DELTA",
+              "AUTHORITY",
+              "None",
+              List.of(
+                  "observed position matches authoritative snapshot; no client physics step required",
+                  snapshot.serverTick() == movement.event().serverTick()
+                      ? "same-server-tick authority is used only as an observation witness, never as a physics root"
+                      : "preceding-server-tick authority is causally safe for the observation witness"),
+              1,
+              List.of())));
+    }
+    return Optional.empty();
   }
 
   private static boolean exceedsConservativeKinematicBound(
