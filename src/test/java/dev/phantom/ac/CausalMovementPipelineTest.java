@@ -264,7 +264,7 @@ class CausalMovementPipelineTest {
   }
 
   @Test
-  void populatedFrontierRefreshesWhenFreshAuthorityIsFarAway() {
+  void populatedFrontierIsNotReplacedByFarFreshAuthority() {
     var stone = dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone", Map.of());
     var worldBuilder = WorldSnapshot.builder(Contracts.TARGET_VERSION)
         .loadChunk(0, 0)
@@ -314,8 +314,13 @@ class CausalMovementPipelineTest {
         report.results().toString());
     assertEquals(Verdict.POSSIBLE, report.results().get(1).verdict(),
         report.results().toString());
+    assertFalse(report.frames().get(1).trace().stream()
+        .anyMatch(line -> line.contains("FRONTIER_REFRESH")),
+        report.frames().get(1).trace().toString());
     assertTrue(report.frames().get(1).trace().stream()
-        .anyMatch(line -> line.contains("FRONTIER_REFRESH reason=FRONTIER_FAR_FROM_LOCAL_AUTHORITY")),
+        .anyMatch(line -> line.contains("EVIDENCE POSSIBLE reason=AUTHORITATIVE_ZERO_DELTA_WITNESS")
+            || line.contains("EVIDENCE POSSIBLE reason=INITIAL_ANCHOR_ZERO_DELTA")
+            || line.contains("MATCHING candidates=")),
         report.frames().get(1).trace().toString());
   }
 
