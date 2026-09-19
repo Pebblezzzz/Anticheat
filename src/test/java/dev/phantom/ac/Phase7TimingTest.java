@@ -39,6 +39,23 @@ class Phase7TimingTest {
   }
 
   @Test
+  void firstUnwatermarkedClientPacketAnchorsRelativeTickZero() {
+    Config config = new Config(
+        50_000_000L, 50_000_000L, 50_000_000L,
+        new LatencyBounds(0, 100_000_000L),
+        new LatencyBounds(0, 100_000_000L),
+        new TickDelayBounds(0, 1),
+        new TickDelayBounds(0, 1),
+        250_000_000L, 3, 128);
+    Reconstruction r = reconstruct(timeline(
+        new RawPacket(1, 0, new Move(Vec3.ZERO, 0f, 0f, true, null))),
+        config);
+    EventTiming timing = r.frames().getFirst().timing();
+    assertEquals(Range.exact(0), timing.packetGenerationClientTicks());
+    assertEquals(TimingSource.RELATIVE_CLIENT_ANCHOR, timing.source());
+  }
+
+  @Test
   void explicitClientTickIsCaptureMetadataNotAUniversalNetworkTimestamp() {
     Reconstruction r = reconstruct(timeline(
         new RawPacket(1, 0, new Move(Vec3.ZERO, 0f, 0f, true, 42L))),
