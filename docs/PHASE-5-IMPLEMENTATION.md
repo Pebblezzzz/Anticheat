@@ -138,3 +138,6 @@ Phase 7 owns temporal synchronization.
 Phase 8 owns movement validation and enforcement.
 
 No Phase 6/7/8 movement decision logic is added by this redesign.
+
+
+<!-- CI rerun after movement-authority baseline restoration. -->
