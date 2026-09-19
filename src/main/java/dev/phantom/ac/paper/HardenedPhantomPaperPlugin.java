@@ -431,6 +431,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     if(!accepted)return;
     var accumulated=capture.accumulator.accept(evidence,
         new Phase8MovementValidation.Config(1,20,alertsEnabled,true));
+    capture.accumulator=accumulated.state();
     capture.processedResults++;
     accumulated.alert().ifPresent(alert->{
       getLogger().warning(alert.message());
@@ -775,6 +776,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
       var accumulated=capture.accumulator.accept(evidence,
           new Phase8MovementValidation.Config(1,20,alertsEnabled,true));
+      capture.accumulator=accumulated.state();
 
       accumulated.alert().ifPresent(alert->{
         String message=alert.message();
@@ -1101,7 +1103,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     volatile boolean lastAuthoritativeFlying;
     volatile long paperMoveFailureWindowStartNanos=-1L;
     volatile int paperMoveFailureCount;
-    Phase8MovementValidation.Accumulator accumulator=Phase8MovementValidation.Accumulator.empty();
+    volatile Phase8MovementValidation.Accumulator accumulator=Phase8MovementValidation.Accumulator.empty();
     final ValidationResultGate validationGate=new ValidationResultGate();
     int processedResults;
     volatile int minY=-64,maxY=319;
