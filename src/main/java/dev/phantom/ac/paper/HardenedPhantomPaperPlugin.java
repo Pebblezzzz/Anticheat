@@ -20,6 +20,16 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientTe
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChunkData;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityVelocity;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityRelativeMove;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityRelativeMoveAndRotation;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityTeleport;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityMetadata;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDestroyEntities;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnLivingEntity;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnPlayer;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnPainting;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnExperienceOrb;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerMultiBlockChange;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerPositionAndLook;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPing;
@@ -186,6 +196,38 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         RelativeFlag flags=packet.getRelativeFlags();
         record(capture,new Packets.Teleport(packet.getTeleportId(),vector(packet.getX(),packet.getY(),packet.getZ()),packet.getYaw(),packet.getPitch(),
             flags.has(RelativeFlag.X),flags.has(RelativeFlag.Y),flags.has(RelativeFlag.Z),flags.has(RelativeFlag.YAW),flags.has(RelativeFlag.PITCH)));
+      }else if(event.getPacketType()==PacketType.Play.Server.SPAWN_ENTITY){
+        var packet=new WrapperPlayServerSpawnEntity(event);
+        recordEntitySpawn(capture,packet.getEntityId(),vector(packet.getPosition().x,packet.getPosition().y,packet.getPosition().z));
+      }else if(event.getPacketType()==PacketType.Play.Server.SPAWN_LIVING_ENTITY){
+        var packet=new WrapperPlayServerSpawnLivingEntity(event);
+        recordEntitySpawn(capture,packet.getEntityId(),vector(packet.getPosition().x,packet.getPosition().y,packet.getPosition().z));
+      }else if(event.getPacketType()==PacketType.Play.Server.SPAWN_PLAYER){
+        var packet=new WrapperPlayServerSpawnPlayer(event);
+        recordEntitySpawn(capture,packet.getEntityId(),vector(packet.getPosition().x,packet.getPosition().y,packet.getPosition().z));
+      }else if(event.getPacketType()==PacketType.Play.Server.SPAWN_PAINTING){
+        var packet=new WrapperPlayServerSpawnPainting(event);
+        var pos=packet.getPosition();
+        recordEntitySpawn(capture,packet.getEntityId(),new Vec3(pos.getX(),pos.getY(),pos.getZ()));
+      }else if(event.getPacketType()==PacketType.Play.Server.SPAWN_EXPERIENCE_ORB){
+        var packet=new WrapperPlayServerSpawnExperienceOrb(event);
+        recordEntitySpawn(capture,packet.getEntityId(),new Vec3(packet.getX(),packet.getY(),packet.getZ()));
+      }else if(event.getPacketType()==PacketType.Play.Server.ENTITY_RELATIVE_MOVE){
+        var packet=new WrapperPlayServerEntityRelativeMove(event);
+        recordEntityRelativeMove(capture,packet.getEntityId(),packet.getDeltaX(),packet.getDeltaY(),packet.getDeltaZ());
+      }else if(event.getPacketType()==PacketType.Play.Server.ENTITY_RELATIVE_MOVE_AND_ROTATION){
+        var packet=new WrapperPlayServerEntityRelativeMoveAndRotation(event);
+        recordEntityRelativeMove(capture,packet.getEntityId(),packet.getDeltaX(),packet.getDeltaY(),packet.getDeltaZ());
+      }else if(event.getPacketType()==PacketType.Play.Server.ENTITY_TELEPORT){
+        var packet=new WrapperPlayServerEntityTeleport(event);
+        var pos=packet.getPosition();
+        recordEntityTeleport(capture,packet.getEntityId(),new Vec3(pos.getX(),pos.getY(),pos.getZ()));
+      }else if(event.getPacketType()==PacketType.Play.Server.ENTITY_METADATA){
+        var packet=new WrapperPlayServerEntityMetadata(event);
+        refreshEntityShape(capture,packet.getEntityId());
+      }else if(event.getPacketType()==PacketType.Play.Server.DESTROY_ENTITIES){
+        var packet=new WrapperPlayServerDestroyEntities(event);
+        for(int entityId:packet.getEntityIds()) recordEntityDespawn(capture,entityId);
       }else if(event.getPacketType()==PacketType.Play.Server.ENTITY_VELOCITY){
         var packet=new WrapperPlayServerEntityVelocity(event);
         if(packet.getEntityId()==event.getUser().getEntityId()){
@@ -1172,6 +1214,124 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         :new Packets.BlockStateChange(position,state));
   }
 
+  private record ClientEntityTrack(int entityId, Vec3 packetPosition, dev.phantom.ac.geometry.BlockBox box)
+      implements Serializable {}
+
+  private void recordEntitySpawn(Capture capture,int entityId,Vec3 packetPosition){
+    long sequence=capture.sequence.incrementAndGet();
+    long receivedNanos=System.nanoTime();
+    capture.clientEntities.remove(entityId);
+    Bukkit.getScheduler().runTask(this,()->{
+      Player viewer=Bukkit.getPlayer(capture.playerId);
+      Entity entity=viewer==null?null:findWorldEntity(viewer,entityId);
+      if(entity==null){
+        capture.clientWorld.markEntityTrackingIncomplete();
+        return;
+      }
+      dev.phantom.ac.geometry.BlockBox box=alignServerEntityBox(entity,packetPosition);
+      capture.clientEntities.put(entityId,new ClientEntityTrack(entityId,packetPosition,box));
+      var event=new dev.phantom.ac.Phase4WorldReplica.EntitySpawn(
+          new dev.phantom.ac.Phase4WorldReplica.Order(authoritativeTick(capture)==null?0:authoritativeTick(capture),receivedNanos,sequence,sequence),
+          new dev.phantom.ac.Phase4WorldReplica.Provenance("paper-entity-spawn","ENTITY_SPAWN",sequence,authoritativeTick(capture)==null?0:authoritativeTick(capture),null,true,"clientbound"),
+          new EntityCollisions.EntityBox(entityId,box));
+      capture.clientWorld.queue(event);
+      var packet=new Packets.EntitySpawn(entityId,box);
+      appendPacket(capture,new RawPacket(sequence,receivedNanos,packet,
+          Packets.CaptureProvenance.fromAdapter("paper-entity-spawn",packet,authoritativeTick(capture))));
+    });
+  }
+
+  private void recordEntityRelativeMove(Capture capture,int entityId,double dx,double dy,double dz){
+    ClientEntityTrack prior=capture.clientEntities.get(entityId);
+    if(prior==null){
+      capture.clientWorld.markEntityTrackingIncomplete();
+      return;
+    }
+    Vec3 position=new Vec3(prior.packetPosition().x()+dx,prior.packetPosition().y()+dy,prior.packetPosition().z()+dz);
+    dev.phantom.ac.geometry.BlockBox box=prior.box().move(dx,dy,dz);
+    ClientEntityTrack next=new ClientEntityTrack(entityId,position,box);
+    capture.clientEntities.put(entityId,next);
+    recordEntityMove(capture,entityId,box);
+  }
+
+  private void recordEntityTeleport(Capture capture,int entityId,Vec3 position){
+    ClientEntityTrack prior=capture.clientEntities.get(entityId);
+    if(prior==null){
+      capture.clientWorld.markEntityTrackingIncomplete();
+      return;
+    }
+    double dx=position.x()-prior.packetPosition().x();
+    double dy=position.y()-prior.packetPosition().y();
+    double dz=position.z()-prior.packetPosition().z();
+    dev.phantom.ac.geometry.BlockBox box=prior.box().move(dx,dy,dz);
+    capture.clientEntities.put(entityId,new ClientEntityTrack(entityId,position,box));
+    recordEntityMove(capture,entityId,box);
+  }
+
+  private void recordEntityMove(Capture capture,int entityId,dev.phantom.ac.geometry.BlockBox box){
+    long sequence=capture.sequence.incrementAndGet();
+    long receivedNanos=System.nanoTime();
+    var event=new dev.phantom.ac.Phase4WorldReplica.EntityMove(
+        new dev.phantom.ac.Phase4WorldReplica.Order(authoritativeTick(capture)==null?0:authoritativeTick(capture),receivedNanos,sequence,sequence),
+        new dev.phantom.ac.Phase4WorldReplica.Provenance("paper-entity-move","ENTITY_MOVE",sequence,authoritativeTick(capture)==null?0:authoritativeTick(capture),null,true,"clientbound"),
+        new EntityCollisions.EntityBox(entityId,box));
+    capture.clientWorld.queue(event);
+    var packet=new Packets.EntityMove(entityId,box);
+    appendPacket(capture,new RawPacket(sequence,receivedNanos,packet,
+        Packets.CaptureProvenance.fromAdapter("paper-entity-move",packet,authoritativeTick(capture))));
+  }
+
+  private void recordEntityDespawn(Capture capture,int entityId){
+    capture.clientEntities.remove(entityId);
+    long sequence=capture.sequence.incrementAndGet();
+    long receivedNanos=System.nanoTime();
+    var event=new dev.phantom.ac.Phase4WorldReplica.EntityDespawn(
+        new dev.phantom.ac.Phase4WorldReplica.Order(authoritativeTick(capture)==null?0:authoritativeTick(capture),receivedNanos,sequence,sequence),
+        new dev.phantom.ac.Phase4WorldReplica.Provenance("paper-entity-despawn","DESTROY_ENTITIES",sequence,authoritativeTick(capture)==null?0:authoritativeTick(capture),null,true,"clientbound"),
+        entityId);
+    capture.clientWorld.queue(event);
+    var packet=new Packets.EntityDespawn(entityId);
+    appendPacket(capture,new RawPacket(sequence,receivedNanos,packet,
+        Packets.CaptureProvenance.fromAdapter("paper-entity-despawn",packet,authoritativeTick(capture))));
+  }
+
+  private void refreshEntityShape(Capture capture,int entityId){
+    ClientEntityTrack prior=capture.clientEntities.get(entityId);
+    if(prior==null){
+      capture.clientWorld.markEntityTrackingIncomplete();
+      return;
+    }
+    Bukkit.getScheduler().runTask(this,()->{
+      Player viewer=Bukkit.getPlayer(capture.playerId);
+      Entity entity=viewer==null?null:findWorldEntity(viewer,entityId);
+      if(entity==null){
+        capture.clientWorld.markEntityTrackingIncomplete();
+        return;
+      }
+      dev.phantom.ac.geometry.BlockBox box=alignServerEntityBox(entity,prior.packetPosition());
+      capture.clientEntities.put(entityId,new ClientEntityTrack(entityId,prior.packetPosition(),box));
+      recordEntityMove(capture,entityId,box);
+    });
+  }
+
+  private static Entity findWorldEntity(Player viewer,int entityId){
+    for(Entity entity:viewer.getWorld().getEntities())
+      if(entity.getEntityId()==entityId)return entity;
+    return null;
+  }
+
+  private static dev.phantom.ac.geometry.BlockBox alignServerEntityBox(Entity entity,Vec3 packetPosition){
+    org.bukkit.Location location=entity.getLocation();
+    org.bukkit.util.BoundingBox box=entity.getBoundingBox();
+    return new dev.phantom.ac.geometry.BlockBox(
+        box.getMinX()+packetPosition.x()-location.getX(),
+        box.getMinY()+packetPosition.y()-location.getY(),
+        box.getMinZ()+packetPosition.z()-location.getZ(),
+        box.getMaxX()+packetPosition.x()-location.getX(),
+        box.getMaxY()+packetPosition.y()-location.getY(),
+        box.getMaxZ()+packetPosition.z()-location.getZ());
+  }
+
   private void warmStateAsync(Capture capture, BlockState state){
     if(state==null||state.isUnsupported())return;
     Bukkit.getScheduler().runTask(this, () -> {
@@ -1391,6 +1551,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final Set<Short> outstandingTransactions=ConcurrentHashMap.newKeySet();
     final Set<Short> reservedTransactions=ConcurrentHashMap.newKeySet();
     final ConcurrentLinkedQueue<PendingChunk> chunkQueue=new ConcurrentLinkedQueue<>();
+    final ConcurrentHashMap<Integer,ClientEntityTrack> clientEntities=new ConcurrentHashMap<>();
     final AtomicInteger pendingChunkDecodes=new AtomicInteger();
     final AtomicLong transactionCounter=new AtomicLong(1);
     final AtomicLong paperMoveFailureSequence=new AtomicLong();
@@ -1417,7 +1578,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     Capture(UUID id,long epoch,int candidateBudget){
       playerId=id;epochNanos=epoch;
       movementRunner=new Phase8PredictionRunner(candidateBudget);
-      clientWorld.setCollisionResolver((snapshot,state,x,y,z)->PaperVanillaCollision.resolve(state,x,y,z));
+      clientWorld.setCollisionResolver((snapshot,state,x,y,z)->PaperVanillaCollision.resolve(state,x,y,z));      clientWorld.markEntityTrackingComplete();
     }
 
     void updateServerPosition(Player player){
