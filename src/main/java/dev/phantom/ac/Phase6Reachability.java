@@ -508,8 +508,14 @@ public final class Phase6Reachability {
         uncertain = true;
         reasons.add("initial state carries explicit uncertainty");
       }
-      long entityCollisionReference = entityCollisionReferences.computeIfAbsent(
-          root.entityCollisions(), ignored -> nextEntityCollisionReference++);
+      Long existingEntityCollisionReference = entityCollisionReferences.get(root.entityCollisions());
+      long entityCollisionReference;
+      if (existingEntityCollisionReference != null) {
+        entityCollisionReference = existingEntityCollisionReference;
+      } else {
+        entityCollisionReference = nextEntityCollisionReference++;
+        entityCollisionReferences.put(root.entityCollisions(), entityCollisionReference);
+      }
       Candidate candidate = new Candidate(
           nextId++, root, new Provenance(
               nextId - 1, -1, root.simulationTick(), "ROOT", "ROOT", "None",
