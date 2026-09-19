@@ -1678,19 +1678,27 @@ public final class CausalMovementPipeline {
       World.VisibilityHistory history,
       MovementEvent movement) {
     /*
-     * MovementEvent.world() has already been selected at capture/reconstruction
-     * time using Phase 7's earliest possible simulation tick. It is the strongest
-     * causally available client-world snapshot for this movement. Reusing it for
-     * each Phase 5 step prevents a second, inconsistent reconstruction from
-     * dropping a known chunk and turning known air into UNKNOWN.
-     *
-     * When no client-visible world exists, fall back to the historical Phase 4
-     * reconstruction so unknown/unloaded coverage still propagates correctly.
+     * Prefer the causally selected live/client-visible snapshot when it is
+     * complete enough to cover both the simulated root and observed endpoint.
+     * If the compact live replica is incomplete, merge it with the historical
+     * reconstruction rather than allowing an incomplete live chunk to turn
+     * known historical air into UNKNOWN.
      */
-    if (movement.world() != null && !movement.world().loadedChunks().isEmpty()) {
-      return movement.world();
+    WorldSnapshot historical = history.statesAt(Math.max(0L, simulationTick));
+    if (!movement.world().loadedChunks().isEmpty()) {
+      Player causalRoot = movement.simulationAuthority()
+          .map(snapshot -> playerFromAuthority(snapshot.context()))
+          .orElse(movement.stateFrame().before());
+      boolean historicalCoversRoot =
+          historical.fullyKnown(playerCollisionBox(causalRoot));
+      boolean historicalCoversObserved =
+          historical.fullyKnown(playerCollisionBox(movement.stateFrame().after()));
+      if (!historicalCoversRoot || !historicalCoversObserved
+          || movement.liveWorldUsed()) {
+        return WorldSnapshot.merge(historical, movement.world());
+      }
     }
-    return history.statesAt(Math.max(0L, simulationTick));
+    return historical; 
   }
 
   private static Optional<Candidate> rootCandidateForTarget(
