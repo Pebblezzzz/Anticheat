@@ -25,6 +25,7 @@ import dev.phantom.ac.world.Chunk;
 import dev.phantom.ac.world.Coverage;
 import dev.phantom.ac.world.Pos;
 import dev.phantom.ac.world.WorldSnapshot;
+import dev.phantom.ac.world.EntityCollisions;
 import dev.phantom.ac.world.v12111.BlockCatalogue12111;
 import java.util.*;
 import org.junit.jupiter.api.Test;
@@ -77,7 +78,8 @@ class Phase6CompletionTest {
     return new Context(
         0, player, Simulation.Environment.DRY, Attributes.DEFAULT,
         MovementEffects.NONE, Pose.STANDING,
-        MovementEnvironment.dry(true, false, false), false);
+        MovementEnvironment.dry(true, false, false), false,
+        EntityCollisions.of(List.of()));
   }
 
   private static Context startAt(Maths.Vec3 position, boolean onGround, float yaw, Pose pose,
@@ -95,7 +97,8 @@ class Phase6CompletionTest {
                     : State.Environment.DRY,
         State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
     return new Context(
-        0, player, environment, attributes, effects, pose, movementEnvironment, false);
+        0, player, environment, attributes, effects, pose, movementEnvironment, false,
+        EntityCollisions.of(List.of()));
   }
 
   private static SearchResult exact(Context start, List<AdvancedInput> sequence,
@@ -389,7 +392,8 @@ class Phase6CompletionTest {
         State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
     Context pendingContext = new Context(
         0, pending, Simulation.Environment.DRY, attributes, effects, Pose.STANDING,
-        MovementEnvironment.dry(false, false, false), false);
+        MovementEnvironment.dry(false, false, false), false,
+        EntityCollisions.of(List.of()));
     SearchResult confirmed = ENGINE.search(
         pendingContext, List.of(InputConstraint.exact(STILL)),
         tick -> List.of(new WorldBranch("known", floorWorld(), true, "known floor")),
