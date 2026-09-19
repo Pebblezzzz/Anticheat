@@ -68,21 +68,27 @@ public final class Vanilla12111RichPhysics {
         }else if(gliding||climbing){
             inputAcceleration=inputMagnitude>1.0?AIR_ACCEL:AIR_ACCEL*INPUT_FRICTION;
         }else if(s.onGround()){
-            BlockState support=context.world().blockAtOrNull(
-                    (int)Math.floor(s.position().x()),
-                    (int)Math.floor(s.position().y()-GROUND_PROBE),
-                    (int)Math.floor(s.position().z()));
-            if(support==null||support.isUnsupported())
-                return uncertain(context,"support block is unavailable for friction calculation");
-            double slipperiness=BlockCatalogue12111.slipperiness(support);
-            double movementSpeed=context.attributes().value()*context.effects().speedMultiplier();
-            if(context.input().sprint())movementSpeed*=SPRINTING_SPEED_MULTIPLIER;
-            if(context.input().sneak())movementSpeed*=SNEAKING_SPEED_MULTIPLIER;
-            double frictionInfluencedSpeed=movementSpeed*FRICTION_SPEED_FACTOR
-                    /(slipperiness*slipperiness*slipperiness);
-            inputAcceleration=inputMagnitude>1.0
-                    ?frictionInfluencedSpeed
-                    :frictionInfluencedSpeed*INPUT_FRICTION;
+            if(inputMagnitude==0.0){
+                // Jump-only and stationary ground ticks have no horizontal friction
+                // calculation to perform, so a support block is not required here.
+                inputAcceleration=0.0;
+            }else{
+                BlockState support=context.world().blockAtOrNull(
+                        (int)Math.floor(s.position().x()),
+                        (int)Math.floor(s.position().y()-GROUND_PROBE),
+                        (int)Math.floor(s.position().z()));
+                if(support==null||support.isUnsupported())
+                    return uncertain(context,"support block is unavailable for friction calculation");
+                double slipperiness=BlockCatalogue12111.slipperiness(support);
+                double movementSpeed=context.attributes().value()*context.effects().speedMultiplier();
+                if(context.input().sprint())movementSpeed*=SPRINTING_SPEED_MULTIPLIER;
+                if(context.input().sneak())movementSpeed*=SNEAKING_SPEED_MULTIPLIER;
+                double frictionInfluencedSpeed=movementSpeed*FRICTION_SPEED_FACTOR
+                        /(slipperiness*slipperiness*slipperiness);
+                inputAcceleration=inputMagnitude>1.0
+                        ?frictionInfluencedSpeed
+                        :frictionInfluencedSpeed*INPUT_FRICTION;
+            }
         }else{
             double offGroundSpeed=context.input().sprint()?SPRINT_AIR_ACCEL:AIR_ACCEL;
             inputAcceleration=inputMagnitude>1.0
