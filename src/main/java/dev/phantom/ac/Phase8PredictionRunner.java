@@ -97,7 +97,8 @@ public final class Phase8PredictionRunner {
       long receivedNanos,
       long serverTick,
       Long clientTick,
-      Packets.PlayerContext context) {}
+      Packets.PlayerContext context,
+      boolean entityCollisionComplete) {}
 
   private record TimedInput(
       long sequence,
@@ -310,12 +311,15 @@ public final class Phase8PredictionRunner {
             ? 0L
             : packet.provenance().authoritativeServerTick();
         Packets.PlayerContext effectiveAuthority = authority;
+        boolean entityCollisionComplete =
+            !packet.provenance().sourceId().equals("paper-live");
         latestAuthority = new AuthorityAnchor(
             sequence,
             packet.receivedNanos(),
             authorityServerTick,
             packet.provenance().authoritativeClientTick(),
-            effectiveAuthority);
+            effectiveAuthority,
+            entityCollisionComplete);
         if (!prediction.isEmpty()) {
           Set<Candidate> updated =
               overlayAuthorityState(prediction, effectiveAuthority, maximumCandidates);
@@ -1388,7 +1392,9 @@ public final class Phase8PredictionRunner {
   private EntityCollisions entityCollisions(AuthorityAnchor authority) {
     return authority == null
         ? EntityCollisions.NONE_TRACKED
-        : EntityCollisions.of(authority.context().entityBoxes());
+        : EntityCollisions.of(
+            authority.context().entityBoxes(),
+            authority.entityCollisionComplete());
   }
 
   private Phase8MovementValidation.Result validate(
