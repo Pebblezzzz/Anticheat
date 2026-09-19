@@ -81,7 +81,7 @@ public final class Phase4WorldReplica implements Serializable {
     Packets.Packet p=event.packet().packet();Packets.CaptureProvenance cp=event.packet().provenance();
     Order o=new Order(event.serverTick(),event.packet().receivedNanos(),event.packet().sequence(),nextOrdinal());
     Provenance v=new Provenance(cp.sourceId(),cp.packetType(),event.packet().sequence(),event.serverTick(),cp.authoritativeClientTick(),true,"timeline");
-    if(p instanceof Packets.ChunkStates x)accept(new ChunkData(o,v,x.chunk(),x.states()));
+    if(p instanceof Packets.ChunkStates x)accept(new ChunkData(o,v,new Chunk(x.chunk().x(),x.chunk().z()),x.states()));
     else if(p instanceof Packets.ChunkUnload x)accept(new ChunkUnload(o,v,x.chunk()));
     else if(p instanceof Packets.BlockStateChange x)accept(new BlockChange(o,v,x.position(),x.state()));
     else if(p instanceof Packets.UnsupportedBlockStateChange x)accept(new BlockChange(o,v,x.position(),x.state()));
