@@ -262,6 +262,7 @@ public final class CausalMovementPipeline {
     Phase7Timing.Range previousPositionPacketGenerationRange = null;
     Long previousExplicitClientTick = null;
     boolean recoveryRequired = false;
+    boolean contradictionActive = false;
     long lastAmbiguitySequence = -1L;
     long lastHandledUnmodeledExternalSequence = -1L;
     boolean haveAuthoritativeSeed = initialAnchor != null && !initialAnchor.uncertain();
@@ -473,7 +474,9 @@ public final class CausalMovementPipeline {
        * remain UNCERTAIN rather than being silently accepted.
        */
       if (!recoveryRequired
+          && !contradictionActive
           && movement.move().clientTick() == null
+          && movementTick >= 0
           && Phase7Timing.Range.exact(movementTick).isExact()
           && Phase6Reachability.positionMatches(observedBefore.position(), observedAfter.position())
           && Float.compare(observedBefore.yaw(), observedAfter.yaw()) == 0
@@ -704,6 +707,7 @@ public final class CausalMovementPipeline {
                     Phase6Reachability.ObservedField.POSITION,
                     Phase6Reachability.ObservedField.ROTATION));
         results.add(validation);
+        contradictionActive = false;
         frontier = new Frontier(flightCandidates, movementTick, true);
         previousPositionPacketTick = movementTick;
         previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
@@ -792,8 +796,14 @@ public final class CausalMovementPipeline {
           kinematicReference = rootCandidate(initialAnchor, movement, maximumCandidates, true);
         }
         if (kinematicReference.isPresent()
-            && movement.world().fullyKnown(
-                playerCollisionBox(kinematicReference.get().context().player()))
+            && movement.world().hasChunk(
+                Math.floorDiv((int) Math.floor(
+                    kinematicReference.get().context().player().position().x()), 16),
+                Math.floorDiv((int) Math.floor(
+                    kinematicReference.get().context().player().position().z()), 16))
+            && movement.world().hasChunk(
+                Math.floorDiv((int) Math.floor(observedAfter.position().x()), 16),
+                Math.floorDiv((int) Math.floor(observedAfter.position().z()), 16))
             && exceedsConservativeKinematicBound(
                 kinematicReference.get(), observedAfter, movementTick)) {
           Candidate reference = kinematicReference.get();
@@ -903,6 +913,7 @@ public final class CausalMovementPipeline {
                   Phase6Reachability.ObservedField.ROTATION,
                   Phase6Reachability.ObservedField.GROUND));
           results.add(validation);
+          contradictionActive = false;
           long baselineTick = baselineMatches.stream()
               .mapToLong(candidate -> candidate.context().simulationTick())
               .max()
@@ -1095,6 +1106,7 @@ public final class CausalMovementPipeline {
               + " frontierTick=" + resultingTick);
         }
       } else if (validation.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
+        contradictionActive = true;
         previousPositionPacketTick = movementTick;
         previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
         if (movement.move().clientTick() != null) {
