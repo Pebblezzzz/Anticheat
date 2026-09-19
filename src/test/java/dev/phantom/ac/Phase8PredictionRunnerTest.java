@@ -156,6 +156,55 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void staleAirborneAuthorityResyncPredictsObservedNextTick() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+
+    runner.process(
+        "stale-airborne",
+        List.of(
+            new RawPacket(1, 10, new ClientTickEnd()),
+            new RawPacket(2, 20, new Move(
+                new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 1L))),
+        floorWorld(), anchor(), 0L);
+
+    double authorityY = 72.7531999805212;
+    double authorityVy = 0.33319999363422365;
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(false, false, false),
+        new Maths.Vec3(.5, authorityY, .5),
+        new Maths.Vec3(0.0, authorityVy, 0.0),
+        false, false, false, List.of());
+
+    double observedY = authorityY + authorityVy * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG
+        - Vanilla12111RichPhysics.GRAVITY * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG;
+
+    var report = runner.process(
+        "stale-airborne",
+        List.of(
+            new RawPacket(3, 30, authority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-authority", authority, 100L, 152L)),
+            new RawPacket(4, 200, new Move(
+                new Maths.Vec3(.5, observedY, .5), 25f, 8f, false, 152L))),
+        floorWorld(), anchor(), 0L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(), report.results().toString());
+    assertTrue(report.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
+        .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
+        report.frames().toString());
+    assertTrue(report.results().stream()
+        .flatMap(result -> result.evidence().uncertaintySources().stream())
+        .noneMatch(reason -> reason.contains("support block is unavailable")
+            || reason.contains("Phase 5 could not deterministically simulate")),
+        report.results().toString());
+    assertTrue(report.candidateFrontierRetained(), report.toString());
+  }
+
+  @Test
   void stationaryObservationIsComparedAgainstRetainedPrediction() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     var report = runner.process(
