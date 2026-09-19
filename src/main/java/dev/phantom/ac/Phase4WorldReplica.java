@@ -826,6 +826,19 @@ public final class Phase4WorldReplica implements Serializable {
       return collisionResolver.resolve(snapshot,state,x,y,z);
     }
 
+    @Override public String coverageDetailAt(int x,int y,int z){
+      Coverage coverage=coverageAt(x,y,z);
+      if(coverage==Coverage.UNLOADED)return coverage.toString();
+      PackedChunk chunk=data.chunks().get(Chunk.containing(x,z));
+      if(chunk==null)return coverage.toString();
+      int sectionIndex=Math.floorDiv(y,16)-data.sectionMinY();
+      if(!chunk.sectionKnown(sectionIndex))return coverage.toString();
+      PackedSection section=chunk.section(sectionIndex);
+      if(section==null)return coverage.toString();
+      BlockState state=section.stateAt((Math.floorMod(y,16)<<8)|((z&15)<<4)|(x&15));
+      return coverage+" block="+state.blockId()+" properties="+state.properties();
+    }
+
     @Override public BlockState blockAtOrNull(int x,int y,int z){
       if(y<data.minY()||y>data.maxY())return null;
       PackedChunk chunk=data.chunks().get(Chunk.containing(x,z));
