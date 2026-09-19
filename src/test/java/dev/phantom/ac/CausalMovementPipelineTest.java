@@ -362,6 +362,49 @@ class CausalMovementPipelineTest {
   }
 
   @Test
+  void liveExplicitTickUsesPrecedingServerAuthorityAsPhysicsRoot() {
+    Player previous = anchor();
+    Packets.PlayerContext previousAuthority = new Packets.PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(), Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        previous.position(), previous.velocity(), false, false, false, List.of());
+    Player sameTick = new Player(
+        new Maths.Vec3(20.5, 64, 0.5), Maths.Vec3.ZERO, 0f, 0f, true,
+        "survival", Map.of(), OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.unknown(), State.Provenance.UNKNOWN, Set.of());
+    Packets.PlayerContext sameTickAuthority = new Packets.PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(), Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        sameTick.position(), sameTick.velocity(), false, false, false, List.of());
+    Packets.Move move = new Packets.Move(previous.position(), 0f, 0f, true, 1L);
+
+    List<Packets.RawPacket> packets = List.of(
+        new Packets.RawPacket(1, 0, previousAuthority,
+            Packets.CaptureProvenance.fromAdapter("paper-live", previousAuthority, 0L, 1L)),
+        new Packets.RawPacket(2, 60_000_000L, sameTickAuthority,
+            Packets.CaptureProvenance.fromAdapter("paper-live", sameTickAuthority, 1L, 1L)),
+        new Packets.RawPacket(3, 70_000_000L, move,
+            Packets.CaptureProvenance.fromAdapter("paper-client-tick-boundary", move, 1L, 1L)));
+
+    var report = CausalMovementPipeline.analyze(
+        "live-preceding-authority",
+        Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L),
+        4096,
+        exactTiming(),
+        floorWorld(),
+        null,
+        0L);
+
+    assertEquals(1, report.movementObservations());
+    assertEquals(Verdict.POSSIBLE, report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("SIMULATION_AUTHORITY seq=1 serverTick=0 clientTick=1")),
+        report.frames().getFirst().trace().toString());
+  }
+
+  @Test
   void PaperMovementRejectionIsPreservedAsCorroborationOnly() {
     List<RawPacket> packets = List.of(
         new RawPacket(1, 0, new ChunkStates(
