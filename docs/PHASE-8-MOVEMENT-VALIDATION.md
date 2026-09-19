@@ -1,16 +1,19 @@
 # Phase 8 — Movement Validation
 
-Phase 8 is the first movement-validation layer. It consumes the existing Phase 1–7 pipeline; it does not replace packet normalization, state reconstruction, world history, physics, reachability, or timing reconstruction.
+Phase 8 consumes normalized packet observations, client state, the per-player latency-compensated packet world, deterministic physics, and reachability. The hardened live path is persistent rather than replay-based: each packet advances an in-memory prediction frontier and the frontier is retained between validation calls.
 
 ## Responsibilities
 
 ```text
-Packets -> Phase 1 timeline -> Phase 2 state -> Phase 3 capture/replay
-        -> Phase 4 world -> Phase 5 physics -> Phase 6 reachability
-        -> Phase 7 synchronization/timing -> Phase 8 validation/evidence
+packet stream -> client state / prediction state
+             -> latency-compensated packet world
+             -> predict forward with Phase 5/6
+             -> compare observed packet
+             -> retain prediction state
+             -> Phase 8 evidence
 ```
 
-`Phase8MovementValidation` is a pure comparison/evidence layer. It does not contain movement physics or threshold-based movement checks. `Phase8LiveValidation` orchestrates the authoritative Phase 6 engine.
+`Phase8MovementValidation` is a pure comparison/evidence layer. It does not contain movement physics or threshold-based movement checks. `Phase8PredictionRunner` is the hardened live prediction engine. `CausalMovementPipeline` remains for deterministic offline/replay analysis.
 
 ## Verdict semantics
 
@@ -24,7 +27,7 @@ Timing deserves one special distinction: a bounded Phase 7 timing range can be e
 
 ## Candidate handling
 
-Candidate sets are deterministic and provenance-carrying. Possible candidates are retained for the next observation. When an uncertain search has safely retained candidates from exhaustively represented branches, those candidates remain available to the orchestration layer; an unsafe partial subset caused by a budget limit is not treated as a complete state space. Each candidate records compact provenance and the simulation diagnostic that produced it.
+Candidate sets are deterministic and provenance-carrying. Possible candidates are retained as the prediction frontier for the next packet. Uncertain observations retain the last complete frontier and do not overwrite it with the observed client position. Impossible observations likewise leave the expected prediction frontier intact so the next packet is still compared against a trusted modeled trajectory. Each candidate records compact provenance and the simulation diagnostic that produced it.
 
 ## World completeness
 
@@ -42,7 +45,7 @@ A server position/correction packet creates a validation barrier. Candidates are
 
 Phase 8 separates observations, simulation results, verdicts, evidence, diagnostics, and enforcement. `Phase8MovementValidation` never kicks or bans. The accumulator only builds repeated impossible evidence; the Paper adapter exposes operator alerts. Any future enforcement policy remains outside the validation core.
 
-Evidence includes server/client timing ranges, world reference, input/timing assumptions, candidate counts, matching/elimination counts, deterministic reasons, closest/provenance witness, uncertainty sources, phase versions, and a replay reference.
+Evidence includes server/client timing ranges, world reference, input/timing assumptions, candidate counts, matching/elimination counts, deterministic reasons, closest/provenance witness, uncertainty sources, phase versions, and a prediction reference.
 
 ## Targeted debug mode
 
@@ -69,9 +72,9 @@ Client chunk decoding is asynchronous and bounded by the decoder-thread count. T
 
 Phase 8 evidence exposes candidate counts and simulation diagnostics. Production latency/performance must be measured on representative Paper 1.21.11 captures; the deterministic benchmark is not a production guarantee.
 
-## Replay
+## Replay and forensic analysis
 
-Replay/evidence references identify the capture and movement sequence used for the observation. Replaying the same deterministic inputs through the same Phase 5/6/7 envelope must reproduce the same Phase 8 verdict. Debugging must not alter that input or scheduling envelope.
+Live validation is incremental and does not replay the retained packet journal on every packet. Deterministic replay remains available through `CausalMovementPipeline` for forensic analysis and regression tests. The live prediction frontier is the authoritative expected client trajectory between corrections.
 
 ## Normal console expectations
 
