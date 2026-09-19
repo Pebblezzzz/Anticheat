@@ -115,6 +115,82 @@ class CausalMovementPipelineTest {
         report.frames().get(1).trace().toString());
   }
 
+
+  @Test
+  void stationaryInitialAnchorDoesNotRequireWorldCoverage() {
+    Packets.PlayerContext liveAuthority = authority();
+    Packets.Move move = new Move(new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 1L);
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 0, liveAuthority,
+            Packets.CaptureProvenance.fromAdapter("paper-live", liveAuthority, 0L, 1L)),
+        new RawPacket(2, 10, move,
+            Packets.CaptureProvenance.fromAdapter("paper-client-tick-boundary", move, 0L, 1L)));
+
+    var report = CausalMovementPipeline.analyze(
+        "stationary-no-world",
+        Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L),
+        4096,
+        exactTiming(),
+        WorldSnapshot.builder(Contracts.TARGET_VERSION).build(),
+        anchor(),
+        0L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(Verdict.POSSIBLE, report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(report.results().getFirst().evidence().matchingCandidateCount() > 0,
+        report.results().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("zero-delta witness")),
+        report.frames().getFirst().trace().toString());
+  }
+
+  @Test
+  void recoveryCanUseExactSameTickAuthorityAsAnObservationWitness() {
+    Packets.PlayerContext firstAuthority = authority();
+    Packets.Move first = new Move(new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 1L);
+    Packets.Move ambiguous = new Move(new Maths.Vec3(.6, 64, .5), 15f, 0f, true, 1L);
+
+    Packets.PlayerContext recoveryAuthority = new Packets.PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(), Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.7, 64, .5), Maths.Vec3.ZERO, false, false, false, List.of());
+    Packets.Move recovered = new Move(new Maths.Vec3(.7, 64, .5), 15f, 0f, true, 2L);
+
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 0, firstAuthority,
+            Packets.CaptureProvenance.fromAdapter("paper-live", firstAuthority, 0L, 1L)),
+        new RawPacket(2, 10, first,
+            Packets.CaptureProvenance.fromAdapter("paper-client-tick-boundary", first, 0L, 1L)),
+        new RawPacket(3, 20, ambiguous,
+            Packets.CaptureProvenance.fromAdapter("paper-client-tick-boundary", ambiguous, 0L, 1L)),
+        new RawPacket(4, 50_000_000L, recoveryAuthority,
+            Packets.CaptureProvenance.fromAdapter("paper-live", recoveryAuthority, 1L, 1L)),
+        new RawPacket(5, 50_000_010L, recovered,
+            Packets.CaptureProvenance.fromAdapter("paper-client-tick-boundary", recovered, 1L, 1L)));
+
+    var report = CausalMovementPipeline.analyze(
+        "same-tick-recovery",
+        Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L),
+        4096,
+        exactTiming(),
+        WorldSnapshot.builder(Contracts.TARGET_VERSION).build(),
+        anchor(),
+        0L);
+
+    assertEquals(3, report.movementObservations(), report.results().toString());
+    assertEquals(Verdict.UNCERTAIN, report.results().get(1).verdict(),
+        report.results().toString());
+    assertEquals(Verdict.POSSIBLE, report.results().get(2).verdict(),
+        report.results().toString());
+    assertTrue(report.frames().get(2).trace().stream()
+        .anyMatch(line -> line.contains("RECOVERY_CLEARED")),
+        report.frames().get(2).trace().toString());
+    assertTrue(report.frames().get(2).trace().stream()
+        .anyMatch(line -> line.contains("authoritative snapshot") && line.contains("observation witness")),
+        report.frames().get(2).trace().toString());
+  }
+
   @Test
   void boundedExplicitMovementAcceptsAuthoritativeZeroStepCandidate() {
     Packets.PlayerContext liveAuthority = authority();
