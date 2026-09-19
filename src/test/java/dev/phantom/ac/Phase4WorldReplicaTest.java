@@ -167,6 +167,55 @@ final class Phase4WorldReplicaTest {
     assertTrue(r.compactStateEntryCount() <= 50);
   }
 
+  @Test void wirePropertiesSurviveStateDecodeAndReplay() {
+    Map<String,String> properties=Map.of(
+        "facing","north","half","bottom","shape","outer_right","waterlogged","false","custom","retained");
+    BlockState state=BlockCatalogue12111.decode("minecraft:oak_stairs",properties);
+    assertEquals(properties,state.properties());
+    assertTrue(state.bukkitDataString().contains("custom=retained"));
+
+    var timelineEvent=new Timeline.Event(1,new Packets.NormalizedPacket(1,1,
+        new Packets.ChunkStates(new Chunk(0,0),Map.of(new Pos(0,64,0),state)),
+        EnumSet.of(Packets.PacketFlag.NORMAL),Packets.CaptureProvenance.forPacket(
+            new Packets.ChunkStates(new Chunk(0,0),Map.of(new Pos(0,64,0),state)))));
+    var timeline=new Timeline.Snapshot(List.of(timelineEvent));
+    var codec=new Timeline.Codec();
+    Timeline.Snapshot decoded=codec.decode(codec.encode(timeline));
+    assertEquals(properties,
+        ((Packets.ChunkStates)decoded.events().getFirst().packet().packet()).states()
+            .get(new Pos(0,64,0)).properties());
+  }
+
+  @Test void exactCollisionResolverOverridesReplayCatalogueWithoutChangingCoverage() {
+    var r=new Phase4WorldReplica(V,"world",-64,319);
+    BlockState stone=BlockCatalogue12111.decode("minecraft:stone",Map.of());
+    r.accept(new Phase4WorldReplica.ChunkData(o(1,1),p(1,1),new Chunk(0,0),
+        Map.of(new Pos(0,64,0),stone)));
+
+    var exact=VoxelShape.local(List.of(BlockBox.of(0.2,0.0,0.2,0.8,0.5,0.8)));
+    r.setCollisionResolver((snapshot,state,x,y,z)->Optional.of(exact.toWorld(x,y,z)));
+
+    assertEquals(Coverage.KNOWN,r.getWorldState().coverageAt(0,64,0));
+    assertEquals(exact.toWorld(0,64,0),r.getCollisionShape(0,64,0));
+  }
+
+  @Test void nativeResolverIsNeverAskedForUnknownOrUnloadedCoverage() {
+    var r=new Phase4WorldReplica(V,"world",-64,319);
+    AtomicInteger calls=new AtomicInteger();
+    r.setCollisionResolver((snapshot,state,x,y,z)->{
+      calls.incrementAndGet();
+      return Optional.of(VoxelShape.fullCube(x,y,z));
+    });
+
+    assertEquals(Coverage.UNLOADED,r.getWorldState().coverageAt(0,64,0));
+    assertTrue(r.getCollisionShape(0,64,0).isEmpty());
+    assertEquals(0,calls.get());
+
+    r.accept(new Phase4WorldReplica.ChunkLoad(o(1,1),p(1,1),new Chunk(0,0)));
+    assertEquals(Coverage.UNKNOWN,r.getWorldState().coverageAt(0,64,0));
+    assertEquals(0,calls.get());
+  }
+
   @Test void replayIsDeterministic(){
     var events=List.of(
       new Timeline.Event(1,new Packets.NormalizedPacket(1,1,new Packets.ChunkStates(new Chunk(0,0),Map.of(new Pos(0,64,0),BlockCatalogue12111.decode("minecraft:stone",Map.of()))),EnumSet.of(Packets.PacketFlag.NORMAL),Packets.CaptureProvenance.forPacket(new Packets.ChunkStates(new Chunk(0,0),Map.of(new Pos(0,64,0),BlockCatalogue12111.decode("minecraft:stone",Map.of()))))))
