@@ -53,6 +53,10 @@ public final class Vanilla12111RichPhysics {
         boolean fluid=context.movementEnvironment().fluid()!=Phase5Mechanics.Fluid.NONE;
         boolean climbing=context.movementEnvironment().climbable();
         boolean gliding=context.movementEnvironment().gliding();
+        if (source.onGround() && !fluid && !climbing && !gliding) {
+            try { supportBlock(context); }
+            catch (IncompleteSupportException missing) { return uncertain(context, missing.getMessage()); }
+        }
         Vec3 velocity=source.velocity();
         Vec3 input=movementInput(context);
         double movementSpeed=context.attributes().value()*context.effects().speedMultiplier();
