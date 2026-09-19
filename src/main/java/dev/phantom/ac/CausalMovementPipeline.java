@@ -1416,16 +1416,24 @@ public final class CausalMovementPipeline {
       long targetTick,
       World.VisibilityHistory history,
       MovementEvent movement) {
+    WorldSnapshot historical = history.statesAt(simulationTick);
     /*
-     * A live acknowledged replica is safe only for the final step when no
-     * world mutation was observed after this movement. Historical/intermediate
-     * simulation always comes from the ticked client-visible world history.
+     * The live Paper adapter retains palette-backed CHUNK_DATA inside its own
+     * acknowledged replica rather than serializing those raw columns into the
+     * Timeline. When the historical view therefore has no chunks at all, using
+     * it for an intermediate physics step would manufacture UNKNOWN coverage
+     * even though the client-visible live replica is known. In that narrow case
+     * the acknowledged live snapshot is the only available world representation.
+     *
+     * If the timeline does contain world data, preserve its per-tick history so
+     * newer block states are never silently projected backwards in time.
      */
     if (movement.liveWorldUsed()
-        && simulationTick == Math.max(0L, targetTick - 1L)) {
+        && !movement.world().loadedChunks().isEmpty()
+        && historical.loadedChunks().isEmpty()) {
       return movement.world();
     }
-    return history.statesAt(simulationTick);
+    return historical;
   }
 
   private static Optional<Candidate> rootCandidateForTarget(
