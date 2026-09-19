@@ -49,6 +49,13 @@ import dev.phantom.ac.world.v12111.BlockCatalogue12111;
  */
 public final class WorldSnapshot implements Serializable {
 
+  /** Runtime collision resolver for exact platform-native shapes. It is intentionally
+   * optional and transient: deterministic replay falls back to the version catalogue. */
+  @FunctionalInterface
+  public interface CollisionResolver {
+    java.util.Optional<VoxelShape> resolve(WorldSnapshot snapshot, BlockState state, int x, int y, int z);
+  }
+
   /** A read-only, query-oriented backend used by compact client-world caches. */
   public interface Backend {
     String version();
@@ -72,6 +79,11 @@ public final class WorldSnapshot implements Serializable {
 
     Coverage coverageAt(int x, int y, int z);
     BlockState blockAtOrNull(int x, int y, int z);
+
+    /** Optional exact runtime shape. Empty means this backend has no native resolver. */
+    default java.util.Optional<VoxelShape> resolveCollisionShape(WorldSnapshot snapshot, int x, int y, int z) {
+      return java.util.Optional.empty();
+    }
 
     /** Diagnostic-only description; never used to make a verdict. */
     default String coverageDetailAt(int x, int y, int z) {
@@ -497,6 +509,10 @@ public final class WorldSnapshot implements Serializable {
   public VoxelShape collisionShapeAt(int x, int y, int z) {
     Coverage coverage = coverageAt(x, y, z);
     if (coverage != Coverage.KNOWN) return VoxelShape.empty();
+    if (backend != null) {
+      java.util.Optional<VoxelShape> exact = backend.resolveCollisionShape(this, x, y, z);
+      if (exact.isPresent()) return exact.get();
+    }
     // A known position with no stored state is genuine air, which has no
     // collision geometry. Only UNLOADED and UNSUPPORTED mean "no data".
     BlockState state = blockAtOrNull(x, y, z);
