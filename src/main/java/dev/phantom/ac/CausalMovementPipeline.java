@@ -574,50 +574,6 @@ public final class CausalMovementPipeline {
         }
       }
 
-      /*
-       * A matching authoritative/previous-frontier position is already a
-       * deterministic zero-delta witness. Evaluate this before demanding a replay
-       * root or world swept-volume coverage; both can be unavailable even though
-       * the observation itself is causally witnessed.
-       */
-      Optional<Candidate> earlyAuthorityWitness =
-          authorityObservationWitness(movement, movementTick);
-      Optional<Candidate> earlyFrontierWitness =
-          earlyAuthorityWitness.isPresent()
-              ? earlyAuthorityWitness
-              : frontierObservationWitness(frontier, movement, movementTick);
-      if (earlyFrontierWitness.isEmpty()) {
-        earlyFrontierWitness = initialAnchorObservationWitness(initialAnchor, movement, movementTick);
-      }
-      if (!recoveryRequired && earlyFrontierWitness.isPresent()) {
-        Candidate witness = earlyFrontierWitness.get();
-        SearchResult witnessSearch = new SearchResult(
-            Verdict.POSSIBLE,
-            Set.of(witness),
-            0,
-            1,
-            0,
-            0,
-            0,
-            0,
-            List.of(
-                "observed position matches a causally valid known state; zero-delta witness requires no physics replay"));
-        results.add(Phase8MovementValidation.validate(
-            playerId, serverTick, observedBefore, observedAfter, movement.world(),
-            worldReference, sync, assumptions, witnessSearch, replayReference,
-            true));
-        frontier = new Frontier(Set.of(witness), movementTick, true);
-        previousPositionPacketTick = movementTick;
-        previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
-        if (movement.move().clientTick() != null) previousExplicitClientTick = movement.move().clientTick();
-        trace.add("CANDIDATES count=1 exhaustive=true");
-        trace.add("EVIDENCE POSSIBLE reason=AUTHORITATIVE_ZERO_DELTA_WITNESS");
-        trace.add("MATCHING candidates=1 frontierTick=" + movementTick);
-        frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
-            assumptions, uncertainty, trace));
-        continue;
-      }
-
       if (recoveryRequired) {
         /*
          * An authoritative server flight state is a separate evidence channel.
@@ -759,6 +715,50 @@ public final class CausalMovementPipeline {
       }
 
       /*
+       * A matching authoritative/previous-frontier position is already a
+       * deterministic zero-delta witness. Evaluate this before demanding a replay
+       * root or world swept-volume coverage; both can be unavailable even though
+       * the observation itself is causally witnessed.
+       */
+      Optional<Candidate> earlyAuthorityWitness =
+          authorityObservationWitness(movement, movementTick);
+      Optional<Candidate> earlyFrontierWitness =
+          earlyAuthorityWitness.isPresent()
+              ? earlyAuthorityWitness
+              : frontierObservationWitness(frontier, movement, movementTick);
+      if (earlyFrontierWitness.isEmpty()) {
+        earlyFrontierWitness = initialAnchorObservationWitness(initialAnchor, movement, movementTick);
+      }
+      if (!recoveryRequired && earlyFrontierWitness.isPresent()) {
+        Candidate witness = earlyFrontierWitness.get();
+        SearchResult witnessSearch = new SearchResult(
+            Verdict.POSSIBLE,
+            Set.of(witness),
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            List.of(
+                "observed position matches a causally valid known state; zero-delta witness requires no physics replay"));
+        results.add(Phase8MovementValidation.validate(
+            playerId, serverTick, observedBefore, observedAfter, movement.world(),
+            worldReference, sync, assumptions, witnessSearch, replayReference,
+            true));
+        frontier = new Frontier(Set.of(witness), movementTick, true);
+        previousPositionPacketTick = movementTick;
+        previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
+        if (movement.move().clientTick() != null) previousExplicitClientTick = movement.move().clientTick();
+        trace.add("CANDIDATES count=1 exhaustive=true");
+        trace.add("EVIDENCE POSSIBLE reason=AUTHORITATIVE_ZERO_DELTA_WITNESS");
+        trace.add("MATCHING candidates=1 frontierTick=" + movementTick);
+        frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+            assumptions, uncertainty, trace));
+        continue;
+      }
+
+      /*
        * With no client-world data at all, an exact first observation can still
        * establish the causal baseline when it agrees with the explicit anchor.
        * This does not prove a physics step; it only avoids manufacturing an
@@ -874,45 +874,6 @@ public final class CausalMovementPipeline {
         frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
             assumptions, uncertainty, trace));
         continue;
-      }
-
-      /*
-       * A large position delta can be rejected without relying on world collision
-       * queries. Use a deliberately conservative one-tick kinematic envelope so
-       * incomplete world coverage cannot turn an obviously unreachable jump into
-       * an UNCERTAIN result. This certificate is only used for exact client ticks.
-       */
-      if (eventTiming.simulationClientTicks().isExact()) {
-        Optional<Candidate> kinematicReference = frontier.candidates().stream().findFirst();
-        if (kinematicReference.isEmpty()) {
-          kinematicReference = rootCandidate(initialAnchor, movement, maximumCandidates, true);
-        }
-        if (kinematicReference.isPresent()
-            && exceedsConservativeKinematicBound(kinematicReference.get(), observedAfter, movementTick)) {
-          Candidate reference = kinematicReference.get();
-          SearchResult impossible = new SearchResult(
-              Verdict.IMPOSSIBLE,
-              Set.of(reference),
-              0,
-              1,
-              0,
-              0,
-              0,
-              0,
-              List.of("conservative kinematic displacement bound exceeded; world collision state is not required to reject this movement",
-                  "all exhaustively modeled legitimate candidates disagree with the observed movement state"));
-          results.add(Phase8MovementValidation.validate(
-              playerId, serverTick, observedBefore, observedAfter, movement.world(),
-              worldReference, sync, assumptions, impossible, replayReference, true));
-          previousPositionPacketTick = movementTick;
-          previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
-          if (movement.move().clientTick() != null) previousExplicitClientTick = movement.move().clientTick();
-          frontier = Frontier.empty();
-          trace.add("EVIDENCE REACHABILITY_CONTRADICTION reason=KINEMATIC_BOUND_EXCEEDED");
-          frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
-              assumptions, uncertainty, trace));
-          continue;
-        }
       }
 
       Optional<Advance> advanced;
@@ -2247,12 +2208,18 @@ public final class CausalMovementPipeline {
       Player initialAnchor,
       MovementEvent movement,
       long simulationTick) {
-    if (initialAnchor == null || initialAnchor.uncertain() || simulationTick < 0) return Optional.empty();
+    if (initialAnchor == null || initialAnchor.uncertain()
+        || initialAnchor.environment() == State.Environment.UNKNOWN
+        || simulationTick < 0) return Optional.empty();
     if (!movement.world().fullyKnown(playerCollisionBox(initialAnchor))) return Optional.empty();
     Player observed = movement.stateFrame().after();
     if (!Phase6Reachability.positionMatches(initialAnchor.position(), observed.position())) return Optional.empty();
     if (initialAnchor.onGround() != observed.onGround()) return Optional.empty();
     if (movement.move().onGround() != null && initialAnchor.onGround() != movement.move().onGround()) return Optional.empty();
+    if (movement.move().yaw() != null
+        && Float.compare(initialAnchor.yaw(), movement.move().yaw()) != 0) return Optional.empty();
+    if (movement.move().pitch() != null
+        && Float.compare(initialAnchor.pitch(), movement.move().pitch()) != 0) return Optional.empty();
     float yaw = movement.move().yaw() == null ? observed.yaw() : movement.move().yaw();
     float pitch = movement.move().pitch() == null ? observed.pitch() : movement.move().pitch();
     Player witnessPlayer = new Player(
@@ -2345,8 +2312,13 @@ public final class CausalMovementPipeline {
     Player authoritative = playerFromAuthority(snapshot.context());
     Player observed = movement.stateFrame().after();
     if (!Phase6Reachability.positionMatches(authoritative.position(), observed.position())) return Optional.empty();
+    if (!movement.world().fullyKnown(playerCollisionBox(observed))) return Optional.empty();
     if (authoritative.onGround() != observed.onGround()) return Optional.empty();
     if (movement.move().onGround() != null && authoritative.onGround() != movement.move().onGround()) return Optional.empty();
+    if (movement.move().yaw() != null
+        && Float.compare(authoritative.yaw(), movement.move().yaw()) != 0) return Optional.empty();
+    if (movement.move().pitch() != null
+        && Float.compare(authoritative.pitch(), movement.move().pitch()) != 0) return Optional.empty();
     float yaw = movement.move().yaw() == null ? observed.yaw() : movement.move().yaw();
     float pitch = movement.move().pitch() == null ? observed.pitch() : movement.move().pitch();
     Player witnessPlayer = new Player(
