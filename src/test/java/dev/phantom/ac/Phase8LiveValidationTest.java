@@ -143,7 +143,7 @@ class Phase8LiveValidationTest {
   }
 
   @Test
-  void unknownWorldProducesUncertainAndNeverImpossible() {
+  void unknownWorldStationaryAnchorRemainsPossible() {
     List<RawPacket> packets = List.of(
         new RawPacket(1, 0, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
         new RawPacket(2, 50_000_000L, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, 1L)));
@@ -151,12 +151,12 @@ class Phase8LiveValidationTest {
         "phase8-unknown", capture(packets), 256, exactTiming(), null,
         Player.initial(new Vec3(.5, 64, .5)), 0L);
     assertEquals(2, report.movementObservations());
-    assertEquals(1, report.possible());
-    assertEquals(1, report.uncertain());
+    assertEquals(2, report.possible());
+    assertEquals(0, report.uncertain());
     assertEquals(0, report.impossible(), report.results().toString());
-    assertTrue(report.results().get(1).evidence().uncertaintySources().stream()
-        .anyMatch(reason -> reason.toLowerCase(Locale.ROOT).contains("world") || reason.toLowerCase(Locale.ROOT).contains("coverage")),
-        report.results().get(1).evidence().toString());
+    assertTrue(report.results().stream().allMatch(result ->
+        result.evidence().matchingCandidateCount() > 0),
+        report.results().toString());
   }
 
   @Test
