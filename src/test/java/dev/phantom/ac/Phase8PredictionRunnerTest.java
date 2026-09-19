@@ -309,7 +309,7 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
-  void sprintJumpUsesAirFrictionAfterTakeoff() {
+  void sprintJumpAddsVanillaHorizontalImpulse() {
     Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
 
     Player state = new Player(
@@ -341,7 +341,7 @@ class Phase8PredictionRunnerTest {
             * Vanilla12111RichPhysics.INPUT_FRICTION;
     double velocityDelta = sprint.state().velocity().z() - noSprint.state().velocity().z();
     assertEquals(
-        expectedPositionDelta * Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION,
+        expectedPositionDelta * Vanilla12111RichPhysics.GROUND_FRICTION,
         velocityDelta,
         1e-7,
         "sprint jump post-tick velocity");
