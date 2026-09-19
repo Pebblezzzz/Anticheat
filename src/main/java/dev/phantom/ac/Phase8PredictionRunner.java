@@ -389,7 +389,9 @@ public final class Phase8PredictionRunner {
           + " clientStatePosition=" + observedAfter.position());
 
       TickResolution tick = resolveMovementTick(move);
-      rememberObservedMovement(observedBefore, observedAfter, tick);
+      if (move.position() != null) {
+        rememberObservedMovement(observedBefore, observedAfter, tick);
+      }
       trace.add("CLIENT_TICK " + tick.display()
           + " exact=" + tick.exact()
           + " source=" + tick.source());
