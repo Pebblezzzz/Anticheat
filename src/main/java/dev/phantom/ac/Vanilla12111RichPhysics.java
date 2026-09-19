@@ -97,7 +97,8 @@ public final class Vanilla12111RichPhysics {
             if (probe.uncertain()) return uncertain(context,probe.diagnostic());
             grounded=probe.collidedY();
         }
-        Vec3 nextVelocity=postMoveVelocity(velocity,context,grounded,collision);
+        Vec3 nextPosition=source.position().add(displacement);
+        Vec3 nextVelocity=postMoveVelocity(velocity,context,grounded,collision,nextPosition);
         Phase5Mechanics.Pose nextPose=Phase5Mechanics.nextPose(pose,context.movementEnvironment(),context.sleeping());
         Player next=richPlayer(source,source.position().add(displacement),nextVelocity,grounded,nextPose,context,false);
         String diagnostic=collision.diagnostic()+"; mode="+movementMode(context,source)+"; jumped="+jumped+"; version="+VERSION;
@@ -158,7 +159,7 @@ public final class Vanilla12111RichPhysics {
         return velocity;
     }
 
-    private static Vec3 postMoveVelocity(Vec3 velocity,Context context,boolean grounded,RichWorldCollision.Result collision) {
+    private static Vec3 postMoveVelocity(Vec3 velocity,Context context,boolean grounded,RichWorldCollision.Result collision,Vec3 nextPosition) {
         boolean fluid=context.movementEnvironment().fluid()!=Phase5Mechanics.Fluid.NONE;
         boolean climbing=context.movementEnvironment().climbable();
         boolean gliding=context.movementEnvironment().gliding();
@@ -168,7 +169,7 @@ public final class Vanilla12111RichPhysics {
             ?(context.input().sprint()?WATER_SPRINT_DRAG:WATER_DRAG):LAVA_DRAG;
         else if (climbing) horizontalFactor=grounded?GROUND_FRICTION:AIR_DRAG;
         else if (gliding) horizontalFactor=AIR_DRAG;
-        else horizontalFactor=grounded?supportFriction(context):AIR_DRAG;
+        else horizontalFactor=grounded?supportFriction(context,nextPosition):AIR_DRAG;
         verticalFactor=fluid?FLUID_VERTICAL_DRAG:AIR_VERTICAL_DRAG;
         double vx=collision.collidedX()?0:velocity.x()*horizontalFactor;
         double vz=collision.collidedZ()?0:velocity.z()*horizontalFactor;
