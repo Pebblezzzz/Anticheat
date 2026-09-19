@@ -26,7 +26,8 @@ public final class Vanilla12111RichPhysics {
             INPUT_FRICTION=0.98f,
             FRICTION_SPEED_FACTOR=0.21600002f,
             SPRINT_JUMP_HORIZONTAL_BOOST=0.2;
-    private static final double SNEAKING_SPEED_MULTIPLIER=0.3,
+    private static final double SPRINTING_SPEED_MULTIPLIER=1.3,
+            SNEAKING_SPEED_MULTIPLIER=0.3,
             WATER_DRAG=0.9,
             LAVA_DRAG=0.5,
             CLIMB_MAX_DOWN=0.15,
@@ -71,6 +72,7 @@ public final class Vanilla12111RichPhysics {
                 return uncertain(context,"support block is unavailable for friction calculation");
             double slipperiness=BlockCatalogue12111.slipperiness(support);
             double movementSpeed=context.attributes().value()*context.effects().speedMultiplier();
+            if(context.input().sprint())movementSpeed*=SPRINTING_SPEED_MULTIPLIER;
             if(context.input().sneak())movementSpeed*=SNEAKING_SPEED_MULTIPLIER;
             double frictionInfluencedSpeed=movementSpeed*FRICTION_SPEED_FACTOR
                     /(slipperiness*slipperiness*slipperiness);
