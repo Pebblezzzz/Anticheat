@@ -59,12 +59,18 @@ public interface EntityCollisions {
      */
     EntityCollisionResult boxesIn(BlockBox query);
 
+    /** True only when the provider can account for every client-visible entity relevant to the query. */
+    default boolean complete() { return true; }
+
     /**
      * The provider used by default: it reports no entities and states plainly
      * that its answer is not complete. It never pretends an empty list means
      * "no entities exist".
      */
-    EntityCollisions NONE_TRACKED = query -> new EntityCollisionResult(List.of(), false);
+    EntityCollisions NONE_TRACKED = new EntityCollisions() {
+        @Override public EntityCollisionResult boxesIn(BlockBox query) { return new EntityCollisionResult(List.of(), false); }
+        @Override public boolean complete() { return false; }
+    };
 
     /**
      * A fully-known provider backed by a fixed list, used by replays that

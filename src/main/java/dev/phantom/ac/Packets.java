@@ -9,10 +9,11 @@ public final class Packets {
 
   public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm,
       Velocity, Effect, Gamemode, PlayerContext, FlightToggle, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange,
-      WorldTransactionSend, WorldTransactionAck, PaperMovementRejection {
+      WorldTransactionSend, WorldTransactionAck, PaperMovementRejection, EntitySpawn, EntityMove, EntityDespawn {
     default boolean mutatesWorld() {
       return this instanceof ChunkData || this instanceof ChunkUnload
-          || this instanceof BlockChange || this instanceof ChunkStates || this instanceof BlockStateChange || this instanceof UnsupportedBlockStateChange;
+          || this instanceof BlockChange || this instanceof ChunkStates || this instanceof BlockStateChange || this instanceof UnsupportedBlockStateChange
+          || this instanceof EntitySpawn || this instanceof EntityMove || this instanceof EntityDespawn;
     }
   }
 
@@ -70,6 +71,16 @@ public final class Packets {
   public record ChunkData(World.Chunk chunk, Map<World.Pos,World.Block> blocks) implements Packet { public ChunkData { Objects.requireNonNull(chunk,"chunk"); blocks=Map.copyOf(blocks); } }
   public record ChunkStates(dev.phantom.ac.world.Chunk chunk, Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> states) implements Packet { public ChunkStates { Objects.requireNonNull(chunk,"chunk"); states=Map.copyOf(states); } }
   public record ChunkUnload(World.Chunk chunk) implements Packet { public ChunkUnload { Objects.requireNonNull(chunk,"chunk"); } }
+  /** Client-visible entity collision state captured from the server's entity packets. */
+  public record EntitySpawn(int entityId, dev.phantom.ac.geometry.BlockBox box) implements Packet {
+    public EntitySpawn { if(entityId<0)throw new IllegalArgumentException("entityId must be non-negative"); Objects.requireNonNull(box,"box"); }
+  }
+  public record EntityMove(int entityId, dev.phantom.ac.geometry.BlockBox box) implements Packet {
+    public EntityMove { if(entityId<0)throw new IllegalArgumentException("entityId must be non-negative"); Objects.requireNonNull(box,"box"); }
+  }
+  public record EntityDespawn(int entityId) implements Packet {
+    public EntityDespawn { if(entityId<0)throw new IllegalArgumentException("entityId must be non-negative"); }
+  }
 
   /** Capture-side provenance. A missing protocol sequence is explicit rather than silently invented. */
   public record CaptureProvenance(String sourceId,String direction,String packetType,

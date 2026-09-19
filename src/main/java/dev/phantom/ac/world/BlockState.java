@@ -2,6 +2,8 @@ package dev.phantom.ac.world;
 
 import java.io.Serializable;
 import java.util.Objects;
+import java.util.Map;
+import java.util.TreeMap;
 
 import dev.phantom.ac.geometry.Directions.Direction;
 
@@ -43,12 +45,15 @@ public record BlockState(
     boolean eastTall,
     int candles,
     boolean poweredState,
-    PropertySource provenance) implements Serializable {
+    PropertySource provenance,
+    Map<String,String> properties) implements Serializable {
 
   public BlockState {
     Objects.requireNonNull(blockId, "blockId");
     Objects.requireNonNull(variant, "variant");
     Objects.requireNonNull(provenance, "provenance");
+    Objects.requireNonNull(properties, "properties");
+    properties = Map.copyOf(new TreeMap<>(properties));
     if (layers < 0 || layers > 8) throw new IllegalArgumentException("snow/leaf layers must be 0..8 but was " + layers);
     // Vanilla fluid level is a 0..7 property ({@code FlowingFluid.LEVEL}); 8 is not
     // a valid value in any 1.21.11 fluid state.
@@ -88,7 +93,9 @@ public record BlockState(
     /** Vanilla {@code Blocks.COBWEB}, {@code POWDER_SNOW}, {@code SWEET_BERRY_BUSH}. */
     NO_COLLISION_SPECIAL,
     /** A state received from the wire that this adapter cannot map to a verified shape. */
-    UNSUPPORTED
+    UNSUPPORTED,
+    /** A fully validated 1.21.11 registry state whose exact collision comes from the generated catalogue. */
+    CATALOGUE
   }
 
   /**
@@ -113,6 +120,19 @@ public record BlockState(
     INCOMPLETE,
     /** A test or replay fixture that declares its own state. */
     FIXTURE
+  }
+
+
+  /** Compatibility constructor for pre-Phase-4 state fixtures. */
+  public BlockState(
+      String blockId, Variant variant, Direction facing, Half half, StairShape stairShape,
+      int layers, int level, boolean waterlogged, boolean open, boolean powered, boolean up,
+      boolean north, boolean south, boolean west, boolean east, boolean northTall,
+      boolean southTall, boolean westTall, boolean eastTall, int candles, boolean poweredState,
+      PropertySource provenance) {
+    this(blockId, variant, facing, half, stairShape, layers, level, waterlogged, open, powered, up,
+        north, south, west, east, northTall, southTall, westTall, eastTall, candles, poweredState,
+        provenance, Map.of());
   }
 
   public static final String AIR_ID = "minecraft:air";
@@ -205,6 +225,32 @@ public record BlockState(
           open, powered, up, north, south, west, east, northTall, southTall, westTall, eastTall,
           candles, poweredState, provenance);
     }
+  }
+
+  /**
+   * Returns a copy with the complete wire-visible property map retained.
+   * Property names and values are canonical lower-case strings.
+   */
+  public BlockState withProperties(Map<String,String> values) {
+    return new BlockState(blockId, variant, facing, half, stairShape, layers, level, waterlogged,
+        open, powered, up, north, south, west, east, northTall, southTall, westTall, eastTall,
+        candles, poweredState, provenance, values == null ? Map.of() : values);
+  }
+
+  /**
+   * Canonical Bukkit/Paper BlockData spelling. Unspecified vanilla properties are intentionally
+   * omitted; the server fills them using the block's own default state.
+   */
+  public String bukkitDataString() {
+    if (properties.isEmpty()) return blockId;
+    StringBuilder out = new StringBuilder(blockId).append('[');
+    boolean first = true;
+    for (var entry : new TreeMap<>(properties).entrySet()) {
+      if (!first) out.append(',');
+      first = false;
+      out.append(entry.getKey()).append('=').append(entry.getValue());
+    }
+    return out.append(']').toString();
   }
 
   public static Builder builder(String blockId) {

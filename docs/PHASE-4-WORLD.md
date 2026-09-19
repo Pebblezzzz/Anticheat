@@ -41,9 +41,11 @@ None is silently converted to air. Collision queries carry coverage so uncertain
 
 WorldSnapshot and WorldQueries are the single collision representation. They expose block states, collision boxes, fluids, environment facts, and coverage. EntityCollisions provides deterministic entity bounding-box infrastructure with an explicit completeness flag.
 
-The current 1.21.11 catalogue models full cubes, slabs, stairs, fences, walls, panes, doors, trapdoors, fence gates, thin/partial blocks, fluids, climbables, and several movement-relevant special blocks. Unknown registry/state combinations become UNSUPPORTED.
+The deterministic 1.21.11 replay catalogue now contains every published block id and every published block-state combination from the pinned minecraft-data source: 1,166 block ids, 29,671 published block-state combinations, and 5,128 deduplicated collision shapes (with constant-shape blocks represented once). Collision boxes are preserved at the source's 1/32-block precision, including shapes that extend beyond the nominal block cube.
 
-This is IMPLEMENTED and INTERNALLY TESTED, but it is not claimed to be complete vanilla parity. Independent real-client validation remains required.
+The live Paper adapter additionally warms native Paper BlockData collision shapes on the main thread and serves those immutable results to validation threads without Bukkit access. The deterministic catalogue is the fallback for replay/offline validation. Unknown registry/state combinations remain UNSUPPORTED rather than becoming air or a guessed cube.
+
+This is IMPLEMENTED and INTERNALLY TESTED for the checked-in data and live/replay wiring. It is not marked VANILLA VALIDATED until an independent 1.21.11 client corpus verifies packet visibility, state ordering, collision geometry, and update timing against actual clients.
 
 ## Publication
 
@@ -51,11 +53,15 @@ The current generation is held in an AtomicReference. Readers only see immutable
 
 ## Entity status
 
-Entity identity, bounding box, spawn, movement, despawn, deterministic ordering, and historical storage are IMPLEMENTED as world infrastructure. Full protocol coverage and every vanilla entity collision semantic are PARTIAL.
+Client-visible entity spawn, relative movement, teleport, metadata-driven bounding-box refresh, despawn, and passenger/attachment invalidation are now captured into Phase 4 history. Entity completeness is explicit: any unmodelled lifecycle/relationship transition marks the entity view incomplete rather than silently dropping it.
+
+The live adapter aligns server-native bounding boxes to the packet-visible entity position, while replay stores the resulting immutable boxes. Full vanilla entity semantics beyond bounding-box collision, especially riding/passenger transforms and every metadata-dependent size transition, still require independent validation.
 
 ## Replay
 
-Phase4WorldReplica.replay(Timeline.Snapshot) rebuilds the world from the existing canonical Phase 1–3 timeline. Equal packet histories produce equal immutable snapshots. Complete replay of dimension/world-state/entity packets is PARTIAL because the current Phase 1–3 packet schema does not capture every clientbound protocol event needed for full vanilla reconstruction.
+Phase4WorldReplica.replay(Timeline.Snapshot) rebuilds the world from the canonical packet history. Timeline format v10 persists lossless block-state properties and client-visible entity lifecycle state. Equal packet histories produce equal immutable snapshots, and merged snapshots retain the exact collision resolver when one is installed.
+
+Replay remains PARTIAL for protocol events that are intentionally outside the Phase 4 collision contract or are conservatively invalidated rather than reconstructed, such as passenger transform semantics.
 
 ## Phase boundary
 
@@ -82,12 +88,14 @@ This is a clean-room architectural comparison. No Grim source code is copied. Gr
 
 ## Evidence labels
 
-- IMPLEMENTED: per-player journal, deterministic ordering, generations, explicit UNKNOWN/UNLOADED/UNSUPPORTED coverage, authoritative collision-query path, entity collision infrastructure.
-- INTERNALLY TESTED: Phase 4 replication/history/uncertainty/dimension/fake-block/entity tests added in this phase.
+- IMPLEMENTED: per-player journal, deterministic ordering, immutable generations, explicit coverage, lossless block properties, native Paper collision integration, deterministic generated 1.21.11 collision data, replay persistence, and client-visible entity lifecycle capture.
+- INTERNALLY TESTED: state-property round trips, exact collision resolver wiring/merge preservation, generated stair/slab shape reconstruction, entity completeness, unknown/unloaded resolver suppression, and deterministic replay cases.
 - VANILLA VALIDATED: not claimed for the complete Phase 4 implementation.
-- PARTIAL: complete protocol packet coverage, full entity protocol coverage, and exact real-client timing/reordering behavior.
-- BLOCKED BY EXTERNAL DATA: independent 1.21.11 client observations for complete packet/state/collision parity.
+- PARTIAL: full entity movement semantics, passenger/riding transforms, and independent verification of client packet visibility/timing.
+- BLOCKED BY EXTERNAL DATA: an independent 1.21.11 real-client corpus sufficient to compare the reconstructed world byte-for-byte/shape-for-shape and validate capture ordering/timing.
 
 ## Completion gate
 
-Phase 4 is not COMPLETE under the requested specification until remaining protocol coverage, replay coverage, concurrency stress measurements, performance measurements, and independent vanilla validation are supplied. The implementation intentionally reports these gaps instead of guessing world state.
+The code path is now complete for the declared Phase 4 collision/world-state contract: live client-visible block replication, deterministic 1.21.11 block-state collision reconstruction, immutable generation/history, and conservative entity lifecycle tracking.
+
+The acceptance label remains below COMPLETE until the remaining empirical gates are supplied: concurrency stress measurements, scale/performance measurements, and an independent real 1.21.11 client corpus validating packet visibility, state ordering, collision geometry, and entity semantics.
