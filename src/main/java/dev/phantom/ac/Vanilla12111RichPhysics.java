@@ -13,6 +13,7 @@ import static dev.phantom.ac.State.Player;
 
 /** Sole canonical 1.21.11 movement implementation used by Phase 5 and Phase 6. */
 public final class Vanilla12111RichPhysics {
+    public static final String VERSION = "1.21.11";
     public static final double GRAVITY=0.08,
             AIR_DRAG=0.98f,
             AIR_HORIZONTAL_FRICTION=0.91f,
@@ -122,8 +123,13 @@ public final class Vanilla12111RichPhysics {
 
     private Player richPlayer(Player source,Vec3 position,Vec3 velocity,boolean onGround,Phase5Mechanics.Pose pose,Context context,boolean uncertain){State.Environment environment=switch(context.environment()){case WATER->State.Environment.WATER;case LAVA->State.Environment.LAVA;case CLIMBABLE->State.Environment.CLIMBABLE;case DRY->State.Environment.DRY;case UNKNOWN->State.Environment.UNKNOWN;};return new Player(position,velocity,source.yaw(),source.pitch(),onGround,source.gamemode(),source.effects(),source.awaitingTeleport(),uncertain,Optional.of(context.input()),context.attributes(),pose,environment,source.clientTickRange(),source.provenance(),source.uncertaintyReasons());}
     private StepResult uncertain(Context context,String message){return new StepResult(context.simulationTick(),richPlayer(context.state(),context.state().position(),context.state().velocity(),context.state().onGround(),context.pose(),context,true),false,false,false,false,false,false,false,message);}
-    public record Context(long simulationTick,Player state,Simulation.AdvancedInput input,WorldSnapshot world,Simulation.Environment environment,Simulation.Attributes attributes,Phase5Mechanics.MovementEffects effects,Phase5Mechanics.Pose pose,Phase5Mechanics.MovementEnvironment movementEnvironment,boolean sleeping,EntityCollisions entityCollisions) implements Serializable {
-        public Context(long tick,Player state,Simulation.AdvancedInput input,WorldSnapshot world,Simulation.Environment environment,Simulation.Attributes attributes,Phase5Mechanics.MovementEffects effects,Phase5Mechanics.Pose pose,Phase5Mechanics.MovementEnvironment movementEnvironment,boolean sleeping){this(tick,state,input,world,environment,attributes,effects,pose,movementEnvironment,sleeping,EntityCollisions.NONE_TRACKED);}
+    public record Context(long simulationTick,Player state,Simulation.AdvancedInput input,WorldSnapshot world,Simulation.Environment environment,Simulation.Attributes attributes,Phase5Mechanics.MovementEffects effects,Phase5Mechanics.Pose pose,Phase5Mechanics.MovementEnvironment movementEnvironment,boolean sleeping, boolean flying, EntityCollisions entityCollisions) implements Serializable {
+        public Context(long tick,Player state,Simulation.AdvancedInput input,WorldSnapshot world,Simulation.Environment environment,
+                       Simulation.Attributes attributes,Phase5Mechanics.MovementEffects effects,Phase5Mechanics.Pose pose,
+                       Phase5Mechanics.MovementEnvironment movementEnvironment,boolean sleeping,EntityCollisions entityCollisions) {
+            this(tick,state,input,world,environment,attributes,effects,pose,movementEnvironment,sleeping,false,entityCollisions);
+        }
+        public Context(long tick,Player state,Simulation.AdvancedInput input,WorldSnapshot world,Simulation.Environment environment,Simulation.Attributes attributes,Phase5Mechanics.MovementEffects effects,Phase5Mechanics.Pose pose,Phase5Mechanics.MovementEnvironment movementEnvironment,boolean sleeping){this(tick,state,input,world,environment,attributes,effects,pose,movementEnvironment,sleeping,false,EntityCollisions.NONE_TRACKED);}
         public Context{Objects.requireNonNull(state);Objects.requireNonNull(input);Objects.requireNonNull(world);Objects.requireNonNull(environment);Objects.requireNonNull(attributes);Objects.requireNonNull(effects);Objects.requireNonNull(pose);Objects.requireNonNull(movementEnvironment);Objects.requireNonNull(entityCollisions);if(simulationTick<0)throw new IllegalArgumentException("simulationTick must be non-negative");}
     }
     public record StepResult(long simulationTick,Player state,boolean collided,boolean stepAttempted,boolean stepSucceeded,boolean collisionX,boolean collisionY,boolean collisionZ,boolean entityCollision,String diagnostic) implements Serializable {public StepResult{Objects.requireNonNull(state);Objects.requireNonNull(diagnostic);}}
