@@ -229,6 +229,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       }else if(event.getPacketType()==PacketType.Play.Server.DESTROY_ENTITIES){
         var packet=new WrapperPlayServerDestroyEntities(event);
         for(int entityId:packet.getEntityIds()) recordEntityDespawn(capture,entityId);
+      }else if(event.getPacketType()==PacketType.Play.Server.ATTACH_ENTITY
+          ||event.getPacketType()==PacketType.Play.Server.SET_PASSENGERS){
+        // Riding/passenger transforms can change the effective collision state without an
+        // ordinary movement packet. We do not invent a transform; invalidate entity completeness.
+        capture.clientWorld.markEntityTrackingIncomplete();
       }else if(event.getPacketType()==PacketType.Play.Server.ENTITY_VELOCITY){
         var packet=new WrapperPlayServerEntityVelocity(event);
         if(packet.getEntityId()==event.getUser().getEntityId()){
@@ -1376,12 +1381,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
                     decoded.sections(),work.column().isFullChunk());
             Bukkit.getScheduler().runTask(this, () -> {
               Player player=Bukkit.getPlayer(target.playerId);
-              if(player!=null){
-                Set<BlockState> states=new HashSet<>();
-                for(var section:decoded.sections().values())
-                  for(int i=0;i<4096;i++)states.add(section.stateAt(i));
-                PaperVanillaCollision.warm(player.getWorld(),states);
-              }
+              if(player!=null) PaperVanillaCollision.warm(player.getWorld(),decoded.statesToWarm());
               target.clientWorld.queue(worldEvent);
             });
           }catch(RuntimeException failure){
@@ -1404,7 +1404,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   private record PendingChunk(long sequence,long receivedNanos,long serverTick,Column column,ClientVersion clientVersion,int minY,int maxY){}
   private record DecodedChunk(
-      Map<Integer,dev.phantom.ac.Phase4WorldReplica.PackedSection> sections){}
+      Map<Integer,dev.phantom.ac.Phase4WorldReplica.PackedSection> sections,
+      Set<BlockState> statesToWarm){}
+
 
   private static DecodedChunk decodeChunk(PendingChunk pending){
     Map<Integer,dev.phantom.ac.Phase4WorldReplica.PackedSection> sections=new TreeMap<>();
@@ -1482,7 +1484,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       sections.put(sectionIndex,
           dev.phantom.ac.Phase4WorldReplica.PackedSection.fromStates(sectionY,states));
     }
-    return new DecodedChunk(Map.copyOf(sections));
+    Set<BlockState> statesToWarm=new HashSet<>();
+    for(var section:sections.values()){
+      for(int i=0;i<4096;i++){
+        BlockState state=section.stateAt(i);
+        if(!state.isUnsupported())statesToWarm.add(state);
+      }
+    }
+    return new DecodedChunk(Map.copyOf(sections),Set.copyOf(statesToWarm));
   }
 
   private static int readPackedValue(long[] data,int bits,int index){
