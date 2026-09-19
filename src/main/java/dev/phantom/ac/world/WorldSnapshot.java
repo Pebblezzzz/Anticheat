@@ -383,8 +383,11 @@ public final class WorldSnapshot implements Serializable {
   public String coverageDetailAt(int x, int y, int z) {
     if (backend != null) return backend.coverageDetailAt(x, y, z);
     Coverage coverage = coverageAt(x, y, z);
-    BlockState state = blockAtOrNull(x, y, z);
-    return state == null ? coverage.toString() : coverage + " block=" + state.blockId();
+    BlockState state = chunks == null ? null : chunks.getOrDefault(Chunk.containing(x, z), Map.of())
+        .get(new Pos(x, y, z));
+    return state == null
+        ? coverage.toString()
+        : coverage + " block=" + state.blockId() + " properties=" + state.properties();
   }
 
   public BlockState blockAtOrNull(int x, int y, int z) {
@@ -475,7 +478,13 @@ public final class WorldSnapshot implements Serializable {
   }
 
   /** One concrete block cell whose coverage cannot be fully verified by this snapshot. */
-  public record CoverageProblem(Pos position, Coverage coverage) implements Serializable {}
+  public record CoverageProblem(Pos position, Coverage coverage, String detail) implements Serializable {
+    public CoverageProblem {
+      Objects.requireNonNull(position, "position");
+      Objects.requireNonNull(coverage, "coverage");
+      Objects.requireNonNull(detail, "detail");
+    }
+  }
 
   /**
    * Returns every block cell in the query whose coverage is UNLOADED, UNKNOWN,
@@ -488,7 +497,7 @@ public final class WorldSnapshot implements Serializable {
       if (coverage == Coverage.UNLOADED
           || coverage == Coverage.UNKNOWN
           || coverage == Coverage.UNSUPPORTED) {
-        result.add(new CoverageProblem(position, coverage));
+        result.add(new CoverageProblem(position, coverage, coverageDetailAt(position.x(), position.y(), position.z())));
       }
     }
     return List.copyOf(result);
