@@ -4,6 +4,7 @@ import java.io.Serializable;
 import java.util.Objects;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.Locale;
 
 import dev.phantom.ac.geometry.Directions.Direction;
 
@@ -221,9 +222,30 @@ public record BlockState(
     public Builder provenance(PropertySource value) { this.provenance = value; return this; }
 
     public BlockState build() {
+      Map<String,String> properties = new TreeMap<>();
+      switch (variant) {
+        case FENCE, WALL, PANE -> {
+          properties.put("north", Boolean.toString(north));
+          properties.put("south", Boolean.toString(south));
+          properties.put("west", Boolean.toString(west));
+          properties.put("east", Boolean.toString(east));
+          properties.put("waterlogged", Boolean.toString(waterlogged));
+        }
+        case SLAB -> {
+          properties.put("type", half == Half.DOUBLE ? "double" : half == Half.TOP ? "top" : "bottom");
+          properties.put("waterlogged", Boolean.toString(waterlogged));
+        }
+        case STAIRS -> {
+          properties.put("facing", facing.name().toLowerCase(Locale.ROOT));
+          properties.put("half", half == Half.TOP ? "top" : "bottom");
+          properties.put("shape", stairShape.name().toLowerCase(Locale.ROOT));
+          properties.put("waterlogged", Boolean.toString(waterlogged));
+        }
+        default -> {}
+      }
       return new BlockState(blockId, variant, facing, half, stairShape, layers, level, waterlogged,
           open, powered, up, north, south, west, east, northTall, southTall, westTall, eastTall,
-          candles, poweredState, provenance);
+          candles, poweredState, provenance, properties);
     }
   }
 
