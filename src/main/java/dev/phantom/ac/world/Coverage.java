@@ -16,6 +16,8 @@ public enum Coverage implements Serializable {
      * state.
      */
     KNOWN,
+    /** The chunk is expected/declared loaded but its complete payload is not yet published. */
+    UNKNOWN,
     /**
      * The containing chunk is not (or no longer) loaded on the client. No state
      * exists.
