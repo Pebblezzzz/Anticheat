@@ -291,6 +291,22 @@ public final class CausalMovementPipeline {
           + "serverTick=" + serverTick
           + ":chunks=" + movement.world().loadedChunks().size();
 
+      if (!worldCoversMovement(movement.world(), observedBefore, observedAfter)) {
+        frontier = Frontier.empty();
+        uncertainty.add("client world coverage is incomplete for the observed movement; unloaded blocks cannot safely be treated as air");
+        recoveryRequired = true;
+        SearchResult uncertain = uncertainSearch(
+            frontier.candidates(),
+            "movement world coverage is incomplete");
+        results.add(Phase8MovementValidation.validate(
+            playerId, serverTick, observedBefore, observedAfter, movement.world(),
+            worldReference, sync, assumptions, uncertain, replayReference, false));
+        trace.add("EVIDENCE UNCERTAIN reason=INCOMPLETE_WORLD_COVERAGE");
+        frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+            assumptions, uncertainty, trace));
+        continue;
+      }
+
       long unmodeledExternalSequence = unmodeledExternalSequences.stream()
           .filter(transitionSequence -> transitionSequence < sequence)
           .max(Long::compareTo)
@@ -1660,6 +1676,21 @@ public final class CausalMovementPipeline {
       refreshed.add(new Candidate(candidate.id(), updated, candidate.provenance()));
     }
     return Set.copyOf(refreshed);
+  }
+
+
+      EnumSet<Packets.PacketFlag> flags) {
+  private static boolean worldCoversMovement(
+      WorldSnapshot world,
+      Player before,
+      Player after) {
+    if (world == null) return false;
+    int beforeChunkX = Math.floorDiv((int) Math.floor(before.position().x()), 16);
+    int beforeChunkZ = Math.floorDiv((int) Math.floor(before.position().z()), 16);
+    int afterChunkX = Math.floorDiv((int) Math.floor(after.position().x()), 16);
+    int afterChunkZ = Math.floorDiv((int) Math.floor(after.position().z()), 16);
+    return world.hasChunk(beforeChunkX, beforeChunkZ)
+        && world.hasChunk(afterChunkX, afterChunkZ);
   }
 
   private static boolean containsChronologyProblem(
