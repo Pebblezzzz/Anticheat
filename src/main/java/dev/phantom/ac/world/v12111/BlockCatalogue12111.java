@@ -60,7 +60,7 @@ public final class BlockCatalogue12111 {
       "minecraft:coal_block", "minecraft:netherite_block", "minecraft:ancient_debris",
       "minecraft:deepslate", "minecraft:tuff", "minecraft:calcite", "minecraft:dripstone_block",
       "minecraft:smooth_basalt", "minecraft:blackstone", "minecraft:basalt", "minecraft:granite",
-      "minecraft:diorite", "minecraft:andesite", "minecraft:mud", "minecraft:clay");
+      "minecraft:diorite", "minecraft:andesite", "minecraft:mud", "minecraft:clay", "minecraft:glass");
 
   /** Names that are full cubes but which the wire can also make waterlogged. */
   private static final Set<String> WATERLOGGABLE_FULL_CUBE = Set.of(
