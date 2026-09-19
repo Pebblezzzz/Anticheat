@@ -150,7 +150,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           logClientInputDebug(capture.playerName,capture.sequence.get(),clientInput);
       }else if(event.getPacketType()==PacketType.Play.Client.TELEPORT_CONFIRM){
         record(capture,new Packets.TeleportConfirm(new WrapperPlayClientTeleportConfirm(event).getTeleportId()));
-        scheduleNettyValidation(capture,event.getChannel());
+        schedulePredictionValidation(capture);
       }else if(event.getPacketType()==PacketType.Play.Client.PONG){
         int id=new WrapperPlayClientPong(event).getId();
         if(id>=0)return;
@@ -772,7 +772,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         }
       });
     }catch(RejectedExecutionException rejected){
-      capture.nettyValidationQueued.set(false);
+      capture.predictionValidationQueued.set(false);
     }
   }
 
@@ -927,7 +927,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   private void logValidationSummary(Capture capture,String playerName,Phase8PredictionRunner.Report report,
-                                     List<CausalMovementPipeline.Frame> frames){
+                                     List<Phase8PredictionRunner.PredictionFrame> frames){
     if(report.results().isEmpty())return;
 
     Phase8MovementValidation.Result latest=report.results().getLast();
@@ -959,7 +959,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     String observedDelta=String.format(Locale.ROOT,"(%.6f,%.6f,%.6f)",dx,dy,dz);
 
     String diagnosticTrace="none";
-    for(CausalMovementPipeline.Frame frame:frames){
+    for(Phase8PredictionRunner.PredictionFrame frame:frames){
       if(!e.replayReference().endsWith(":"+frame.sequence()))continue;
       List<String> highlights=frame.trace().stream()
           .filter(line->line.startsWith("EVIDENCE ")
@@ -1371,7 +1371,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     volatile Channel nettyChannel;
     volatile String playerName;
     final AtomicBoolean predictionValidationQueued=new AtomicBoolean();
-    final Phase8IncrementalRunner movementRunner;
+    final Phase8PredictionRunner movementRunner;
     volatile State.Player initialState;
     volatile long initialStateReceivedNanos=-1L;
     final Set<Short> outstandingTransactions=ConcurrentHashMap.newKeySet();
