@@ -171,7 +171,7 @@ public final class Vanilla12111RichPhysics {
             ?(context.input().sprint()?WATER_SPRINT_DRAG:WATER_DRAG):LAVA_DRAG;
         else if (climbing) horizontalFactor=grounded?GROUND_FRICTION:AIR_DRAG;
         else if (gliding) horizontalFactor=AIR_DRAG;
-        else horizontalFactor=grounded?supportFriction(context,nextPosition):AIR_DRAG;
+        else horizontalFactor=context.state().onGround()?supportFriction(context,nextPosition):AIR_DRAG;
         verticalFactor=fluid?FLUID_VERTICAL_DRAG:AIR_VERTICAL_DRAG;
         double vx=collision.collidedX()?0:velocity.x()*horizontalFactor;
         double vz=collision.collidedZ()?0:velocity.z()*horizontalFactor;
