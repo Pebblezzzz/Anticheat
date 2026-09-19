@@ -238,6 +238,7 @@ final class Phase4WorldReplicaTest {
   @Test void entityTrackingCompletenessIsExplicitAndReplayable() {
     var box=BlockBox.of(0,64,0,1,66,1);
     var replica=new Phase4WorldReplica(V);
+    replica.markEntityTrackingComplete();
     replica.accept(new Timeline.Event(1,new Packets.NormalizedPacket(1,1,
         new Packets.EntitySpawn(7,box),EnumSet.of(Packets.PacketFlag.NORMAL),
         Packets.CaptureProvenance.forPacket(new Packets.EntitySpawn(7,box)))));
