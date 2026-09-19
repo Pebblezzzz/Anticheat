@@ -74,6 +74,46 @@ class Phase8HardeningRegressionTest {
 
 
   @Test
+  void authoritativeActiveFlightIsNotForcedThroughGroundReachability() {
+    var authority = new Packets.PlayerContext(
+        "survival",
+        Simulation.Attributes.DEFAULT,
+        Map.of(),
+        Phase5Mechanics.Pose.STANDING,
+        Phase5Mechanics.MovementEnvironment.dry(true, false, false),
+        new Vec3(0.5, 100.0, 0.5),
+        Vec3.ZERO,
+        true,
+        true,
+        false,
+        List.of());
+
+    var packets = List.of(
+        new RawPacket(1, 0, new ChunkStates(
+            new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
+        new RawPacket(2, 10, authority),
+        new RawPacket(3, 20, new Move(
+            new Vec3(40.5, 120.0, 0.5), 90f, 0f, true, 1L)));
+
+    var report = CausalMovementPipeline.analyze(
+        "authorized-flight",
+        capture(packets),
+        4096,
+        exactTiming(),
+        null,
+        Player.initial(new Vec3(0.5, 100.0, 0.5)),
+        0L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(Verdict.POSSIBLE, report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("AUTHORIZED_FLIGHT serverCanFly=true serverFlying=true")));
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("clientGround=true")));
+  }
+
+  @Test
   void blatantTeleportLikeMovementIsExhaustivelyImpossibleOnKnownWorld() {
     var packets=List.of(
         new RawPacket(1,0,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
