@@ -99,6 +99,11 @@ public final class Phase8PredictionRunner {
       Long clientTick,
       Packets.PlayerContext context) {}
 
+  private record TimedInput(
+      long sequence,
+      long clientTick,
+      InputConstraint constraint) {}
+
   private static final double POSITION_TOLERANCE = Phase6Reachability.POSITION_MATCH_TOLERANCE;
   private static final long MAX_INCREMENTAL_HORIZON = Phase6Reachability.MAX_HORIZON_TICKS;
   private static final long PREDICTION_RESYNC_LAG_TICKS = 2L;
@@ -111,6 +116,7 @@ public final class Phase8PredictionRunner {
 
   private Player clientState;
   private InputConstraint currentInput;
+  private final NavigableMap<Long, List<TimedInput>> inputHistory = new TreeMap<>();
   private AuthorityAnchor latestAuthority;
   private Set<Candidate> prediction = Set.of();
   private long predictionTick = -1L;
@@ -162,6 +168,7 @@ public final class Phase8PredictionRunner {
     initialAnchorReceivedNanos = authoritativeReceivedNanos;
     clientState = authoritativeAnchor;
     currentInput = neutralInput;
+    inputHistory.clear();
     latestAuthority = null;
     prediction = Set.of();
     predictionTick = -1L;
@@ -274,17 +281,15 @@ public final class Phase8PredictionRunner {
         long authorityServerTick = packet.provenance().authoritativeServerTick() == null
             ? 0L
             : packet.provenance().authoritativeServerTick();
-        Packets.PlayerContext effectiveAuthority =
-            deriveAuthoritativeVelocity(latestAuthority, authorityServerTick, authority);
         latestAuthority = new AuthorityAnchor(
             sequence,
             packet.receivedNanos(),
             authorityServerTick,
             packet.provenance().authoritativeClientTick(),
-            effectiveAuthority);
+            authority);
         if (!prediction.isEmpty()) {
           Set<Candidate> updated =
-              overlayAuthorityState(prediction, effectiveAuthority, maximumCandidates);
+              overlayAuthorityState(prediction, authority, maximumCandidates);
           if (!updated.isEmpty()) prediction = updated;
         }
         continue;
@@ -293,6 +298,9 @@ public final class Phase8PredictionRunner {
       if (value instanceof Packets.ClientInput input) {
         clientState = State.apply(clientState, normalized);
         currentInput = InputConstraint.fromClientInput(input);
+        long inputTick = hasClientTickBoundary ? relativeClientTick : 0L;
+        inputHistory.computeIfAbsent(inputTick, ignored -> new ArrayList<>())
+            .add(new TimedInput(sequence, inputTick, currentInput));
         if (!prediction.isEmpty()) {
           Set<Candidate> updated = overlayClientInput(prediction, clientState, maximumCandidates);
           if (!updated.isEmpty()) prediction = updated;
@@ -618,7 +626,7 @@ public final class Phase8PredictionRunner {
       }
 
       AdvanceResult advance = advancePrediction(
-          prediction, startTick, targetTick, currentInput, world, maximumCandidates);
+          prediction, startTick, targetTick, inputHistory, world, maximumCandidates);
       trace.add("PREDICT_FORWARD startTick=" + startTick
           + " targetTick=" + targetTick
           + " steps=" + advance.simulatedTicks()
@@ -847,16 +855,10 @@ public final class Phase8PredictionRunner {
       Set<Candidate> existingPrediction) {
     Player authority = playerFromAuthority(context);
     Optional<Candidate> retained = existingPrediction.stream().findFirst();
-    boolean authoritativeHorizontalVelocity =
-        Math.hypot(authority.velocity().x(), authority.velocity().z()) > 1.0E-12;
-    double horizontalX = authoritativeHorizontalVelocity
-        ? authority.velocity().x()
-        : retained.map(candidate -> candidate.context().player().velocity().x())
-            .orElse(0.0);
-    double horizontalZ = authoritativeHorizontalVelocity
-        ? authority.velocity().z()
-        : retained.map(candidate -> candidate.context().player().velocity().z())
-            .orElse(0.0);
+    double horizontalX = retained.map(candidate -> candidate.context().player().velocity().x())
+        .orElse(authority.velocity().x());
+    double horizontalZ = retained.map(candidate -> candidate.context().player().velocity().z())
+        .orElse(authority.velocity().z());
     double verticalVelocity = authority.velocity().y();
 
     Phase5Mechanics.MovementEnvironment environment = context.movementEnvironment();
@@ -885,50 +887,6 @@ public final class Phase8PredictionRunner {
         authority.effects(), authority.awaitingTeleport(), authority.uncertain(), authority.input(),
         authority.attributes(), authority.pose(), authority.environment(),
         authority.clientTickRange(), authority.provenance(), authority.uncertaintyReasons());
-  }
-
-  private static Packets.PlayerContext deriveAuthoritativeVelocity(
-      AuthorityAnchor previous,
-      long currentServerTick,
-      Packets.PlayerContext current) {
-    if (previous == null || currentServerTick <= previous.serverTick()) return current;
-
-    long tickDelta = currentServerTick - previous.serverTick();
-    if (tickDelta < 1L || tickDelta > 2L) return current;
-
-    Vec3 delta = new Vec3(
-        current.serverPosition().x() - previous.context().serverPosition().x(),
-        current.serverPosition().y() - previous.context().serverPosition().y(),
-        current.serverPosition().z() - previous.context().serverPosition().z());
-    double distance = Math.sqrt(delta.x() * delta.x()
-        + delta.y() * delta.y()
-        + delta.z() * delta.z());
-    double maximumPlausibleDistance = 1.5 * tickDelta;
-
-    /*
-     * Consecutive authoritative positions are safer than Bukkit getVelocity():
-     * the latter is not the player's packet-to-packet locomotion vector. Only
-     * derive velocity across a short, bounded interval so teleports/corrections
-     * do not become a synthetic movement velocity.
-     */
-    if (!Double.isFinite(distance) || distance > maximumPlausibleDistance) return current;
-
-    Vec3 derived = new Vec3(
-        delta.x() / tickDelta,
-        delta.y() / tickDelta,
-        delta.z() / tickDelta);
-    return new Packets.PlayerContext(
-        current.gamemode(),
-        current.attributes(),
-        current.effects(),
-        current.pose(),
-        current.movementEnvironment(),
-        current.serverPosition(),
-        derived,
-        current.canFly(),
-        current.flying(),
-        current.sleeping(),
-        current.entityBoxes());
   }
 
   private static Player playerFromAuthority(Packets.PlayerContext context) {
@@ -1207,7 +1165,7 @@ public final class Phase8PredictionRunner {
       Set<Candidate> start,
       long startTick,
       long targetTick,
-      InputConstraint input,
+      NavigableMap<Long, List<TimedInput>> inputHistory,
       WorldSnapshot world,
       int maximumCandidates) {
     if (start.isEmpty()) {
@@ -1228,6 +1186,7 @@ public final class Phase8PredictionRunner {
 
     for (long tick = startTick; tick < targetTick; tick++) {
       final long simulationTick = tick;
+      InputConstraint input = inputForSimulationTick(inputHistory, simulationTick);
       SearchResult result = new Phase6Reachability(new Vanilla12111RichPhysics()).search(
           current.stream()
               .map(candidate -> candidate.context().withTick(simulationTick))
@@ -1257,7 +1216,7 @@ public final class Phase8PredictionRunner {
       }
     }
 
-    reasons.add("persistent prediction advanced without replaying prior packet history");
+    reasons.add("persistent prediction advanced using client input history indexed by simulation tick");
     return new AdvanceResult(current, true, simulatedTicks, List.copyOf(reasons));
   }
 
@@ -1429,6 +1388,21 @@ public final class Phase8PredictionRunner {
             "flightToggle.cancelled=" + (((Packets.FlightToggle) packet.packet()).cancelled()),
             "this evidence is independent of Paper movement rejection events"),
         "prediction:flight:" + playerId + ":" + packet.sequence());
+  }
+
+  private InputConstraint inputForSimulationTick(
+      NavigableMap<Long, List<TimedInput>> history,
+      long simulationTick) {
+    if (history.isEmpty() || simulationTick < 0L) return neutralInput;
+    for (var entry : history.headMap(simulationTick, true).descendingMap().entrySet()) {
+      TimedInput selected = null;
+      for (TimedInput input : entry.getValue()) {
+        if (input.sequence() > lastProcessedSequence) break;
+        selected = input;
+      }
+      if (selected != null) return selected.constraint();
+    }
+    return neutralInput;
   }
 
   private static SearchResult uncertainSearch(Set<Candidate> candidates, String reason) {
