@@ -47,8 +47,8 @@ class Phase5FullMechanicsTest {
         var env = Phase5Mechanics.MovementEnvironment.vanillaClimbable(false, false, false);
         var physics = new Vanilla12111Physics();
         var result = physics.step(new PhysicsContext(1, state, new AdvancedInput(0, 0, false), WORLD,
-                Simulation.Environment.CLIMBABLE, Attributes.DEFAULT, Phase5Mechanics.Phase5Mechanics.MovementEffects.NONE,
-                Phase5Mechanics.Phase5Mechanics.Pose.STANDING, env));
+                Simulation.Environment.CLIMBABLE, Attributes.DEFAULT, Phase5Mechanics.MovementEffects.NONE,
+                Phase5Mechanics.Pose.STANDING, env));
         assertTrue(result.state().velocity().y() >= -0.15 - 1e-12);
 
         var up = physics.step(new PhysicsContext(2, state, new AdvancedInput(1, 0, false), WORLD,
