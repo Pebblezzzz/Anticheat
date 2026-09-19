@@ -334,7 +334,9 @@ class Phase8AdversarialMatrixTest {
               "survival", Map.of(), OptionalInt.empty(), false, Optional.empty(),
               Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
               State.TickRange.unknown(), State.Provenance.UNKNOWN, Set.of());
-          var currentWorld = floorWorld(x - 8, x + 8, -8, 8);
+          int worldMinX = (int) Math.floor(x) - 8;
+          int worldMaxX = (int) Math.floor(x) + 8;
+          var currentWorld = floorWorld(worldMinX, worldMaxX, -8, 8);
           var currentAuthority = new Packets.PlayerContext(
               "survival",
               Simulation.Attributes.DEFAULT,
