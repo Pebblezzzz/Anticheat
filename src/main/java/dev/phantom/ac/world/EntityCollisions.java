@@ -72,14 +72,26 @@ public interface EntityCollisions {
      * deterministic.
      */
     static EntityCollisions of(List<EntityBox> boxes) {
+        return of(boxes, true);
+    }
+
+    /**
+     * Creates a deterministic fixed-list provider with explicit completeness.
+     * Replays/tests may pass true when the recorded entity set is complete; live
+     * adapters must pass true only after they have actually enumerated every
+     * relevant entity, otherwise Phase 5 must propagate uncertainty.
+     */
+    static EntityCollisions of(List<EntityBox> boxes, boolean complete) {
         List<EntityBox> sorted = boxes.stream()
                 .sorted(java.util.Comparator.comparingInt(EntityBox::entityId))
                 .toList();
         return new EntityCollisions() {
             @Override
             public EntityCollisionResult boxesIn(BlockBox query) {
-                List<EntityBox> overlapping = sorted.stream().filter(entity -> entity.box().intersects(query)).toList();
-                return new EntityCollisionResult(overlapping, true);
+                List<EntityBox> overlapping = sorted.stream()
+                        .filter(entity -> entity.box().intersects(query))
+                        .toList();
+                return new EntityCollisionResult(overlapping, complete);
             }
         };
     }
