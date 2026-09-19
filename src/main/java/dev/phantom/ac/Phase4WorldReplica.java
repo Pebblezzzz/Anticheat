@@ -801,6 +801,13 @@ public final class Phase4WorldReplica implements Serializable {
       return state.isUnsupported()?Coverage.UNSUPPORTED:Coverage.KNOWN;
     }
 
+    @Override public java.util.Optional<VoxelShape> resolveCollisionShape(WorldSnapshot snapshot,int x,int y,int z){
+      if(collisionResolver==null)return java.util.Optional.empty();
+      BlockState state=blockAtOrNull(x,y,z);
+      if(state==null)return java.util.Optional.of(VoxelShape.empty());
+      return collisionResolver.resolve(snapshot,state,x,y,z);
+    }
+
     @Override public BlockState blockAtOrNull(int x,int y,int z){
       if(y<data.minY()||y>data.maxY())return null;
       PackedChunk chunk=data.chunks().get(Chunk.containing(x,z));
