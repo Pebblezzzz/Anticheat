@@ -80,9 +80,13 @@ class CausalMovementPipelineTest {
 
   @Test
   void explicitMovementRefusesUnwatermarkedAuthorityRoot() {
+    Packets.PlayerContext liveAuthority = authority();
+    Packets.Move liveMove = new Move(new Maths.Vec3(.5, 64, .5), 90f, 0f, true, 1L);
     List<RawPacket> packets = List.of(
-        new RawPacket(1, 0, authority()),
-        new RawPacket(2, 10, new Move(new Maths.Vec3(.5, 64, .5), 90f, 0f, true, 1L)));
+        new RawPacket(1, 0, liveAuthority,
+            Packets.CaptureProvenance.fromAdapter("paper-live", liveAuthority, 0L, null)),
+        new RawPacket(2, 10, liveMove,
+            Packets.CaptureProvenance.fromAdapter("paper-client-tick-boundary", liveMove, 0L, null)));
 
     var report = CausalMovementPipeline.analyze(
         "unwatermarked-authority",
