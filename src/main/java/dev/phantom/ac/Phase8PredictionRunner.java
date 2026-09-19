@@ -1296,7 +1296,7 @@ public final class Phase8PredictionRunner {
             + " startVel=" + beforeCandidate.context().player().velocity()
             + " startGround=" + beforeCandidate.context().player().onGround());
       }
-      SearchResult result = new Phase6Reachability(new Vanilla12111RichPhysics()).search(
+      SearchResult result = new Phase6Reachability().search(
           current.stream()
               .map(candidate -> candidate.context().withTick(simulationTick))
               .toList(),
