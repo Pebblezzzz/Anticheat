@@ -733,7 +733,7 @@ public final class Phase8PredictionRunner {
     Phase7Timing.EventTiming timing = phase7TimingBySequence.get(packet.sequence());
     if (timing != null) {
       Phase7Timing.Range range = timing.simulationClientTicks();
-      if (!range.isEmpty()) {
+      if (timing.simulationClientTickEnvelope().known()) {
         long tick = Math.max(0L, range.min());
         relativeClientTick = Math.max(relativeClientTick, tick);
         boolean exact = range.isExact()
@@ -1495,8 +1495,12 @@ public final class Phase8PredictionRunner {
         relativeClientTick,
         hasClientTickBoundary,
         hasClientTickBoundary,
-        "flight-toggle-observation");
-    return Phase8MovementValidation.authoritativeImpossible(
+        !hasClientTickBoundary,
+        "flight-toggle-observation",
+        hasClientTickBoundary
+            ? "client-tick boundary observed"
+            : "no client-tick boundary observed for authoritative flight toggle");
+    return Phase8MovementValidation.authoritativeObservation(
         playerId,
         movementServerTick(packet),
         state,
