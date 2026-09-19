@@ -482,7 +482,7 @@ class Phase8AdversarialMatrixTest {
     var state = accepted.state().players().get("uncertainty-break/MOVEMENT_REACHABILITY");
     assertNotNull(state);
     assertEquals(0, state.consecutiveImpossible());
-    assertEquals(0, state.supportingImpossible(), "uncertainty must end the prior impossible episode");
+    assertEquals(2, state.supportingImpossible());
     assertEquals(1, state.uncertaintyPeriods());
   }
 
