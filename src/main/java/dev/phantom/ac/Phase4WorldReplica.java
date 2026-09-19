@@ -428,7 +428,7 @@ public final class Phase4WorldReplica implements Serializable {
     WorldSnapshot worldSnapshot=snapshotFor(visible,lastVisibleSequence);
     Generation initial=new Generation(
         0,worldId,0,-1L,new Order(0,0,0,0),
-        worldSnapshot,new TrackedEntities(Map.of()),Map.of(),List.of());
+        worldSnapshot,new TrackedEntities(Map.of(),true),Map.of(),List.of());
     current=new AtomicReference<>(initial);
     history.add(initial);
   }
