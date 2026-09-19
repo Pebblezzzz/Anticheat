@@ -285,8 +285,12 @@ public final class WorldSnapshot implements Serializable {
         }
         @Override public java.util.Optional<VoxelShape> resolveCollisionShape(WorldSnapshot snapshot,int x,int y,int z) {
           Chunk sought=Chunk.containing(x,z);
-          if(first.hasChunk(sought)) return first.resolveCollisionShape(x,y,z);
-          return second.resolveCollisionShape(x,y,z);
+          if(first.hasChunk(sought)){
+            java.util.Optional<VoxelShape> a=first.resolveCollisionShape(x,y,z);
+            if(a.isPresent())return a;
+          }
+          if(second.hasChunk(sought))return second.resolveCollisionShape(x,y,z);
+          return java.util.Optional.empty();
         }
       };
       return WorldSnapshot.backed(first.version(),first.minY(),first.maxY(),mergedBackend);
