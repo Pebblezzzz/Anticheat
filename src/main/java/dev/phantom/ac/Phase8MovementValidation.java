@@ -61,7 +61,7 @@ public final class Phase8MovementValidation {
 
   public record CandidateSummary(long candidateId, long simulationTick, String position,
                                  String velocity, boolean onGround, String pose,
-                                 String provenance) implements Serializable {}
+                                 float yaw, float pitch, String provenance) implements Serializable {}
 
   public record Result(Verdict verdict, Evidence evidence) implements Serializable {
     public Result { Objects.requireNonNull(verdict); Objects.requireNonNull(evidence); if (evidence.verdict() != verdict) throw new IllegalArgumentException("evidence/result verdict mismatch"); }
@@ -219,7 +219,8 @@ public final class Phase8MovementValidation {
   private static CandidateSummary summary(Candidate c) {
     Player p = c.context().player();
     return new CandidateSummary(c.id(), c.context().simulationTick(), p.position().toString(),
-        p.velocity().toString(), p.onGround(), c.context().pose().name(), c.provenance().toString());
+        p.velocity().toString(), p.onGround(), c.context().pose().name(),
+        p.yaw(), p.pitch(), c.provenance().toString());
   }
 
   public record Accumulator(Map<String, State> players) implements Serializable {
