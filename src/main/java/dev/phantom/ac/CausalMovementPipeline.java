@@ -1686,19 +1686,6 @@ public final class CausalMovementPipeline {
     return Set.copyOf(refreshed);
   }
 
-  private static boolean worldCoversMovement(
-      WorldSnapshot world,
-      Player before,
-      Player after) {
-    if (world == null) return false;
-    int beforeChunkX = Math.floorDiv((int) Math.floor(before.position().x()), 16);
-    int beforeChunkZ = Math.floorDiv((int) Math.floor(before.position().z()), 16);
-    int afterChunkX = Math.floorDiv((int) Math.floor(after.position().x()), 16);
-    int afterChunkZ = Math.floorDiv((int) Math.floor(after.position().z()), 16);
-    return world.hasChunk(beforeChunkX, beforeChunkZ)
-        && world.hasChunk(afterChunkX, afterChunkZ);
-  }
-
   private static boolean worldCoversFrontierMovement(
       WorldSnapshot world,
       Frontier frontier,
