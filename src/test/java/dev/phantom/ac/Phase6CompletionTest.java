@@ -163,13 +163,13 @@ class Phase6CompletionTest {
   @Test
   void partialInputOnlyBranchesTheUnknownFields() {
     InputConstraint constraint = new InputConstraint(
-        OptionalInt.of(1), OptionalInt.empty(), Optional.of(false),
+        OptionalInt.empty(), OptionalInt.empty(), Optional.empty(),
         Optional.of(true), Optional.empty());
     SearchResult result = ENGINE.search(
         start(), List.of(constraint),
         tick -> List.of(new WorldBranch("known", floorWorld(), true, "known floor")),
         tick -> List.of(new Phase6Reachability.None()), 128);
-    assertEquals(9, result.candidates().size());
+    assertEquals(36, result.candidates().size());
     assertEquals(Verdict.UNCERTAIN, result.verdict());
     assertTrue(result.metrics().generatedCandidates() >= 9);
   }
@@ -364,8 +364,13 @@ class Phase6CompletionTest {
   void correctionAndConfirmationPreserveRichCandidateState() {
     Attributes attributes = new Attributes(2.0);
     MovementEffects effects = new MovementEffects(1, -1, -1, -1, false);
+    Context richStart = startAt(
+        new Maths.Vec3(0.5, 65, 0.5), true, 0, Pose.STANDING,
+        Simulation.Environment.DRY,
+        MovementEnvironment.dry(true, false, false),
+        attributes, effects);
     Context corrected = ENGINE.search(
-        start(), List.of(InputConstraint.exact(STILL)),
+        richStart, List.of(InputConstraint.exact(STILL)),
         tick -> List.of(new WorldBranch("known", floorWorld(), true, "known floor")),
         tick -> List.of(new Phase6Reachability.TeleportCorrection(
             7, new Maths.Vec3(3.5, 65, 3.5), Maths.Vec3.ZERO,
@@ -420,7 +425,7 @@ class Phase6CompletionTest {
     assertEquals(Verdict.POSSIBLE, result.verdict());
     Candidate candidate = result.candidates().iterator().next();
     assertTrue(candidate.provenance().externalTransition().contains("ordered-external"));
-    assertTrue(candidate.provenance().causes().stream().anyMatch(c -> c.contains("collision")));
+    assertEquals(new Maths.Vec3(0.4, 0.2, 0.1), candidate.context().player().velocity());
   }
 
   @Test
