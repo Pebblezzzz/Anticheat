@@ -107,6 +107,66 @@ final class Phase4WorldReplicaTest {
     assertEquals(stone,r.snapshotAtSequence(3L).blockAtOrNull(0,64,0));
   }
 
+
+  @Test void packedSectionRoundTripsAcrossLongBoundary(){
+    BlockState[] states=new BlockState[4096];
+    for(int i=0;i<states.length;i++)
+      states[i]=BlockState.builder("test:state_"+(i%17)).variant(BlockState.Variant.FULL_CUBE).build();
+    var packed=Phase4WorldReplica.PackedSection.fromStates(4,states);
+    assertEquals(states[12],packed.stateAt(12));
+    assertEquals(states[13],packed.stateAt(13));
+    assertEquals(states[4095],packed.stateAt(4095));
+    assertEquals(5,packed.bitsPerEntry());
+  }
+
+  @Test void packedFullChunkKeepsEmptySectionsKnown(){
+    var sections=new TreeMap<Integer,Phase4WorldReplica.PackedSection>();
+    for(int i=0;i<24;i++)sections.put(i,Phase4WorldReplica.PackedSection.empty(-4+i));
+    BlockState stone=BlockCatalogue12111.decode("minecraft:stone",Map.of());
+    BlockState[] cells=new BlockState[4096];
+    Arrays.fill(cells,BlockState.air());
+    cells[(0<<8)|(0<<4)|0]=stone;
+    sections.put(8,Phase4WorldReplica.PackedSection.fromStates(4,cells));
+
+    var r=new Phase4WorldReplica(V,"world",-64,319);
+    r.accept(new Phase4WorldReplica.PackedChunkData(
+        o(1,1),p(1,1),new Chunk(0,0),sections,true));
+
+    assertEquals(Coverage.KNOWN,r.getWorldState().coverageAt(0,64,0));
+    assertEquals(Coverage.KNOWN,r.getWorldState().coverageAt(0,80,0));
+    assertEquals(stone,r.getWorldState().blockAtOrNull(0,64,0));
+  }
+
+  @Test void partialPackedChunkPreservesUnknownSections(){
+    BlockState stone=BlockCatalogue12111.decode("minecraft:stone",Map.of());
+    BlockState[] cells=new BlockState[4096];
+    Arrays.fill(cells,BlockState.air());
+    cells[0]=stone;
+
+    var r=new Phase4WorldReplica(V,"world",-64,319);
+    r.accept(new Phase4WorldReplica.PackedChunkData(
+        o(1,1),p(1,1),new Chunk(0,0),
+        Map.of(8,Phase4WorldReplica.PackedSection.fromStates(4,cells)),false));
+
+    assertEquals(stone,r.getWorldState().blockAtOrNull(0,64,0));
+    assertEquals(Coverage.KNOWN,r.getWorldState().coverageAt(0,64,0));
+    assertEquals(Coverage.UNKNOWN,r.getWorldState().coverageAt(0,80,0));
+  }
+
+  @Test void packedBlockChangeUsesSmallOverlay(){
+    BlockState stone=BlockCatalogue12111.decode("minecraft:stone",Map.of());
+    var r=new Phase4WorldReplica();
+    Map<Integer,Phase4WorldReplica.PackedSection> sections=new TreeMap<>();
+    for(int i=0;i<24;i++)sections.put(i,Phase4WorldReplica.PackedSection.empty(-4+i));
+    r.accept(new Phase4WorldReplica.PackedChunkData(
+        o(1,1),p(1,1),new Chunk(0,0),sections,true));
+    r.accept(new Phase4WorldReplica.BlockChange(
+        o(2,2),p(2,2),new Pos(0,64,0),stone));
+
+    assertEquals(stone,r.getWorldState().blockAtOrNull(0,64,0));
+    assertTrue(r.compactStateEntryCount() <= 50);
+  }
+
   @Test void replayIsDeterministic(){
     var events=List.of(
       new Timeline.Event(1,new Packets.NormalizedPacket(1,1,new Packets.ChunkStates(new Chunk(0,0),Map.of(new Pos(0,64,0),BlockCatalogue12111.decode("minecraft:stone",Map.of()))),EnumSet.of(Packets.PacketFlag.NORMAL),Packets.CaptureProvenance.forPacket(new Packets.ChunkStates(new Chunk(0,0),Map.of(new Pos(0,64,0),BlockCatalogue12111.decode("minecraft:stone",Map.of()))))))
