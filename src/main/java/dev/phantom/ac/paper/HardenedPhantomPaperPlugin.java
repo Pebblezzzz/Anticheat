@@ -951,7 +951,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         +",vel="+candidate.velocity()
         +",ground="+candidate.onGround()
         +",yaw="+candidate.yaw()
-        +",pitch="+candidate.pitch()).orElse("none");
+        +",pitch="+candidate.pitch()
+        +",provenance="+candidate.provenance()).orElse("none");
 
     double dx=e.observedState().position().x()-e.priorState().position().x();
     double dy=e.observedState().position().y()-e.priorState().position().y();
@@ -967,6 +968,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
               ||line.startsWith("FRONTIER_")
               ||line.startsWith("ROOT ")
               ||line.startsWith("ROOT_")
+              ||line.startsWith("SIM_INPUT ")
+              ||line.startsWith("SIM_STEP ")
               ||line.startsWith("CANDIDATES ")
               ||line.startsWith("WORLD ")
               ||line.startsWith("TIMING_"))
