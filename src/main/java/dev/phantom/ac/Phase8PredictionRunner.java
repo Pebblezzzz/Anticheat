@@ -923,12 +923,12 @@ public final class Phase8PredictionRunner {
         current.effects(),
         current.pose(),
         current.movementEnvironment(),
-        current.sleeping(),
-        current.entityBoxes(),
         current.serverPosition(),
         derived,
         current.canFly(),
-        current.flying());
+        current.flying(),
+        current.sleeping(),
+        current.entityBoxes());
   }
 
   private static Player playerFromAuthority(Packets.PlayerContext context) {
