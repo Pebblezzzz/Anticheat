@@ -283,6 +283,11 @@ public final class WorldSnapshot implements Serializable {
           if (first.hasChunk(sought)) return first.blockAtOrNull(x,y,z);
           return second.blockAtOrNull(x,y,z);
         }
+        @Override public java.util.Optional<VoxelShape> resolveCollisionShape(WorldSnapshot snapshot,int x,int y,int z) {
+          Chunk sought=Chunk.containing(x,z);
+          if(first.hasChunk(sought)) return first.resolveCollisionShape(x,y,z);
+          return second.resolveCollisionShape(x,y,z);
+        }
       };
       return WorldSnapshot.backed(first.version(),first.minY(),first.maxY(),mergedBackend);
     }
