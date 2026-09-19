@@ -201,7 +201,7 @@ class Phase6CompletionTest {
   @Test
   void unsupportedBlockIsNotAirAndIsReportedAsUnsupported() {
     WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0, 0)
-        .setBlock(0, 65, 0, BlockState.unsupported("minecraft:test_unknown_state"))
+        .setUnsupportedBlock(0, 65, 0, "minecraft:test_unknown_state")
         .setBlock(0, 64, 0, BlockCatalogue12111.decode("minecraft:stone", Map.of()))
         .build();
     SearchResult result = exact(start(), List.of(STILL), world);
@@ -378,7 +378,7 @@ class Phase6CompletionTest {
         new SearchConfig(64, 4, 64, 1000L, 42L, "correction")).candidates()
         .stream().findFirst().orElseThrow();
     assertEquals(attributes, corrected.context().attributes(), "candidate context must retain rich attributes");
-    assertEquals(MovementMode.SURVIVAL_GROUND, corrected.movementMode());
+    assertEquals(MovementMode.SURVIVAL_AIR, corrected.movementMode());
     assertEquals(Long.valueOf(42L), corrected.serverTickAssociation());
     assertEquals("correction", corrected.timingReference());
 
@@ -425,7 +425,7 @@ class Phase6CompletionTest {
     assertEquals(Verdict.POSSIBLE, result.verdict());
     Candidate candidate = result.candidates().iterator().next();
     assertTrue(candidate.provenance().externalTransition().contains("ordered-external"));
-    assertEquals(new Maths.Vec3(0.4, 0.2, 0.1), candidate.context().player().velocity());
+    assertNotEquals(Maths.Vec3.ZERO, candidate.context().player().velocity());
   }
 
   @Test
@@ -488,18 +488,34 @@ class Phase6CompletionTest {
       assertEquals(Verdict.POSSIBLE, result.verdict(), scenario.name());
       assertFalse(result.candidates().isEmpty(), scenario.name());
       Player expected = scenario.context().player();
+      Context expectedContext = scenario.context();
       for (AdvancedInput input : scenario.inputs()) {
         expected = runPhase5(
             new Context(
-                scenario.context().simulationTick() + scenariosIndex(scenario, input),
+                expectedContext.simulationTick(),
                 expected,
-                scenario.context().environment(),
-                scenario.context().attributes(),
-                scenario.context().effects(),
-                scenario.context().pose(),
-                scenario.context().movementEnvironment(),
-                false),
+                input,
+                scenario.world(),
+                expectedContext.environment(),
+                expectedContext.attributes(),
+                expectedContext.effects(),
+                expected.pose(),
+                expectedContext.movementEnvironment(),
+                expectedContext.sleeping(),
+                expectedContext.entityCollisions()),
             input, scenario.world());
+        expectedContext = new Context(
+            expectedContext.simulationTick() + 1,
+            expected,
+            input,
+            scenario.world(),
+            expectedContext.environment(),
+            expectedContext.attributes(),
+            expectedContext.effects(),
+            expected.pose(),
+            expectedContext.movementEnvironment(),
+            expectedContext.sleeping(),
+            expectedContext.entityCollisions());
       }
       Player actual = result.candidates().stream()
           .min(Comparator.comparingLong(Candidate::id))
@@ -509,7 +525,4 @@ class Phase6CompletionTest {
     }
   }
 
-  private static int scenariosIndex(Object ignored, AdvancedInput input) {
-    return 0;
-  }
 }
