@@ -59,6 +59,9 @@ public interface EntityCollisions {
      */
     EntityCollisionResult boxesIn(BlockBox query);
 
+    /** True when the provider can account for every client-visible entity relevant to the query. */
+    default boolean complete() { return true; }
+
     /**
      * The provider used by default: it reports no entities and states plainly
      * that its answer is not complete. It never pretends an empty list means
