@@ -176,8 +176,11 @@ class Phase8PredictionRunnerTest {
         new Maths.Vec3(0.0, authorityVy, 0.0),
         false, false, false, List.of());
 
-    // The captured authority velocity is already the velocity for the next movement step.
-    double observedY = authorityY + authorityVy;
+    // The captured server velocity is converted to the Phase 5 client-tick boundary
+    // before the next movement step is simulated.
+    double observedY = authorityY
+        + (authorityVy - Vanilla12111RichPhysics.GRAVITY)
+            * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG;
 
     var report = runner.process(
         "stale-airborne",
@@ -205,7 +208,7 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
-  void staleAirborneAuthorityUsesCapturedVelocityWithoutAnExtraGravityStep() {
+  void staleAirborneAuthorityConvertsCapturedVelocityToClientBoundary() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
     runner.process(
@@ -218,7 +221,9 @@ class Phase8PredictionRunnerTest {
 
     double authorityY = 66.92159999847412;
     double authorityVy = -0.15523200634002686;
-    double observedY = authorityY + authorityVy;
+    double observedY = authorityY
+        + (authorityVy - Vanilla12111RichPhysics.GRAVITY)
+            * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG;
 
     PlayerContext authority = new PlayerContext(
         "survival", Simulation.Attributes.DEFAULT, Map.of(),
@@ -248,6 +253,36 @@ class Phase8PredictionRunnerTest {
         .flatMap(result -> result.evidence().uncertaintySources().stream())
         .noneMatch(reason -> reason.contains("Phase 5 could not deterministically simulate")),
         report.results().toString());
+  }
+
+  @Test
+  void jumpOnlyGroundTickDoesNotRequireSupportFrictionData() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.5, 64.0, .5), new Maths.Vec3(0.0, -0.0784000015258789, 0.0),
+        false, false, false, List.of());
+
+    var report = runner.process(
+        "jump-only",
+        List.of(
+            new RawPacket(1, 10, authority,
+                Packets.CaptureProvenance.fromAdapter("test-authority", authority, 100L, 0L)),
+            new RawPacket(2, 20, new ClientInput(
+                false, false, true, false, false, false, false)),
+            new RawPacket(3, 30, new ClientTickEnd()),
+            new RawPacket(4, 200, new Move(
+                new Maths.Vec3(.5, 64.41999998688698, .5), 0f, 0f, false, 1L))),
+        floorWorld(), anchor(), 0L);
+
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(), report.results().toString());
+    assertTrue(report.results().getFirst().evidence().uncertaintySources().stream()
+        .noneMatch(reason -> reason.contains("support block is unavailable")
+            || reason.contains("Phase 5 could not deterministically simulate")),
+        report.results().toString());
+    assertTrue(report.candidateFrontierRetained(), report.toString());
   }
 
   @Test
