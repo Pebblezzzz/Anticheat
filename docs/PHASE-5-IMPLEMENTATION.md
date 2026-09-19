@@ -141,3 +141,5 @@ No Phase 6/7/8 movement decision logic is added by this redesign.
 
 
 <!-- CI rerun after movement-authority baseline restoration. -->
+
+<!-- compile compatibility fixed -->
