@@ -1153,7 +1153,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       BaseChunk section=chunks[sectionIndex];
       int sectionY=Math.floorDiv(pending.minY(),16)+sectionIndex;
 
-      if(section==null||section.isEmpty()){
+      if(section==null){
+        // A null section in a partial column was not delivered by the client.
+        // A full column may legitimately represent it as empty.
+        if(pending.column().isFullChunk())
+          sections.put(sectionIndex,dev.phantom.ac.Phase4WorldReplica.PackedSection.empty(sectionY));
+        continue;
+      }
+      if(section.isEmpty()){
         // Empty is still known data for this section. Do not turn it into UNKNOWN.
         sections.put(sectionIndex,dev.phantom.ac.Phase4WorldReplica.PackedSection.empty(sectionY));
         continue;
