@@ -33,7 +33,7 @@ import dev.phantom.ac.Phase5Mechanics;
 import dev.phantom.ac.Phase7Timing;
 import dev.phantom.ac.Phase8PredictionRunner;
 import dev.phantom.ac.Phase8MovementValidation;
-import dev.phantom.ac.SetbackPolicy;
+import dev.phantom.ac.Phase8EnforcementPolicy;
 import dev.phantom.ac.State;
 import dev.phantom.ac.Timeline;
 import dev.phantom.ac.ValidationResultGate;
@@ -83,6 +83,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private org.bukkit.scheduler.BukkitTask stateTask;
   private int validationBudget;
   private boolean alertsEnabled,broadcastAlerts,setbacksEnabled,setbacksOnlyExhaustive;
+  private boolean kickEnabled,punishmentEnabled,enforcementOnlyExhaustive,permissionExempt;
+  private int minimumImpossibleObservations;
+  private double minimumEnforcementConfidence;
+  private String punishmentCommand,exemptionPermission;
   private final Map<UUID,Boolean> setbackOverrides=new ConcurrentHashMap<>();
   private ExecutorService chunkExecutor;
   private ExecutorService worldPublishExecutor;
@@ -256,6 +260,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     broadcastAlerts=getConfig().getBoolean("alerts.broadcast",false);
     setbacksEnabled=getConfig().getBoolean("setbacks.enabled",false);
     setbacksOnlyExhaustive=getConfig().getBoolean("setbacks.only-when-exhaustive",true);
+    kickEnabled=getConfig().getBoolean("enforcement.kick-enabled",false);
+    punishmentEnabled=getConfig().getBoolean("enforcement.punishment-enabled",false);
+    enforcementOnlyExhaustive=getConfig().getBoolean("enforcement.only-when-exhaustive",true);
+    minimumImpossibleObservations=Math.max(1,getConfig().getInt("enforcement.minimum-impossible-observations",2));
+    minimumEnforcementConfidence=Math.max(0.0,Math.min(1.0,getConfig().getDouble("enforcement.minimum-confidence",1.0)));
+    permissionExempt=getConfig().getBoolean("enforcement.permission-exempt",true);
+    exemptionPermission=getConfig().getString("enforcement.permission","phantom.exempt");
+    punishmentCommand=getConfig().getString("enforcement.punishment-command","warn {player} Phantom movement evidence");
     validationBudget=Math.max(1,getConfig().getInt("validation.candidate-budget",4096));
     getServer().getPluginManager().registerEvents(this,this);
     PacketEvents.getAPI().getEventManager().registerListener(listener);
@@ -657,10 +669,23 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           climb?Phase5Mechanics.MovementEnvironment.vanillaClimbable(player.isOnGround(),sprint,sneak):
           Phase5Mechanics.MovementEnvironment.dry(player.isOnGround(),sprint,sneak);
 
+      /*
+       * Enumerate the complete Bukkit entity set for the current world and retain
+       * the subset capable of intersecting the local validation volume. The local
+       * collision provider is explicitly marked complete for that deterministic
+       * server snapshot; no incomplete nearby-query result is passed downstream.
+       */
+      org.bukkit.util.BoundingBox relevantEntityRegion=box.expand(6.0,6.0,6.0);
       List<EntityCollisions.EntityBox> entityBoxes=new ArrayList<>();
-      for(Entity entity:player.getWorld().getNearbyEntities(player.getLocation(),4.0,4.0,4.0)){
+      for(Entity entity:player.getWorld().getEntities()){
         if(entity.getEntityId()==player.getEntityId())continue;
         org.bukkit.util.BoundingBox eb=entity.getBoundingBox();
+        if(eb.getMaxX()<relevantEntityRegion.getMinX()
+            ||eb.getMinX()>relevantEntityRegion.getMaxX()
+            ||eb.getMaxY()<relevantEntityRegion.getMinY()
+            ||eb.getMinY()>relevantEntityRegion.getMaxY()
+            ||eb.getMaxZ()<relevantEntityRegion.getMinZ()
+            ||eb.getMinZ()>relevantEntityRegion.getMaxZ())continue;
         entityBoxes.add(new EntityCollisions.EntityBox(entity.getEntityId(),
             new dev.phantom.ac.geometry.BlockBox(eb.getMinX(),eb.getMinY(),eb.getMinZ(),eb.getMaxX(),eb.getMaxY(),eb.getMaxZ())));
       }
@@ -846,15 +871,29 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             ?capture.playerId.toString()
             :getServer().getPlayer(capture.playerId).getName(),result);
     }
+
     Phase8MovementValidation.Evidence latestSetbackEvidence=null;
     long latestSetbackTick=Long.MIN_VALUE;
+
+    Phase8MovementValidation.Config accumulatorConfig =
+        new Phase8MovementValidation.Config(
+            minimumImpossibleObservations, 20, alertsEnabled, true);
+
+    Phase8EnforcementPolicy.Config enforcementConfig =
+        new Phase8EnforcementPolicy.Config(
+            setbackEnabled(capture.playerId),
+            kickEnabled,
+            punishmentEnabled,
+            enforcementOnlyExhaustive,
+            minimumImpossibleObservations,
+            minimumEnforcementConfidence,
+            punishmentCommand);
 
     for(Phase8MovementValidation.Result result:report.results()){
       Phase8MovementValidation.Evidence evidence=result.evidence();
       if(!capture.validationGate.accept(evidence.replayReference(),result.verdict()))continue;
 
-      var accumulated=capture.accumulator.accept(evidence,
-          new Phase8MovementValidation.Config(1,20,alertsEnabled,true));
+      var accumulated=capture.accumulator.accept(evidence,accumulatorConfig);
       capture.accumulator=accumulated.state();
 
       accumulated.alert().ifPresent(alert->{
@@ -869,12 +908,61 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         }
       });
 
-      if(result.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE
-          &&evidence.serverTick()>=latestSetbackTick
-          &&setbackEnabled(capture.playerId)
-          &&SetbackPolicy.evaluate(evidence,true,setbacksOnlyExhaustive).allowed()){
+      String episodeKey=evidence.playerId()+"/"+evidence.rule();
+      Phase8MovementValidation.State episode =
+          accumulated.state().players().get(episodeKey);
+      if(episode==null)continue;
+
+      Phase8EnforcementPolicy.Decision decision =
+          Phase8EnforcementPolicy.evaluate(evidence,episode,enforcementConfig);
+
+      if (debugLevel.trace() && result.verdict()!=Phase8MovementValidation.Verdict.POSSIBLE) {
+        getLogger().info("[PhantomAC][PHASE8][ENFORCEMENT] player="+capture.playerId
+            +" eligible="+decision.eligible()
+            +" confidence="+decision.confidence()
+            +" actions="+decision.actions()
+            +" reason="+decision.reason()
+            +" tick="+evidence.serverTick());
+      }
+
+      Player player=getServer().getPlayer(capture.playerId);
+      if(player!=null && permissionExempt && exemptionPermission!=null
+          && !exemptionPermission.isBlank() && player.hasPermission(exemptionPermission)){
+        continue;
+      }
+
+      if(!decision.eligible())continue;
+
+      if(decision.actions().contains(Phase8EnforcementPolicy.Action.SETBACK)
+          &&evidence.serverTick()>=latestSetbackTick){
         latestSetbackTick=evidence.serverTick();
         latestSetbackEvidence=evidence;
+      }
+
+      if(decision.actions().contains(Phase8EnforcementPolicy.Action.KICK) && player!=null){
+        player.kickPlayer(
+            "[PhantomAC] Movement evidence exhausted the configured legitimate state space.");
+        getLogger().warning("[PhantomAC][PHASE8][KICK] player="+capture.playerId
+            +" tick="+evidence.serverTick()+" replay="+evidence.replayReference());
+      }
+
+      if(decision.actions().contains(Phase8EnforcementPolicy.Action.PUNISHMENT_COMMAND)){
+        String command=Phase8EnforcementPolicy.renderPunishmentCommand(
+            punishmentCommand,
+            player==null?capture.playerId.toString():player.getName(),
+            evidence);
+        if(command.startsWith("/"))command=command.substring(1);
+        if(!command.isBlank()){
+          try{
+            getServer().dispatchCommand(getServer().getConsoleSender(),command);
+            getLogger().warning("[PhantomAC][PHASE8][PUNISHMENT] player="+capture.playerId
+                +" tick="+evidence.serverTick()+" replay="+evidence.replayReference());
+          }catch(RuntimeException failure){
+            getLogger().log(java.util.logging.Level.WARNING,
+                "[PhantomAC][PHASE8][PUNISHMENT] command failed for "+capture.playerId,
+                failure);
+          }
+        }
       }
     }
 
@@ -897,8 +985,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         }
       }
     }
-
-    
   }
 
   private boolean setbackEnabled(UUID playerId){
