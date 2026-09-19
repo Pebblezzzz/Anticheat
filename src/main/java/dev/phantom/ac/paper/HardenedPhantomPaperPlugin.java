@@ -936,7 +936,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         +",canFly="+capture.lastAuthoritativeCanFly
         +",flying="+capture.lastAuthoritativeFlying+"}"
         +" worldState={visibleChunks="+capture.clientWorld.visibleChunkCount()
-        +",decodedStates="+capture.clientWorld.decodedStateCacheSize()
+        +",compactEntries="+capture.clientWorld.compactStateEntryCount()
         +",pendingBarriers="+capture.clientWorld.pendingBarrierCount()
         +",causalSequence="+capture.clientWorld.causalSequence()+"}"
         +" paperRejectionsInWindow="+capture.paperMoveFailureCount
@@ -1058,7 +1058,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         +" movement="+movementSummary
         +" result="+resultSummary
         +" chunks={seen="+capture.chunkPackets.get()
-        +",decodedStatesCached="+capture.clientWorld.decodedStateCacheSize()
+        +",compactEntries="+capture.clientWorld.compactStateEntryCount()
         +",pendingBarriers="+capture.clientWorld.pendingBarrierCount()
         +",visible="+capture.clientWorld.visibleChunkCount()+"}"
         +" tickIntegrity={endTicks="+capture.clientTickTracker.endTickCount()
