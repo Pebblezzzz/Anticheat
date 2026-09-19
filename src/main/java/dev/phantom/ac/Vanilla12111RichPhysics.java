@@ -13,8 +13,26 @@ import static dev.phantom.ac.State.Player;
 
 /** Sole canonical 1.21.11 movement implementation used by Phase 5 and Phase 6. */
 public final class Vanilla12111RichPhysics {
-    public static final double GRAVITY=0.08,AIR_DRAG=0.98,AIR_HORIZONTAL_FRICTION=0.91,AIR_VERTICAL_DRAG=0.98,AIR_ACCEL=0.0196,GROUND_FRICTION=0.546,WALK_ACCEL=0.98,JUMP=0.42,STEP_HEIGHT=0.6;
-    private static final double DIAGONAL_ACCEL=0.1,WATER_DRAG=0.9,LAVA_DRAG=0.5,CLIMB_MAX_DOWN=0.15,CLIMB_MAX_UP=0.15,GLIDE_GRAVITY=0.035,GROUND_PROBE=1.0E-4;
+    public static final double GRAVITY=0.08,
+            AIR_DRAG=0.98f,
+            AIR_HORIZONTAL_FRICTION=0.91f,
+            AIR_VERTICAL_DRAG=0.98f,
+            AIR_ACCEL=0.02f,
+            SPRINT_AIR_ACCEL=0.025999999f,
+            GROUND_FRICTION=0.546f,
+            WALK_ACCEL=0.98f,
+            JUMP=0.42f,
+            STEP_HEIGHT=0.6,
+            INPUT_FRICTION=0.98f,
+            FRICTION_SPEED_FACTOR=0.21600002f,
+            SPRINT_JUMP_HORIZONTAL_BOOST=0.2;
+    private static final double SNEAKING_SPEED_MULTIPLIER=0.3,
+            WATER_DRAG=0.9,
+            LAVA_DRAG=0.5,
+            CLIMB_MAX_DOWN=0.15,
+            CLIMB_MAX_UP=0.15,
+            GLIDE_GRAVITY=0.035,
+            GROUND_PROBE=1.0E-4;
 
     public StepResult step(Context context){
         Objects.requireNonNull(context);Player s=context.state();
@@ -33,10 +51,52 @@ public final class Vanilla12111RichPhysics {
         if(!s.gamemode().equals("survival")&&!s.gamemode().equals("adventure"))return uncertain(context,"unsupported gamemode movement model");
         Aabb start=Aabb.playerAt(s.position(),pose);var startEntities=context.entityCollisions().boxesIn(new dev.phantom.ac.geometry.BlockBox(start.minX(),start.minY(),start.minZ(),start.maxX(),start.maxY(),start.maxZ()));if(!startEntities.isDefinite())return uncertain(context,"entity collision history is incomplete");
         if(context.world().hasUnknownOrUnsupported(new dev.phantom.ac.geometry.BlockBox(start.minX(),start.minY(),start.minZ(),start.maxX(),start.maxY(),start.maxZ())))return uncertain(context,"start collision volume is not fully known");
-        double radians=Math.toRadians(s.yaw());double speed=context.attributes().value()*context.effects().speedMultiplier()*(context.input().sprint()?1.3:1.0)*(context.input().sneak()?0.3:1.0);boolean fluid=context.movementEnvironment().fluid()!=Phase5Mechanics.Fluid.NONE,climbing=context.movementEnvironment().climbable(),gliding=context.movementEnvironment().gliding();double inputMagnitude=Math.hypot(context.input().forward(),context.input().strafe()),inputScale=inputMagnitude>1.0?1.0/Math.sqrt(2.0):1.0;double inputAcceleration;if(fluid)inputAcceleration=AIR_ACCEL;else if(s.onGround()&&inputMagnitude>1.0)inputAcceleration=DIAGONAL_ACCEL*context.effects().speedMultiplier()*(context.input().sprint()?1.3:1.0)*(context.input().sneak()?0.3:1.0);else inputAcceleration=s.onGround()?WALK_ACCEL*speed:AIR_ACCEL;if(gliding)inputAcceleration=AIR_ACCEL;
+        double radians=Math.toRadians(s.yaw());
+        boolean fluid=context.movementEnvironment().fluid()!=Phase5Mechanics.Fluid.NONE,
+                climbing=context.movementEnvironment().climbable(),
+                gliding=context.movementEnvironment().gliding();
+        double inputMagnitude=Math.hypot(context.input().forward(),context.input().strafe());
+        double inputScale=inputMagnitude>1.0?1.0/Math.sqrt(2.0):1.0;
+        double inputAcceleration;
+        if(fluid){
+            inputAcceleration=inputMagnitude>1.0?AIR_ACCEL:AIR_ACCEL*INPUT_FRICTION;
+        }else if(gliding||climbing){
+            inputAcceleration=inputMagnitude>1.0?AIR_ACCEL:AIR_ACCEL*INPUT_FRICTION;
+        }else if(s.onGround()){
+            BlockState support=context.world().blockAtOrNull(
+                    (int)Math.floor(s.position().x()),
+                    (int)Math.floor(s.position().y()-GROUND_PROBE),
+                    (int)Math.floor(s.position().z()));
+            if(support==null||support.isUnsupported())
+                return uncertain(context,"support block is unavailable for friction calculation");
+            double slipperiness=BlockCatalogue12111.slipperiness(support);
+            double movementSpeed=context.attributes().value()*context.effects().speedMultiplier();
+            if(context.input().sneak())movementSpeed*=SNEAKING_SPEED_MULTIPLIER;
+            double frictionInfluencedSpeed=movementSpeed*FRICTION_SPEED_FACTOR
+                    /(slipperiness*slipperiness*slipperiness);
+            inputAcceleration=inputMagnitude>1.0
+                    ?frictionInfluencedSpeed
+                    :frictionInfluencedSpeed*INPUT_FRICTION;
+        }else{
+            double offGroundSpeed=context.input().sprint()?SPRINT_AIR_ACCEL:AIR_ACCEL;
+            inputAcceleration=inputMagnitude>1.0
+                    ?offGroundSpeed
+                    :offGroundSpeed*INPUT_FRICTION;
+        }if(gliding)inputAcceleration=AIR_ACCEL;
         Vec3 acceleration=new Vec3(inputScale*(context.input().strafe()*inputAcceleration*Math.cos(radians)-context.input().forward()*inputAcceleration*Math.sin(radians)),0,inputScale*(context.input().forward()*inputAcceleration*Math.cos(radians)+context.input().strafe()*inputAcceleration*Math.sin(radians)));Vec3 velocity=s.velocity().add(acceleration);
         if(climbing){if(context.input().forward()>0)velocity=new Vec3(velocity.x(),CLIMB_MAX_UP,velocity.z());else if(context.input().forward()<0)velocity=new Vec3(velocity.x(),-CLIMB_MAX_DOWN,velocity.z());else velocity=new Vec3(velocity.x(),Math.max(-CLIMB_MAX_DOWN,velocity.y()),velocity.z());}
-        boolean jumped=context.input().jump()&&s.onGround()&&!fluid&&!climbing&&!gliding&&!context.sleeping();if(jumped)velocity=new Vec3(velocity.x(),JUMP+context.effects().jumpVelocityAdd(),velocity.z());if(context.effects().levitation())velocity=new Vec3(velocity.x(),context.effects().levitationVelocity(),velocity.z());
+        boolean jumped=context.input().jump()&&s.onGround()&&!fluid&&!climbing&&!gliding&&!context.sleeping();
+        if(jumped){
+            velocity=new Vec3(velocity.x(),JUMP+context.effects().jumpVelocityAdd(),velocity.z());
+            if(context.input().sprint()){
+                velocity=velocity.add(
+                        -Math.sin(radians)*SPRINT_JUMP_HORIZONTAL_BOOST,
+                        0.0,
+                        Math.cos(radians)*SPRINT_JUMP_HORIZONTAL_BOOST);
+            }
+        }
+        if(context.effects().levitation())
+            velocity=new Vec3(velocity.x(),context.effects().levitationVelocity(),velocity.z());
         double gravity=GRAVITY*context.movementEnvironment().gravityMultiplier();
         RichWorldCollision.Result collision=RichWorldCollision.resolve(context.world(),start,velocity,s.onGround()&&!fluid&&!climbing&&!gliding?STEP_HEIGHT:0,context.entityCollisions());if(collision.uncertain())return uncertain(context,collision.diagnostic());Vec3 displacement=collision.displacement();
         boolean supported=false;if(s.onGround()&&velocity.y()<=0&&!fluid&&!climbing&&!gliding){RichWorldCollision.Result probe=RichWorldCollision.resolve(context.world(),start,new Vec3(0,-GROUND_PROBE,0),0,context.entityCollisions());if(probe.uncertain())return uncertain(context,probe.diagnostic());supported=probe.collidedY();}
