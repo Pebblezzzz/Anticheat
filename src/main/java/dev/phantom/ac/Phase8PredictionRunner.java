@@ -312,7 +312,9 @@ public final class Phase8PredictionRunner {
             : packet.provenance().authoritativeServerTick();
         Packets.PlayerContext effectiveAuthority = authority;
         boolean entityCollisionComplete =
-            !packet.provenance().sourceId().equals("paper-live");
+            packet.provenance().sourceId().equals("paper-live")
+                || packet.provenance().sourceId().equals("packet-replay")
+                || packet.provenance().sourceId().equals("test");
         latestAuthority = new AuthorityAnchor(
             sequence,
             packet.receivedNanos(),
