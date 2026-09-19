@@ -609,58 +609,6 @@ public final class Phase8PredictionRunner {
         continue;
       }
 
-      /*
-       * A conservative certificate catches obviously excessive exact-tick
-       * displacement even when the packet world is incomplete. It is deliberately
-       * skipped for fluid/gliding/climbable contexts where the vanilla profile has
-       * additional movement modes that need the full Phase 5 model.
-       */
-      if (tick.exact() && deltaTicks >= 1L) {
-        Optional<Candidate> reference = prediction.stream().findFirst();
-        if (reference.isPresent()
-            && movementAllowsKinematicCertificate(reference.get())
-            && exceedsConservativeKinematicBound(
-                reference.get(), observedAfter, deltaTicks)) {
-          Candidate certificateRoot = reference.get();
-          SearchResult search = new SearchResult(
-              Verdict.POSSIBLE,
-              Set.of(certificateRoot),
-              0,
-              1,
-              0, 0, 0, 0,
-              List.of(
-                  "conservative kinematic certificate exceeded; collision replay is not required for this rejection",
-                  "prediction frontier remains retained for subsequent packets"));
-          Phase8MovementValidation.Result result = validate(
-              playerId, packet, move, observedBefore, observedAfter, world,
-              tick, uncertaintySources, search, true);
-          results.add(result);
-          /*
-           * The certificate proves only that this observation is outside the
-           * conservative envelope. The last fully simulated prediction remains
-           * the trusted expected state for the next packet.
-           */
-          prediction = Set.of(certificateRoot);
-          if (result.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
-            latestContinuation = Continuation.IMPOSSIBLE;
-            impossible++;
-          } else if (result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE) {
-            latestContinuation = Continuation.ACTIVE;
-            possible++;
-          } else {
-            latestContinuation = Continuation.UNCERTAIN;
-            uncertain++;
-          }
-          lastPositionClientTick = targetTick;
-          trace.add("EVIDENCE KINEMATIC_CERTIFICATE");
-          trace.add("FRONTIER_RETAINED after="+prediction.size()+" tick="+predictionTick);
-          frames.add(frame(
-              sequence, packet, tick, move, observedBefore, observedAfter,
-              predictedBefore, prediction, world, uncertaintySources, trace));
-          continue;
-        }
-      }
-
       AdvanceResult advance = advancePrediction(
           prediction, startTick, targetTick, inputHistory, world, maximumCandidates);
       trace.add("PREDICT_FORWARD startTick=" + startTick
