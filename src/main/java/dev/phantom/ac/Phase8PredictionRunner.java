@@ -1076,7 +1076,7 @@ public final class Phase8PredictionRunner {
               true,
               "latency-compensated client-visible world")),
           ignored -> List.of(new Phase6Reachability.None()),
-          maximumCandidates);
+          Phase6Reachability.SearchConfig.defaults(maximumCandidates));
       simulatedTicks++;
 
       if (result.verdict() != Verdict.POSSIBLE
@@ -1172,6 +1172,24 @@ public final class Phase8PredictionRunner {
       List<String> uncertainty,
       SearchResult search,
       boolean timingExhaustivelyModeled) {
+    return validate(
+        playerId, packet, move, prior, observed, world, tick, uncertainty,
+        search, timingExhaustivelyModeled,
+        observedFields);
+  }
+
+  private Phase8MovementValidation.Result validate(
+      String playerId,
+      Packets.RawPacket packet,
+      Packets.Move move,
+      Player prior,
+      Player observed,
+      WorldSnapshot world,
+      TickResolution tick,
+      List<String> uncertainty,
+      SearchResult search,
+      boolean timingExhaustivelyModeled,
+      Set<Phase6Reachability.ObservedField> observedFields) {
     Validation.SyncWindow timing = new Validation.SyncWindow(
         Math.max(0L, tick.clientTick()),
         Math.max(0L, tick.clientTick()),
