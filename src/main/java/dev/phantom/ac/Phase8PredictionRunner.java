@@ -281,7 +281,7 @@ public final class Phase8PredictionRunner {
         long authorityServerTick = packet.provenance().authoritativeServerTick() == null
             ? 0L
             : packet.provenance().authoritativeServerTick();
-        PlayerContext effectiveAuthority =
+        Packets.PlayerContext effectiveAuthority =
             deriveAuthoritativeHorizontalVelocity(latestAuthority, authorityServerTick, authority);
         latestAuthority = new AuthorityAnchor(
             sequence,
@@ -923,12 +923,12 @@ public final class Phase8PredictionRunner {
         current.effects(),
         current.pose(),
         current.movementEnvironment(),
-        current.sleeping(),
-        current.entityBoxes(),
         current.serverPosition(),
         horizontal,
         current.canFly(),
-        current.flying());
+        current.flying(),
+        current.sleeping(),
+        current.entityBoxes());
   }
 
   private static Player playerFromAuthority(Packets.PlayerContext context) {
