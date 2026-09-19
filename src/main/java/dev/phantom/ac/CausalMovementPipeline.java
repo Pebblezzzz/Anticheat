@@ -1811,10 +1811,8 @@ public final class CausalMovementPipeline {
     if (annotated.isPresent()) return annotated;
 
     /*
-     * Legacy/historical captures without explicit client ticks may still use a
-     * strictly preceding server-tick snapshot. This fallback is never used for
-     * explicit client-tick movement, where the adapter can provide stronger
-     * chronology.
+     * Prefer a strictly preceding server-tick snapshot when it is no more than
+     * one server tick old. This is the safe live chronology root.
      */
     Optional<AuthoritativeSnapshot> previous = authorities.stream()
         .filter(snapshot -> snapshot.sequence() < sequence)
@@ -1828,6 +1826,14 @@ public final class CausalMovementPipeline {
             .thenComparingLong(AuthoritativeSnapshot::sequence));
     if (previous.isPresent()) return previous;
 
+    /*
+     * Synthetic/historical captures sometimes provide an authoritative
+     * PlayerContext earlier in the same server tick, but without a client-tick
+     * watermark. When no safe preceding-tick root exists, that earlier packet is
+     * the strongest available causal anchor and is safe because sequence and
+     * capture time both precede the movement. Live Paper explicit-tick captures
+     * were already rejected above when their watermark is missing.
+     */
     return authorities.stream()
         .filter(snapshot -> snapshot.sequence() < sequence)
         .filter(snapshot -> snapshot.receivedNanos() <= received)
