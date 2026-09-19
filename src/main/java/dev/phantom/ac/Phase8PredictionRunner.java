@@ -389,9 +389,6 @@ public final class Phase8PredictionRunner {
           + " clientStatePosition=" + observedAfter.position());
 
       TickResolution tick = resolveMovementTick(move);
-      if (move.position() != null) {
-        rememberObservedMovement(observedBefore, observedAfter, tick);
-      }
       trace.add("CLIENT_TICK " + tick.display()
           + " exact=" + tick.exact()
           + " source=" + tick.source());
@@ -409,6 +406,9 @@ public final class Phase8PredictionRunner {
             tick, sources, search, false);
         results.add(result);
         uncertain++;
+        if (move.position() != null) {
+          rememberObservedMovement(observedBefore, observedAfter, tick);
+        }
         frames.add(frame(
             sequence, packet, tick, move, observedBefore, observedAfter,
             prediction, prediction, worldOrEmpty(world), sources, trace));
@@ -421,6 +421,9 @@ public final class Phase8PredictionRunner {
 
       ensureRoot(playerId, packet, move, observedBefore, tick, trace);
       refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, world, trace);
+      if (move.position() != null) {
+        rememberObservedMovement(observedBefore, observedAfter, tick);
+      }
 
       boolean stationaryPositionObservation = move.position() != null
           && positionExactlyMatches(observedBefore.position(), observedAfter.position())
