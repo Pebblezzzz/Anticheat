@@ -1360,7 +1360,7 @@ public final class CausalMovementPipeline {
     Player authoritative = playerFromAuthority(snapshot.context());
     Player observedBefore = movement.stateFrame().before();
     Player anchor = withClientRotation(authoritative, observedBefore.yaw(), observedBefore.pitch());
-    long rootTick = target == 0 ? 0L : target - 1L;
+    long rootTick = Math.max(0L, target + (snapshot.serverTick() - movement.event().serverTick()));
     if (rootTick < 0 || target - rootTick > Phase6Reachability.MAX_HORIZON_TICKS) {
       return Optional.empty();
     }
@@ -1732,7 +1732,7 @@ public final class CausalMovementPipeline {
   }
 
   private static boolean matchesObserved(Player candidate, Player observed, Packets.Move movement) {
-    if (!candidate.position().equals(observed.position())) return false;
+    if (!Phase6Reachability.positionMatches(candidate.context().player().position(), observed.position())) return false;
     if (Float.compare(candidate.yaw(), observed.yaw()) != 0) return false;
     if (Float.compare(candidate.pitch(), observed.pitch()) != 0) return false;
     return movement.onGround() == null || candidate.onGround() == movement.onGround();
