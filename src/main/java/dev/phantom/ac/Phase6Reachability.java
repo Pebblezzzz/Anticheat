@@ -15,6 +15,8 @@ import java.util.function.LongFunction;
 /** Sound Phase 6 finite reachable-state search over the complete Phase 5 context. */
 public final class Phase6Reachability {
   public static final int MAX_HORIZON_TICKS=512, MAX_TIMING_OFFSETS=128, MAX_PROVENANCE_PARENTS=8;
+  /** Small numerical envelope for client/server position reconstruction. */
+  static final double POSITION_MATCH_TOLERANCE = 0.01D;
   public enum Verdict { POSSIBLE, UNCERTAIN, IMPOSSIBLE }
   public enum UncertainDimension { POSITION, ROTATION, VELOCITY, GROUND, INPUT, ENVIRONMENT, ATTRIBUTES, EFFECTS, POSE, TELEPORT, WORLD, TIMING }
 
@@ -126,7 +128,12 @@ public final class Phase6Reachability {
   }
 
   public Evidence compare(SearchResult result,Observation observation){if(result.verdict()==Verdict.UNCERTAIN)return new Evidence(Verdict.UNCERTAIN,0,List.of(),result.reasons());List<Provenance> matches=new ArrayList<>();for(Candidate c:result.candidates())if(matches(c.context().player(),observation))matches.add(c.provenance());if(!matches.isEmpty())return new Evidence(Verdict.POSSIBLE,matches.size(),matches,List.of("observed facts are reachable","candidate provenance is retained"));return new Evidence(Verdict.IMPOSSIBLE,0,List.of(),List.of("no exact candidate matches the declared observed facts","all declared branches were exhausted"));}
-  private static boolean matches(Player c,Observation o){Player x=o.observed();for(ObservedField f:o.known())switch(f){case POSITION->{if(!c.position().equals(x.position()))return false;}case VELOCITY->{if(!c.velocity().equals(x.velocity()))return false;}case ROTATION->{if(Float.compare(c.yaw(),x.yaw())!=0||Float.compare(c.pitch(),x.pitch())!=0)return false;}case GROUND->{if(c.onGround()!=x.onGround())return false;}case GAMEMODE->{if(!c.gamemode().equals(x.gamemode()))return false;}case EFFECTS->{if(!c.effects().equals(x.effects()))return false;}case TELEPORT_PENDING->{if(c.awaitingTeleport().isPresent()!=x.awaitingTeleport().isPresent())return false;}}return true;}
+  static boolean positionMatches(Maths.Vec3 a, Maths.Vec3 b){
+    if(a==null||b==null)return a==b;
+    double dx=a.x()-b.x(),dy=a.y()-b.y(),dz=a.z()-b.z();
+    return dx*dx+dy*dy+dz*dz<=POSITION_MATCH_TOLERANCE*POSITION_MATCH_TOLERANCE;
+  }
+  private static boolean matches(Player c,Observation o){Player x=o.observed();for(ObservedField f:o.known())switch(f){case POSITION->{if(!positionMatches(c.position(),x.position()))return false;}case VELOCITY->{if(!c.velocity().equals(x.velocity()))return false;}case ROTATION->{if(Float.compare(c.yaw(),x.yaw())!=0||Float.compare(c.pitch(),x.pitch())!=0)return false;}case GROUND->{if(c.onGround()!=x.onGround())return false;}case GAMEMODE->{if(!c.gamemode().equals(x.gamemode()))return false;}case EFFECTS->{if(!c.effects().equals(x.effects()))return false;}case TELEPORT_PENDING->{if(c.awaitingTeleport().isPresent()!=x.awaitingTeleport().isPresent())return false;}}return true;}
   private static Context applyExternal(Context c,ExternalTransition e,long tick){Player s=c.player();if(e instanceof None)return c.withTick(tick);if(e instanceof VelocityImpulse v){Player n=Phase5Mechanics.applyVelocityImpulse(s,new Phase5Mechanics.Vec3Like(v.impulse().x(),v.impulse().y(),v.impulse().z()));return new Context(tick,n,c.environment(),c.attributes(),c.effects(),c.pose(),c.movementEnvironment(),c.sleeping(),c.entityCollisions(),c.uncertainty());}if(e instanceof TeleportCorrection t){OptionalInt p=t.awaitingConfirmation()?OptionalInt.of(t.id()):OptionalInt.empty();float yaw=t.yaw()==null?s.yaw():t.yaw();float pitch=t.pitch()==null?s.pitch():t.pitch();Player n=new Player(t.position(),t.velocity(),yaw,pitch,false,s.gamemode(),s.effects(),p,false);return new Context(tick,n,c.environment(),c.attributes(),c.effects(),t.pose(),c.movementEnvironment(),c.sleeping(),c.entityCollisions(),c.uncertainty());}if(e instanceof TeleportConfirmation t){boolean ok=s.awaitingTeleport().isPresent()&&s.awaitingTeleport().getAsInt()==t.id();Player n=new Player(s.position(),s.velocity(),s.yaw(),s.pitch(),s.onGround(),s.gamemode(),s.effects(),ok?OptionalInt.empty():s.awaitingTeleport(),s.uncertain()||!ok);return new Context(tick,n,c.environment(),c.attributes(),c.effects(),c.pose(),c.movementEnvironment(),c.sleeping(),c.entityCollisions(),c.uncertainty());}throw new IllegalStateException("unhandled external transition "+e.getClass());}
   private static MovementEnvironment inferEnvironment(WorldSnapshot world,Player player,AdvancedInput input){
     Maths.Aabb box=Maths.Aabb.playerAt(player.position(),player.pose());
