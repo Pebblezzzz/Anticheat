@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test;
  * rather than treating creative/spectator/flying as permanently uncertain.</p>
  */
 class Phase5UnsupportedModesTest {
-  private static final WorldSnapshot WORLD = WorldSnapshot.emptyOverworld12111();
+  private static final WorldSnapshot WORLD = WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0, 0).build();
   private static final EntityCollisions ENTITIES = EntityCollisions.of(List.of(), true);
 
   @Test void creativeFlightIsModeled() {
