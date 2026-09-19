@@ -44,7 +44,7 @@ class Phase7PerformanceBenchmarkTest {
     var capture = Phase7TimingTestFixture.timeline(
         new Packets.RawPacket(1, 0,
             new Packets.Move(Maths.Vec3.ZERO, 0f, 0f, true, 0L)),
-        new RawPacket(2, 1_000_000_000L,
+        new Packets.RawPacket(2, 1_000_000_000L,
             new Packets.Move(new Maths.Vec3(1, 0, 0), 0f, 0f, true, null)));
     var result = Phase7Timing.reconstruct(capture, config);
     var timing = result.frames().getLast().timing();
@@ -58,7 +58,7 @@ class Phase7PerformanceBenchmarkTest {
   static final class Phase7TimingTestFixture {
     static Timeline.Snapshot timeline(Packets.RawPacket... packets) {
       return Timeline.assign(
-          new Normalizer().normalize(java.util.List.of(packets)),
+          new Packets.Normalizer().normalize(java.util.List.of(packets)),
           0, 50_000_000L);
     }
   }
