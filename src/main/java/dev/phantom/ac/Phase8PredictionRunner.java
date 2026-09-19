@@ -643,6 +643,7 @@ public final class Phase8PredictionRunner {
           + " targetTick=" + targetTick
           + " steps=" + advance.simulatedTicks()
           + " exhaustive=" + advance.exhaustive());
+      trace.addAll(advance.trace());
 
       if (!advance.exhaustive()) {
         uncertaintySources.addAll(advance.reasons());
@@ -1232,10 +1233,12 @@ public final class Phase8PredictionRunner {
       Set<Candidate> candidates,
       boolean exhaustive,
       int simulatedTicks,
-      List<String> reasons) {
+      List<String> reasons,
+      List<String> trace) {
     AdvanceResult {
       candidates = Set.copyOf(candidates);
       reasons = List.copyOf(reasons);
+      trace = List.copyOf(trace);
     }
   }
 
@@ -1247,24 +1250,34 @@ public final class Phase8PredictionRunner {
       WorldSnapshot world,
       int maximumCandidates) {
     if (start.isEmpty()) {
-      return new AdvanceResult(Set.of(), false, 0, List.of("prediction frontier is empty"));
+      return new AdvanceResult(Set.of(), false, 0,
+          List.of("prediction frontier is empty"), List.of());
     }
     if (targetTick < startTick) {
       return new AdvanceResult(Set.copyOf(start), false, 0,
-          List.of("target client tick precedes retained prediction state"));
+          List.of("target client tick precedes retained prediction state"), List.of());
     }
     if (targetTick - startTick > MAX_INCREMENTAL_HORIZON) {
       return new AdvanceResult(Set.copyOf(start), false, 0,
-          List.of("incremental prediction horizon exceeded"));
+          List.of("incremental prediction horizon exceeded"), List.of());
     }
 
     Set<Candidate> current = Set.copyOf(start);
     LinkedHashSet<String> reasons = new LinkedHashSet<>();
+    List<String> trace = new ArrayList<>();
     int simulatedTicks = 0;
 
     for (long tick = startTick; tick < targetTick; tick++) {
       final long simulationTick = tick;
       InputConstraint input = inputForSimulationTick(inputHistory, simulationTick);
+      Candidate beforeCandidate = current.stream().findFirst().orElse(null);
+      if (beforeCandidate != null) {
+        trace.add("SIM_INPUT tick=" + simulationTick
+            + " input=" + input
+            + " startPos=" + beforeCandidate.context().player().position()
+            + " startVel=" + beforeCandidate.context().player().velocity()
+            + " startGround=" + beforeCandidate.context().player().onGround());
+      }
       SearchResult result = new Phase6Reachability(new Vanilla12111RichPhysics()).search(
           current.stream()
               .map(candidate -> candidate.context().withTick(simulationTick))
@@ -1284,18 +1297,34 @@ public final class Phase8PredictionRunner {
           || !result.exhaustive()) {
         reasons.addAll(result.reasons());
         reasons.add("prediction step " + tick + " was not exhaustively modeled");
-        return new AdvanceResult(current, false, simulatedTicks, List.copyOf(reasons));
+        trace.add("SIM_STEP tick=" + tick
+            + " exhaustive=false"
+            + " resultVerdict=" + result.verdict()
+            + " reasons=" + result.reasons());
+        return new AdvanceResult(current, false, simulatedTicks,
+            List.copyOf(reasons), List.copyOf(trace));
       }
 
       current = Set.copyOf(result.candidates());
+      Candidate afterCandidate = current.stream().findFirst().orElse(null);
+      if (afterCandidate != null) {
+        trace.add("SIM_STEP tick=" + tick
+            + " exhaustive=true"
+            + " resultPos=" + afterCandidate.context().player().position()
+            + " resultVel=" + afterCandidate.context().player().velocity()
+            + " resultGround=" + afterCandidate.context().player().onGround());
+      }
       if (current.size() > maximumCandidates) {
         reasons.add("prediction candidate budget exceeded");
-        return new AdvanceResult(Set.of(), false, simulatedTicks, List.copyOf(reasons));
+        trace.add("SIM_STEP tick=" + tick + " candidateBudgetExceeded=true");
+        return new AdvanceResult(Set.of(), false, simulatedTicks,
+            List.copyOf(reasons), List.copyOf(trace));
       }
     }
 
     reasons.add("persistent prediction advanced using client input history indexed by simulation tick");
-    return new AdvanceResult(current, true, simulatedTicks, List.copyOf(reasons));
+    return new AdvanceResult(current, true, simulatedTicks,
+        List.copyOf(reasons), List.copyOf(trace));
   }
 
   private static Set<Candidate> matchingCandidates(
