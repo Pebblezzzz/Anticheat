@@ -650,11 +650,64 @@ public final class CausalMovementPipeline {
       }
 
       /*
+       * With no client-world data at all, an exact first observation can still
+       * establish the causal baseline when it agrees with the explicit anchor.
+       * This does not prove a physics step; it only avoids manufacturing an
+       * IMPOSSIBLE verdict from an unknown world. Subsequent movements require
+       * actual coverage of the causal frontier and destination.
+       */
+      if (previousPositionPacketTick < 0
+          && !localAuthoritativeRootAvailable
+          && !worldCoversFrontierMovement(movement.world(), frontier, observedAfter)) {
+        Set<Candidate> baselineMatches = new LinkedHashSet<>();
+        for (Candidate candidate : frontier.candidates()) {
+          if (matchesObserved(candidate.context().player(), observedAfter, movement.move())) {
+            baselineMatches.add(candidate);
+          }
+        }
+        if (!baselineMatches.isEmpty()) {
+          SearchResult baselineSearch = new SearchResult(
+              Verdict.POSSIBLE,
+              baselineMatches,
+              0,
+              baselineMatches.size(),
+              0,
+              0,
+              0,
+              0,
+              List.of("exact initial observation established the causal baseline; world physics was not required"));
+          Phase8MovementValidation.Result validation = Phase8MovementValidation.validate(
+              playerId, serverTick, observedBefore, observedAfter, movement.world(),
+              worldReference, sync, assumptions, baselineSearch, replayReference,
+              eventTiming.simulationClientTicks().isExact() && movement.chronologyClean(),
+              EnumSet.of(
+                  Phase6Reachability.ObservedField.POSITION,
+                  Phase6Reachability.ObservedField.ROTATION,
+                  Phase6Reachability.ObservedField.GROUND));
+          results.add(validation);
+          long baselineTick = baselineMatches.stream()
+              .mapToLong(candidate -> candidate.context().simulationTick())
+              .max()
+              .orElse(movementTick);
+          frontier = new Frontier(Set.copyOf(baselineMatches), baselineTick, true);
+          previousPositionPacketTick = baselineTick;
+          previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
+          if (movement.move().clientTick() != null) {
+            previousExplicitClientTick = movement.move().clientTick();
+          }
+          trace.add("EVIDENCE POSSIBLE reason=INITIAL_BASELINE_WITHOUT_WORLD");
+          trace.add("MATCHING candidates=" + baselineMatches.size()
+              + " frontierTick=" + baselineTick);
+          frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+              assumptions, uncertainty, trace));
+          continue;
+        }
+      }
+
+      /*
        * Once a causal frontier exists, world coverage must include the simulated
-       * starting positions as well as the observed destination. The very first
-       * position observation is allowed to establish the baseline frontier even
-       * when no client-world chunks have arrived yet; later movement cannot safely
-       * be called IMPOSSIBLE from an incomplete world replica.
+       * starting positions as well as the observed destination. A later movement
+       * cannot safely be called IMPOSSIBLE from an incomplete world replica.
        */
       if ((previousPositionPacketTick >= 0 || localAuthoritativeRootAvailable)
           && !worldCoversFrontierMovement(movement.world(), frontier, observedAfter)) {
