@@ -56,7 +56,7 @@ class Phase7PerformanceBenchmarkTest {
 
   /** Small shared capture helper avoids adding network or clock dependence to benchmarks. */
   static final class Phase7TimingTestFixture {
-    static Timeline.Snapshot timeline(RawPacket... packets) {
+    static Timeline.Snapshot timeline(Packets.RawPacket... packets) {
       return Timeline.assign(
           new Normalizer().normalize(java.util.List.of(packets)),
           0, 50_000_000L);
