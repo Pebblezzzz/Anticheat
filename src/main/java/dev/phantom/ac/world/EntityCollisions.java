@@ -22,64 +22,44 @@ import java.util.Objects;
  */
 public interface EntityCollisions {
 
-    /**
-     * A single entity's bounding box, with a stable identity for
-     * reproducibility.
-     */
     record EntityBox(int entityId, BlockBox box) implements Serializable {
-
         public EntityBox {
             Objects.requireNonNull(box, "box");
         }
     }
 
-    /**
-     * The result of an entity query. {@code complete} is false when the
-     * provider cannot enumerate every entity in the region, which is the normal
-     * case until full entity tracking exists. Phase 5 must treat an incomplete
-     * list as uncertainty rather than as an empty world.
-     */
     record EntityCollisionResult(List<EntityBox> boxes, boolean complete) implements Serializable {
-
         public EntityCollisionResult {
             boxes = List.copyOf(boxes);
         }
-
-        public boolean isEmpty() {
-            return boxes.isEmpty();
-        }
-
-        public boolean isDefinite() {
-            return complete;
-        }
+        public boolean isEmpty() { return boxes.isEmpty(); }
+        public boolean isDefinite() { return complete; }
     }
 
-    /**
-     * Boxes overlapping the query, in ascending {@code entityId} order.
-     */
     EntityCollisionResult boxesIn(BlockBox query);
+
+    /** True only when the provider can account for every client-visible entity relevant to the query. */
+    default boolean complete() { return true; }
 
     /**
      * The provider used by default: it reports no entities and states plainly
-     * that its answer is not complete. It never pretends an empty list means
-     * "no entities exist".
+     * that its answer is not complete.
      */
-    EntityCollisions NONE_TRACKED = query -> new EntityCollisionResult(List.of(), false);
+    EntityCollisions NONE_TRACKED = new EntityCollisions() {
+        @Override public EntityCollisionResult boxesIn(BlockBox query) {
+            return new EntityCollisionResult(List.of(), false);
+        }
+        @Override public boolean complete() { return false; }
+    };
 
-    /**
-     * A fully-known provider backed by a fixed list, used by replays that
-     * recorded entity boxes and by tests. The list is sorted so the result is
-     * deterministic.
-     */
+    /** Fully-known fixed-list provider used by replays/tests. */
     static EntityCollisions of(List<EntityBox> boxes) {
         return of(boxes, true);
     }
 
     /**
-     * Creates a deterministic fixed-list provider with explicit completeness.
-     * Replays/tests may pass true when the recorded entity set is complete; live
-     * adapters must pass true only after they have actually enumerated every
-     * relevant entity, otherwise Phase 5 must propagate uncertainty.
+     * Fixed-list provider with explicit completeness. Live adapters must only
+     * pass true when they have actually enumerated every relevant entity.
      */
     static EntityCollisions of(List<EntityBox> boxes, boolean complete) {
         List<EntityBox> sorted = boxes.stream()
@@ -93,6 +73,7 @@ public interface EntityCollisions {
                         .toList();
                 return new EntityCollisionResult(overlapping, complete);
             }
+            @Override public boolean complete() { return complete; }
         };
     }
 }
