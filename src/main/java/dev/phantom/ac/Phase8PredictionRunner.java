@@ -887,7 +887,14 @@ public final class Phase8PredictionRunner {
       horizontalZ = inferredHorizontal.get().z();
       trace.add("ROOT_HORIZONTAL source=client-observed-prev-displacement"
           + " velocity=" + inferredHorizontal.get()
-          + " authorityVelocity=" + authority.velocity());
+          + " authorityVelocity=" + authority.velocity()
+          + " authorityPositionDeltaFromLastObservation="
+          + (lastObservedMovementPosition == null
+              ? "unavailable"
+              : new Vec3(
+                  context.serverPosition().x() - lastObservedMovementPosition.x(),
+                  context.serverPosition().y() - lastObservedMovementPosition.y(),
+                  context.serverPosition().z() - lastObservedMovementPosition.z())));
     } else {
       trace.add("ROOT_HORIZONTAL source=authoritative-velocity"
           + " velocity=" + authority.velocity()
@@ -945,8 +952,7 @@ public final class Phase8PredictionRunner {
         || previousObservedMovementPosition == null
         || lastObservedMovementPosition == null
         || previousObservedMovementClientTick != targetTick - 2L
-        || lastObservedMovementClientTick != targetTick - 1L
-        || !positionMatches(lastObservedMovementPosition, authority.serverPosition())) {
+        || lastObservedMovementClientTick != targetTick - 1L) {
       return Optional.empty();
     }
 
