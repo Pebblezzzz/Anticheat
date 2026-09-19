@@ -99,7 +99,7 @@ public final class Vanilla12111RichPhysics {
         return new StepResult(context.simulationTick(),next,
             collision.collidedX()||collision.collidedY()||collision.collidedZ(),
             collision.stepAttempted(),collision.stepSucceeded(),collision.collidedX(),collision.collidedY(),
-            collision.collidedZ(),collision.entityCollision(),diagnostic);
+            collision.collidedZ(),false,diagnostic);
     }
 
     private static Phase5Mechanics.Pose resolvePose(Context context) {
@@ -134,7 +134,7 @@ public final class Vanilla12111RichPhysics {
             collision.collidedY()&&requested.y()<0,pose,context,false);
         return new StepResult(context.simulationTick(),next,
             collision.collidedX()||collision.collidedY()||collision.collidedZ(),false,false,
-            collision.collidedX(),collision.collidedY(),collision.collidedZ(),collision.entityCollision(),
+            collision.collidedX(),collision.collidedY(),collision.collidedZ(),false,
             "creative flight; version="+VERSION);
     }
 
