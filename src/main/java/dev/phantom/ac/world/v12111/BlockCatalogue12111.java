@@ -3,6 +3,7 @@ package dev.phantom.ac.world.v12111;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 import dev.phantom.ac.geometry.BlockBox;
 import dev.phantom.ac.geometry.Directions.Direction;
@@ -91,6 +92,20 @@ public final class BlockCatalogue12111 {
    * @param properties raw property name to value, already lower-cased
    */
   public static BlockState decode(String blockId, Map<String, String> properties) {
+    Map<String, String> wireProperties = properties == null ? Map.of() : canonicalProperties(properties);
+    return decodeInternal(blockId, wireProperties).withProperties(wireProperties);
+  }
+
+  private static Map<String,String> canonicalProperties(Map<String,String> properties) {
+    Map<String,String> canonical = new TreeMap<>();
+    for (var entry : properties.entrySet()) {
+      if (entry.getKey() == null || entry.getValue() == null) continue;
+      canonical.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue().toLowerCase(Locale.ROOT));
+    }
+    return Map.copyOf(canonical);
+  }
+
+  private static BlockState decodeInternal(String blockId, Map<String, String> properties) {
     if (blockId == null || blockId.isBlank()) return BlockState.unsupported(blockId);
     Map<String, String> p = properties == null ? Map.of() : properties;
     String name = blockId.toLowerCase(Locale.ROOT);
@@ -138,10 +153,18 @@ public final class BlockCatalogue12111 {
     }
     if (isNonCollidable(name)) return simpleVariant(name, Variant.NO_COLLISION_SPECIAL, p);
 
-    if (isLikelyFullCube(name)) return fullCube(name, p);
+    // Every remaining target-version registry state is represented by the generated exact
+    // collision catalogue. Validate its property tuple before admitting it as a usable state.
+    if (BlockCollisionCatalogue12111.knowsBlock(name)) {
+      BlockState candidate = simpleVariant(name, Variant.CATALOGUE, p);
+      var exact = BlockCollisionCatalogue12111.shapeFor(candidate);
+      if (exact.isPresent()) {
+        return exact.get().isFullCube() ? fullCube(name, p) : candidate;
+      }
+    }
 
-    // Unknown block: explicitly unsupported, never assumed to be air or a cube.
-    return BlockState.unsupported(name);
+    // Unknown block or invalid state tuple: explicitly unsupported, never assumed to be air or a cube.
+    return BlockState.unsupported(name).withProperties(p);
   }
 
   private static BlockState fluidStateBlock(String name, Map<String, String> p) {
@@ -461,60 +484,6 @@ public final class BlockCatalogue12111 {
         || name.endsWith("_banner") || name.endsWith("_pressure_plate");
   }
 
-  /**
-   * The 1.21.11 blocks this build models as full cubes but which are not in
-   * {@link #FULL_CUBE_EXACT}. The set is explicit rather than suffix-based,
-   * because a suffix guess would also accept a block id that does not exist and
-   * silently give an unknown block a collidable cube where vanilla has none.
-   */
-  private static final Set<String> FULL_CUBE_FAMILIES = Set.of(
-      "minecraft:ice", "minecraft:packed_ice", "minecraft:blue_ice", "minecraft:frosted_ice",
-      "minecraft:slime_block", "minecraft:honey_block", "minecraft:soul_sand", "minecraft:soul_soil",
-      "minecraft:mud", "minecraft:magma_block", "minecraft:bone_block", "minecraft:sculk",
-      "minecraft:ochre_froglight", "minecraft:verdant_froglight", "minecraft:pearlescent_froglight",
-      "minecraft:hay_block", "minecraft:melon", "minecraft:pumpkin", "minecraft:carved_pumpkin",
-      "minecraft:jack_o_lantern", "minecraft:bookshelf", "minecraft:crafting_table", "minecraft:furnace",
-      "minecraft:sponge", "minecraft:wet_sponge", "minecraft:target", "minecraft:lodestone",
-      "minecraft:nether_bricks", "minecraft:red_nether_bricks", "minecraft:prismarine",
-      "minecraft:prismarine_bricks", "minecraft:dark_prismarine", "minecraft:sea_lantern",
-      "minecraft:glowstone", "minecraft:shroomlight", "minecraft:honeycomb_block",
-      "minecraft:dried_kelp_block", "minecraft:bamboo_block", "minecraft:resin_block",
-      "minecraft:netherite_block", "minecraft:quartz_block", "minecraft:smooth_quartz");
-
-  /**
-   * Full-cube detection for blocks that are full cubes in 1.21.11. It matches
-   * the registry's own {@code boundingBox == "block"} signal for the families
-   * this build models, and it does <em>not</em> guess: an id that is not in one
-   * of these families is reported as unsupported.
-   */
-  private static boolean isLikelyFullCube(String name) {
-    if (FULL_CUBE_EXACT.contains(name) || WATERLOGGABLE_FULL_CUBE.contains(name)
-        || FULL_CUBE_FAMILIES.contains(name)) {
-      return true;
-    }
-    // Log and wood variants are enumerated to 1.21.11's wood set so a made-up
-    // "oak_slabx_log" cannot be mistaken for a real cube.
-    for (String wood : WOODS) {
-      if (name.equals("minecraft:" + wood + "_log") || name.equals("minecraft:" + wood + "_wood")
-          || name.equals("minecraft:stripped_" + wood + "_log") || name.equals("minecraft:stripped_" + wood + "_wood")
-          || name.equals("minecraft:" + wood + "_planks") || name.equals("minecraft:" + wood + "_leaves")
-          || name.equals("minecraft:" + wood + "_hyphae")) {
-        return true;
-      }
-    }
-    return name.endsWith("_ore") || name.endsWith("_bricks") || name.endsWith("_terracotta")
-        || name.endsWith("_concrete") || name.endsWith("_concrete_powder") || name.endsWith("_glazed_terracotta")
-        || name.endsWith("_wool") || name.endsWith("_sandstone") || name.endsWith("_deepslate")
-        || name.endsWith("_nylium") || name.endsWith("_planks") || name.endsWith("_log")
-        || name.endsWith("_wood") || name.endsWith("_leaves") || name.endsWith("_hyphae")
-        || name.endsWith("_stem") || name.endsWith("_sculk") || name.endsWith("_bone_block");
-  }
-
-  /** The 1.21.11 wood set, used to keep suffix guesses honest. */
-  private static final Set<String> WOODS = Set.of(
-      "oak", "spruce", "birch", "jungle", "acacia", "cherry", "dark_oak", "pale_oak",
-      "mangrove", "bamboo", "crimson", "warped");
-
   // ------------------------------------------------------------------
   // Shapes
   // ------------------------------------------------------------------
@@ -556,6 +525,7 @@ public final class BlockCatalogue12111 {
       case SEA_PICKLE -> Shapes.SEA_PICKLE;
       case PLATE -> Shapes.PLATE_1PX_INSET;
       case NO_COLLISION_SPECIAL -> Shapes.EMPTY;
+      case CATALOGUE -> BlockCollisionCatalogue12111.shapeFor(state).orElse(Shapes.EMPTY);
       case UNSUPPORTED -> Shapes.EMPTY;
     };
   }
@@ -649,7 +619,7 @@ public final class BlockCatalogue12111 {
       return new FluidState(state.fluidName(), state.level(), FluidState.HeightSource.UNAVAILABLE,
           FluidState.HEIGHT_UNKNOWN, false);
     }
-    if (state.waterlogged() || state.up()) {
+    if (state.waterlogged()) {
       return new FluidState(FluidState.Type.WATER, 0, FluidState.HeightSource.SOURCE, 1.0, false);
     }
     return FluidState.NONE;
