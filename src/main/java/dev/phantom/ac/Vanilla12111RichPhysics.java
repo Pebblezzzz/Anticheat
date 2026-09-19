@@ -176,7 +176,7 @@ public final class Vanilla12111RichPhysics {
         double vx=collision.collidedX()?0:velocity.x()*horizontalFactor;
         double vz=collision.collidedZ()?0:velocity.z()*horizontalFactor;
         double vy;
-        if (collision.collidedY()&&velocity.y()<0) vy=0;
+        if ((collision.collidedY()&&velocity.y()<0) || (grounded && velocity.y()<=0)) vy=0;
         else if (context.effects().levitation()) vy=context.effects().levitationVelocity();
         else if (climbing) vy=velocity.y();
         else if (fluid) {
