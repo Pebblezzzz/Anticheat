@@ -1249,20 +1249,14 @@ public final class Phase7Timing {
         : Range.empty();
     Range constrained = wall;
     if (!boundaries.isEmpty()) {
-      BoundaryConstraint result = applyBoundaryConstraints(generation, boundaries);
+      BoundaryConstraint result = applyBoundaryConstraints(
+          generation, boundaries, config);
       if (result.known()) {
-        if (known) {
-          Range intersected = intersect(wall, result.range());
-          if (intersected != null) {
-            constrained = intersected;
-          } else {
-            constrained = wall.union(result.range());
-            reasons.add("boundary-derived and latency-derived client tick envelopes conflict; preserving both possibilities");
-          }
-        } else {
-          constrained = result.range();
-          known = true;
-        }
+        // Local CLIENT_TICK_END boundaries are stronger than elapsed-time
+        // extrapolation from a distant anchor. Do not double-count elapsed time.
+        constrained = result.range();
+        known = true;
+        reasons.add("client-tick envelope constrained by adjacent CLIENT_TICK_END boundaries");
       }
     }
 
@@ -1315,19 +1309,44 @@ public final class Phase7Timing {
 
   private static BoundaryConstraint applyBoundaryConstraints(
       TimeRange generation,
-      List<BoundaryObservation> boundaries) {
+      List<BoundaryObservation> boundaries,
+      Config config) {
     long minimum = 0L;
     long maximum = Long.MAX_VALUE;
     boolean constrained = false;
-    for (BoundaryObservation boundary : boundaries) {
+
+    for (int i = 0; i < boundaries.size(); i++) {
+      BoundaryObservation boundary = boundaries.get(i);
       if (generation.maxNanos() < boundary.generationNanos().minNanos()) {
-        maximum = Math.min(maximum, Math.max(0L, boundary.boundaryIndex() - 1L));
+        // The packet was generated before this completed client tick.
+        maximum = Math.min(
+            maximum, Math.max(0L, boundary.boundaryIndex() - 1L));
         constrained = true;
       } else if (generation.minNanos() > boundary.generationNanos().maxNanos()) {
+        // The packet was generated after this completed client tick.
         minimum = Math.max(minimum, boundary.boundaryIndex());
+        constrained = true;
+
+        // After the final observed boundary, elapsed time supplies only a
+        // finite upper bound. This never assumes server tick == client tick.
+        if (i == boundaries.size() - 1) {
+          long deltaMax = safeAdd(
+              generation.maxNanos(), -boundary.generationNanos().minNanos());
+          long elapsedTicks = Math.floorDiv(
+              Math.max(0L, deltaMax), config.clientTickMinNanos());
+          maximum = Math.min(
+              maximum, safeAdd(boundary.boundaryIndex(), elapsedTicks));
+        }
+      } else {
+        // The generation interval overlaps this boundary, so both adjacent
+        // client ticks remain possible.
+        minimum = Math.max(
+            minimum, Math.max(0L, boundary.boundaryIndex() - 1L));
+        maximum = Math.min(maximum, boundary.boundaryIndex());
         constrained = true;
       }
     }
+
     if (!constrained) return new BoundaryConstraint(false, Range.empty());
     if (minimum > maximum) {
       return new BoundaryConstraint(true, Range.exact(minimum));
