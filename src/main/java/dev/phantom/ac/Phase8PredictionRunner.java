@@ -514,6 +514,9 @@ public final class Phase8PredictionRunner {
       if (!tick.known()) {
         uncertaintySources.add("client simulation tick has not been established by a client-tick boundary");
       }
+      if (tick.timingUncertain()) {
+        uncertaintySources.add(tick.uncertaintyReason());
+      }
 
       if (prediction.isEmpty()) {
         uncertaintySources.add("persistent prediction frontier is not anchored to an authoritative or correction state");
@@ -711,7 +714,13 @@ public final class Phase8PredictionRunner {
         frames);
   }
 
-  private record TickResolution(long clientTick, boolean known, boolean exact, String source) {
+  private record TickResolution(
+      long clientTick,
+      boolean known,
+      boolean exact,
+      boolean timingUncertain,
+      String source,
+      String uncertaintyReason) {
     String display() {
       return known ? Long.toString(clientTick) : "unknown";
     }
@@ -727,20 +736,33 @@ public final class Phase8PredictionRunner {
       if (!range.isEmpty()) {
         long tick = Math.max(0L, range.min());
         relativeClientTick = Math.max(relativeClientTick, tick);
-        boolean exact = range.isExact() && timing.simulationCandidatesExhaustive();
+        boolean exact = range.isExact()
+            && timing.simulationCandidatesExhaustive()
+            && !timing.uncertain();
         String source = exact
             ? "phase7-temporal-envelope-exact"
             : "phase7-temporal-envelope-range";
-        return new TickResolution(tick, true, exact, source);
+        String reason = timing.uncertain()
+            ? "Phase 7 timing envelope is explicitly uncertain: " + timing.reasons()
+            : "Phase 7 timing envelope is exact and exhaustively materialized";
+        return new TickResolution(
+            tick, true, exact, timing.uncertain(), source, reason);
       }
-      return new TickResolution(0L, false, false, "phase7-temporal-envelope-unknown");
+      return new TickResolution(
+          0L, false, false, true,
+          "phase7-temporal-envelope-unknown",
+          "Phase 7 did not produce a known simulation-tick envelope");
     }
     if (move.clientTick() != null) {
       long tick = move.clientTick();
       relativeClientTick = Math.max(relativeClientTick, tick);
-      return new TickResolution(tick, true, true, "packet-client-tick-fallback");
+      return new TickResolution(
+          tick, true, true, false, "packet-client-tick-fallback",
+          "Phase 7 timing record was unavailable; explicit packet client tick used only as a conservative fallback");
     }
-    return new TickResolution(0L, false, false, "phase7-timing-missing");
+    return new TickResolution(
+        0L, false, false, true, "phase7-timing-missing",
+        "Phase 7 timing record was unavailable and no explicit client tick was captured");
   }
 
   private void rememberTimingPacket(Packets.RawPacket packet) {
