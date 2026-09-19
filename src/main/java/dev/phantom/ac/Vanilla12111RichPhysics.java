@@ -195,8 +195,11 @@ public final class Vanilla12111RichPhysics {
         return movementSpeed*FRICTION_SPEED_FACTOR/(s*s*s);
     }
 
-    private static double supportFriction(Context context) {
-        return BlockCatalogue12111.slipperiness(supportBlock(context))*AIR_DRAG;
+    private static double supportFriction(Context context,Vec3 position) {
+        BlockState support=context.world().blockAtOrNull((int)Math.floor(position.x()),
+            (int)Math.floor(position.y()-GROUND_PROBE),(int)Math.floor(position.z()));
+        if (support==null||support.isUnsupported()) throw new IncompleteSupportException("support block is unavailable after movement");
+        return BlockCatalogue12111.slipperiness(support)*AIR_DRAG;
     }
 
     private static BlockState supportBlock(Context context) {
