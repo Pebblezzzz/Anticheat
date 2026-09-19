@@ -9,6 +9,9 @@ import dev.phantom.ac.State.Player;
 import org.junit.jupiter.api.Test;
 
 import java.util.OptionalInt;
+import java.util.Map;
+import java.util.Set;
+
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -44,8 +47,8 @@ class Phase5FullMechanicsTest {
         var env = Phase5Mechanics.MovementEnvironment.vanillaClimbable(false, false, false);
         var physics = new Vanilla12111Physics();
         var result = physics.step(new PhysicsContext(1, state, new AdvancedInput(0, 0, false), WORLD,
-                Simulation.Environment.CLIMBABLE, Attributes.DEFAULT, Phase5Mechanics.MovementEffects.NONE,
-                Phase5Mechanics.Pose.STANDING, env));
+                Simulation.Environment.CLIMBABLE, Attributes.DEFAULT, Phase5Mechanics.Phase5Mechanics.MovementEffects.NONE,
+                Phase5Mechanics.Phase5Mechanics.Pose.STANDING, env));
         assertTrue(result.state().velocity().y() >= -0.15 - 1e-12);
 
         var up = physics.step(new PhysicsContext(2, state, new AdvancedInput(1, 0, false), WORLD,
@@ -101,8 +104,8 @@ class Phase5FullMechanicsTest {
     var creativeResult = new Vanilla12111RichPhysics().step(new Vanilla12111RichPhysics.Context(
         1, creative, new AdvancedInput(1,0,false,true,false), WORLD,
         Simulation.Environment.DRY, Attributes.DEFAULT, MovementEffects.NONE,
-        Pose.STANDING, MovementEnvironment.dry(false,true,false), false, true,
-        EntityCollisions.of(List.of(), true)));
+        Pose.STANDING, Phase5Mechanics.MovementEnvironment.dry(false,true,false), false, true,
+        dev.phantom.ac.world.EntityCollisions.of(java.util.List.of(), true)));
     assertTrue(creativeResult.state().uncertain());
     assertTrue(creativeResult.diagnostic().contains("creative"));
 
