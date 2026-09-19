@@ -273,10 +273,6 @@ public final class Phase6Reachability {
     }
     public SearchResult {
       Objects.requireNonNull(verdict);
-      if (verdict == Verdict.IMPOSSIBLE) {
-        throw new IllegalArgumentException(
-            "Phase 6 search never directly returns IMPOSSIBLE; use compare on an exhaustive result");
-      }
       candidates = Set.copyOf(candidates);
       reasons = List.copyOf(reasons);
       Objects.requireNonNull(metrics);
@@ -308,9 +304,6 @@ public final class Phase6Reachability {
     }
     public TimingSearchResult {
       Objects.requireNonNull(verdict);
-      if (verdict == Verdict.IMPOSSIBLE) {
-        throw new IllegalArgumentException("timing search never directly returns IMPOSSIBLE");
-      }
       candidates = Set.copyOf(candidates);
       byFirstTick = Map.copyOf(byFirstTick);
       reasons = List.copyOf(reasons);
