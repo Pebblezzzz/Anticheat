@@ -364,7 +364,8 @@ public final class CausalMovementPipeline {
        * frontier. This is especially important for AFK clients, which may emit
        * periodic position packets without changing state.
        */
-      if (observedAfter.position().equals(observedBefore.position())
+      if (previousPositionPacketTick >= 0
+          && observedAfter.position().equals(observedBefore.position())
           && Float.compare(observedAfter.yaw(), observedBefore.yaw()) == 0
           && Float.compare(observedAfter.pitch(), observedBefore.pitch()) == 0
           && observedAfter.onGround() == observedBefore.onGround()) {
@@ -835,7 +836,6 @@ public final class CausalMovementPipeline {
          * movement to re-root from current authority.
          */
         frontier = Frontier.empty();
-        previousPositionPacketTick = -1L;
         previousPositionPacketGenerationRange = null;
         previousExplicitClientTick = movement.move().clientTick();
         trace.add("FRONTIER_RESET reason=UNCERTAIN_REQUIRES_FRESH_AUTHORITY");
