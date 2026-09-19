@@ -93,6 +93,20 @@ final class Phase4WorldReplicaTest {
     assertTrue(r.getWorldGeneration().entities().boxesIn(BlockBox.of(-1,63,-1,2,67,2)).boxes().isEmpty());
   }
 
+  @Test void pendingClientWorldIsNotVisibleUntilBarrierAck(){
+    var r=new Phase4WorldReplica(V);
+    var stone=BlockCatalogue12111.decode("minecraft:stone",Map.of());
+    var event=new Phase4WorldReplica.ChunkData(o(1,1),p(1,1),new Chunk(0,0),Map.of(new Pos(0,64,0),stone));
+    r.queue(event);
+    assertEquals(Coverage.UNLOADED,r.getWorldState().coverageAt(0,64,0));
+    r.openBarrier((short)-1);
+    assertEquals(Coverage.UNLOADED,r.getWorldState().coverageAt(0,64,0));
+    assertTrue(r.acknowledge((short)-1,3L));
+    assertEquals(stone,r.getWorldState().blockAtOrNull(0,64,0));
+    assertEquals(3L,r.causalSequence());
+    assertEquals(stone,r.snapshotAtSequence(3L).blockAtOrNull(0,64,0));
+  }
+
   @Test void replayIsDeterministic(){
     var events=List.of(
       new Timeline.Event(1,new Packets.NormalizedPacket(1,1,new Packets.ChunkStates(new Chunk(0,0),Map.of(new Pos(0,64,0),BlockCatalogue12111.decode("minecraft:stone",Map.of()))),EnumSet.of(Packets.PacketFlag.NORMAL),Packets.CaptureProvenance.forPacket(new Packets.ChunkStates(new Chunk(0,0),Map.of(new Pos(0,64,0),BlockCatalogue12111.decode("minecraft:stone",Map.of()))))))
