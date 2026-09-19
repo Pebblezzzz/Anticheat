@@ -842,8 +842,22 @@ public final class CausalMovementPipeline {
       trace.add("CANDIDATES count=" + reachable.size()
           + " exhaustive=" + advance.exhaustive());
 
+      /*
+       * A bounded timing envelope can contain a concrete witness even when one
+       * other offset remains non-exhaustive. Existence of a deterministic,
+       * matching candidate is enough to establish POSSIBLE; impossibility still
+       * requires every offset to be exhaustively eliminated.
+       */
+      boolean deterministicWitness = reachable.stream().anyMatch(candidate ->
+          candidate.context().uncertainty().isEmpty()
+              && !candidate.context().player().uncertain()
+              && matchesObserved(
+                  candidate.context().player(), observedAfter, movement.move()));
+      boolean possibleWithConcreteWitness =
+          !advance.exhaustive() && deterministicWitness;
       SearchResult search = new SearchResult(
-          advance.exhaustive() ? Verdict.POSSIBLE : Verdict.UNCERTAIN,
+          advance.exhaustive() || possibleWithConcreteWitness
+              ? Verdict.POSSIBLE : Verdict.UNCERTAIN,
           reachable,
           (int) Math.min(Integer.MAX_VALUE,
               reachable.stream().mapToLong(c -> Math.max(0L,
@@ -855,6 +869,7 @@ public final class CausalMovementPipeline {
           advance.reasons());
 
       boolean timingExhaustive = eventTiming.simulationClientTicks().isExact()
+          || possibleWithConcreteWitness
           || (advance.exhaustive()
               && eventTiming.simulationClientTicks().width()
                   <= timingConfig.maxTimingCandidates());
@@ -1967,7 +1982,9 @@ public final class CausalMovementPipeline {
       anchor = withClientRotation(authoritative, yaw, pitch);
       rootTick = snapshot.clientTick() != null
           ? Math.max(0L, snapshot.clientTick() - 1L)
-          : Math.max(0L, target - 1L);
+          : snapshot.serverTick() == movement.event().serverTick()
+              ? target
+              : Math.max(0L, target - 1L);
     }
 
     if (target < rootTick) {
