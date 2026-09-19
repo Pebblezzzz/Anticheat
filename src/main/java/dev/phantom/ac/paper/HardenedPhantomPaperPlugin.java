@@ -914,6 +914,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     long now=System.nanoTime();
     boolean changed=verdict!=capture.lastDebugSummaryVerdict
         || !Objects.equals(reason,capture.lastDebugSummaryReason);
+    if(verdict==Phase8MovementValidation.Verdict.POSSIBLE)return false;
     boolean important=verdict==Phase8MovementValidation.Verdict.IMPOSSIBLE;
     long last=capture.lastDebugSummaryNanos;
     if(important||changed||last<0L||now-last>=5_000_000_000L){
