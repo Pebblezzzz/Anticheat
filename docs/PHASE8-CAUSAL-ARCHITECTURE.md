@@ -4,21 +4,21 @@ Phantom Phase 8 is an independent movement validator. Paper supplies authoritati
 
 ## Data flow
 
-raw packet capture
-  -> packet normalization / chronology
-  -> Phase 7 client-tick reconstruction
-  -> authoritative server snapshot timeline
-  -> client-visible world timeline
-  -> deterministic Phase 5 physics
-  -> Phase 6 reachable-state frontier
-  -> observed packet state
-  -> observed-vs-reachable comparison
+packet stream
+  -> client state reducer
+  -> persistent Phase 6 prediction frontier
+  -> latency-compensated per-player packet world
+  -> deterministic Phase 5 physics forward step
+  -> observed packet comparison
+  -> retain the trusted prediction frontier
   -> provenance-bearing evidence
   -> POSSIBLE / UNCERTAIN / IMPOSSIBLE
 
-`CausalMovementPipeline` is the canonical Phase 8 orchestration boundary. `Phase8LiveValidation` is a compatibility facade and does not own a second physics implementation.
+`Phase8PredictionRunner` is the canonical live orchestration boundary. It is stateful: the client observation state and the Phase 6 prediction frontier survive between validation calls. Each new movement only advances the frontier from its last complete simulation tick.
 
-`Phase8IncrementalRunner` is intentionally thin. It retains a bounded packet journal and replays the causal pipeline when new capture records arrive. It does not persist a second candidate state machine, a contradiction streak, a poison bit, or a latest-authoritative-state shortcut.
+`CausalMovementPipeline` remains an offline/replay analysis utility for deterministic test and forensic workflows. It is no longer used by the hardened live Paper adapter.
+
+There is no live replay-on-every-packet adapter. The old `Phase8IncrementalRunner` has been removed.
 
 ## Authority
 
