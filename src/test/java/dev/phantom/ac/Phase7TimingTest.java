@@ -80,8 +80,8 @@ class Phase7TimingTest {
     EventTiming secondMove = r.timingFor(4).orElseThrow();
     assertEquals(Range.exact(1), firstMove.packetGenerationClientTicks());
     assertEquals(new Range(3, 4), secondMove.packetGenerationClientTicks());
-    assertTrue(firstMove.possiblePacketGenerationClientTicks().contains(1L));
-    assertTrue(secondMove.possiblePacketGenerationClientTicks().contains(2L));
+    assertEquals(List.of(1L), firstMove.possiblePacketGenerationClientTicks());
+    assertEquals(List.of(3L, 4L), secondMove.possiblePacketGenerationClientTicks());
   }
 
   @Test
