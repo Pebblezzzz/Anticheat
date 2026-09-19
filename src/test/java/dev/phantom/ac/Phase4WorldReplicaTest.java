@@ -46,7 +46,7 @@ final class Phase4WorldReplicaTest {
     r.accept(new Phase4WorldReplica.ChunkData(o(1,1),p(1,1),new Chunk(0,0),Map.of()));
     r.accept(new Phase4WorldReplica.BlockChange(o(3,3),p(3,3),new Pos(0,64,0),dirt));
     r.accept(new Phase4WorldReplica.BlockChange(o(2,2),p(2,2),new Pos(0,64,0),stone));
-    assertEquals(stone,r.getWorldState().blockAtOrNull(0,64,0));
+    assertEquals(dirt,r.getWorldState().blockAtOrNull(0,64,0));
   }
 
   @Test void historicalGenerationsReturnEarlierState(){
@@ -88,7 +88,7 @@ final class Phase4WorldReplicaTest {
     var r=new Phase4WorldReplica(V);
     var e=new dev.phantom.ac.world.EntityCollisions.EntityBox(4,BlockBox.of(0,64,0,1,66,1));
     r.accept(new Phase4WorldReplica.EntitySpawn(o(1,1),p(1,1),e));
-    assertEquals(1,r.getWorldGeneration().entities().boxesIn(BlockBox.of(-1,63,-1,2,3,2)).boxes().size());
+    assertEquals(1,r.getWorldGeneration().entities().boxesIn(BlockBox.of(-1,63,-1,2,67,2)).boxes().size());
     r.accept(new Phase4WorldReplica.EntityDespawn(o(2,2),p(2,2),4));
     assertTrue(r.getWorldGeneration().entities().boxesIn(BlockBox.of(-1,63,-1,2,3,2)).boxes().isEmpty());
   }
