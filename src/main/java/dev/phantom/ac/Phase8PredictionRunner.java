@@ -107,8 +107,12 @@ public final class Phase8PredictionRunner {
   private static final double POSITION_TOLERANCE = Phase6Reachability.POSITION_MATCH_TOLERANCE;
   private static final long MAX_INCREMENTAL_HORIZON = Phase6Reachability.MAX_HORIZON_TICKS;
   private static final long PREDICTION_RESYNC_LAG_TICKS = 2L;
+  private static final int MAX_TIMING_HISTORY_EVENTS = 512;
 
   private final int maximumCandidates;
+  private final Phase7Timing.Config phase7TimingConfig;
+  private final ArrayDeque<Packets.RawPacket> timingHistory = new ArrayDeque<>();
+  private long timingEpochNanos = -1L;
   private final InputConstraint neutralInput;
 
   private Player initialAnchor;
@@ -133,8 +137,13 @@ public final class Phase8PredictionRunner {
   private Continuation latestContinuation = Continuation.UNANCHORED;
 
   public Phase8PredictionRunner(int maximumCandidates) {
+    this(maximumCandidates, Phase7Timing.Config.defaultConfig());
+  }
+
+  public Phase8PredictionRunner(int maximumCandidates, Phase7Timing.Config phase7TimingConfig) {
     Contracts.requireCandidateBudget(maximumCandidates);
     this.maximumCandidates = maximumCandidates;
+    this.phase7TimingConfig = Objects.requireNonNull(phase7TimingConfig, "phase7TimingConfig");
     this.neutralInput = InputConstraint.fromClientInput(
         new Packets.ClientInput(false, false, false, false, false, false, false));
     this.currentInput = neutralInput;
@@ -174,6 +183,8 @@ public final class Phase8PredictionRunner {
     clientState = authoritativeAnchor;
     currentInput = neutralInput;
     inputHistory.clear();
+    timingHistory.clear();
+    timingEpochNanos = -1L;
     latestAuthority = null;
     prediction = Set.of();
     predictionTick = -1L;
@@ -243,6 +254,17 @@ public final class Phase8PredictionRunner {
           lastProcessedSequence, relativeClientTick, latestContinuation,
           !prediction.isEmpty(), List.of());
     }
+
+    /*
+     * Phase 7 is the sole live client/server timing authority. The history is
+     * bounded so timing reconstruction cannot grow without limit; a retained
+     * prefix can be truncated only at the cost of becoming conservative.
+     */
+    for (Packets.RawPacket packet : packets) {
+      rememberTimingPacket(packet);
+    }
+    Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence =
+        reconstructPhase7Timing().bySequence();
 
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     List<PredictionFrame> frames = new ArrayList<>();
@@ -385,7 +407,7 @@ public final class Phase8PredictionRunner {
           + " receivedNanos=" + packet.receivedNanos()
           + " clientStatePosition=" + observedAfter.position());
 
-      TickResolution tick = resolveMovementTick(move);
+      TickResolution tick = resolveMovementTick(packet, move, phase7TimingBySequence);
       trace.add("CLIENT_TICK " + tick.display()
           + " exact=" + tick.exact()
           + " source=" + tick.source());
@@ -743,16 +765,53 @@ public final class Phase8PredictionRunner {
     }
   }
 
-  private TickResolution resolveMovementTick(Packets.Move move) {
+  private TickResolution resolveMovementTick(
+      Packets.RawPacket packet,
+      Packets.Move move,
+      Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
+    Phase7Timing.EventTiming timing = phase7TimingBySequence.get(packet.sequence());
+    if (timing != null) {
+      Phase7Timing.Range range = timing.simulationClientTicks();
+      if (!range.isEmpty()) {
+        long tick = Math.max(0L, range.min());
+        relativeClientTick = Math.max(relativeClientTick, tick);
+        boolean exact = range.isExact() && timing.simulationCandidatesExhaustive();
+        String source = exact
+            ? "phase7-temporal-envelope-exact"
+            : "phase7-temporal-envelope-range";
+        return new TickResolution(tick, true, exact, source);
+      }
+      return new TickResolution(0L, false, false, "phase7-temporal-envelope-unknown");
+    }
     if (move.clientTick() != null) {
       long tick = move.clientTick();
       relativeClientTick = Math.max(relativeClientTick, tick);
-      return new TickResolution(tick, true, true, "packet-client-tick");
+      return new TickResolution(tick, true, true, "packet-client-tick-fallback");
     }
-    if (hasClientTickBoundary) {
-      return new TickResolution(relativeClientTick, true, true, "client-tick-boundary-watermark");
+    return new TickResolution(0L, false, false, "phase7-timing-missing");
+  }
+
+  private void rememberTimingPacket(Packets.RawPacket packet) {
+    if (timingEpochNanos < 0L) timingEpochNanos = packet.receivedNanos();
+    timingHistory.addLast(packet);
+    while (timingHistory.size() > MAX_TIMING_HISTORY_EVENTS) {
+      timingHistory.removeFirst();
     }
-    return new TickResolution(0L, false, false, "pre-boundary");
+  }
+
+  private Phase7Timing.Reconstruction reconstructPhase7Timing() {
+    if (timingHistory.isEmpty()) {
+      return Phase7Timing.reconstruct(
+          Timeline.assign(List.of(), 0L, phase7TimingConfig.serverTickNanos()),
+          phase7TimingConfig);
+    }
+    List<Packets.RawPacket> raw = List.copyOf(timingHistory);
+    List<Packets.NormalizedPacket> normalized = new Packets.Normalizer().normalize(raw);
+    Timeline.Snapshot timeline = Timeline.assign(
+        normalized,
+        Math.max(0L, timingEpochNanos),
+        phase7TimingConfig.serverTickNanos());
+    return Phase7Timing.reconstruct(timeline, phase7TimingConfig);
   }
 
   private long resolvedCorrectionTick() {
