@@ -82,6 +82,56 @@ class CausalMovementPipelineTest {
   }
 
   @Test
+  void inputArrivingAfterGroundMovementCannotCauseBackwardJumpFlag() {
+    Player jumping = new Player(
+        new Maths.Vec3(.5, 64.42, .5),
+        new Maths.Vec3(0.0, 0.3332, 0.0),
+        0f, 0f, false,
+        "survival", Map.of(), OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.unknown(), State.Provenance.UNKNOWN, Set.of());
+
+    Packets.PlayerContext firstAuthority = authority();
+    Packets.PlayerContext secondAuthority = new Packets.PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(), Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        jumping.position(), jumping.velocity(), false, false, false, List.of());
+
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 0, new ChunkStates(
+            new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
+        new RawPacket(2, 10, firstAuthority),
+        // This movement is still grounded and arrives before the jump input packet.
+        new RawPacket(3, 20, new Move(
+            new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
+        // Same server tick, but later on the wire: it must not be applied backwards
+        // to the earlier movement observation.
+        new RawPacket(4, 30, new ClientInput(false, false, false, false, true, false, false)),
+        // Next client/server tick contains the actual first airborne jump position.
+        new RawPacket(5, 50_000_020L, secondAuthority),
+        new RawPacket(6, 50_000_030L, new Move(
+            jumping.position(), 0f, 0f, false, 1L)));
+
+    var report = CausalMovementPipeline.analyze(
+        "jump-ordering",
+        Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L),
+        4096,
+        exactTiming(),
+        floorWorld(),
+        anchor(),
+        0L);
+
+    assertEquals(2, report.movementObservations());
+    assertEquals(Verdict.POSSIBLE, report.results().getFirst().verdict(),
+        report.results().toString());
+    assertEquals(Verdict.POSSIBLE, report.results().get(1).verdict(),
+        report.results().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("INPUT_FUTURE_EXCLUDED seq=4")),
+        report.frames().getFirst().trace().toString());
+  }
+
+  @Test
   void staleInitialAnchorRefreshesFromExactLocalAuthorityWhenOldChunkIsGone() {
     var stone = dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone", Map.of());
     var worldBuilder = WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(2, 0);
