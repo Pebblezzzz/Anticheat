@@ -28,14 +28,14 @@ class Phase5AuthorityTest {
     assertEquals(authority.simulate(c).delegate(), authority.simulate(c).delegate());
   }
 
-  @Test void fallingSpendsGravityBeforeCollisionMove() {
+  @Test void fallingAppliesPostMoveVerticalGravityAndFloatDrag() {
     var state = new State.Player(new Maths.Vec3(0.5,65,0.5), Maths.Vec3.ZERO, 0,0,false,
         "survival", java.util.Map.of(), java.util.OptionalInt.empty(), false);
     var c = context(state, new Simulation.AdvancedInput(0,0,false),
         Phase5Mechanics.MovementEnvironment.dry(false,false,false), Phase5Mechanics.Pose.STANDING);
     var result = new Phase5MovementAuthority().simulate(c);
     assertEquals(0.0, result.state().position().y()-state.position().y(), 1e-12);
-    assertEquals(-0.0784, result.state().velocity().y(), 1e-12);
+    assertEquals(-0.0784000015258789, result.state().velocity().y(), 1e-12);
   }
 
   @Test void waterUsesVersionPinnedEightTenthsDrag() {
