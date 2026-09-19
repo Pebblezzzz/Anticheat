@@ -1554,18 +1554,19 @@ public final class CausalMovementPipeline {
                   maximumCandidates);
 
           if (result.verdict() == Verdict.POSSIBLE
-              || exhaustivelyEnumeratedInputEnvelope(result, input)) {
+              || exhaustivelyEnumeratedInputEnvelope(result, input)
+              || exhaustivelyEliminatedInputEnvelope(result, input)) {
             /*
-             * Phase 6 intentionally labels an unknown input envelope UNCERTAIN
-             * at the generic search API boundary, even when every admissible
-             * input combination was actually enumerated. For causal movement
-             * validation, that candidate set is still a complete legitimate
-             * state-space branch, so retain it rather than discarding it.
+             * Phase 6's generic API preserves UNCERTAIN for a non-exact input
+             * constraint even when the entire finite input envelope was actually
+             * enumerated. At the pipeline boundary we can safely preserve those
+             * complete candidates, or preserve an exhaustive empty result when
+             * every concrete input was eliminated.
              */
             next.addAll(result.candidates());
             if (result.verdict() != Verdict.POSSIBLE) {
               reasons.addAll(result.reasons());
-              reasons.add("unknown input was exhaustively enumerated; candidates are complete for this input envelope");
+              reasons.add("Phase 6 input envelope was fully enumerated; no timing/world budget was spent selecting a subset");
             }
           } else {
             reasons.addAll(result.reasons());
@@ -1617,6 +1618,34 @@ public final class CausalMovementPipeline {
    * transition uncertainty, and every retained candidate carries only INPUT
    * uncertainty from the input envelope itself.
    */
+  private static boolean exhaustivelyEliminatedInputEnvelope(
+      SearchResult result,
+      InputConstraint input) {
+    if (result.verdict() != Verdict.UNCERTAIN
+        || !result.candidates().isEmpty()
+        || result.metrics().budgetReached()
+        || result.nonExhaustiveWorldBranches() != 0
+        || result.uncertainTransitions() != 0
+        || input.enumerate().isEmpty()) {
+      return false;
+    }
+    /*
+     * Empty means every concrete input branch was eliminated. The only allowed
+     * uncertainty here is the generic "input envelope" label plus the normal
+     * no-survivor diagnostic. Any world/physics/budget evidence means the search
+     * was not exhaustive and must remain UNCERTAIN.
+     */
+    return result.reasons().stream().noneMatch(reason ->
+        reason.contains("world hypothesis")
+            || reason.contains("world ")
+            || reason.contains("Phase 5")
+            || reason.contains("physics")
+            || reason.contains("maximum ")
+            || reason.contains("budget")
+            || reason.contains("initial state carries explicit uncertainty")
+            || reason.contains("external transition"));
+  }
+
   private static boolean exhaustivelyEnumeratedInputEnvelope(
       SearchResult result,
       InputConstraint input) {
