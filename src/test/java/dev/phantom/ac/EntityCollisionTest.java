@@ -27,7 +27,7 @@ class EntityCollisionTest {
     var provider = EntityCollisions.of(List.of(entity), false);
     var result = provider.boxesIn(new dev.phantom.ac.geometry.BlockBox(-1, -1, -1, 2, 3, 2));
     assertFalse(result.complete());
-    assertEquals(1, result.entities().size());
+    assertEquals(1, result.boxes().size());
   }
 
 
