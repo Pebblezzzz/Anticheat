@@ -792,8 +792,7 @@ public final class CausalMovementPipeline {
        * a deterministic large jump into UNCERTAIN solely because swept-volume
        * reconstruction is incomplete.
        */
-      if (!recoveryRequired
-          && movement.move().clientTick() != null
+      if (movement.move().clientTick() != null
           && previousExplicitClientTick != null
           && movement.move().clientTick() > previousExplicitClientTick
           && eventTiming.simulationClientTicks().isExact()
@@ -1128,6 +1127,9 @@ public final class CausalMovementPipeline {
                   Phase6Reachability.ObservedField.POSITION,
                   Phase6Reachability.ObservedField.ROTATION));
       results.add(validation);
+      if (validation.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
+        trace.add("EVIDENCE REACHABILITY_CONTRADICTION");
+      }
 
       // The candidate frontier advances only through a POSSIBLE observation.
       // IMPOSSIBLE/UNCERTAIN evidence never becomes a trusted baseline. UNCERTAIN
