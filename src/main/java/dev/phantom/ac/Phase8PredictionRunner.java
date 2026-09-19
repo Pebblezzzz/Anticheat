@@ -436,9 +436,11 @@ public final class Phase8PredictionRunner {
         if (result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE) {
           possible++;
           latestContinuation = Continuation.ACTIVE;
+          lastPositionClientTick = tick.clientTick();
         } else if (result.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
           impossible++;
           latestContinuation = Continuation.IMPOSSIBLE;
+          lastPositionClientTick = tick.clientTick();
         } else {
           uncertain++;
           latestContinuation = Continuation.UNCERTAIN;
@@ -503,10 +505,8 @@ public final class Phase8PredictionRunner {
         continue;
       }
 
-      boolean sameClientTick = predictionTick >= 0L && tick.clientTick() == predictionTick;
       boolean movedWithinCurrentClientTick =
-          sameClientTick
-              && lastPositionClientTick == tick.clientTick()
+          lastPositionClientTick == tick.clientTick()
               && !positionMatches(observedBefore.position(), observedAfter.position());
 
       if (movedWithinCurrentClientTick) {
