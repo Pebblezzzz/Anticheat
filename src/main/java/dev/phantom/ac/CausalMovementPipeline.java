@@ -1639,26 +1639,24 @@ public final class CausalMovementPipeline {
       World.VisibilityHistory history,
       MovementEvent movement) {
     WorldSnapshot historical = history.statesAt(simulationTick);
-    /*
-     * The live Paper adapter retains palette-backed CHUNK_DATA inside its own
-     * acknowledged replica rather than serializing those raw columns into the
-     * Timeline. When the historical view therefore has no chunks at all, using
-     * it for an intermediate physics step would manufacture UNKNOWN coverage
-     * even though the client-visible live replica is known. In that narrow case
-     * the acknowledged live snapshot is the only available world representation.
-     *
-     * If the timeline does contain world data, preserve its per-tick history so
-     * newer block states are never silently projected backwards in time.
-     */
-    if (movement.liveWorldUsed()
-        && !movement.world().loadedChunks().isEmpty()) {
+    if (!movement.world().loadedChunks().isEmpty()) {
       /*
-       * The packet timeline may contain an older chunk history while the
-       * acknowledged live replica contains newly visible chunks elsewhere.
-       * Merge only disjoint coverage: historical chunks keep their causal
-       * contents, while a live-only chunk can safely fill a coverage hole.
+       * Prefer the historical world whenever it completely covers the causal
+       * simulation volume. When it does not, the currently supplied/live client
+       * snapshot may contain disjoint chunks that are the only known geometry
+       * for the authoritative root or observed destination. Merge those chunks
+       * without replacing conflicting historical blocks.
        */
-      return WorldSnapshot.merge(historical, movement.world());
+      Player causalRoot = movement.simulationAuthority()
+          .map(snapshot -> playerFromAuthority(snapshot.context()))
+          .orElse(movement.stateFrame().before());
+      boolean historicalCoversRoot =
+          historical.fullyKnown(playerCollisionBox(causalRoot));
+      boolean historicalCoversObserved =
+          historical.fullyKnown(playerCollisionBox(movement.stateFrame().after()));
+      if (movement.liveWorldUsed() || !historicalCoversRoot || !historicalCoversObserved) {
+        return WorldSnapshot.merge(historical, movement.world());
+      }
     }
     return historical;
   }
