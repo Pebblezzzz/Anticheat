@@ -37,7 +37,7 @@ public final class PaperVanillaCollision {
   }
 
   public static void warm(World world, BlockState state) {
-    if (state == null || state.isUnsupported() || isNeighbourDependent(state)) return;
+    if (state == null || state.isUnsupported()) return;
     String key = state.bukkitDataString();
     if (SHAPES.containsKey(key) || FAILED.contains(key)) return;
     try {
@@ -56,7 +56,7 @@ public final class PaperVanillaCollision {
   }
 
   public static Optional<VoxelShape> resolve(BlockState state, int x, int y, int z) {
-    if (state == null || state.isUnsupported() || isNeighbourDependent(state)) {
+    if (state == null || state.isUnsupported()) {
       return Optional.empty();
     }
     VoxelShape local = SHAPES.get(state.bukkitDataString());
@@ -67,10 +67,5 @@ public final class PaperVanillaCollision {
     return SHAPES.size();
   }
 
-  private static boolean isNeighbourDependent(BlockState state) {
-    return switch (state.variant()) {
-      case FENCE, WALL, PANE, FENCE_GATE -> true;
-      default -> false;
-    };
   }
 }
