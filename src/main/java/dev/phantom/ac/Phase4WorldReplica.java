@@ -762,7 +762,7 @@ public final class Phase4WorldReplica implements Serializable {
   private void publish(VisibleState state,long causalSequence,List<Event> delta){
     lastVisibleSequence=Math.max(lastVisibleSequence,causalSequence);
     WorldSnapshot worldSnapshot=snapshotFor(state,lastVisibleSequence);
-    EntityCollisions entities=new TrackedEntities(state.entities());
+    EntityCollisions entities=new TrackedEntities(state.entities(),entityTrackingComplete);
     long tick=delta.isEmpty()?current.get().serverTick():delta.getLast().order().serverTick();
     Order order=delta.isEmpty()?current.get().order():delta.getLast().order();
     Generation generation=new Generation(
