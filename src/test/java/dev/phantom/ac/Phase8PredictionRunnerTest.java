@@ -96,7 +96,7 @@ class Phase8PredictionRunnerTest {
       catchUp.add(new RawPacket(i, 30L + i, new ClientTickEnd()));
     }
     catchUp.add(new RawPacket(13, 200, new Move(
-        new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 10L)));
+        new Maths.Vec3(.6, 64, .5), 0f, 0f, true, 10L)));
 
     var second = runner.process(
         "stale-root", catchUp, floorWorld(), anchor(), 0L);
