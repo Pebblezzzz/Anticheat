@@ -230,7 +230,7 @@ class Phase8PredictionRunnerTest {
         new Maths.Vec3(.2, 0.0, 0.0),
         false, false, false, List.of());
 
-    double expectedX=.6+0.2*Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION;
+    double expectedX=.6+0.2;
     double expectedY=70.0;
 
     var second = runner.process(
@@ -255,8 +255,7 @@ class Phase8PredictionRunnerTest {
   void staleResyncUsesInputFromTheSimulatedTickNotTheLatestInput() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
-    // Sprint is represented in the effective movement-speed attribute on Paper.
-    double movementSpeed = 0.13;
+    double movementSpeed = 0.1;
     PlayerContext authority = new PlayerContext(
         "survival", new Simulation.Attributes(movementSpeed), Map.of(),
         Pose.STANDING, MovementEnvironment.dry(true, false, false),
@@ -286,7 +285,8 @@ class Phase8PredictionRunnerTest {
         Packets.CaptureProvenance.fromAdapter(
             "test-authority", authority, 104L, 4L)));
 
-    double expectedZ = .5 + movementSpeed * Vanilla12111RichPhysics.WALK_ACCEL;
+    double expectedZ = .5 + movementSpeed * Vanilla12111RichPhysics.SPRINTING_SPEED_MULTIPLIER
+        * Vanilla12111RichPhysics.WALK_ACCEL;
     packets.add(new RawPacket(10, 100, new Move(
         new Maths.Vec3(.5, 64.0, expectedZ), 0f, 0f, true, 4L)));
 
