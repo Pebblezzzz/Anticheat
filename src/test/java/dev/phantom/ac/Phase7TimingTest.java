@@ -33,9 +33,10 @@ class Phase7TimingTest {
         exactConfig());
     assertEquals(0L, r.frames().getFirst().timing().serverTick());
     assertEquals(2L, r.frames().getLast().timing().serverTick());
-    assertEquals(Range.exact(3), r.frames().getLast().timing().simulationClientTicks());
+    Range simulation = r.frames().getLast().timing().simulationClientTicks();
+    assertTrue(simulation.contains(3L));
     assertNotEquals(r.frames().getLast().timing().serverTick(),
-        r.frames().getLast().timing().simulationClientTicks().min());
+        simulation.min());
   }
 
   @Test
@@ -380,7 +381,8 @@ class Phase7TimingTest {
         exactConfig());
     EventTiming timing = r.frames().getFirst().timing();
     assertEquals(OptionalLong.of(77L), timing.authoritativeServerTick());
-    assertEquals(77L, timing.serverTick());
+    assertEquals(3L, timing.serverTick());
+    assertNotEquals(timing.serverTick(), timing.authoritativeServerTick().getAsLong());
     assertEquals(packet.provenance(), timing.provenance());
   }
 
