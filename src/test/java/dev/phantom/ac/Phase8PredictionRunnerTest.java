@@ -59,7 +59,7 @@ class Phase8PredictionRunnerTest {
         List.of(
             new RawPacket(4, 110, new ClientTickEnd()),
             new RawPacket(5, 160, new Move(
-                new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 2L))),
+                new Maths.Vec3(.5, 64, .5), 45f, 15f, true, 2L))),
         floorWorld(), anchor, 20L);
 
     assertFalse(second.results().stream().anyMatch(
@@ -133,7 +133,11 @@ class Phase8PredictionRunnerTest {
 
     assertEquals(2, report.movementObservations());
     assertTrue(report.results().stream().allMatch(
-        result -> result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE),
+        result -> result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE),
+        report.results().toString());
+    assertTrue(report.results().stream().noneMatch(
+        result -> result.evidence().uncertaintySources().stream()
+            .anyMatch(source -> source.contains("Phase 5 could not deterministically simulate"))),
         report.results().toString());
     assertTrue(report.candidateFrontierRetained(), report.toString());
   }
