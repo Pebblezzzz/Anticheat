@@ -58,7 +58,11 @@ public final class Vanilla12111RichPhysics {
         }
         if(!s.gamemode().equals("survival")&&!s.gamemode().equals("adventure")&&!s.gamemode().equals("creative"))
             return uncertain(context,"unsupported gamemode movement model");var startEntities=context.entityCollisions().boxesIn(new dev.phantom.ac.geometry.BlockBox(start.minX(),start.minY(),start.minZ(),start.maxX(),start.maxY(),start.maxZ()));if(!startEntities.isDefinite())return uncertain(context,"entity collision history is incomplete");
-        if(context.world().hasUnknownOrUnsupported(new dev.phantom.ac.geometry.BlockBox(start.minX(),start.minY(),start.minZ(),start.maxX(),start.maxY(),start.maxZ())))return uncertain(context,"start collision volume is not fully known");
+        dev.phantom.ac.geometry.BlockBox startBox = new dev.phantom.ac.geometry.BlockBox(
+                start.minX(),start.minY(),start.minZ(),start.maxX(),start.maxY(),start.maxZ());
+        if(context.world().hasUnknownOrUnsupported(startBox))
+            return uncertain(context,"start collision volume is not fully known problems="
+                    + coverageProblems(context.world(),startBox));
         double radians=Math.toRadians(s.yaw());
         boolean fluid=context.movementEnvironment().fluid()!=Phase5Mechanics.Fluid.NONE,
                 climbing=context.movementEnvironment().climbable(),
@@ -81,7 +85,11 @@ public final class Vanilla12111RichPhysics {
                         (int)Math.floor(s.position().y()-GROUND_PROBE),
                         (int)Math.floor(s.position().z()));
                 if(support==null||support.isUnsupported())
-                    return uncertain(context,"support block is unavailable for friction calculation");
+                    return uncertain(context,"support block is unavailable for friction calculation at "
+                            + supportDiagnostic(context.world(),
+                                (int)Math.floor(s.position().x()),
+                                (int)Math.floor(s.position().y()-GROUND_PROBE),
+                                (int)Math.floor(s.position().z())));
                 double slipperiness=BlockCatalogue12111.slipperiness(support);
                 double movementSpeed=context.attributes().value()*context.effects().speedMultiplier();
                 if(context.input().sprint())movementSpeed*=SPRINTING_SPEED_MULTIPLIER;
@@ -122,7 +130,11 @@ public final class Vanilla12111RichPhysics {
                 horizontalFactor=1.0;
             } else {
                 BlockState support=context.world().blockAtOrNull((int)Math.floor(s.position().x()),(int)Math.floor(s.position().y()-GROUND_PROBE),(int)Math.floor(s.position().z()));
-                if(support==null||support.isUnsupported())return uncertain(context,"support block is unavailable for friction calculation");
+                if(support==null||support.isUnsupported())return uncertain(context,"support block is unavailable for friction calculation at "
+                        + supportDiagnostic(context.world(),
+                            (int)Math.floor(s.position().x()),
+                            (int)Math.floor(s.position().y()-GROUND_PROBE),
+                            (int)Math.floor(s.position().z())));
                 horizontalFactor=BlockCatalogue12111.slipperiness(support)*AIR_HORIZONTAL_FRICTION;
             }
         } else horizontalFactor=AIR_HORIZONTAL_FRICTION;
@@ -223,6 +235,23 @@ public final class Vanilla12111RichPhysics {
     }
 
     private Player richPlayer(Player source,Vec3 position,Vec3 velocity,boolean onGround,Phase5Mechanics.Pose pose,Context context,boolean uncertain){State.Environment environment=switch(context.environment()){case WATER->State.Environment.WATER;case LAVA->State.Environment.LAVA;case CLIMBABLE->State.Environment.CLIMBABLE;case DRY->State.Environment.DRY;case UNKNOWN->State.Environment.UNKNOWN;};return new Player(position,velocity,source.yaw(),source.pitch(),onGround,source.gamemode(),source.effects(),source.awaitingTeleport(),uncertain,Optional.of(context.input()),context.attributes(),pose,environment,source.clientTickRange(),source.provenance(),source.uncertaintyReasons());}
+    private static String supportDiagnostic(WorldSnapshot world,int x,int y,int z){
+        return "("+x+","+y+","+z+") coverage="+world.coverageAt(x,y,z)
+                +" detail="+world.coverageDetailAt(x,y,z);
+    }
+
+    private static String coverageProblems(WorldSnapshot world,dev.phantom.ac.geometry.BlockBox query){
+        List<WorldSnapshot.CoverageProblem> problems=world.coverageProblemsIn(query);
+        if(problems.isEmpty())return "[]";
+        StringBuilder result=new StringBuilder("[");
+        for(int i=0;i<problems.size();i++){
+            if(i>0)result.append(", ");
+            WorldSnapshot.CoverageProblem problem=problems.get(i);
+            result.append(problem.coverage()).append('@').append(problem.position());
+        }
+        return result.append(']').toString();
+    }
+
     private StepResult uncertain(Context context,String message){return new StepResult(context.simulationTick(),richPlayer(context.state(),context.state().position(),context.state().velocity(),context.state().onGround(),context.pose(),context,true),false,false,false,false,false,false,false,message);}
     public record Context(long simulationTick,Player state,Simulation.AdvancedInput input,WorldSnapshot world,Simulation.Environment environment,Simulation.Attributes attributes,Phase5Mechanics.MovementEffects effects,Phase5Mechanics.Pose pose,Phase5Mechanics.MovementEnvironment movementEnvironment,boolean sleeping, boolean flying, EntityCollisions entityCollisions) implements Serializable {
         public Context(long tick,Player state,Simulation.AdvancedInput input,WorldSnapshot world,Simulation.Environment environment,

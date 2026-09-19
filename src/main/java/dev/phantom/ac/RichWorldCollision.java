@@ -24,7 +24,10 @@ public final class RichWorldCollision {
     BlockBox startBox=box(start),sweptBox=startBox.enclose(startBox.move(requested.x(),requested.y(),requested.z()));
     EntityCollisions.EntityCollisionResult entityResult=entities.boxesIn(sweptBox);
     if(!entityResult.isDefinite())return new Result(Vec3.ZERO,false,false,false,false,false,true,"entity collision history is incomplete");
-    if(world.hasUnknownOrUnsupported(sweptBox))return new Result(Vec3.ZERO,false,false,false,false,false,true,"rich world snapshot does not fully cover swept movement volume");
+    if(world.hasUnknownOrUnsupported(sweptBox))return new Result(
+        Vec3.ZERO,false,false,false,false,false,true,
+        "rich world snapshot does not fully cover swept movement volume"
+            + " problems=" + coverageProblems(world,sweptBox));
     List<EntityCollisions.EntityBox> entityBoxes=entityResult.boxes();
 
     AxisResult vertical=clipAxis(world,startBox,Axis.Y,requested.y(),entityBoxes);BlockBox afterY=startBox.move(0,vertical.amount(),0);
@@ -38,7 +41,10 @@ public final class RichWorldCollision {
     if(stepHeight<=0||requested.y()>0||!(horizontalX.collided()||horizontalZ.collided()))return new Result(direct,horizontalX.collided(),vertical.collided(),horizontalZ.collided(),false,false,false,collided?"rich voxel/entity collision":"rich voxel/entity movement");
 
     Aabb raised=start.move(new Vec3(0,stepHeight,0));BlockBox raisedBox=box(raised),raisedSweep=raisedBox.enclose(raisedBox.move(requested.x(),requested.y(),requested.z()));
-    if(world.hasUnknownOrUnsupported(raisedSweep))return new Result(direct,horizontalX.collided(),vertical.collided(),horizontalZ.collided(),true,false,true,"step candidate crosses unknown or unsupported world coverage");
+    if(world.hasUnknownOrUnsupported(raisedSweep))return new Result(
+        direct,horizontalX.collided(),vertical.collided(),horizontalZ.collided(),true,false,true,
+        "step candidate crosses unknown or unsupported world coverage"
+            + " problems=" + coverageProblems(world,raisedSweep));
     AxisResult sx=clipAxis(world,raisedBox,Axis.X,requested.x(),entityBoxes);BlockBox bx=raisedBox.move(sx.amount(),0,0);
     AxisResult sz=clipAxis(world,bx,Axis.Z,requested.z(),entityBoxes);BlockBox steppedHorizontal=bx.move(0,0,sz.amount());
     AxisResult sy=clipAxis(world,steppedHorizontal,Axis.Y,-stepHeight+requested.y(),entityBoxes);
@@ -68,6 +74,18 @@ public final class RichWorldCollision {
     else if(axis==Axis.Y){if(amount>0&&moving.maxY()<=obstacle.minY())return Math.min(amount,obstacle.minY()-moving.maxY());if(amount<0&&moving.minY()>=obstacle.maxY())return Math.max(amount,obstacle.maxY()-moving.minY());}
     else {if(amount>0&&moving.maxZ()<=obstacle.minZ())return Math.min(amount,obstacle.minZ()-moving.maxZ());if(amount<0&&moving.minZ()>=obstacle.maxZ())return Math.max(amount,obstacle.maxZ()-moving.minZ());}
     return amount;
+  }
+
+  private static String coverageProblems(WorldSnapshot world,BlockBox query){
+    List<WorldSnapshot.CoverageProblem> problems=world.coverageProblemsIn(query);
+    if(problems.isEmpty())return "[]";
+    StringBuilder result=new StringBuilder("[");
+    for(int i=0;i<problems.size();i++){
+      if(i>0)result.append(", ");
+      WorldSnapshot.CoverageProblem problem=problems.get(i);
+      result.append(problem.coverage()).append('@').append(problem.position());
+    }
+    return result.append(']').toString();
   }
 
   private static BlockBox box(Aabb box){return new BlockBox(box.minX(),box.minY(),box.minZ(),box.maxX(),box.maxY(),box.maxZ());}

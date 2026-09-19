@@ -350,6 +350,23 @@ import dev.phantom.ac.geometry.BlockBox;
     assertEquals(Set.of(Coverage.UNLOADED), world.coverageIn(BlockBox.of(100, 64, 100, 101, 65, 101)));
   }
 
+  @Test void coverageProblemsInListsEveryMissingOrUnsupportedCell() {
+    WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+        .setUnsupportedBlock(1, 64, 0, "minecraft:unknown_shape")
+        .loadUnknownChunk(2, 0)
+        .setBlock(0, 64, 0, stoneBlock())
+        .build();
+
+    List<WorldSnapshot.CoverageProblem> problems = world.coverageProblemsIn(
+        BlockBox.of(0, 64, 0, 35, 65, 1));
+
+    assertTrue(problems.contains(new WorldSnapshot.CoverageProblem(
+        new Pos(1, 64, 0), Coverage.UNSUPPORTED)));
+    assertTrue(problems.contains(new WorldSnapshot.CoverageProblem(
+        new Pos(32, 64, 0), Coverage.UNKNOWN)));
+    assertEquals(41, problems.size());
+  }
+
   @Test void fullyKnownIsTrueOnlyWhenNothingInTheBoxIsMissingData() {
     WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
         .setBlock(0, 64, 0, stoneBlock()).build();
