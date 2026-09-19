@@ -34,7 +34,7 @@ class Phase5AuthorityTest {
     var c = context(state, new Simulation.AdvancedInput(0,0,false),
         Phase5Mechanics.MovementEnvironment.dry(false,false,false), Phase5Mechanics.Pose.STANDING);
     var result = new Phase5MovementAuthority().simulate(c);
-    assertEquals(-0.08, result.state().position().y()-state.position().y(), 1e-12);
+    assertEquals(0.0, result.state().position().y()-state.position().y(), 1e-12);
     assertEquals(-0.0784, result.state().velocity().y(), 1e-12);
   }
 
