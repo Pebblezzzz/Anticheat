@@ -62,6 +62,9 @@ public final class WorldSnapshot implements Serializable {
      */
     default long causalSequence() { return -1L; }
 
+    /** Chunks whose load is known but whose complete payload is not yet published. */
+    default Set<Chunk> unknownChunks() { return Set.of(); }
+
     default boolean hasChunk(int chunkX, int chunkZ) {
       return loadedChunks().contains(new Chunk(chunkX, chunkZ));
     }
@@ -117,6 +120,7 @@ public final class WorldSnapshot implements Serializable {
   private volatile Map<Chunk, Map<Pos, BlockState>> chunks;
   private final int minY;
   private final int maxY;
+  private final Set<Chunk> unknownChunks;
   private final transient Backend backend;
 
   public WorldSnapshot(String version, Map<Chunk, Map<Pos, BlockState>> chunks, int minY, int maxY) {
@@ -147,7 +151,22 @@ public final class WorldSnapshot implements Serializable {
     this.version = version;
     this.minY = minY;
     this.maxY = maxY;
+    this.unknownChunks = Set.of();
     this.backend = null;
+  }
+
+  private WorldSnapshot(String version, Map<Chunk, Map<Pos, BlockState>> chunks, Set<Chunk> unknownChunks, int minY, int maxY) {
+    this.version = Objects.requireNonNull(version, "version");
+    this.minY = minY;
+    this.maxY = maxY;
+    this.unknownChunks = Set.copyOf(unknownChunks);
+    this.backend = null;
+    Map<Chunk, Map<Pos, BlockState>> frozen = new HashMap<>(chunks.size());
+    for (Map.Entry<Chunk, Map<Pos, BlockState>> entry : chunks.entrySet()) {
+      TreeMap<Pos, BlockState> sorted = new TreeMap<>(POS_ORDER); sorted.putAll(entry.getValue());
+      frozen.put(entry.getKey(), Collections.unmodifiableMap(sorted));
+    }
+    this.chunks = Collections.unmodifiableMap(frozen);
   }
 
   private WorldSnapshot(String version, int minY, int maxY, Backend backend) {
@@ -156,6 +175,7 @@ public final class WorldSnapshot implements Serializable {
     this.maxY = maxY;
     if (minY > maxY) throw new IllegalArgumentException("minY must not exceed maxY");
     this.backend = Objects.requireNonNull(backend, "backend");
+    this.unknownChunks = Set.copyOf(backend.unknownChunks());
     this.chunks = null;
   }
 
@@ -299,6 +319,7 @@ public final class WorldSnapshot implements Serializable {
     if (backend != null) return backend.coverageAt(x, y, z);
     if (y < minY || y > maxY) return Coverage.UNLOADED;
     Chunk chunk = Chunk.containing(x, z);
+    if (unknownChunks.contains(chunk)) return Coverage.UNKNOWN;
     Map<Pos, BlockState> states = chunks.get(chunk);
     if (states == null) return Coverage.UNLOADED;
     BlockState state = states.get(new Pos(x, y, z));
@@ -366,6 +387,7 @@ public final class WorldSnapshot implements Serializable {
         yield state == null ? BlockState.air() : state;
       }
       case UNSUPPORTED -> throw new UnsupportedStateException(x, y, z);
+      case UNKNOWN -> throw new UnknownRegionException(x, y, z);
       case UNLOADED -> throw new UnloadedRegionException(x, y, z);
     };
   }
@@ -378,6 +400,7 @@ public final class WorldSnapshot implements Serializable {
   public BlockState blockRequireKnown(Pos position) {
     Coverage coverage = coverageAt(position.x(), position.y(), position.z());
     if (coverage == Coverage.UNLOADED) throw new UnloadedRegionException(position.x(), position.y(), position.z());
+    if (coverage == Coverage.UNKNOWN) throw new UnknownRegionException(position.x(), position.y(), position.z());
     if (coverage == Coverage.UNSUPPORTED) throw new UnsupportedStateException(position.x(), position.y(), position.z());
     // Covered and empty is genuine air, not missing data.
     BlockState state = blockAtOrNull(position.x(), position.y(), position.z());
@@ -385,6 +408,10 @@ public final class WorldSnapshot implements Serializable {
   }
 
   /** Raised when a caller asks for a guaranteed state in an unloaded region. */
+  public static final class UnknownRegionException extends IllegalStateException {
+    public UnknownRegionException(int x, int y, int z) { super("client world data for (" + x + "," + y + "," + z + ") is not yet known"); }
+  }
+
   public static final class UnloadedRegionException extends IllegalStateException {
     public UnloadedRegionException(int x, int y, int z) {
       super("no client world data for (" + x + "," + y + "," + z + "): the chunk is unloaded");
@@ -450,7 +477,7 @@ public final class WorldSnapshot implements Serializable {
   /** True when the query overlaps information this build cannot verify. */
   public boolean hasUnknownOrUnsupported(BlockBox query) {
     Set<Coverage> coverage = coverageIn(query);
-    return coverage.contains(Coverage.UNLOADED) || coverage.contains(Coverage.UNSUPPORTED);
+    return coverage.contains(Coverage.UNLOADED) || coverage.contains(Coverage.UNKNOWN) || coverage.contains(Coverage.UNSUPPORTED);
   }
 
   // ------------------------------------------------------------------
@@ -524,6 +551,8 @@ public final class WorldSnapshot implements Serializable {
     return List.copyOf(ordered);
   }
 
+  public Set<Chunk> unknownChunkSet() { return backend == null ? unknownChunks : Set.copyOf(backend.unknownChunks()); }
+
   @Override public String toString() {
     int chunkCount = backend != null ? backend.loadedChunks().size() : chunks.size();
     return "WorldSnapshot[" + version + " chunks=" + chunkCount + " y=" + minY + ".." + maxY + "]";
@@ -531,7 +560,7 @@ public final class WorldSnapshot implements Serializable {
 
   /** Materializes a compact backend only at explicit serialization/replay boundaries. */
   private Object writeReplace() {
-    return backend == null ? this : new WorldSnapshot(version, chunks(), minY, maxY);
+    return backend == null ? this : new WorldSnapshot(version, chunks(), unknownChunkSet(), minY, maxY);
   }
 
   @Override public boolean equals(Object other) {
@@ -542,7 +571,7 @@ public final class WorldSnapshot implements Serializable {
   }
 
   @Override public int hashCode() {
-    return Objects.hash(version, chunks(), minY, maxY);
+    return Objects.hash(version, chunks(), unknownChunkSet(), minY, maxY);
   }
 
   // ------------------------------------------------------------------
@@ -554,6 +583,7 @@ public final class WorldSnapshot implements Serializable {
     private final String version;
     private final int minY;
     private final int maxY;
+    private final Set<Chunk> unknownChunks = new TreeSet<>(java.util.Comparator.comparingInt(Chunk::x).thenComparingInt(Chunk::z));
     private final Map<Chunk, Map<Pos, BlockState>> chunks = new TreeMap<>(
         java.util.Comparator.comparingInt(Chunk::x).thenComparingInt(Chunk::z));
 
@@ -564,20 +594,27 @@ public final class WorldSnapshot implements Serializable {
       this.maxY = maxY;
     }
 
-    /** Declares a chunk as delivered to the client, without any block states. */
+    /** Declares a chunk as fully decoded/known to the client. */
     public Builder loadChunk(int chunkX, int chunkZ) {
+      Chunk chunk = new Chunk(chunkX, chunkZ); unknownChunks.remove(chunk);
       chunks.computeIfAbsent(new Chunk(chunkX, chunkZ), ignored -> new HashMap<>());
       return this;
     }
 
     /** Declares a chunk as delivered to the client, without any block states. */
+    public Builder loadUnknownChunk(int chunkX, int chunkZ) {
+      Chunk chunk = new Chunk(chunkX, chunkZ); unknownChunks.add(chunk); chunks.remove(chunk); return this;
+    }
+
+    public Builder loadUnknownChunk(Chunk chunk) { return loadUnknownChunk(chunk.x(), chunk.z()); }
+
     public Builder loadChunk(Chunk chunk) {
       return loadChunk(chunk.x(), chunk.z());
     }
 
     /** Unloads a chunk, discarding its states, mirroring a client chunk-unload packet. */
     public Builder unloadChunk(int chunkX, int chunkZ) {
-      chunks.remove(new Chunk(chunkX, chunkZ));
+      Chunk chunk = new Chunk(chunkX, chunkZ); chunks.remove(chunk); unknownChunks.remove(chunk);
       return this;
     }
 
@@ -625,7 +662,7 @@ public final class WorldSnapshot implements Serializable {
         // silently unload the chunk.
         snapshot.put(entry.getKey(), new HashMap<>(entry.getValue()));
       }
-      return new WorldSnapshot(version, snapshot, minY, maxY);
+      return new WorldSnapshot(version, snapshot, unknownChunks, minY, maxY);
     }
   }
 }
