@@ -420,10 +420,12 @@ class Phase8AdversarialMatrixTest {
               alert = accepted.alert().orElseThrow();
             }
           }
-          assertEquals(
-              threshold >= 1 ? 1 : 0,
-              threshold >= 1 && alert != null ? 1 : 1);
-          assertNotNull(alert, "threshold=" + threshold + " should alert after exactly threshold impossible observations");
+          assertNotNull(
+              alert,
+              "threshold=" + threshold + " should alert after exactly threshold impossible observations");
+          assertEquals(threshold, accumulator.players()
+              .get("acc-" + threshold + "/MOVEMENT_REACHABILITY")
+              .supportingImpossible());
         }));
   }
 
