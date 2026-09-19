@@ -204,6 +204,29 @@ final class Phase4WorldReplicaTest {
     assertEquals(exact.toWorld(16,64,0),merged.collisionShapeAt(16,64,0));
   }
 
+  @Test void generated12111CatalogueReconstructsStateSpecificCollision() {
+    BlockState stairs=BlockCatalogue12111.decode("minecraft:oak_stairs",Map.of(
+        "facing","north","half","top","shape","straight","waterlogged","false"));
+    VoxelShape stairShape=dev.phantom.ac.world.v12111.BlockCollisionCatalogue12111.shapeFor(stairs).orElseThrow();
+    assertEquals(List.of(
+        BlockBox.of(0,0,0,1,1,0.5),
+        BlockBox.of(0,0.5,0.5,1,1,1)), stairShape.boxes());
+
+    BlockState slab=BlockCatalogue12111.decode("minecraft:oak_slab",Map.of(
+        "type","bottom","waterlogged","false"));
+    assertEquals(BlockBox.of(0,0,0,1,0.5,1),
+        dev.phantom.ac.world.v12111.BlockCollisionCatalogue12111.shapeFor(slab).orElseThrow().boxes().getFirst());
+  }
+
+  @Test void generatedCatalogueAcceptsOutOfUnitVanillaBoxes() {
+    BlockState conduit=BlockCatalogue12111.decode("minecraft:end_rod",Map.of("facing","north"));
+    VoxelShape shape=dev.phantom.ac.world.v12111.BlockCollisionCatalogue12111.shapeFor(conduit).orElseThrow();
+    assertNotNull(shape);
+    assertTrue(shape.boxes().stream().allMatch(b ->
+        b.minX() >= -1 && b.minY() >= -1 && b.minZ() >= -1
+            && b.maxX() <= 2 && b.maxY() <= 2 && b.maxZ() <= 2));
+  }
+
   @Test void entityTrackingCompletenessIsExplicitAndReplayable() {
     var box=BlockBox.of(0,64,0,1,66,1);
     var replica=new Phase4WorldReplica(V);
