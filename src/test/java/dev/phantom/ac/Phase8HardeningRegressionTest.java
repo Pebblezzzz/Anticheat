@@ -153,6 +153,42 @@ class Phase8HardeningRegressionTest {
   }
 
   @Test
+  void overlappingLatencyWindowsDoNotMasqueradeAsSubTickEvidence() {
+    var packets = List.of(
+        new RawPacket(1, 0, new ChunkStates(
+            new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
+        new RawPacket(2, 0, new Packets.PlayerContext(
+            "survival", Simulation.Attributes.DEFAULT, Map.of(),
+            Phase5Mechanics.Pose.STANDING,
+            Phase5Mechanics.MovementEnvironment.dry(true, false, false),
+            new Vec3(.5, 64, .5), Vec3.ZERO, false, false, false, List.of())),
+        new RawPacket(3, 0, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, null)),
+        // With 0..100 ms upstream latency this movement has a broad generation
+        // window that overlaps the first movement's window. That overlap alone
+        // must not invalidate the causal frontier.
+        new RawPacket(4, 60_000_000L, new Move(new Vec3(.5, 64, .5), 0f, 0f, true, null)));
+
+    var report = CausalMovementPipeline.analyze(
+        "latency-overlap",
+        capture(packets),
+        4096,
+        Phase7Timing.Config.defaultConfig(),
+        floorWorld(),
+        Player.initial(new Vec3(.5, 64, .5)),
+        0L);
+
+    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertEquals(Verdict.POSSIBLE, report.results().get(0).verdict(), report.results().toString());
+    assertEquals(Verdict.POSSIBLE, report.results().get(1).verdict(), report.results().toString());
+    assertTrue(report.frames().get(1).trace().stream()
+        .anyMatch(line -> line.contains("TIMING_RANGE_OVERLAP observation-only")),
+        report.frames().get(1).trace().toString());
+    assertFalse(report.frames().get(1).trace().stream()
+        .anyMatch(line -> line.contains("SUB_TICK_AMBIGUITY")),
+        report.frames().get(1).trace().toString());
+  }
+
+  @Test
   void multipleMovementPacketsInOneClientTickRemainExplicitlyUncertain(){
     var packets=List.of(
         new RawPacket(1,0,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
