@@ -390,7 +390,7 @@ class Phase8AdversarialMatrixTest {
         new SearchResult(
             Phase6Reachability.Verdict.UNCERTAIN, Set.of(), 1, 4097, 0, 0, 1, 0,
             List.of("candidate budget exceeded")),
-        "budget-replay");
+        "budget-replay").evidence();
     assertEquals(Verdict.UNCERTAIN, evidence.verdict());
   }
 
