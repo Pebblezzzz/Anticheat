@@ -1065,13 +1065,14 @@ public final class Phase8PredictionRunner {
     int simulatedTicks = 0;
 
     for (long tick = startTick; tick < targetTick; tick++) {
+      final long simulationTick = tick;
       SearchResult result = new Phase6Reachability(new Vanilla12111RichPhysics()).search(
           current.stream()
-              .map(candidate -> candidate.context().withTick(tick))
+              .map(candidate -> candidate.context().withTick(simulationTick))
               .toList(),
           List.of(input),
           ignored -> List.of(new WorldBranch(
-              "packet-world@" + tick,
+              "packet-world@" + simulationTick,
               world,
               true,
               "latency-compensated client-visible world")),
