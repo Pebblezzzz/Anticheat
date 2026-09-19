@@ -187,6 +187,20 @@ final class Phase4WorldReplicaTest {
             .get(new Pos(0,64,0)).properties());
   }
 
+  @Test void entityTrackingCompletenessIsExplicitAndReplayable() {
+    var box=BlockBox.of(0,64,0,1,66,1);
+    var replica=new Phase4WorldReplica(V);
+    replica.accept(new Timeline.Event(1,new Packets.NormalizedPacket(1,1,
+        new Packets.EntitySpawn(7,box),EnumSet.of(Packets.PacketFlag.NORMAL),
+        Packets.CaptureProvenance.forPacket(new Packets.EntitySpawn(7,box)))));
+    assertTrue(replica.getWorldGeneration().entities().complete());
+    assertEquals(box,replica.getWorldGeneration().entities()
+        .boxesIn(BlockBox.of(-1,63,-1,2,67,2)).boxes().getFirst().box());
+
+    replica.markEntityTrackingIncomplete();
+    assertFalse(replica.getWorldGeneration().entities().complete());
+  }
+
   @Test void exactCollisionResolverOverridesReplayCatalogueWithoutChangingCoverage() {
     var r=new Phase4WorldReplica(V,"world",-64,319);
     BlockState stone=BlockCatalogue12111.decode("minecraft:stone",Map.of());
