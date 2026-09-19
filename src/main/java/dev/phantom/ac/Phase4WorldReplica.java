@@ -413,6 +413,7 @@ public final class Phase4WorldReplica implements Serializable {
   private final NavigableMap<Long,Event> unassigned=new TreeMap<>();
   private final Map<Short,List<Event>> pending=new LinkedHashMap<>();
   private transient volatile WorldSnapshot.CollisionResolver collisionResolver;
+  private volatile boolean entityTrackingComplete=true;
   private final Deque<Short> sentOrder=new ArrayDeque<>();
 
   private long generationId;
@@ -446,6 +447,21 @@ public final class Phase4WorldReplica implements Serializable {
   }
 
   public WorldSnapshot.CollisionResolver collisionResolver(){return collisionResolver;}
+
+  /** Marks live entity reconstruction incomplete until a fresh capture is established. */
+  public synchronized void markEntityTrackingIncomplete(){
+    if(entityTrackingComplete){
+      entityTrackingComplete=false;
+      publish(visible,lastVisibleSequence,List.of());
+    }
+  }
+
+  public synchronized void markEntityTrackingComplete(){
+    if(!entityTrackingComplete){
+      entityTrackingComplete=true;
+      publish(visible,lastVisibleSequence,List.of());
+    }
+  }
   public Generation getWorldGeneration(){return current.get();}
   public WorldSnapshot getWorldState(){return current.get().world();}
   public WorldSnapshot snapshot(){return getWorldState();}
@@ -628,6 +644,12 @@ public final class Phase4WorldReplica implements Serializable {
       accept(new ChunkData(order,provenance,x.chunk().toWorldChunk(),states));
     } else if(packet instanceof Packets.BlockChange x){
       accept(new BlockChange(order,provenance,x.position().toWorldPos(),World.legacyBlockState(x.block())));
+    } else if(packet instanceof Packets.EntitySpawn x){
+      accept(new EntitySpawn(order,provenance,new EntityCollisions.EntityBox(x.entityId(),x.box())));
+    } else if(packet instanceof Packets.EntityMove x){
+      accept(new EntityMove(order,provenance,new EntityCollisions.EntityBox(x.entityId(),x.box())));
+    } else if(packet instanceof Packets.EntityDespawn x){
+      accept(new EntityDespawn(order,provenance,x.entityId()));
     }
   }
 
@@ -819,10 +841,14 @@ public final class Phase4WorldReplica implements Serializable {
 
   private static final class TrackedEntities implements EntityCollisions,Serializable {
     private final Map<Integer,EntityCollisions.EntityBox> entities;
+    private final boolean complete;
 
-    TrackedEntities(Map<Integer,EntityCollisions.EntityBox> entities){
+    TrackedEntities(Map<Integer,EntityCollisions.EntityBox> entities,boolean complete){
       this.entities=Map.copyOf(entities);
+      this.complete=complete;
     }
+
+    @Override public boolean complete(){return complete;}
 
     @Override public EntityCollisionResult boxesIn(BlockBox query){
       List<EntityCollisions.EntityBox> result=new ArrayList<>();
