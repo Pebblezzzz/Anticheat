@@ -481,43 +481,20 @@ public final class Phase6Reachability {
 
     outer:
     for (int offset = 0; offset < inputs.size(); offset++) {
-      long tick = firstSimulationTick(current);
       List<AdvancedInput> allowed = orderedInputs(inputs.get(offset), reasons);
-      if (!inputs.get(offset).isExact()) {
+      boolean inputUncertain = !inputs.get(offset).isExact();
+      if (inputUncertain) {
         uncertain = true;
-        reasons.add("input uncertainty at tick " + tick + ": " + inputs.get(offset));
+        reasons.add("input uncertainty at relative step " + offset + ": " + inputs.get(offset));
       }
       if (allowed.isEmpty()) {
         uncertain = true;
-        reasons.add("input constraint has no realizable advanced input at tick " + tick);
+        reasons.add("input constraint has no realizable advanced input at relative step " + offset);
         addElimination(eliminations, new Elimination(
-            tick, -1, "INPUT", "input constraint has no realizable advanced input",
+            0L, -1, "INPUT", "input constraint has no realizable advanced input",
             inputs.get(offset).toString(), "UNKNOWN", "NONE",
             WorldKnowledge.UNKNOWN, List.of()));
         break;
-      }
-
-      List<WorldBranch> branches = orderedWorldBranches(
-          Objects.requireNonNull(worlds.apply(tick), "world branches"), tick);
-      if (branches.isEmpty()) {
-        uncertain = true;
-        reasons.add("world hypothesis envelope is empty at tick " + tick);
-        addElimination(eliminations, new Elimination(
-            tick, -1, "WORLD", "world hypothesis envelope is empty",
-            inputs.get(offset).toString(), "UNKNOWN", "NONE",
-            WorldKnowledge.UNKNOWN, List.of()));
-        break;
-      }
-      if (branches.stream().anyMatch(branch -> !branch.exhaustive())) {
-        nonExhaustiveWorldBranches += (int) branches.stream().filter(branch -> !branch.exhaustive()).count();
-        uncertain = true;
-        reasons.add("world hypothesis envelope is not exhaustive at tick " + tick);
-      }
-
-      List<ExternalPath> paths = orderedExternalPaths(
-          Objects.requireNonNull(externalPaths.apply(tick), "external paths"), tick);
-      if (paths.isEmpty()) {
-        paths = List.of(new ExternalPath("NONE@" + tick, List.of(new None()), "implicit no-op external path"));
       }
 
       TreeMap<String, Candidate> next = new TreeMap<>();
@@ -526,6 +503,30 @@ public final class Phase6Reachability {
 
       tickBranches:
       for (Candidate parent : parents) {
+        long tick = parent.context().simulationTick();
+        List<WorldBranch> branches = orderedWorldBranches(
+            Objects.requireNonNull(worlds.apply(tick), "world branches"), tick);
+        if (branches.isEmpty()) {
+          uncertain = true;
+          reasons.add("world hypothesis envelope is empty at tick " + tick);
+          addElimination(eliminations, new Elimination(
+              tick, parent.id(), "WORLD", "world hypothesis envelope is empty",
+              inputs.get(offset).toString(), "UNKNOWN", "NONE",
+              WorldKnowledge.UNKNOWN, List.of()));
+          continue;
+        }
+        if (branches.stream().anyMatch(branch -> !branch.exhaustive())) {
+          nonExhaustiveWorldBranches += (int) branches.stream().filter(branch -> !branch.exhaustive()).count();
+          uncertain = true;
+          reasons.add("world hypothesis envelope is not exhaustive at tick " + tick);
+        }
+
+        List<ExternalPath> paths = orderedExternalPaths(
+            Objects.requireNonNull(externalPaths.apply(tick), "external paths"), tick);
+        if (paths.isEmpty()) {
+          paths = List.of(new ExternalPath("NONE@" + tick, List.of(), "implicit no-op external path"));
+        }
+
         for (WorldBranch branch : branches) {
           WorldKnowledge branchKnowledge = worldKnowledge(branch);
           var player = parent.context().player();
@@ -548,6 +549,7 @@ public final class Phase6Reachability {
             continue;
           }
 
+          long parentBranchEvaluations = 0;
           for (ExternalPath path : paths) {
             Context pre = parent.context().withTick(tick);
             boolean externalUncertain = false;
@@ -572,7 +574,8 @@ public final class Phase6Reachability {
 
             for (AdvancedInput input : allowed) {
               branchEvaluations++;
-              if (branchEvaluations > config.maximumBranchesPerTransition()) {
+              parentBranchEvaluations++;
+              if (parentBranchEvaluations > config.maximumBranchesPerTransition()) {
                 budgetReached = true;
                 uncertain = true;
                 reasons.add("maximum branch budget reached at tick " + tick);
@@ -635,15 +638,15 @@ public final class Phase6Reachability {
               }
 
               generated++;
+              Aabb nextBox = Maths.Aabb.playerAt(
+                  stepped.state().position(), stepped.state().pose());
               MovementEnvironment nextEnvironment =
                   movementEnvironmentFor(
-                      WorldQueries.environment(branch.world(), new dev.phantom.ac.geometry.BlockBox(
-                          Math.floor(stepped.state().position().x()),
-                          Math.floor(stepped.state().position().y()),
-                          Math.floor(stepped.state().position().z()),
-                          Math.nextDown(Math.ceil(stepped.state().position().x() + 0.6)),
-                          Math.nextDown(Math.ceil(stepped.state().position().y() + 1.8)),
-                          Math.nextDown(Math.ceil(stepped.state().position().z() + 0.6)))),
+                      WorldQueries.environment(
+                          branch.world(),
+                          new dev.phantom.ac.geometry.BlockBox(
+                              nextBox.minX(), nextBox.minY(), nextBox.minZ(),
+                              nextBox.maxX(), nextBox.maxY(), nextBox.maxZ())),
                       pre, input);
               Pose nextPose = Phase5Mechanics.nextPose(
                   pre.pose(), nextEnvironment, pre.sleeping());
@@ -996,12 +999,6 @@ public final class Phase6Reachability {
         candidate.movementMode());
   }
 
-  private static long firstSimulationTick(Map<String,Candidate> current) {
-    return current.values().stream()
-        .mapToLong(candidate -> candidate.context().simulationTick())
-        .min().orElse(0L);
-  }
-
   private static MovementMode movementModeFor(Context context) {
     Player player = context.player();
     if ("creative".equals(player.gamemode()) || "spectator".equals(player.gamemode())) {
@@ -1208,12 +1205,34 @@ public final class Phase6Reachability {
   }
 
   private static boolean matches(Player c, Observation o) {
-    return mismatch(
-        new Candidate(0, new Context(0, c, Simulation.Environment.DRY,
-            Simulation.Attributes.DEFAULT, MovementEffects.NONE, Pose.STANDING,
-            MovementEnvironment.dry(c.onGround(), false, false), false), 
-            new Provenance(0, -1, 0, "match", "match", "None", List.of(), 1, List.of())),
-        o).dimensions().isEmpty();
+    Player expected = o.observed();
+    for (ObservedField field : o.known()) {
+      switch (field) {
+        case POSITION -> {
+          if (!positionMatches(c.position(), expected.position())) return false;
+        }
+        case VELOCITY -> {
+          if (!c.velocity().equals(expected.velocity())) return false;
+        }
+        case ROTATION -> {
+          if (Float.compare(c.yaw(), expected.yaw()) != 0
+              || Float.compare(c.pitch(), expected.pitch()) != 0) return false;
+        }
+        case GROUND -> {
+          if (c.onGround() != expected.onGround()) return false;
+        }
+        case GAMEMODE -> {
+          if (!c.gamemode().equals(expected.gamemode())) return false;
+        }
+        case EFFECTS -> {
+          if (!c.effects().equals(expected.effects())) return false;
+        }
+        case TELEPORT_PENDING -> {
+          if (c.awaitingTeleport().isPresent() != expected.awaitingTeleport().isPresent()) return false;
+        }
+      }
+    }
+    return true;
   }
 
   private static SearchMetrics aggregateMetrics(
@@ -1246,13 +1265,6 @@ public final class Phase6Reachability {
     List<Elimination> out = new ArrayList<>();
     for (SearchResult result : results) out.addAll(result.eliminations());
     return List.copyOf(out);
-  }
-
-  private static String sortedCandidates(Set<Candidate> candidates) {
-    return candidates.stream()
-        .sorted(Comparator.comparing(c -> candidateKey(c).toString()))
-        .map(Candidate::id)
-        .toList().toString();
   }
 
   private static void addElimination(List<Elimination> eliminations, Elimination elimination) {
