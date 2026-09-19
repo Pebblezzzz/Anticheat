@@ -1143,13 +1143,19 @@ public final class Phase7Timing {
     if (synchronization.status() != SyncStatus.SYNCHRONIZED) {
       reasons.add("Phase 7 synchronization state is " + synchronization.status());
     }
+    boolean synchronizationMakesThisEnvelopeUncertain =
+        switch (synchronization.status()) {
+          case AMBIGUOUS, UNKNOWN -> true;
+          case RECOVERING -> !timing.simulationClientTicks().isExact();
+          case SYNCHRONIZED, PARTIALLY_SYNCHRONIZED -> false;
+        };
     return new Phase6TimingEnvelope(
         timing.simulationClientTicks(),
         timing.possibleSimulationClientTicks(),
         timing.simulationCandidatesExhaustive(),
         synchronization.status(),
         synchronization.activeWindows(),
-        timing.uncertain() || synchronization.status() != SyncStatus.SYNCHRONIZED,
+        timing.uncertain() || synchronizationMakesThisEnvelopeUncertain,
         List.copyOf(reasons));
   }
 
@@ -1644,7 +1650,7 @@ public final class Phase7Timing {
         timing.clientProcessingClientTickEnvelope(),
         timing.simulationClientTickEnvelope(),
         timing.inputClientTickEnvelope(),
-        timing.explicitClientTick(), timing.source(), true,
+        timing.explicitClientTick(), timing.source(), timing.uncertain(),
         timing.orderingConstraints(), timing.windows(), reasons);
   }
 
