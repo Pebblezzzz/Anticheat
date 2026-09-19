@@ -269,14 +269,13 @@ public final class Phase8PredictionRunner {
     Phase7Timing.Reconstruction phase7Reconstruction = reconstructPhase7Timing();
     Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence =
         phase7Reconstruction.bySequence();
-    boolean phase7ChronologyUncertain =
-        phase7Reconstruction.frames().stream()
-            .anyMatch(frame -> frame.timing().windows().stream().anyMatch(
-                window -> switch (window.kind()) {
-                  case PACKET_GAP, SERVER_TICK_GAP, REORDERING, DUPLICATE, RECOVERY -> true;
-                  default -> false;
-                }))
-        || captureSequenceGap(packets);
+    /*
+     * Chronology uncertainty must be associated with the affected capture
+     * sequence, not broadcast from unrelated timing events in the same batch.
+     * Phase 7's per-event timing flag remains authoritative below; this batch
+     * flag only covers a concrete Phase 1 sequence gap.
+     */
+    boolean phase7ChronologyUncertain = captureSequenceGap(packets);
 
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     List<PredictionFrame> frames = new ArrayList<>();
