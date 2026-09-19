@@ -58,6 +58,14 @@ public final class VoxelShape implements Serializable {
     return local(boxes.toArray(BlockBox[]::new));
   }
 
+  /** Creates a block-local shape from vanilla boxes that may extend outside the unit cube. */
+  public static VoxelShape localUnbounded(List<BlockBox> boxes) {
+    Objects.requireNonNull(boxes, "boxes");
+    if (boxes.isEmpty()) return EMPTY;
+    for (BlockBox box : boxes) Objects.requireNonNull(box, "box");
+    return new VoxelShape(boxes, false);
+  }
+
   public static VoxelShape empty() {
     return EMPTY;
   }
