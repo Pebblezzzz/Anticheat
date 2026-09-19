@@ -670,6 +670,7 @@ public final class CausalMovementPipeline {
       }
 
       boolean rootedFromLocalAuthority = false;
+      boolean clientClockLocalAuthority = false;
       if (frontier.candidates().isEmpty()) {
         if (!preferLocalAuthoritativeRoot && (initialAnchor == null || initialAnchor.uncertain())) {
           uncertainty.add("first movement cannot be proven without an authoritative server anchor");
@@ -699,6 +700,8 @@ public final class CausalMovementPipeline {
         Candidate rootCandidate = root.orElseThrow();
         frontier = new Frontier(Set.of(rootCandidate), rootCandidate.context().simulationTick(), true);
         rootedFromLocalAuthority = preferLocalAuthoritativeRoot
+            && movement.simulationAuthority().isPresent();
+        clientClockLocalAuthority = rootedFromLocalAuthority
             && movement.simulationAuthority().map(AuthoritativeSnapshot::clientTick).isPresent();
         if (rootedFromLocalAuthority) {
           AuthoritativeSnapshot snapshot = movement.simulationAuthority().orElseThrow();
@@ -790,7 +793,7 @@ public final class CausalMovementPipeline {
 
       Optional<Advance> advanced;
       if (!eventTiming.simulationClientTicks().isExact()) {
-        if (rootedFromLocalAuthority) {
+        if (clientClockLocalAuthority) {
           advanced = Optional.ofNullable(advanceAcrossLocalAuthorityTimingRange(
               eventTiming.simulationClientTicks().min(),
               eventTiming.simulationClientTicks().max(),
@@ -1674,7 +1677,9 @@ public final class CausalMovementPipeline {
      * capture-local client-tick watermark and was captured before the movement.
      * A server-tick match without the client watermark is not sufficient.
      */
-    if (movement.packet().packet() instanceof Packets.Move move && move.clientTick() != null) {
+    boolean explicitClientTick = movement.packet().packet() instanceof Packets.Move move && move.clientTick() != null;
+    if (explicitClientTick) {
+      Packets.Move move = (Packets.Move) movement.packet().packet();
       long target = move.clientTick();
       Optional<AuthoritativeSnapshot> exactClient = authorities.stream()
           .filter(snapshot -> snapshot.sequence() < sequence)
