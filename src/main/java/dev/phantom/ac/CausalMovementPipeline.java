@@ -2463,8 +2463,18 @@ public final class CausalMovementPipeline {
   private static Optional<Candidate> authorityObservationWitness(
       MovementEvent movement,
       long simulationTick) {
-    Optional<AuthoritativeSnapshot> authority = movement.authority().snapshot();
-    if (authority.isEmpty() || simulationTick < 0) return Optional.empty();
+    if (simulationTick < 0) return Optional.empty();
+
+    /*
+     * Prefer the causally safe simulation authority (strictly preceding server
+     * tick for live explicit-tick captures). If it is unavailable, fall back to
+     * the best aligned authority snapshot for an observation-only witness.
+     * A zero-delta witness does not need collision/world coverage because it
+     * does not simulate a physics step.
+     */
+    Optional<AuthoritativeSnapshot> authority =
+        movement.simulationAuthority().or(() -> movement.authority().snapshot());
+    if (authority.isEmpty()) return Optional.empty();
     AuthoritativeSnapshot snapshot = authority.get();
     if (snapshot.sequence() == 0L) return Optional.empty();
     long age = movement.event().serverTick() - snapshot.serverTick();
@@ -2472,7 +2482,6 @@ public final class CausalMovementPipeline {
     Player authoritative = playerFromAuthority(snapshot.context());
     Player observed = movement.stateFrame().after();
     if (!Phase6Reachability.positionMatches(authoritative.position(), observed.position())) return Optional.empty();
-    if (!movement.world().fullyKnown(playerCollisionBox(observed))) return Optional.empty();
     if (authoritative.onGround() != observed.onGround()) return Optional.empty();
     if (movement.move().onGround() != null && authoritative.onGround() != movement.move().onGround()) return Optional.empty();
     /*
