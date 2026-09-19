@@ -127,7 +127,7 @@ class Phase8PredictionRunnerTest {
     PlayerContext authority = new PlayerContext(
         "survival", Simulation.Attributes.DEFAULT, Map.of(),
         Pose.STANDING, MovementEnvironment.dry(true, false, false),
-        new Maths.Vec3(.5, 72, .5), new Maths.Vec3(0.0, -0.0784, 0.0),
+        new Maths.Vec3(.5, 64, .5), Maths.Vec3.ZERO,
         false, false, false, List.of());
 
     List<RawPacket> catchUp = new ArrayList<>();
