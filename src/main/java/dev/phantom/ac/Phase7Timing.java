@@ -629,8 +629,7 @@ public final class Phase7Timing {
           anchorSet = true;
           anchorSequence = OptionalLong.of(normalized.sequence());
           anchorGeneration = bounds.packetGenerationNanos;
-          anchorTick = new Range(
-              Math.max(0L, clientBoundaryCount - 1L), clientBoundaryCount);
+          anchorTick = Range.exact(clientBoundaryCount);
           sync = new SynchronizationState(
               SyncStatus.PARTIALLY_SYNCHRONIZED,
               anchorTick,
@@ -795,9 +794,7 @@ public final class Phase7Timing {
       List<String> reasons = new ArrayList<>(bounds.reasons);
       boolean uncertain = !packetTicks.exhaustive()
           || !simulationTicks.exhaustive()
-          || (direction == Direction.SERVER_TO_CLIENT && !processingTicks.exhaustive())
-          || (packetTicks.known() && !packetTicks.range().isExact())
-          || (simulationTicks.known() && !simulationTicks.range().isExact());
+          || (direction == Direction.SERVER_TO_CLIENT && !processingTicks.exhaustive());
       if (packetDerivation.evidenceConflict()) {
         uncertain = true;
         if (consistency == Consistency.CONSISTENT) consistency = Consistency.UNCERTAIN;
@@ -1276,14 +1273,14 @@ public final class Phase7Timing {
             TickEnvelope.bounded(Range.exact(tick), config.maxTimingCandidates()),
             TimingSource.EXPLICIT_CLIENT_TICK,
             false,
-            List.of("capture-supplied client tick metadata is used as a discrete timing witness"));
+            List.of("capture-supplied client tick metadata exactly identifies packet-generation client tick; later simulation delay remains a separate envelope"));
       }
       if (constrained.contains(tick)) {
         return new TickDerivation(
             TickEnvelope.bounded(Range.exact(tick), config.maxTimingCandidates()),
             TimingSource.EXPLICIT_CLIENT_TICK,
             false,
-            List.of("capture-supplied client tick metadata agrees with the bounded chronology envelope"));
+            List.of("capture-supplied client tick metadata exactly identifies packet-generation client tick and agrees with bounded chronology"));
       }
       Range widened = constrained.union(Range.exact(tick));
       reasons.add("capture-supplied client tick metadata disagrees with independently derived timing; exactness is widened");
@@ -1341,9 +1338,11 @@ public final class Phase7Timing {
   private static TickEnvelope boundaryEnvelope(
       long boundaryIndex,
       int maximumCandidates) {
-    Range range = new Range(
-        Math.max(0L, boundaryIndex - 1L), boundaryIndex);
-    return TickEnvelope.bounded(range, maximumCandidates);
+    // CLIENT_TICK_END gives an exact relative ordinal of completed client ticks.
+    // It does not establish an absolute wall-clock/client-clock origin.
+    return TickEnvelope.bounded(
+        Range.exact(Math.max(0L, boundaryIndex)),
+        maximumCandidates);
   }
 
   private static TickEnvelope shiftEnvelope(
