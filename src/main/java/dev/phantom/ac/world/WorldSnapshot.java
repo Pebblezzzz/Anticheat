@@ -49,6 +49,13 @@ import dev.phantom.ac.world.v12111.BlockCatalogue12111;
  */
 public final class WorldSnapshot implements Serializable {
 
+  /** Runtime collision resolver for exact platform-native shapes. It is intentionally
+   * optional and transient: deterministic replay falls back to the version catalogue. */
+  @FunctionalInterface
+  public interface CollisionResolver {
+    java.util.Optional<VoxelShape> resolve(WorldSnapshot snapshot, BlockState state, int x, int y, int z);
+  }
+
   /** A read-only, query-oriented backend used by compact client-world caches. */
   public interface Backend {
     String version();
@@ -72,6 +79,11 @@ public final class WorldSnapshot implements Serializable {
 
     Coverage coverageAt(int x, int y, int z);
     BlockState blockAtOrNull(int x, int y, int z);
+
+    /** Optional exact runtime shape. Empty means this backend has no native resolver. */
+    default java.util.Optional<VoxelShape> resolveCollisionShape(WorldSnapshot snapshot, int x, int y, int z) {
+      return java.util.Optional.empty();
+    }
 
     /** Diagnostic-only description; never used to make a verdict. */
     default String coverageDetailAt(int x, int y, int z) {
@@ -270,6 +282,15 @@ public final class WorldSnapshot implements Serializable {
           Chunk sought=Chunk.containing(x,z);
           if (first.hasChunk(sought)) return first.blockAtOrNull(x,y,z);
           return second.blockAtOrNull(x,y,z);
+        }
+        @Override public java.util.Optional<VoxelShape> resolveCollisionShape(WorldSnapshot snapshot,int x,int y,int z) {
+          Chunk sought=Chunk.containing(x,z);
+          if(first.hasChunk(sought)){
+            java.util.Optional<VoxelShape> a=first.resolveCollisionShape(x,y,z);
+            if(a.isPresent())return a;
+          }
+          if(second.hasChunk(sought))return second.resolveCollisionShape(x,y,z);
+          return java.util.Optional.empty();
         }
       };
       return WorldSnapshot.backed(first.version(),first.minY(),first.maxY(),mergedBackend);
@@ -494,13 +515,29 @@ public final class WorldSnapshot implements Serializable {
    * empty shape only when the block's own shape is empty; otherwise the missing
    * neighbour is reported through {@link #coverageIn} on the connection check.</p>
    */
+  /** Returns only the platform-native collision answer, without invoking deterministic fallbacks. */
+  private java.util.Optional<VoxelShape> resolveCollisionShape(int x,int y,int z) {
+    return backend == null
+        ? java.util.Optional.empty()
+        : backend.resolveCollisionShape(this,x,y,z);
+  }
+
   public VoxelShape collisionShapeAt(int x, int y, int z) {
     Coverage coverage = coverageAt(x, y, z);
     if (coverage != Coverage.KNOWN) return VoxelShape.empty();
+    if (backend != null) {
+      java.util.Optional<VoxelShape> exact = backend.resolveCollisionShape(this, x, y, z);
+      if (exact.isPresent()) return exact.get();
+    }
     // A known position with no stored state is genuine air, which has no
     // collision geometry. Only UNLOADED and UNSUPPORTED mean "no data".
     BlockState state = blockAtOrNull(x, y, z);
     if (state == null) return VoxelShape.empty();
+    if (state.variant() == BlockState.Variant.CATALOGUE) {
+      java.util.Optional<VoxelShape> deterministic =
+          dev.phantom.ac.world.v12111.BlockCollisionCatalogue12111.shapeFor(state);
+      if (deterministic.isPresent()) return deterministic.get().toWorld(x, y, z);
+    }
     VoxelShape local = BlockCatalogue12111.collisionShape(state, neighboursFor(x, y, z, state));
     return local.isEmpty() ? VoxelShape.empty() : local.toWorld(x, y, z);
   }
