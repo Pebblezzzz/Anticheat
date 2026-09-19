@@ -780,7 +780,7 @@ public final class Phase8PredictionRunner {
           ? "phase7-explicit-client-tick"
           : "packet-client-tick";
       String reason = timingUncertain
-          ? "Phase 7 timing reconstruction retained chronology uncertainty for an explicitly captured client tick"
+          ? "Phase 7 timing envelope retains chronology uncertainty for an explicitly captured client tick"
           : "explicit client tick captured from the protocol movement chronology";
       return new TickResolution(
           tick, true, true, timingUncertain, source, reason);
@@ -794,7 +794,7 @@ public final class Phase8PredictionRunner {
       String source = timing != null ? "phase7-client-tick-boundary-watermark"
           : "client-tick-boundary-watermark";
       String reason = timingUncertain
-          ? "Phase 7 timing reconstruction retained chronology uncertainty around the boundary watermark"
+          ? "Phase 7 timing envelope retains chronology uncertainty around the boundary watermark"
           : "client tick boundary established the current relative client tick";
       return new TickResolution(
           relativeClientTick, true, true, timingUncertain, source, reason);
