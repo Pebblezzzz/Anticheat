@@ -10,6 +10,8 @@ There is no global reconstructed world shared by players.
 
 ## Implemented
 
+- The former `LiveClientWorldReplica` Paper cache is removed. It is not a second world model anymore.
+
 - Phase4WorldRegistry owns one Phase4WorldReplica per tracked player.
 - Each replica owns its own ordered event journal and immutable generation history.
 - Two players can receive different block histories and therefore have different snapshots.
@@ -44,7 +46,7 @@ This is IMPLEMENTED and INTERNALLY TESTED, but it is not claimed to be complete 
 
 ## Publication
 
-The current generation is held in an AtomicReference. Readers only see immutable snapshots. Chunk construction happens before publication, so a partially decoded chunk cannot appear as a complete snapshot.
+The current generation is held in an AtomicReference. Readers only see immutable snapshots. Clientbound chunk/block mutations are queued behind the same transaction barriers used by the Paper adapter and become visible to the authoritative Phase 4 generation only after acknowledgement.
 
 ## Entity status
 
@@ -69,7 +71,7 @@ Phase 5 should consume WorldSnapshot/WorldView/WorldQueries rather than implemen
 | Per-player CompensatedWorld | Phase4WorldReplica + Phase4WorldRegistry | Yes | Phase 4 |
 | Packet-driven chunk/block replication | Timeline adapter + Phase 4 events | Yes | Phase 1–4 boundary |
 | Transaction/latency-gated visibility | Existing CompensatedClientWorld barrier model plus Phase 4 provenance/generation seam | Yes | Adapter/Phase 4 |
-| Palette-backed world cache | Existing PacketEvents LiveClientWorldReplica backend | Yes for live memory efficiency | Paper adapter |
+| Live packet world cache | Phase4WorldReplica transaction-gated journal + immutable generations | Yes | Phase 4 + Paper adapter |
 | Historical/latency world state | Immutable Generation history | Yes | Phase 4; temporal selection belongs to Phase 7 |
 | Version-specific collision shapes | BlockCatalogue12111 + WorldSnapshot | Yes | Phase 4 |
 | Compensated entity state | EntityCollisions generation state | Yes | Phase 4 |
