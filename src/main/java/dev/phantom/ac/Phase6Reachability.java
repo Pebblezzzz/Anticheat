@@ -104,12 +104,26 @@ public final class Phase6Reachability {
       int peakCandidates,
       int evaluatedTicks,
       boolean budgetReached,
-      boolean exhaustive) implements Serializable {
+      boolean exhaustive,
+      List<Integer> candidatesPerTick) implements Serializable {
+    public SearchMetrics(long generatedCandidates, long mergedCandidates, long prunedCandidates,
+                         long branchEvaluations, long simulationSteps, int peakCandidates,
+                         int evaluatedTicks, boolean budgetReached, boolean exhaustive) {
+      this(generatedCandidates, mergedCandidates, prunedCandidates, branchEvaluations,
+          simulationSteps, peakCandidates, evaluatedTicks, budgetReached, exhaustive, List.of());
+    }
     public SearchMetrics {
       if (generatedCandidates < 0 || mergedCandidates < 0 || prunedCandidates < 0
           || branchEvaluations < 0 || simulationSteps < 0 || peakCandidates < 0
           || evaluatedTicks < 0) {
         throw new IllegalArgumentException("negative search metric");
+      }
+      candidatesPerTick = List.copyOf(candidatesPerTick);
+      if (candidatesPerTick.stream().anyMatch(count -> count == null || count < 0)) {
+        throw new IllegalArgumentException("invalid candidatesPerTick metric");
+      }
+      if (!candidatesPerTick.isEmpty() && candidatesPerTick.size() != evaluatedTicks) {
+        throw new IllegalArgumentException("candidatesPerTick must match evaluatedTicks");
       }
     }
   }
@@ -367,7 +381,8 @@ public final class Phase6Reachability {
       String worldReference,
       String timingReference,
       Long serverTickAssociation,
-      MovementMode movementMode) {}
+      MovementMode movementMode,
+      long candidateIsolationId) {}
 
   private static final int MAX_DIAGNOSTICS = 256;
   private static final int MAX_CLOSEST_CANDIDATES = 4;
@@ -649,14 +664,17 @@ public final class Phase6Reachability {
               generated++;
               Maths.Aabb nextBox = Maths.Aabb.playerAt(
                   stepped.state().position(), stepped.state().pose());
-              MovementEnvironment nextEnvironment =
-                  movementEnvironmentFor(
-                      WorldQueries.environment(
-                          branch.world(),
-                          new dev.phantom.ac.geometry.BlockBox(
-                              nextBox.minX(), nextBox.minY(), nextBox.minZ(),
-                              nextBox.maxX(), nextBox.maxY(), nextBox.maxZ())),
-                      pre, input);
+              WorldQueries.EnvironmentSample nextSample = WorldQueries.environment(
+                  branch.world(),
+                  new dev.phantom.ac.geometry.BlockBox(
+                      nextBox.minX(), nextBox.minY(), nextBox.minZ(),
+                      nextBox.maxX(), nextBox.maxY(), nextBox.maxZ()));
+              boolean nextEnvironmentKnown =
+                  nextSample.isDefinite()
+                      && (!nextSample.inFluid() || nextSample.allFluidHeightsKnown());
+              MovementEnvironment nextEnvironment = nextEnvironmentKnown
+                  ? movementEnvironmentFor(nextSample, pre, input)
+                  : pre.movementEnvironment();
               Pose nextPose = Phase5Mechanics.nextPose(
                   pre.pose(), nextEnvironment, pre.sleeping());
 
@@ -665,6 +683,10 @@ public final class Phase6Reachability {
               if (!branch.exhaustive()) stateUncertainty.add(UncertainDimension.WORLD);
               if (!inputs.get(offset).isExact()) stateUncertainty.add(UncertainDimension.INPUT);
               if (branchKnowledge != WorldKnowledge.KNOWN) stateUncertainty.add(UncertainDimension.WORLD);
+              if (!nextEnvironmentKnown) {
+                stateUncertainty.add(UncertainDimension.WORLD);
+                stateUncertainty.add(UncertainDimension.ENVIRONMENT);
+              }
 
               Context after = new Context(
                   tick + 1, stepped.state(), environmentFor(nextEnvironment),
@@ -677,7 +699,7 @@ public final class Phase6Reachability {
                   nextId++, after,
                   new Provenance(
                       nextId - 1, parent.id(), tick, input.toString(), branch.id(),
-                      path.id(), List.of(stepped.diagnostic()), 1, List.of(parent.id()),
+                      externalTransitionSummary(path), List.of(stepped.diagnostic()), 1, List.of(parent.id()),
                       List.of(
                           "input=" + input,
                           "world=" + branch.id() + " knowledge=" + branchKnowledge,
@@ -716,6 +738,7 @@ public final class Phase6Reachability {
       }
 
       evaluatedTicks++;
+      candidatesPerTick.add(next.size());
       long diagnosticTick = current.values().stream()
           .mapToLong(candidate -> candidate.context().simulationTick())
           .min().orElse(0L);
@@ -723,6 +746,7 @@ public final class Phase6Reachability {
         uncertain = true;
         reasons.add("no legitimate Phase 5 candidate survived tick " + diagnosticTick
             + "; Phase 6 cannot prove impossibility without a complete trusted model");
+        current = next;
         break;
       }
       current = next;
@@ -737,7 +761,7 @@ public final class Phase6Reachability {
 
     SearchMetrics metrics = new SearchMetrics(
         generated, merged, pruned, branchEvaluations, simulationSteps,
-        peak, evaluatedTicks, budgetReached, exhaustive);
+        peak, evaluatedTicks, budgetReached, exhaustive, candidatesPerTick);
     return new SearchResult(verdict, new LinkedHashSet<>(current.values()),
         evaluatedTicks, peak, (int)Math.min(Integer.MAX_VALUE, merged),
         nonExhaustiveWorldBranches, uncertainTransitions, provenanceMerges,
@@ -854,6 +878,18 @@ public final class Phase6Reachability {
     if (matches.isEmpty()) {
       Optional<Candidate> last = closest.isEmpty() ? ordered.stream().findFirst() : Optional.of(closest.getFirst());
       Optional<Elimination> elimination = result.eliminations().stream().findFirst();
+      if (elimination.isEmpty() && result.exhaustive() && last.isPresent()) {
+        Candidate candidate = last.get();
+        elimination = Optional.of(new Elimination(
+            candidate.context().simulationTick(), candidate.id(), "OBSERVATION",
+            "declared observed state does not match any reachable candidate",
+            candidate.inputAssumption(), candidate.worldReference(),
+            candidate.provenance().externalTransition(), candidate.worldKnowledge(),
+            List.of("mismatchDimensions=" + (sortedMismatches.isEmpty()
+                ? Set.of() : sortedMismatches.getFirst().dimensions()),
+                "candidatePosition=" + candidate.context().player().position(),
+                "observedPosition=" + observation.observed().position())));
+      }
       Set<ObservedField> dimensions = sortedMismatches.isEmpty()
           ? EnumSet.noneOf(ObservedField.class)
           : sortedMismatches.getFirst().dimensions();
@@ -1000,7 +1036,8 @@ public final class Phase6Reachability {
         .append(context.pose()).append('|')
         .append(context.movementEnvironment()).append('|')
         .append(context.sleeping()).append('|')
-        .append(context.entityCollisions()).append('|')
+        .append(context.entityCollisions() == EntityCollisions.NONE_TRACKED
+            ? "NONE_TRACKED" : "NON_CANONICAL_PROVIDER").append('|')
         .append(sortedSet(context.uncertainty()));
     return b.toString();
   }
@@ -1017,12 +1054,15 @@ public final class Phase6Reachability {
   }
 
   private static CandidateKey candidateKey(Candidate candidate) {
+    long isolation = candidate.context().entityCollisions() == EntityCollisions.NONE_TRACKED
+        ? 0L : candidate.id();
     return new CandidateKey(
         contextKey(candidate.context()),
         candidate.worldReference(),
         candidate.timingReference(),
         candidate.serverTickAssociation(),
-        candidate.movementMode());
+        candidate.movementMode(),
+        isolation);
   }
 
   private static MovementMode movementModeFor(Context context) {
@@ -1134,6 +1174,11 @@ public final class Phase6Reachability {
     result.addAll(current);
     result.add(dimension);
     return result;
+  }
+
+  private static String externalTransitionSummary(ExternalPath path) {
+    if (path.transitions().isEmpty()) return path.id() + ":NONE";
+    return path.id() + ":" + path.transitions().stream().map(Objects::toString).toList();
   }
 
   private static Candidate mergeProvenance(Candidate existing, Candidate alternative) {
@@ -1294,9 +1339,13 @@ public final class Phase6Reachability {
       peak = Math.max(peak, m.peakCandidates());
       ticks += m.evaluatedTicks();
     }
+    List<Integer> candidatesPerTick = new ArrayList<>();
+    for (SearchResult result : results) {
+      candidatesPerTick.addAll(result.metrics().candidatesPerTick());
+    }
     return new SearchMetrics(generated, merged, pruned, branches, steps, peak, ticks,
         budgetReached || results.stream().anyMatch(r -> r.metrics().budgetReached()),
-        exhaustive);
+        exhaustive, candidatesPerTick);
   }
 
   private static List<Elimination> flattenEliminations(Collection<SearchResult> results) {
