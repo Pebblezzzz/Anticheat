@@ -108,7 +108,7 @@ class Phase8PredictionRunnerTest {
             new RawPacket(2, 30, new ClientTickEnd()),
             new RawPacket(3, 60, new Move(anchor().position(), 0f, 0f, true, 1L)),
             new RawPacket(4, 65, new Move(
-                new Maths.Vec3(.6, 64, .5), 15f, 0f, true, 1L)))),
+                new Maths.Vec3(.6, 64, .5), 15f, 0f, true, 1L))),
         floorWorld(), anchor(), 20L);
 
     assertTrue(report.results().stream().anyMatch(
