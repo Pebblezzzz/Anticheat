@@ -83,10 +83,12 @@ public final class Phase8EnforcementPolicy {
           Set.of(),
           "configured consecutive impossible-evidence threshold has not been reached");
     }
+    if (episode.consecutiveImpossible() > config.minimumImpossibleObservations()) {
+      return new Decision(false, 1.0, Set.of(),
+          "enforcement actions were already eligible earlier in this impossible-evidence episode");
+    }
 
-    double confidence = Math.min(
-        1.0,
-        (double) episode.consecutiveImpossible() / config.minimumImpossibleObservations());
+    double confidence = 1.0;
     if (confidence < config.minimumConfidence()) {
       return new Decision(false, confidence, Set.of(), "minimum enforcement confidence has not been reached");
     }
