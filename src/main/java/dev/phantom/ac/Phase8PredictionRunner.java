@@ -1380,36 +1380,6 @@ public final class Phase8PredictionRunner {
         && Double.compare(left.z(), right.z()) == 0;
   }
 
-  private static boolean movementAllowsKinematicCertificate(Candidate candidate) {
-    MovementEnvironment environment = candidate.context().movementEnvironment();
-    return environment.fluid() == Fluid.NONE
-        && !environment.climbable()
-        && !environment.gliding()
-        && candidate.context().pose() != Pose.FALL_FLYING;
-  }
-
-  private static boolean exceedsConservativeKinematicBound(
-      Candidate candidate,
-      Player observed,
-      long ticks) {
-    if (ticks < 1L || ticks > 2L) return false;
-    double dx = observed.position().x() - candidate.context().player().position().x();
-    double dy = observed.position().y() - candidate.context().player().position().y();
-    double dz = observed.position().z() - candidate.context().player().position().z();
-    double horizontalDistance = Math.hypot(dx, dz);
-    double horizontalVelocity = Math.hypot(
-        candidate.context().player().velocity().x(),
-        candidate.context().player().velocity().z());
-    double speedMultiplier = Math.max(1.0, candidate.context().effects().speedMultiplier());
-    double configuredSpeed = Math.max(0.05, candidate.context().attributes().value()) * speedMultiplier;
-    double horizontalPerTick = horizontalVelocity + configuredSpeed * 4.0 + 0.25;
-    double verticalVelocity = Math.abs(candidate.context().player().velocity().y());
-    double verticalPerTick = verticalVelocity + 1.0 + configuredSpeed + 0.25;
-    double horizontalBound = horizontalPerTick * ticks;
-    double verticalBound = verticalPerTick * ticks;
-    return horizontalDistance > horizontalBound || Math.abs(dy) > verticalBound;
-  }
-
   private long movementServerTick(Packets.RawPacket packet) {
     Long value = packet.provenance().authoritativeServerTick();
     return value == null ? 0L : value;
