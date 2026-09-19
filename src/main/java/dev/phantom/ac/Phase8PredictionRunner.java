@@ -393,6 +393,9 @@ public final class Phase8PredictionRunner {
           + " causalSequence=" + world.causalSequence()
           + " chunks=" + world.loadedChunks().size());
 
+      ensureRoot(playerId, packet, move, observedBefore, tick, trace);
+      refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, trace);
+
       boolean stationaryPositionObservation = move.position() != null
           && positionExactlyMatches(observedBefore.position(), observedAfter.position())
           && observedBefore.onGround()
@@ -400,7 +403,6 @@ public final class Phase8PredictionRunner {
 
       if (move.position() == null || stationaryPositionObservation) {
         boolean positionlessRotationObservation = move.position() == null;
-        ensureRoot(playerId, packet, move, observedBefore, tick, trace);
         prediction = retargetRotation(prediction, move, maximumCandidates);
         Set<Candidate> rotated = prediction;
         boolean possibleObservation = !rotated.isEmpty();
@@ -461,8 +463,6 @@ public final class Phase8PredictionRunner {
         uncertaintySources.add("client simulation tick has not been established by a client-tick boundary");
       }
 
-      ensureRoot(playerId, packet, move, observedBefore, tick, trace);
-      refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, trace);
       if (prediction.isEmpty()) {
         uncertaintySources.add("persistent prediction frontier is not anchored to an authoritative or correction state");
         latestContinuation = Continuation.UNCERTAIN;
