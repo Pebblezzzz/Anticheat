@@ -89,6 +89,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private final PacketListenerAbstract listener=new PacketListenerAbstract(){
     @Override public void onPacketReceive(PacketReceiveEvent event){
       UUID playerId=event.getUser().getUUID();
+      if(playerId==null)return;
       Capture capture=captures.computeIfAbsent(playerId,ignored->new Capture(playerId,System.nanoTime(),validationBudget));
       capture.nettyChannel=asNettyChannel(event.getChannel());
       capture.playerName=event.getUser().getName();
