@@ -498,8 +498,6 @@ class Phase6CompletionTest {
             new Context(
                 expectedContext.simulationTick(),
                 expected,
-                input,
-                scenario.world(),
                 expectedContext.environment(),
                 expectedContext.attributes(),
                 expectedContext.effects(),
@@ -511,8 +509,6 @@ class Phase6CompletionTest {
         expectedContext = new Context(
             expectedContext.simulationTick() + 1,
             expected,
-            input,
-            scenario.world(),
             expectedContext.environment(),
             expectedContext.attributes(),
             expectedContext.effects(),
