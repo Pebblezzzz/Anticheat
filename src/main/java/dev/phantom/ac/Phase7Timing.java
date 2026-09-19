@@ -1146,7 +1146,7 @@ public final class Phase7Timing {
     boolean synchronizationMakesThisEnvelopeUncertain =
         switch (synchronization.status()) {
           case AMBIGUOUS, UNKNOWN -> true;
-          case RECOVERING -> !timing.simulationClientTicks().isExact();
+          case RECOVERING -> true;
           case SYNCHRONIZED, PARTIALLY_SYNCHRONIZED -> false;
         };
     return new Phase6TimingEnvelope(
@@ -1636,6 +1636,16 @@ public final class Phase7Timing {
     if (!affectsMovementSynchronization(kind)
         || sync.status() == SyncStatus.SYNCHRONIZED
         || timing.uncertain()) {
+      return timing;
+    }
+    /*
+     * A correction lifecycle is different from an ordinary partially-synced
+     * clock. While RECOVERING, movement chronology is intentionally not trusted
+     * until the configured number of clean post-correction observations exists.
+     * This is event-local recovery uncertainty; it does not poison unrelated
+     * world events or permanently mark subsequent synchronized movement.
+     */
+    if (sync.status() != SyncStatus.RECOVERING) {
       return timing;
     }
     List<String> reasons = new ArrayList<>(timing.reasons());
