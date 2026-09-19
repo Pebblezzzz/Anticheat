@@ -449,9 +449,11 @@ public final class Phase8PredictionRunner {
         continue;
       }
 
-      prediction = overlayEntityCollisions(
-          prediction, entityCollisions(latestAuthority), maximumCandidates);
-      prediction = retargetRotation(prediction, move, maximumCandidates);
+      Set<Candidate> withEntities =
+          overlayEntityCollisions(prediction, entityCollisions(latestAuthority), maximumCandidates);
+      if (!withEntities.isEmpty()) prediction = withEntities;
+      Set<Candidate> withRotation = retargetRotation(prediction, move, maximumCandidates);
+      if (!withRotation.isEmpty()) prediction = withRotation;
 
       if (!tick.exact()) {
         uncertaintySources.add("movement timing is not exact; the persistent predictor requires a bounded client-tick state");
@@ -558,8 +560,12 @@ public final class Phase8PredictionRunner {
               playerId, packet, move, observedBefore, observedAfter, world,
               tick, uncertaintySources, search, true);
           results.add(result);
-          predictionTick = targetTick;
-          latestPositionAdvanceWithoutObservation(certificateRoot, targetTick);
+          /*
+           * The certificate proves only that this observation is outside the
+           * conservative envelope. The last fully simulated prediction remains
+           * the trusted expected state for the next packet.
+           */
+          prediction = Set.of(certificateRoot);
           if (result.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
             latestContinuation = Continuation.IMPOSSIBLE;
             impossible++;
@@ -1142,16 +1148,6 @@ public final class Phase8PredictionRunner {
     double horizontalBound = horizontalPerTick * ticks;
     double verticalBound = verticalPerTick * ticks;
     return horizontalDistance > horizontalBound || Math.abs(dy) > verticalBound;
-  }
-
-  private void latestPositionAdvanceWithoutObservation(Candidate candidate, long targetTick) {
-    /*
-     * The certificate only establishes that the observed position is outside the
-     * conservative envelope. The actual Phase 5 state remains the last prediction;
-     * never mutate it toward the client observation.
-     */
-    prediction = Set.of(candidate);
-    predictionTick = targetTick;
   }
 
   private long movementServerTick(Packets.RawPacket packet) {
