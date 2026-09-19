@@ -795,7 +795,7 @@ public final class CausalMovementPipeline {
       if (movement.move().clientTick() != null
           && previousExplicitClientTick != null
           && movement.move().clientTick() > previousExplicitClientTick
-          && eventTiming.simulationClientTicks().isExact()
+          && movement.chronologyClean()
           && movement.world().hasChunk(
               Math.floorDiv((int) Math.floor(observedBefore.position().x()), 16),
               Math.floorDiv((int) Math.floor(observedBefore.position().z()), 16))
