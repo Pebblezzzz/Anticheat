@@ -37,15 +37,35 @@ public final class Vanilla12111RichPhysics {
         Vec3 acceleration=new Vec3(inputScale*(context.input().strafe()*inputAcceleration*Math.cos(radians)-context.input().forward()*inputAcceleration*Math.sin(radians)),0,inputScale*(context.input().forward()*inputAcceleration*Math.cos(radians)+context.input().strafe()*inputAcceleration*Math.sin(radians)));Vec3 velocity=s.velocity().add(acceleration);
         if(climbing){if(context.input().forward()>0)velocity=new Vec3(velocity.x(),CLIMB_MAX_UP,velocity.z());else if(context.input().forward()<0)velocity=new Vec3(velocity.x(),-CLIMB_MAX_DOWN,velocity.z());else velocity=new Vec3(velocity.x(),Math.max(-CLIMB_MAX_DOWN,velocity.y()),velocity.z());}
         boolean jumped=context.input().jump()&&s.onGround()&&!fluid&&!climbing&&!gliding&&!context.sleeping();if(jumped)velocity=new Vec3(velocity.x(),JUMP+context.effects().jumpVelocityAdd(),velocity.z());if(context.effects().levitation())velocity=new Vec3(velocity.x(),context.effects().levitationVelocity(),velocity.z());
-        RichWorldCollision.Result collision=RichWorldCollision.resolve(context.world(),start,velocity,s.onGround()&&!fluid&&!climbing&&!gliding?STEP_HEIGHT:0,context.entityCollisions());if(collision.uncertain())return uncertain(context,collision.diagnostic());Vec3 displacement=collision.displacement();
-        boolean supported=false;if(s.onGround()&&velocity.y()<=0&&!fluid&&!climbing&&!gliding){RichWorldCollision.Result probe=RichWorldCollision.resolve(context.world(),start,new Vec3(0,-GROUND_PROBE,0),0,context.entityCollisions());if(probe.uncertain())return uncertain(context,probe.diagnostic());supported=probe.collidedY();}
-        boolean grounded=velocity.y()<=0&&(collision.collidedY()||supported);
+        double gravity=GRAVITY*context.movementEnvironment().gravityMultiplier();
+        /*
+         * Airborne PlayerContext velocity is the velocity carried into the client
+         * movement step. Vanilla applies the vertical drag/gravity transition before
+         * the next observed position is emitted, so the displacement for an ordinary
+         * airborne tick is the post-gravity/post-drag vertical velocity. The explicit
+         * jump transition remains special: the jump impulse is applied first and its
+         * 0.42-ish upward motion is the movement for that tick.
+         */
+        Vec3 movementVelocity=velocity;
+        if(!jumped&&!fluid&&!climbing&&!gliding&&!context.effects().levitation()&&!s.onGround()){
+            double airborneVerticalVelocity=
+                velocity.y()*AIR_VERTICAL_DRAG-gravity*context.effects().fallGravityMultiplier()*AIR_VERTICAL_DRAG;
+            movementVelocity=new Vec3(velocity.x(),airborneVerticalVelocity,velocity.z());
+        }
+        RichWorldCollision.Result collision=RichWorldCollision.resolve(context.world(),start,movementVelocity,s.onGround()&&!fluid&&!climbing&&!gliding?STEP_HEIGHT:0,context.entityCollisions());if(collision.uncertain())return uncertain(context,collision.diagnostic());Vec3 displacement=collision.displacement();
+        boolean supported=false;if(s.onGround()&&movementVelocity.y()<=0&&!fluid&&!climbing&&!gliding){RichWorldCollision.Result probe=RichWorldCollision.resolve(context.world(),start,new Vec3(0,-GROUND_PROBE,0),0,context.entityCollisions());if(probe.uncertain())return uncertain(context,probe.diagnostic());supported=probe.collidedY();}
+        boolean grounded=movementVelocity.y()<=0&&(collision.collidedY()||supported);
         double horizontalFactor;if(context.movementEnvironment().fluid()==Phase5Mechanics.Fluid.WATER)horizontalFactor=context.movementEnvironment().fluidSpeedMultiplier()*WATER_DRAG;else if(context.movementEnvironment().fluid()==Phase5Mechanics.Fluid.LAVA)horizontalFactor=context.movementEnvironment().fluidSpeedMultiplier()*LAVA_DRAG;else if(climbing)horizontalFactor=s.onGround()?GROUND_FRICTION:AIR_HORIZONTAL_FRICTION;else if(gliding)horizontalFactor=AIR_DRAG;else if(s.onGround()){
-            BlockState support=context.world().blockAtOrNull((int)Math.floor(s.position().x()),(int)Math.floor(s.position().y()-GROUND_PROBE),(int)Math.floor(s.position().z()));
-            if(support==null||support.isUnsupported())return uncertain(context,"support block is unavailable for friction calculation");
-            horizontalFactor=BlockCatalogue12111.slipperiness(support)*AIR_HORIZONTAL_FRICTION;
+            boolean horizontalMotion=Math.hypot(movementVelocity.x(),movementVelocity.z())>1.0E-12;
+            if(!horizontalMotion){
+                horizontalFactor=1.0;
+            } else {
+                BlockState support=context.world().blockAtOrNull((int)Math.floor(s.position().x()),(int)Math.floor(s.position().y()-GROUND_PROBE),(int)Math.floor(s.position().z()));
+                if(support==null||support.isUnsupported())return uncertain(context,"support block is unavailable for friction calculation");
+                horizontalFactor=BlockCatalogue12111.slipperiness(support)*AIR_HORIZONTAL_FRICTION;
+            }
         } else horizontalFactor=AIR_HORIZONTAL_FRICTION;
-        double gravity=GRAVITY*context.movementEnvironment().gravityMultiplier();double postTickVerticalVelocity;if(context.effects().levitation())postTickVerticalVelocity=context.effects().levitationVelocity();else if(climbing)postTickVerticalVelocity=velocity.y();else if(context.movementEnvironment().fluid()==Phase5Mechanics.Fluid.WATER||context.movementEnvironment().fluid()==Phase5Mechanics.Fluid.LAVA)postTickVerticalVelocity=velocity.y()*context.movementEnvironment().fluidDrag()-gravity;else if(gliding)postTickVerticalVelocity=velocity.y()-GLIDE_GRAVITY;else postTickVerticalVelocity=(jumped?(velocity.y()-gravity*context.effects().fallGravityMultiplier())*AIR_VERTICAL_DRAG:velocity.y()*AIR_VERTICAL_DRAG-gravity*context.effects().fallGravityMultiplier()*AIR_VERTICAL_DRAG);
+        double postTickVerticalVelocity;if(context.effects().levitation())postTickVerticalVelocity=context.effects().levitationVelocity();else if(climbing)postTickVerticalVelocity=velocity.y();else if(context.movementEnvironment().fluid()==Phase5Mechanics.Fluid.WATER||context.movementEnvironment().fluid()==Phase5Mechanics.Fluid.LAVA)postTickVerticalVelocity=velocity.y()*context.movementEnvironment().fluidDrag()-gravity;else if(gliding)postTickVerticalVelocity=velocity.y()-GLIDE_GRAVITY;else postTickVerticalVelocity=(jumped?(velocity.y()-gravity*context.effects().fallGravityMultiplier())*AIR_VERTICAL_DRAG:velocity.y()*AIR_VERTICAL_DRAG-gravity*context.effects().fallGravityMultiplier()*AIR_VERTICAL_DRAG);
         double groundedVerticalVelocity=context.effects().levitation()?context.effects().levitationVelocity():climbing?velocity.y():(context.movementEnvironment().fluid()==Phase5Mechanics.Fluid.WATER||context.movementEnvironment().fluid()==Phase5Mechanics.Fluid.LAVA)?velocity.y()*context.movementEnvironment().fluidDrag()-gravity:(supported&&s.onGround()&&Math.abs(velocity.y())<=1.0E-12?0.0:-gravity*AIR_VERTICAL_DRAG*context.effects().fallGravityMultiplier());double nextY=grounded&& !context.effects().levitation()&&!climbing?groundedVerticalVelocity:postTickVerticalVelocity;Vec3 nextVelocity=new Vec3(collision.collidedX()?0:velocity.x()*horizontalFactor,nextY,collision.collidedZ()?0:velocity.z()*horizontalFactor);
         Phase5Mechanics.Pose nextPose=Phase5Mechanics.nextPose(pose,context.movementEnvironment(),context.sleeping());Player next=richPlayer(s,s.position().add(displacement),nextVelocity,grounded,nextPose,context,false);return new StepResult(context.simulationTick(),next,collision.collidedX()||collision.collidedY()||collision.collidedZ(),collision.stepAttempted(),collision.stepSucceeded(),collision.collidedX(),collision.collidedY(),collision.collidedZ(),collision.collidedX()||collision.collidedY()||collision.collidedZ(),collision.diagnostic());
     }
