@@ -141,6 +141,68 @@ class Phase5ParityToolTest {
     assertEquals(0.33319999363422365,actual.velocity().y(),1e-6);
   }
 
+  @Test
+  void airborneVerticalIntegrationMatchesObservedPostTickVelocity() {
+    var initial = new State.Player(
+      new Maths.Vec3(72.7531999805212, 72.7531999805212, 0.5),
+      new Maths.Vec3(0.0, 0.33319999363422365, 0.0),
+      0.0f,
+      0.0f,
+      false,
+      "survival",
+      Map.of(),
+      OptionalInt.empty(),
+      false
+    );
+    var world = World.Snapshot.emptyVisibleChunks(List.of(World.Chunk.containing(72, 0)));
+    var context = new Simulation.PhysicsContext(
+      152,
+      initial,
+      new Simulation.AdvancedInput(0, 0, false, false, false),
+      world,
+      Simulation.Environment.DRY,
+      new Simulation.Attributes(0.10000000149011612)
+    );
+
+    var result = new Simulation.Vanilla12111Physics().step(context);
+    var actual = result.state();
+
+    assertEquals(73.00133597428274, actual.position().y(), 1e-9);
+    assertEquals(0.2481359937615392, actual.velocity().y(), 1e-9);
+    assertFalse(actual.onGround());
+  }
+
+  @Test
+  void verticalJumpDoesNotRequireSupportBlockForHorizontalFriction() {
+    var initial = new State.Player(
+      new Maths.Vec3(0.5, 64.0, 0.5),
+      Maths.Vec3.ZERO,
+      0.0f,
+      0.0f,
+      true,
+      "survival",
+      Map.of(),
+      OptionalInt.empty(),
+      false
+    );
+    var world = World.Snapshot.emptyVisibleChunks(List.of(World.Chunk.containing(0, 0)));
+    var context = new Simulation.PhysicsContext(
+      153,
+      initial,
+      new Simulation.AdvancedInput(0, 0, true, false, false),
+      world,
+      Simulation.Environment.DRY,
+      new Simulation.Attributes(0.10000000149011612)
+    );
+
+    var result = new Simulation.Vanilla12111Physics().step(context);
+
+    assertFalse(result.state().uncertain(), result.diagnostic());
+    assertEquals(64.42, result.state().position().y(), 1e-9);
+    assertEquals(0.33319999363422365, result.state().velocity().y(), 1e-9);
+    assertFalse(result.state().onGround());
+  }
+
   @Test void stoneJumpLandingMatchesObservedVanillaTransition() {
     var initial = new State.Player(
       new Maths.Vec3(-22.882971729405668,72.1212968405392,26.46644782303221),
