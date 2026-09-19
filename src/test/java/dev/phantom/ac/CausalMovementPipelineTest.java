@@ -458,6 +458,54 @@ class CausalMovementPipelineTest {
   }
 
   @Test
+  void impossibleMovementRecoversOnlyFromMatchingFreshAuthority() {
+    Packets.PlayerContext firstAuthority = authority();
+    Player second = new Player(
+        new Maths.Vec3(.5, 64, .5), Maths.Vec3.ZERO, 0f, 0f, true,
+        "survival", Map.of(), OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.unknown(), State.Provenance.UNKNOWN, Set.of());
+    Packets.PlayerContext recoveryAuthority = new Packets.PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(), Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        second.position(), second.velocity(), false, false, false, List.of());
+
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 0, new ChunkStates(
+            new dev.phantom.ac.world.Chunk(0, 0), floorStates())),
+        new RawPacket(2, 10, firstAuthority),
+        new RawPacket(3, 20, new Move(
+            new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
+        new RawPacket(4, 70, new Move(
+            new Maths.Vec3(10.5, 64, .5), 0f, 0f, true, 1L)),
+        new RawPacket(5, 120, recoveryAuthority,
+            Packets.CaptureProvenance.fromAdapter("paper-live", recoveryAuthority, 1L, 2L)),
+        new RawPacket(6, 130, new Move(
+            new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 2L),
+            Packets.CaptureProvenance.fromAdapter("paper-client-tick-boundary",
+                new Move(new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 2L), 2L, 2L)));
+
+    var report = CausalMovementPipeline.analyze(
+        "recovery-authority-witness",
+        Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L),
+        4096,
+        exactTiming(),
+        floorWorld(),
+        anchor(),
+        0L);
+
+    assertEquals(3, report.movementObservations(), report.results().toString());
+    assertTrue(report.results().stream().anyMatch(result ->
+        result.verdict() == Verdict.IMPOSSIBLE
+            && result.evidence().rule().equals("MOVEMENT_REACHABILITY")));
+    var last = report.results().getLast();
+    assertEquals(Verdict.POSSIBLE, last.verdict(), report.results().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("FRONTIER_REESTABLISHED source=AUTHORITATIVE_OBSERVATION_WITNESS")),
+        report.frames().getLast().trace().toString());
+  }
+
+  @Test
   void PaperMovementRejectionIsPreservedAsCorroborationOnly() {
     List<RawPacket> packets = List.of(
         new RawPacket(1, 0, new ChunkStates(
