@@ -785,58 +785,15 @@ public final class CausalMovementPipeline {
       }
 
       /*
-       * A consecutive explicit-client-tick displacement can be certified directly
-       * from the two observed states. This fallback is intentionally conservative
-       * and only runs when both ticks are exact, the tick delta is positive, and a
-       * known client-world chunk covers the observed positions. It avoids turning
-       * a deterministic large jump into UNCERTAIN solely because swept-volume
-       * reconstruction is incomplete.
-       */
-      if (movement.move().clientTick() != null
-          && previousExplicitClientTick != null
-          && movement.move().clientTick() > previousExplicitClientTick
-          && movement.chronologyClean()
-          && movement.world().hasChunk(
-              Math.floorDiv((int) Math.floor(observedBefore.position().x()), 16),
-              Math.floorDiv((int) Math.floor(observedBefore.position().z()), 16))
-          && movement.world().hasChunk(
-              Math.floorDiv((int) Math.floor(observedAfter.position().x()), 16),
-              Math.floorDiv((int) Math.floor(observedAfter.position().z()), 16))
-          && exceedsObservedStepBound(observedBefore, observedAfter,
-              movement.move().clientTick() - previousExplicitClientTick)) {
-        SearchResult impossible = new SearchResult(
-            Verdict.IMPOSSIBLE,
-            Set.of(),
-            0,
-            1,
-            0,
-            0,
-            0,
-            0,
-            List.of(
-                "conservative consecutive-client-tick displacement bound exceeded",
-                "all exhaustively modeled legitimate candidates disagree with the observed movement state"));
-        results.add(Phase8MovementValidation.validate(
-            playerId, serverTick, observedBefore, observedAfter, movement.world(),
-            worldReference, sync, assumptions, impossible, replayReference, true));
-        contradictionActive = true;
-        previousPositionPacketTick = movementTick;
-        previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
-        previousExplicitClientTick = movement.move().clientTick();
-        frontier = Frontier.empty();
-        trace.add("EVIDENCE REACHABILITY_CONTRADICTION reason=CONSECUTIVE_TICK_DISPLACEMENT_BOUND");
-        frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
-            assumptions, uncertainty, trace));
-        continue;
-      }
-
-      /*
        * A conservative exact-tick kinematic bound is independent of block collision
        * coverage, but it must start from a known state. This is placed immediately
        * after root establishment so recovery validation can reject a deterministic
        * excessive displacement before Phase 5 encounters an incomplete sweep.
        */
-      if (!recoveryRequired && eventTiming.simulationClientTicks().isExact()) {
+      if (!recoveryRequired
+          && movement.chronologyClean()
+          && (eventTiming.simulationClientTicks().isExact()
+              || movement.move().clientTick() != null)) {
         Optional<Candidate> kinematicReference = frontier.candidates().stream().findFirst();
         if (kinematicReference.isEmpty()) {
           kinematicReference = rootCandidate(initialAnchor, movement, maximumCandidates, true);
@@ -2538,24 +2495,6 @@ public final class CausalMovementPipeline {
             List.of("observed position matches authoritative snapshot; no client physics step required"),
             1,
             List.of())));
-  }
-
-  private static boolean exceedsObservedStepBound(
-      Player before,
-      Player after,
-      long tickDelta) {
-    if (tickDelta <= 0 || tickDelta > 2) return false;
-    double dx = after.position().x() - before.position().x();
-    double dz = after.position().z() - before.position().z();
-    double dy = after.position().y() - before.position().y();
-    double horizontalDistance = Math.hypot(dx, dz);
-    double configuredSpeed = Math.max(0.05, before.attributes().value());
-    double speedMultiplier = Math.max(1.0, movementEffects(before).speedMultiplier());
-    double horizontalBound = (Math.hypot(before.velocity().x(), before.velocity().z())
-        + configuredSpeed * 4.0 + 0.25) * tickDelta * 1.25;
-    double verticalBound = (Math.abs(before.velocity().y())
-        + 1.0 + configuredSpeed + 0.25) * tickDelta * 1.25;
-    return horizontalDistance > horizontalBound || Math.abs(dy) > verticalBound;
   }
 
   private static boolean exceedsConservativeKinematicBound(
