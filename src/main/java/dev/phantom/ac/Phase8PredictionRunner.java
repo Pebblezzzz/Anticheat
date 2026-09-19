@@ -312,9 +312,7 @@ public final class Phase8PredictionRunner {
             : packet.provenance().authoritativeServerTick();
         Packets.PlayerContext effectiveAuthority = authority;
         boolean entityCollisionComplete =
-            packet.provenance().sourceId().equals("paper-live")
-                || packet.provenance().sourceId().equals("packet-replay")
-                || packet.provenance().sourceId().equals("test");
+            !"entity-collision-incomplete".equals(packet.provenance().sourceId());
         latestAuthority = new AuthorityAnchor(
             sequence,
             packet.receivedNanos(),
@@ -748,17 +746,29 @@ public final class Phase8PredictionRunner {
       if (timing.simulationClientTickEnvelope().known()) {
         long tick = Math.max(0L, range.min());
         relativeClientTick = Math.max(relativeClientTick, tick);
-        boolean exact = range.isExact()
-            && timing.simulationCandidatesExhaustive()
-            && !timing.uncertain();
-        String source = exact
-            ? "phase7-temporal-envelope-exact"
-            : "phase7-temporal-envelope-range";
-        String reason = timing.uncertain()
-            ? "Phase 7 timing envelope is explicitly uncertain: " + timing.reasons()
-            : "Phase 7 timing envelope is exact and exhaustively materialized";
+        boolean explicit = timing.explicitClientTick().isPresent();
+        boolean exact = explicit || (
+            range.isExact()
+                && timing.simulationCandidatesExhaustive()
+                && !timing.uncertain());
+        /*
+         * An explicit client tick is stronger than the packet's wall-clock timing
+         * range: it pins the simulation tick while unrelated packet-generation
+         * uncertainty remains diagnostic context.
+         */
+        boolean timingUncertain = timing.uncertain() && !explicit;
+        String source = explicit
+            ? "phase7-explicit-client-tick"
+            : exact
+                ? "phase7-temporal-envelope-exact"
+                : "phase7-temporal-envelope-range";
+        String reason = explicit && timing.uncertain()
+            ? "explicit client tick pins simulation time; Phase 7 retains other timing uncertainty: " + timing.reasons()
+            : timing.uncertain()
+                ? "Phase 7 timing envelope is explicitly uncertain: " + timing.reasons()
+                : "Phase 7 timing envelope is exact and exhaustively materialized";
         return new TickResolution(
-            tick, true, exact, timing.uncertain(), source, reason);
+            tick, true, exact, timingUncertain, source, reason);
       }
       return new TickResolution(
           0L, false, false, true,
