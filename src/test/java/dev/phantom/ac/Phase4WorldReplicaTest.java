@@ -204,6 +204,14 @@ final class Phase4WorldReplicaTest {
     assertEquals(exact.toWorld(16,64,0),merged.collisionShapeAt(16,64,0));
   }
 
+  @Test void legacyBlockStateVariantOrdinalsRemainStable() {
+    assertEquals(0, BlockState.Variant.AIR.ordinal());
+    assertEquals(25, BlockState.Variant.FLUID.ordinal());
+    assertEquals(26, BlockState.Variant.NO_COLLISION_SPECIAL.ordinal());
+    assertEquals(27, BlockState.Variant.UNSUPPORTED.ordinal());
+    assertEquals(28, BlockState.Variant.CATALOGUE.ordinal());
+  }
+
   @Test void generated12111CatalogueReconstructsStateSpecificCollision() {
     BlockState stairs=BlockCatalogue12111.decode("minecraft:oak_stairs",Map.of(
         "facing","north","half","top","shape","straight","waterlogged","false"));
