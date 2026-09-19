@@ -79,6 +79,38 @@ class CausalMovementPipelineTest {
   }
 
   @Test
+  void boundedExplicitMovementAcceptsAuthoritativeZeroStepCandidate() {
+    Packets.PlayerContext liveAuthority = authority();
+    Packets.Move liveMove = new Move(new Maths.Vec3(.5, 64, .5), 90f, 0f, true, 1L);
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 0, liveAuthority,
+            Packets.CaptureProvenance.fromAdapter("paper-live", liveAuthority, 0L, 1L)),
+        new RawPacket(2, 10, liveMove,
+            Packets.CaptureProvenance.fromAdapter("paper-live", liveMove, 0L, 1L)));
+
+    var report = CausalMovementPipeline.analyze(
+        "bounded-explicit-zero-step",
+        Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L),
+        4096,
+        Phase7Timing.Config.defaultConfig(),
+        floorWorld(),
+        null,
+        0L);
+
+    assertEquals(Verdict.POSSIBLE, report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("CANDIDATES count=") && line.contains("exhaustive=true")),
+        report.frames().getFirst().trace().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("MATCHING candidates=")),
+        report.frames().getFirst().trace().toString());
+    assertFalse(report.results().getFirst().evidence().uncertaintySources().stream()
+        .anyMatch(reason -> reason.contains("intermediate rotation chronology")),
+        report.results().getFirst().evidence().uncertaintySources().toString());
+  }
+
+  @Test
   void explicitMovementRefusesUnwatermarkedAuthorityRoot() {
     Packets.PlayerContext liveAuthority = authority();
     Packets.Move liveMove = new Move(new Maths.Vec3(.5, 64, .5), 90f, 0f, true, 1L);
