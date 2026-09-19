@@ -79,9 +79,10 @@ class Phase7TimingTest {
     EventTiming firstMove = r.timingFor(2).orElseThrow();
     EventTiming secondMove = r.timingFor(4).orElseThrow();
     assertEquals(Range.exact(1), firstMove.packetGenerationClientTicks());
-    assertEquals(new Range(3, 4), secondMove.packetGenerationClientTicks());
+    assertEquals(Range.exact(1), firstMove.packetGenerationClientTicks());
+    assertEquals(new Range(2, 3), secondMove.packetGenerationClientTicks());
     assertEquals(List.of(1L), firstMove.possiblePacketGenerationClientTicks());
-    assertEquals(List.of(3L, 4L), secondMove.possiblePacketGenerationClientTicks());
+    assertEquals(List.of(2L, 3L), secondMove.possiblePacketGenerationClientTicks());
   }
 
   @Test
@@ -95,7 +96,7 @@ class Phase7TimingTest {
         250_000_000L, 3, 128);
     Reconstruction r = reconstruct(timeline(
         new RawPacket(1, 0, new ClientTickEnd()),
-        new RawPacket(2, 60_000_000L,
+        new RawPacket(2, 130_000_000L,
             new Move(new Vec3(.1, 0, 0), 0f, 0f, true, null)),
         new RawPacket(3, 100_000_000L, new ClientTickEnd())),
         config);
