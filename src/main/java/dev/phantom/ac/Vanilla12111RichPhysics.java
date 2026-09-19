@@ -47,7 +47,8 @@ public final class Vanilla12111RichPhysics {
          * 0.42-ish upward motion is the movement for that tick.
          */
         Vec3 movementVelocity=velocity;
-        if(!jumped&&!fluid&&!climbing&&!gliding&&!context.effects().levitation()&&!s.onGround()){
+        if(!jumped&&!fluid&&!climbing&&!gliding&&!context.effects().levitation()
+            &&!s.onGround()&&Math.abs(velocity.y())>1.0E-12){
             double airborneVerticalVelocity=
                 velocity.y()*AIR_VERTICAL_DRAG-gravity*context.effects().fallGravityMultiplier()*AIR_VERTICAL_DRAG;
             movementVelocity=new Vec3(velocity.x(),airborneVerticalVelocity,velocity.z());
