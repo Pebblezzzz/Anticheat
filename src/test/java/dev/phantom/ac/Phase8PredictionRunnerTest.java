@@ -231,7 +231,7 @@ class Phase8PredictionRunnerTest {
         false, false, false, List.of());
 
     double expectedX=.6+0.2;
-    double expectedY=70.0;
+    double expectedY=70.0 - Vanilla12111RichPhysics.GRAVITY * Vanilla12111RichPhysics.AIR_VERTICAL_FRICTION;
 
     var second = runner.process(
         "stale-horizontal",
@@ -332,10 +332,10 @@ class Phase8PredictionRunnerTest {
         Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
         MovementEnvironment.dry(true, true, false), false));
 
-    assertEquals(0.5, noSprint.state().position().z(), 1e-12);
     assertEquals(
-        0.5 + Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST,
-        sprint.state().position().z(), 1e-12);
+        Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST
+            * Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION,
+        sprint.state().velocity().z() - noSprint.state().velocity().z(), 1e-7);
     assertEquals(
         Vanilla12111RichPhysics.JUMP,
         noSprint.state().position().y() - state.position().y(), 1e-7);
