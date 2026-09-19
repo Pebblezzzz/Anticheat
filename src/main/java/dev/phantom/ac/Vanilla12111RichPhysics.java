@@ -29,14 +29,14 @@ public final class Vanilla12111RichPhysics {
             SPRINT_JUMP_HORIZONTAL_BOOST=0.2,
             SPRINTING_SPEED_MULTIPLIER=1.3,
             AIR_VERTICAL_FRICTION=0.98f;
-    static final double
+    private static final double
             SNEAKING_SPEED_MULTIPLIER=0.3,
-            WATER_DRAG=0.8,
-            LAVA_DRAG=0.5,
             CLIMB_MAX_DOWN=0.15,
             CLIMB_MAX_UP=0.15,
             GLIDE_GRAVITY=0.035,
             GROUND_PROBE=1.0E-4;
+    static final double WATER_DRAG=0.8,
+            LAVA_DRAG=0.5;
 
     public StepResult step(Context context){
         Objects.requireNonNull(context);Player s=context.state();
