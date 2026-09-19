@@ -1429,11 +1429,53 @@ public final class CausalMovementPipeline {
      * newer block states are never silently projected backwards in time.
      */
     if (movement.liveWorldUsed()
-        && !movement.world().loadedChunks().isEmpty()
-        && historical.loadedChunks().isEmpty()) {
-      return movement.world();
+        && !movement.world().loadedChunks().isEmpty()) {
+      /*
+       * The packet timeline may contain an older chunk history while the
+       * acknowledged live replica contains newly visible chunks elsewhere.
+       * Merge only disjoint coverage: historical chunks keep their causal
+       * contents, while a live-only chunk can safely fill a coverage hole.
+       */
+      return mergeMissingLiveChunks(historical, movement.world());
     }
     return historical;
+  }
+
+  private static WorldSnapshot mergeMissingLiveChunks(
+      WorldSnapshot historical,
+      WorldSnapshot live) {
+    if (historical.loadedChunks().isEmpty()) return live;
+    if (live.loadedChunks().isEmpty()) return historical;
+
+    Set<dev.phantom.ac.world.Chunk> missing = new LinkedHashSet<>(live.loadedChunks());
+    missing.removeAll(historical.loadedChunks());
+    if (missing.isEmpty()) return historical;
+
+    WorldSnapshot.Builder builder =
+        WorldSnapshot.builder(historical.version(), historical.minY(), historical.maxY());
+    for (dev.phantom.ac.world.Chunk chunk : historical.loadedChunks()) {
+      builder.loadChunk(chunk);
+      for (Map.Entry<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> entry
+          : historical.chunkStates(chunk).entrySet()) {
+        builder.setBlock(
+            entry.getKey().x(),
+            entry.getKey().y(),
+            entry.getKey().z(),
+            entry.getValue());
+      }
+    }
+    for (dev.phantom.ac.world.Chunk chunk : missing) {
+      builder.loadChunk(chunk);
+      for (Map.Entry<dev.phantom.ac.world.Pos, dev.phantom.ac.world.BlockState> entry
+          : live.chunkStates(chunk).entrySet()) {
+        builder.setBlock(
+            entry.getKey().x(),
+            entry.getKey().y(),
+            entry.getKey().z(),
+            entry.getValue());
+      }
+    }
+    return builder.build();
   }
 
   private static Optional<Candidate> rootCandidateForTarget(
