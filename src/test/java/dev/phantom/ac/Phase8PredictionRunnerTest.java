@@ -69,6 +69,50 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void stalePredictionRebasesToFreshCausalAuthority() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+
+    var first = runner.process(
+        "stale-root",
+        List.of(
+            new RawPacket(1, 10, new ClientTickEnd()),
+            new RawPacket(2, 20, new Move(
+                new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 1L))),
+        floorWorld(), anchor(), 0L);
+
+    assertEquals(1, first.movementObservations());
+    assertTrue(first.candidateFrontierRetained(), first.toString());
+
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.5, 64, .5), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    List<RawPacket> catchUp = new ArrayList<>();
+    catchUp.add(new RawPacket(3, 30, authority,
+        Packets.CaptureProvenance.fromAdapter("test-authority", authority, 100L, 10L)));
+    for (int i = 4; i <= 12; i++) {
+      catchUp.add(new RawPacket(i, 30L + i, new ClientTickEnd()));
+    }
+    catchUp.add(new RawPacket(13, 200, new Move(
+        new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 10L)));
+
+    var second = runner.process(
+        "stale-root", catchUp, floorWorld(), anchor(), 0L);
+
+    assertTrue(second.candidateFrontierRetained(), second.toString());
+    assertTrue(second.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
+        .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
+        second.frames().toString());
+    assertTrue(second.results().stream()
+        .flatMap(result -> result.evidence().uncertaintySources().stream())
+        .noneMatch(reason -> reason.contains("initial state carries explicit uncertainty")),
+        second.results().toString());
+  }
+
+  @Test
   void stationaryObservationIsComparedAgainstRetainedPrediction() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     var report = runner.process(
