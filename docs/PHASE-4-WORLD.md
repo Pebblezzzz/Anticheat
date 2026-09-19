@@ -41,7 +41,7 @@ None is silently converted to air. Collision queries carry coverage so uncertain
 
 WorldSnapshot and WorldQueries are the single collision representation. They expose block states, collision boxes, fluids, environment facts, and coverage. EntityCollisions provides deterministic entity bounding-box infrastructure with an explicit completeness flag.
 
-The deterministic 1.21.11 replay catalogue now contains every published block id and every published block-state combination from the pinned minecraft-data source: 1,166 block ids, 21,060 state-to-shape mappings, and 5,128 deduplicated collision shapes. Collision boxes are preserved at the source's 1/32-block precision, including shapes that extend beyond the nominal block cube.
+The deterministic 1.21.11 replay catalogue now contains every published block id and every published block-state combination from the pinned minecraft-data source: 1,166 block ids, 29,671 published block-state combinations, and 5,128 deduplicated collision shapes (with constant-shape blocks represented once). Collision boxes are preserved at the source's 1/32-block precision, including shapes that extend beyond the nominal block cube.
 
 The live Paper adapter additionally warms native Paper BlockData collision shapes on the main thread and serves those immutable results to validation threads without Bukkit access. The deterministic catalogue is the fallback for replay/offline validation. Unknown registry/state combinations remain UNSUPPORTED rather than becoming air or a guessed cube.
 
