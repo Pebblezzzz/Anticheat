@@ -152,15 +152,10 @@ public final class Vanilla12111RichPhysics {
     }
 
     private static Vec3 applyPreMoveVertical(Vec3 velocity,Context context,boolean fluid,boolean climbing,boolean gliding) {
-        if (context.effects().levitation()||climbing) return velocity;
-        if (gliding) return new Vec3(velocity.x(),velocity.y()-GLIDE_GRAVITY,velocity.z());
-        if (fluid) {
-            double gravity=FLUID_GRAVITY*context.movementEnvironment().gravityMultiplier();
-            return new Vec3(velocity.x(),velocity.y()-gravity,velocity.z());
-        }
-        double gravity=GRAVITY*context.effects().fallGravityMultiplier()*context.movementEnvironment().gravityMultiplier();
-        double y=Math.max(-3.92,velocity.y()-gravity);
-        return new Vec3(velocity.x(),y,velocity.z());
+        // LivingEntity.travelInAir and the 1.21.11 fluid travel paths apply
+        // gravity after Entity.move. The requested movement therefore uses the
+        // incoming vertical velocity, not a freshly-gravitied value.
+        return velocity;
     }
 
     private static Vec3 postMoveVelocity(Vec3 velocity,Context context,boolean grounded,RichWorldCollision.Result collision) {
@@ -181,7 +176,15 @@ public final class Vanilla12111RichPhysics {
         if (collision.collidedY()&&velocity.y()<0) vy=0;
         else if (context.effects().levitation()) vy=context.effects().levitationVelocity();
         else if (climbing) vy=velocity.y();
-        else vy=velocity.y()*verticalFactor;
+        else if (fluid) {
+            double gravity=FLUID_GRAVITY*context.movementEnvironment().gravityMultiplier();
+            vy=velocity.y()*verticalFactor-gravity;
+        } else if (gliding) {
+            vy=(velocity.y()-GLIDE_GRAVITY)*verticalFactor;
+        } else {
+            double gravity=GRAVITY*context.effects().fallGravityMultiplier()*context.movementEnvironment().gravityMultiplier();
+            vy=Math.max(-3.92,velocity.y()-gravity)*verticalFactor;
+        }
         return new Vec3(vx,vy,vz);
     }
 
