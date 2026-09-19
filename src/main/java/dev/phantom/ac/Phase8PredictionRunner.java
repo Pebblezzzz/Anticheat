@@ -722,6 +722,7 @@ public final class Phase8PredictionRunner {
     if (predictionTick < 0L || lag <= PREDICTION_RESYNC_LAG_TICKS) return;
     if (authorityTick > tick.clientTick()) return;
 
+    long previousPredictionTick = predictionTick;
     long rootTick = authorityTick == tick.clientTick()
         ? Math.max(0L, tick.clientTick() - 1L)
         : authorityTick;
@@ -741,7 +742,7 @@ public final class Phase8PredictionRunner {
     latestContinuation = Continuation.ACTIVE;
 
     trace.add("ROOT_REFRESH reason=PREDICTION_LAG"
-        + " predictionTickBefore=" + (predictionTick + lag)
+        + " predictionTickBefore=" + previousPredictionTick
         + " authorityClientTick=" + authorityTick
         + " rootTick=" + rootTick
         + " authoritySequence=" + authority.sequence()
