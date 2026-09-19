@@ -546,7 +546,7 @@ public final class Phase6Reachability {
                 knowledgeForCoverage(coverage), List.of(branch.description(),
                     branch.world().coverageDetailAt((int)Math.floor(player.position().x()),
                         (int)Math.floor(player.position().y()),
-                        (int)Math.floor(player.position().z()))));
+                        (int)Math.floor(player.position().z())))));
             continue;
           }
 
