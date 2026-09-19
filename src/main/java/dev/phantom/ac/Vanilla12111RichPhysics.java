@@ -26,7 +26,8 @@ public final class Vanilla12111RichPhysics {
             INPUT_FRICTION=0.98f,
             FRICTION_SPEED_FACTOR=0.21600002f,
             SPRINT_JUMP_HORIZONTAL_BOOST=0.2,
-            SPRINTING_SPEED_MULTIPLIER=1.3;
+            SPRINTING_SPEED_MULTIPLIER=1.3,
+            AIR_VERTICAL_FRICTION=0.98f;
     private static final double
             SNEAKING_SPEED_MULTIPLIER=0.3,
             WATER_DRAG=0.9,
