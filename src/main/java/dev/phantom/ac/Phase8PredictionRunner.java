@@ -114,6 +114,7 @@ public final class Phase8PredictionRunner {
   private final Phase7Timing.Config phase7TimingConfig;
   private final ArrayDeque<Packets.RawPacket> timingHistory = new ArrayDeque<>();
   private long timingEpochNanos = -1L;
+  private boolean timingHistoryTruncated;
   private final InputConstraint neutralInput;
 
   private Player initialAnchor;
@@ -186,6 +187,7 @@ public final class Phase8PredictionRunner {
     inputHistory.clear();
     timingHistory.clear();
     timingEpochNanos = -1L;
+    timingHistoryTruncated = false;
     latestAuthority = null;
     prediction = Set.of();
     predictionTick = -1L;
@@ -756,19 +758,25 @@ public final class Phase8PredictionRunner {
          * range: it pins the simulation tick while unrelated packet-generation
          * uncertainty remains diagnostic context.
          */
-        boolean timingUncertain = timing.uncertain() && !explicit;
+        boolean timingUncertain = (timing.uncertain() && !explicit) || timingHistoryTruncated;
         String source = explicit
             ? "phase7-explicit-client-tick"
             : exact
                 ? "phase7-temporal-envelope-exact"
                 : "phase7-temporal-envelope-range";
-        String reason = explicit && timing.uncertain()
-            ? "explicit client tick pins simulation time; Phase 7 retains other timing uncertainty: " + timing.reasons()
-            : timing.uncertain()
-                ? "Phase 7 timing envelope is explicitly uncertain: " + timing.reasons()
-                : "Phase 7 timing envelope is exact and exhaustively materialized";
+        String reason;
+        if (timingHistoryTruncated) {
+          reason = "Phase 7 history prefix was truncated at the deterministic live bound; timing remains conservative: "
+              + timing.reasons();
+        } else if (explicit && timing.uncertain()) {
+          reason = "explicit client tick pins simulation time; Phase 7 retains other timing uncertainty: " + timing.reasons();
+        } else if (timing.uncertain()) {
+          reason = "Phase 7 timing envelope is explicitly uncertain: " + timing.reasons();
+        } else {
+          reason = "Phase 7 timing envelope is exact and exhaustively materialized";
+        }
         return new TickResolution(
-            tick, true, exact, timingUncertain, source, reason);
+            tick, true, exact && !timingHistoryTruncated, timingUncertain, source, reason);
       }
       return new TickResolution(
           0L, false, false, true,
@@ -792,6 +800,7 @@ public final class Phase8PredictionRunner {
     timingHistory.addLast(packet);
     while (timingHistory.size() > MAX_TIMING_HISTORY_EVENTS) {
       timingHistory.removeFirst();
+      timingHistoryTruncated = true;
     }
   }
 
