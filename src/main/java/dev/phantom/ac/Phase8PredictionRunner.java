@@ -891,7 +891,7 @@ public final class Phase8PredictionRunner {
           + " authorityPositionDeltaFromLastObservation="
           + (lastObservedMovementPosition == null
               ? "unavailable"
-              : authority.serverPosition().subtract(lastObservedMovementPosition)));
+              : context.serverPosition().subtract(lastObservedMovementPosition)));
     } else {
       trace.add("ROOT_HORIZONTAL source=authoritative-velocity"
           + " velocity=" + authority.velocity()
