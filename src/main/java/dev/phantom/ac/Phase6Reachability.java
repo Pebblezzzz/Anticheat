@@ -127,7 +127,7 @@ public final class Phase6Reachability {
     return new TimingSearchResult(Verdict.POSSIBLE,Set.copyOf(union.values()),results,evaluated,0,List.of("all client-tick offsets were exhaustively simulated"));
   }
 
-  public Evidence compare(SearchResult result,Observation observation){if(result.verdict()==Verdict.UNCERTAIN)return new Evidence(Verdict.UNCERTAIN,0,List.of(),result.reasons());List<Provenance> matches=new ArrayList<>();for(Candidate c:result.candidates())if(matches(c.context().player(),observation))matches.add(c.provenance());if(!matches.isEmpty())return new Evidence(Verdict.POSSIBLE,matches.size(),matches,List.of("observed facts are reachable","candidate provenance is retained"));return new Evidence(Verdict.IMPOSSIBLE,0,List.of(),List.of("no exact candidate matches the declared observed facts","all declared branches were exhausted"));}
+  public Evidence compare(SearchResult result,Observation observation){if(result.verdict()==Verdict.UNCERTAIN)return new Evidence(Verdict.UNCERTAIN,0,List.of(),result.reasons());List<Provenance> matches=new ArrayList<>();for(Candidate c:result.candidates())if(matches(c.context().player(),observation))matches.add(c.provenance());if(!matches.isEmpty())return new Evidence(Verdict.POSSIBLE,matches.size(),matches,List.of("observed facts are reachable","candidate provenance is retained"));return new Evidence(Verdict.IMPOSSIBLE,0,List.of(),List.of("no candidate matches the declared observed facts within the configured numerical envelope","all declared branches were exhausted"));}
   static boolean positionMatches(Maths.Vec3 a, Maths.Vec3 b){
     if(a==null||b==null)return a==b;
     double dx=a.x()-b.x(),dy=a.y()-b.y(),dz=a.z()-b.z();
