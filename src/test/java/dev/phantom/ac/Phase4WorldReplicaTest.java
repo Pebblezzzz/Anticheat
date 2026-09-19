@@ -155,7 +155,7 @@ final class Phase4WorldReplicaTest {
 
   @Test void packedBlockChangeUsesSmallOverlay(){
     BlockState stone=BlockCatalogue12111.decode("minecraft:stone",Map.of());
-    var r=new Phase4WorldReplica();
+    var r=new Phase4WorldReplica(V);
     Map<Integer,Phase4WorldReplica.PackedSection> sections=new TreeMap<>();
     for(int i=0;i<24;i++)sections.put(i,Phase4WorldReplica.PackedSection.empty(-4+i));
     r.accept(new Phase4WorldReplica.PackedChunkData(
