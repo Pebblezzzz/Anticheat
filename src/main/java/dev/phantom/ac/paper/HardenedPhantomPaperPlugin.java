@@ -201,6 +201,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         capture.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.BlockChange(
               new dev.phantom.ac.Phase4WorldReplica.Order(authoritativeTick(capture)==null?0:authoritativeTick(capture),receivedNanos,sequence,sequence),
               new dev.phantom.ac.Phase4WorldReplica.Provenance("paper-block-change","BLOCK_CHANGE",sequence,authoritativeTick(capture)==null?0:authoritativeTick(capture),null,false,"clientbound"),pos,state));
+        warmStateAsync(capture,state);
         Packets.Packet blockChange=blockStatePacket(pos,state);
         appendPacket(capture,new RawPacket(sequence,receivedNanos,blockChange,
             Packets.CaptureProvenance.fromAdapter("paper-block-change",blockChange,null)));
@@ -214,6 +215,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           capture.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.BlockChange(
               new dev.phantom.ac.Phase4WorldReplica.Order(authoritativeTick(capture)==null?0:authoritativeTick(capture),receivedNanos,sequence,sequence),
               new dev.phantom.ac.Phase4WorldReplica.Provenance("paper-multi-block-change","MULTI_BLOCK_CHANGE",sequence,authoritativeTick(capture)==null?0:authoritativeTick(capture),null,false,"clientbound"),pos,state));
+          warmStateAsync(capture,state);
           Packets.Packet blockChange=blockStatePacket(pos,state);
           appendPacket(capture,new RawPacket(sequence,receivedNanos,blockChange,
               Packets.CaptureProvenance.fromAdapter("paper-multi-block-change",blockChange,null)));
@@ -1169,6 +1171,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         :new Packets.BlockStateChange(position,state));
   }
 
+  private void warmStateAsync(Capture capture, BlockState state){
+    if(state==null||state.isUnsupported())return;
+    Bukkit.getScheduler().runTask(this, () -> {
+      Player player=Bukkit.getPlayer(capture.playerId);
+      if(player!=null)PaperVanillaCollision.warm(player.getWorld(),state);
+    });
+  }
+
   private static void appendPacket(Capture capture,RawPacket packet){
     synchronized(capture.packets){
       while(capture.packets.size()>=MAX_CAPTURE_PACKETS)capture.packets.remove(0);
@@ -1198,9 +1208,20 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             var order=new dev.phantom.ac.Phase4WorldReplica.Order(work.serverTick(),work.receivedNanos(),work.sequence(),work.sequence());
             var provenance=new dev.phantom.ac.Phase4WorldReplica.Provenance(
                 "paper-client-chunk-data","CHUNK_DATA",work.sequence(),work.serverTick(),null,false,"clientbound");
-            target.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.PackedChunkData(
-                order,provenance,new dev.phantom.ac.world.Chunk(work.column().getX(),work.column().getZ()),
-                decoded.sections(),work.column().isFullChunk()));
+            dev.phantom.ac.Phase4WorldReplica.PackedChunkData worldEvent =
+                new dev.phantom.ac.Phase4WorldReplica.PackedChunkData(
+                    order,provenance,new dev.phantom.ac.world.Chunk(work.column().getX(),work.column().getZ()),
+                    decoded.sections(),work.column().isFullChunk());
+            Bukkit.getScheduler().runTask(this, () -> {
+              Player player=Bukkit.getPlayer(target.playerId);
+              if(player!=null){
+                Set<BlockState> states=new HashSet<>();
+                for(var section:decoded.sections().values())
+                  for(int i=0;i<4096;i++)states.add(section.stateAt(i));
+                PaperVanillaCollision.warm(player.getWorld(),states);
+              }
+              target.clientWorld.queue(worldEvent);
+            });
           }catch(RuntimeException failure){
             getLogger().log(java.util.logging.Level.WARNING,
                 "[PhantomAC][CHUNK] asynchronous client chunk decode failed player="+target.playerId
@@ -1319,7 +1340,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     var cache=STATE_CACHE.computeIfAbsent(version,ignored->new ConcurrentHashMap<>());
     var cached=cache.get(globalId);if(cached!=null)return cached;
     WrappedBlockState raw=WrappedBlockState.getByGlobalId(version,globalId,false);
-    var core=raw==null||raw.getType().isAir()?dev.phantom.ac.world.BlockState.air():toCoreState(raw);
+    if(raw==null || raw.getGlobalId()!=globalId){
+      var unsupported=dev.phantom.ac.world.BlockState.unsupported("global-state-"+globalId);
+      var existing=cache.putIfAbsent(globalId,unsupported);return existing==null?unsupported:existing;
+    }
+    var core=toCoreState(raw);
     var existing=cache.putIfAbsent(globalId,core);return existing==null?core:existing;
   }
 
@@ -1327,25 +1352,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     if(state==null||state.getType().isAir())return dev.phantom.ac.world.BlockState.air();
     String name=state.getType().getName();
     Map<String,String> properties=new LinkedHashMap<>();
-    putEnum(properties,"type",state.getData(StateValue.TYPE));
-    putEnum(properties,"facing",state.getData(StateValue.FACING));
-    putEnum(properties,"half",state.getData(StateValue.HALF));
-    putEnum(properties,"shape",state.getData(StateValue.SHAPE));
-    putEnum(properties,"part",state.getData(StateValue.PART));
-    putEnum(properties,"hinge",state.getData(StateValue.HINGE));
-    putNumber(properties,"layers",state.getData(StateValue.LAYERS));
-    putNumber(properties,"level",state.getData(StateValue.LEVEL));
-    putNumber(properties,"candles",state.getData(StateValue.CANDLES));
-    putNumber(properties,"pickles",state.getData(StateValue.PICKLES));
-    putBoolean(properties,"waterlogged",state.getData(StateValue.WATERLOGGED));
-    putBoolean(properties,"open",state.getData(StateValue.OPEN));
-    putBoolean(properties,"powered",state.getData(StateValue.POWERED));
-    putBoolean(properties,"up",state.getData(StateValue.UP));
-    putBoolean(properties,"north",state.getData(StateValue.NORTH));
-    putBoolean(properties,"south",state.getData(StateValue.SOUTH));
-    putBoolean(properties,"west",state.getData(StateValue.WEST));
-    putBoolean(properties,"east",state.getData(StateValue.EAST));
-    putBoolean(properties,"lit",state.getData(StateValue.LIT));
+    for(StateValue value:StateValue.values()){
+      Object raw=state.getData(value);
+      if(raw!=null)properties.put(value.name().toLowerCase(Locale.ROOT),raw.toString().toLowerCase(Locale.ROOT));
+    }
     return dev.phantom.ac.world.v12111.BlockCatalogue12111.decode(name,properties);
   }
 
@@ -1403,7 +1413,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     volatile int minY=-64,maxY=319;
     volatile double lastServerX,lastServerY,lastServerZ;
 
-    Capture(UUID id,long epoch,int candidateBudget){playerId=id;epochNanos=epoch;movementRunner=new Phase8PredictionRunner(candidateBudget);}
+    Capture(UUID id,long epoch,int candidateBudget){
+      playerId=id;epochNanos=epoch;
+      movementRunner=new Phase8PredictionRunner(candidateBudget);
+      clientWorld.setCollisionResolver((snapshot,state,x,y,z)->PaperVanillaCollision.resolve(state,x,y,z));
+    }
 
     void updateServerPosition(Player player){
       org.bukkit.Location location=player.getLocation();
