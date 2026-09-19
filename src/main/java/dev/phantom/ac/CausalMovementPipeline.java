@@ -1669,6 +1669,7 @@ public final class CausalMovementPipeline {
         return WorldSnapshot.merge(historical, movement.world());
       }
     }
+    return historical;
   }
 
   private static Optional<Candidate> rootCandidateForTarget(
