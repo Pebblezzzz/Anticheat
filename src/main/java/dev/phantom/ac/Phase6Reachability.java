@@ -396,8 +396,20 @@ public final class Phase6Reachability {
 
   private static final int MAX_DIAGNOSTICS = 256;
   private static final int MAX_CLOSEST_CANDIDATES = 4;
-  private final Vanilla12111RichPhysics physics;
-  public Phase6Reachability(Vanilla12111RichPhysics physics){this.physics=Objects.requireNonNull(physics);}
+  private final Phase5MovementAuthority movementAuthority;
+
+  public Phase6Reachability() {
+    this(new Phase5MovementAuthority());
+  }
+
+  public Phase6Reachability(Phase5MovementAuthority movementAuthority) {
+    this.movementAuthority = Objects.requireNonNull(movementAuthority, "movementAuthority");
+  }
+
+  /** Compatibility constructor: the supplied physics implementation is still owned by the Phase 5 authority. */
+  public Phase6Reachability(Vanilla12111RichPhysics physics) {
+    this(new Phase5MovementAuthority(physics));
+  }
 
   public SearchResult search(
       Context start,
@@ -662,13 +674,15 @@ public final class Phase6Reachability {
                   movementEnvironmentFor(sample, pre, input);
               Simulation.Environment simulationEnvironment = environmentFor(environment);
 
-              Vanilla12111RichPhysics.Context physicsContext =
-                  new Vanilla12111RichPhysics.Context(
+              Phase5MovementAuthority.SimulationContext physicsContext =
+                  new Phase5MovementAuthority.SimulationContext(
                       tick, pre.player(), input, branch.world(),
                       simulationEnvironment, pre.attributes(), pre.effects(),
-                      pre.pose(), environment, pre.sleeping(), pre.entityCollisions());
+                      pre.pose(), environment, pre.sleeping(),
+                      pre.player().pose() == Pose.FALL_FLYING,
+                      pre.entityCollisions());
               simulationSteps++;
-              Vanilla12111RichPhysics.StepResult stepped = physics.step(physicsContext);
+              Phase5MovementAuthority.StepResult stepped = movementAuthority.simulate(physicsContext);
               if (stepped.state().uncertain()) {
                 uncertain = true;
                 uncertainTransitions++;
