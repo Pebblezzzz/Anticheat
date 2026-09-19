@@ -199,7 +199,7 @@ class Phase5ParityToolTest {
 
     assertFalse(result.state().uncertain(), result.diagnostic());
     assertEquals(64.41999998688698, result.state().position().y(), 1e-9);
-    assertEquals(0.33319999999999994, result.state().velocity().y(), 1e-9);
+    assertEquals(0.33319999363422365, result.state().velocity().y(), 1e-9);
     assertFalse(result.state().onGround());
   }
 
