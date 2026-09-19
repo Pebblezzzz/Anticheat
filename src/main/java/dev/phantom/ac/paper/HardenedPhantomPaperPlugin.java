@@ -175,11 +175,18 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           long receivedNanos=System.nanoTime();
           try{
             worldPublishExecutor.execute(()->{
-              if(capture.clientWorld.acknowledge(transaction,sequence)){
-                Packets.WorldTransactionAck ack=new Packets.WorldTransactionAck(transaction);
-                appendPacket(capture,new RawPacket(sequence,receivedNanos,ack,
-                    Packets.CaptureProvenance.fromAdapter("paper-transaction-ack",ack,null)));
-                schedulePredictionValidation(capture);
+              try{
+                if(capture.clientWorld.acknowledge(transaction,sequence)){
+                  Packets.WorldTransactionAck ack=new Packets.WorldTransactionAck(transaction);
+                  appendPacket(capture,new RawPacket(sequence,receivedNanos,ack,
+                      Packets.CaptureProvenance.fromAdapter("paper-transaction-ack",ack,null)));
+                  schedulePredictionValidation(capture);
+                }
+              }finally{
+                // The ID only needs to stay reserved while this transaction is
+                // outstanding. Release it after the ACK has been published so
+                // long-running players cannot exhaust the 15-bit ID space.
+                capture.reservedTransactions.remove(transaction);
               }
             });
           }catch(RejectedExecutionException rejected){
@@ -645,6 +652,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           Packets.CaptureProvenance.fromAdapter("paper-transaction",tx,null)));
     }catch(RuntimeException failure){
       capture.outstandingTransactions.remove(transactionId);
+      capture.reservedTransactions.remove(transactionId);
       capture.clientWorld.abortBarrier(transactionId);
       getLogger().log(java.util.logging.Level.FINE,"[PhantomAC][WORLD] transaction send failed for "+capture.playerId,failure);
     }
