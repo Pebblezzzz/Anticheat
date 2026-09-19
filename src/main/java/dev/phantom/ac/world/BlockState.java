@@ -4,6 +4,9 @@ import java.io.Serializable;
 import java.util.Objects;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.Locale;
+import java.util.Set;
+import java.util.HashSet;
 
 import dev.phantom.ac.geometry.Directions.Direction;
 
@@ -193,37 +196,60 @@ public record BlockState(
     private int candles;
     private boolean poweredState;
     private PropertySource provenance = PropertySource.FIXTURE;
+    private final Set<String> explicitlySet = new HashSet<>();
 
     public Builder(String blockId) {
       this.blockId = Objects.requireNonNull(blockId, "blockId");
     }
 
     public Builder variant(Variant value) { this.variant = value; return this; }
-    public Builder facing(Direction value) { this.facing = value; return this; }
-    public Builder half(Half value) { this.half = value; return this; }
-    public Builder stairShape(StairShape value) { this.stairShape = value; return this; }
-    public Builder layers(int value) { this.layers = value; return this; }
-    public Builder level(int value) { this.level = value; return this; }
-    public Builder waterlogged(boolean value) { this.waterlogged = value; return this; }
-    public Builder open(boolean value) { this.open = value; return this; }
-    public Builder powered(boolean value) { this.powered = value; return this; }
-    public Builder up(boolean value) { this.up = value; return this; }
-    public Builder north(boolean value) { this.north = value; return this; }
-    public Builder south(boolean value) { this.south = value; return this; }
-    public Builder west(boolean value) { this.west = value; return this; }
-    public Builder east(boolean value) { this.east = value; return this; }
-    public Builder northTall(boolean value) { this.northTall = value; return this; }
-    public Builder southTall(boolean value) { this.southTall = value; return this; }
-    public Builder westTall(boolean value) { this.westTall = value; return this; }
-    public Builder eastTall(boolean value) { this.eastTall = value; return this; }
-    public Builder candles(int value) { this.candles = value; return this; }
-    public Builder poweredState(boolean value) { this.poweredState = value; return this; }
+    public Builder facing(Direction value) { this.facing = value; explicitlySet.add("facing"); return this; }
+    public Builder half(Half value) { this.half = value; explicitlySet.add("half"); return this; }
+    public Builder stairShape(StairShape value) { this.stairShape = value; explicitlySet.add("shape"); return this; }
+    public Builder layers(int value) { this.layers = value; explicitlySet.add("layers"); return this; }
+    public Builder level(int value) { this.level = value; explicitlySet.add("level"); return this; }
+    public Builder waterlogged(boolean value) { this.waterlogged = value; explicitlySet.add("waterlogged"); return this; }
+    public Builder open(boolean value) { this.open = value; explicitlySet.add("open"); return this; }
+    public Builder powered(boolean value) { this.powered = value; explicitlySet.add("powered"); return this; }
+    public Builder up(boolean value) { this.up = value; explicitlySet.add("up"); return this; }
+    public Builder north(boolean value) { this.north = value; explicitlySet.add("north"); return this; }
+    public Builder south(boolean value) { this.south = value; explicitlySet.add("south"); return this; }
+    public Builder west(boolean value) { this.west = value; explicitlySet.add("west"); return this; }
+    public Builder east(boolean value) { this.east = value; explicitlySet.add("east"); return this; }
+    public Builder northTall(boolean value) { this.northTall = value; explicitlySet.add("northTall"); return this; }
+    public Builder southTall(boolean value) { this.southTall = value; explicitlySet.add("southTall"); return this; }
+    public Builder westTall(boolean value) { this.westTall = value; explicitlySet.add("westTall"); return this; }
+    public Builder eastTall(boolean value) { this.eastTall = value; explicitlySet.add("eastTall"); return this; }
+    public Builder candles(int value) { this.candles = value; explicitlySet.add("candles"); return this; }
+    public Builder poweredState(boolean value) { this.poweredState = value; explicitlySet.add("poweredState"); return this; }
     public Builder provenance(PropertySource value) { this.provenance = value; return this; }
 
     public BlockState build() {
+      Map<String,String> properties = new TreeMap<>();
+      switch (variant) {
+        case FENCE, WALL, PANE -> {
+          if (explicitlySet.contains("north")) properties.put("north", Boolean.toString(north));
+          if (explicitlySet.contains("south")) properties.put("south", Boolean.toString(south));
+          if (explicitlySet.contains("west")) properties.put("west", Boolean.toString(west));
+          if (explicitlySet.contains("east")) properties.put("east", Boolean.toString(east));
+          if (explicitlySet.contains("waterlogged")) properties.put("waterlogged", Boolean.toString(waterlogged));
+        }
+        case SLAB -> {
+          if (explicitlySet.contains("half"))
+            properties.put("type", half == Half.DOUBLE ? "double" : half == Half.TOP ? "top" : "bottom");
+          if (explicitlySet.contains("waterlogged")) properties.put("waterlogged", Boolean.toString(waterlogged));
+        }
+        case STAIRS -> {
+          if (explicitlySet.contains("facing")) properties.put("facing", facing.name().toLowerCase(Locale.ROOT));
+          if (explicitlySet.contains("half")) properties.put("half", half == Half.TOP ? "top" : "bottom");
+          if (explicitlySet.contains("shape")) properties.put("shape", stairShape.name().toLowerCase(Locale.ROOT));
+          if (explicitlySet.contains("waterlogged")) properties.put("waterlogged", Boolean.toString(waterlogged));
+        }
+        default -> {}
+      }
       return new BlockState(blockId, variant, facing, half, stairShape, layers, level, waterlogged,
           open, powered, up, north, south, west, east, northTall, southTall, westTall, eastTall,
-          candles, poweredState, provenance);
+          candles, poweredState, provenance, properties);
     }
   }
 
