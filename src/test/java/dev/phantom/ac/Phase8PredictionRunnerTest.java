@@ -333,15 +333,11 @@ class Phase8PredictionRunnerTest {
         MovementEnvironment.dry(true, true, false), false));
 
     double positionDelta = sprint.state().position().z() - noSprint.state().position().z();
-    assertTrue(
-        positionDelta > Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST,
-        "sprint jump should add the vanilla forward impulse"
-            + " noSprintPos=" + noSprint.state().position()
-            + " sprintPos=" + sprint.state().position()
-            + " noSprintVel=" + noSprint.state().velocity()
-            + " sprintVel=" + sprint.state().velocity()
-            + " noSprintUncertain=" + noSprint.state().uncertain()
-            + " sprintUncertain=" + sprint.state().uncertain());
+    assertEquals(
+        Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST,
+        positionDelta,
+        1e-9,
+        "sprint jump should add the vanilla forward impulse");
     assertEquals(
         Vanilla12111RichPhysics.JUMP,
         noSprint.state().position().y() - state.position().y(), 1e-7);
