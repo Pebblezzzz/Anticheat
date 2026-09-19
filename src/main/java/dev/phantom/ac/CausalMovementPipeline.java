@@ -1934,7 +1934,21 @@ public final class CausalMovementPipeline {
           : Math.max(0L, target - 1L);
     }
 
-    if (target < rootTick || target - rootTick > Phase6Reachability.MAX_HORIZON_TICKS) {
+    if (target < rootTick) {
+      return Optional.empty();
+    }
+    /*
+     * Non-authoritative replay from an explicit/fallback anchor can be
+     * evaluated in deterministic single-tick Phase 6 calls even when the
+     * absolute client tick is far away. The Phase 6 candidate budget still
+     * bounds branching; an uncertain or over-budget long replay therefore
+     * remains UNCERTAIN rather than fabricating an impossible result.
+     *
+     * Authoritative local roots retain the finite-horizon guard because there
+     * is no safe intermediate chronology for a distant local snapshot.
+     */
+    if (localAuthoritativeRoot
+        && target - rootTick > Phase6Reachability.MAX_HORIZON_TICKS) {
       return Optional.empty();
     }
 
