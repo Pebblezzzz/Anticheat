@@ -153,6 +153,20 @@ class Phase8HardeningRegressionTest {
   }
 
   @Test
+  void unchangedAfkMovementPacketIsCausallyInert() {
+    var packets=List.of(
+        new RawPacket(1,0,new Move(new Vec3(10.5,70.0,10.5),0f,0f,true,10L)),
+        new RawPacket(2,50_000_000L,new Move(new Vec3(10.5,70.0,10.5),0f,0f,true,11L)));
+    var report=Phase8LiveValidation.analyze(
+        "afk",capture(packets),256,exactTiming(),null,
+        Player.initial(new Vec3(10.5,70.0,10.5)),0L);
+    assertEquals(2,report.movementObservations(),report.results().toString());
+    assertEquals(Verdict.POSSIBLE,report.results().get(1).verdict(),report.results().toString());
+    assertTrue(report.frames().get(1).trace().stream()
+        .anyMatch(line -> line.contains("NO_OP_MOVEMENT")));
+  }
+
+  @Test
   void multipleMovementPacketsInOneClientTickRemainExplicitlyUncertain(){
     var packets=List.of(
         new RawPacket(1,0,new ChunkStates(new dev.phantom.ac.world.Chunk(0,0),floorStates())),
