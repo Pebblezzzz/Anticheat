@@ -440,11 +440,23 @@ public final class CausalMovementPipeline {
             + " boxes=" + movement.authority().snapshot().get().context().entityBoxes().size());
       }
 
-      if ((previousPositionPacketTick >= 0
+      boolean observedPositionChanged =
+          !Phase6Reachability.positionMatches(
+              observedBefore.position(), observedAfter.position());
+
+      /*
+       * Multiple packets in one client tick are only a sub-tick ambiguity when
+       * they actually describe different positions. Clients may legitimately
+       * emit repeated position-bearing packets while stationary (for example
+       * to refresh rotation/ground state). Those packets must remain eligible
+       * for the deterministic zero-delta witness below.
+       */
+      if (((previousPositionPacketTick >= 0
               && eventTiming.simulationClientTicks().isExact()
               && movementTick == previousPositionPacketTick)
-          || sameExplicitClientTick) {
-        uncertainty.add("multiple position-bearing movement packets occurred in one client tick; sub-tick motion is not modeled");
+          || sameExplicitClientTick)
+          && observedPositionChanged) {
+        uncertainty.add("multiple position-bearing movement packets changed position within one client tick; sub-tick motion is not modeled");
         lastAmbiguitySequence = sequence;
         recoveryRequired = true;
         frontier = Frontier.empty();
