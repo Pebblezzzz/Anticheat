@@ -656,7 +656,7 @@ public final class CausalMovementPipeline {
        * when no client-world chunks have arrived yet; later movement cannot safely
        * be called IMPOSSIBLE from an incomplete world replica.
        */
-      if (previousPositionPacketTick >= 0
+      if ((previousPositionPacketTick >= 0 || localAuthoritativeRootAvailable)
           && !worldCoversFrontierMovement(movement.world(), frontier, observedAfter)) {
         frontier = Frontier.empty();
         uncertainty.add("client world coverage is incomplete for the causal movement frontier; unloaded blocks cannot safely be treated as air");
