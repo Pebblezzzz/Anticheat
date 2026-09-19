@@ -131,7 +131,12 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         scheduleNettyValidation(capture,event.getChannel());
       }else if(event.getPacketType()==PacketType.Play.Client.PLAYER_INPUT){
         var input=new WrapperPlayClientPlayerInput(event);
-        record(capture,new Packets.ClientInput(input.isForward(),input.isBackward(),input.isLeft(),input.isRight(),input.isJump(),input.isShift(),input.isSprint()));
+        Packets.ClientInput clientInput=new Packets.ClientInput(
+            input.isForward(),input.isBackward(),input.isLeft(),input.isRight(),
+            input.isJump(),input.isShift(),input.isSprint());
+        record(capture,clientInput);
+        if(debugLevel(capture.playerId).trace())
+          logClientInputDebug(capture.playerName,capture.sequence.get(),clientInput);
       }else if(event.getPacketType()==PacketType.Play.Client.TELEPORT_CONFIRM){
         record(capture,new Packets.TeleportConfirm(new WrapperPlayClientTeleportConfirm(event).getTeleportId()));
         scheduleNettyValidation(capture,event.getChannel());
@@ -154,6 +159,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
     @Override public void onPacketSend(PacketSendEvent event){
       UUID playerId=event.getUser().getUUID();
+      if(playerId==null)return;
       Capture capture=captures.computeIfAbsent(playerId,ignored->new Capture(playerId,System.nanoTime(),validationBudget));
       capture.nettyChannel=asNettyChannel(event.getChannel());
       capture.playerName=event.getUser().getName();
@@ -884,6 +890,18 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         +",causalSequence="+capture.clientWorld.causalSequence()+"}"
         +" paperRejectionsInWindow="+capture.paperMoveFailureCount
         +" replay="+e.replayReference());
+  }
+
+  private void logClientInputDebug(String playerName,long sequence,Packets.ClientInput input){
+    getLogger().info("[PhantomAC][PHASE8][INPUT] player="+playerName
+        +" seq="+sequence
+        +" forward="+input.forward()
+        +" backward="+input.backward()
+        +" left="+input.left()
+        +" right="+input.right()
+        +" jump="+input.jump()
+        +" sneak="+input.sneak()
+        +" sprint="+input.sprint());
   }
 
   private void logMovementPacketDebug(String playerName,Capture capture,long sequence,long receivedNanos,
