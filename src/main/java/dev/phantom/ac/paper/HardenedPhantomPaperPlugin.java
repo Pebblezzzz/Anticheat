@@ -90,7 +90,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     @Override public void onPacketReceive(PacketReceiveEvent event){
       UUID playerId=event.getUser().getUUID();
       Capture capture=captures.computeIfAbsent(playerId,ignored->new Capture(playerId,System.nanoTime(),validationBudget));
-      capture.nettyChannel=event.getChannel();
+      capture.nettyChannel=asNettyChannel(event.getChannel());
       capture.playerName=event.getUser().getName();
 
       if(event.getPacketType()==PacketType.Play.Client.CLIENT_TICK_END){
@@ -490,6 +490,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
     sender.sendMessage("Usage: /phantom status | /phantom debug <player> [summary|trace|off|status] | /phantom setback <player> [on|off]");
     return true;
+  }
+
+  private static Channel asNettyChannel(Object channel){
+    return channel instanceof Channel nettyChannel ? nettyChannel : null;
   }
 
   private void requestWorldBarrier(Player player,Capture capture){
