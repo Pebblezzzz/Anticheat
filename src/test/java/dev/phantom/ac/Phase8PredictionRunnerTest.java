@@ -335,21 +335,18 @@ class Phase8PredictionRunnerTest {
         dev.phantom.ac.world.EntityCollisions.of(List.of())));
 
     double positionDelta = sprint.state().position().z() - noSprint.state().position().z();
+    double movementSpeed = state.attributes().value();
+    double expectedPositionDelta = Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST
+        + movementSpeed * (Vanilla12111RichPhysics.SPRINTING_SPEED_MULTIPLIER - 1.0)
+            * Vanilla12111RichPhysics.INPUT_FRICTION;
     double velocityDelta = sprint.state().velocity().z() - noSprint.state().velocity().z();
     assertEquals(
-        Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST * Vanilla12111RichPhysics.GROUND_FRICTION,
+        expectedPositionDelta * Vanilla12111RichPhysics.GROUND_FRICTION,
         velocityDelta,
         1e-7,
-        "sprint jump velocity"
-            + " noSprintPos=" + noSprint.state().position()
-            + " sprintPos=" + sprint.state().position()
-            + " noSprintVel=" + noSprint.state().velocity()
-            + " sprintVel=" + sprint.state().velocity()
-            + " noSprintGround=" + noSprint.state().onGround()
-            + " sprintGround=" + sprint.state().onGround()
-            + " positionDelta=" + positionDelta);
+        "sprint jump post-tick velocity");
     assertEquals(
-        Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST,
+        expectedPositionDelta,
         positionDelta,
         1e-9,
         "sprint jump displacement");
