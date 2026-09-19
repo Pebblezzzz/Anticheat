@@ -195,14 +195,8 @@ public final class Phase4WorldReplica implements Serializable {
       for(BlockState state:palette)Objects.requireNonNull(state);
       if(bitsPerEntry==0)return uniform(sectionY,palette[0]);
 
-      int[] localIndexes=new int[4096];
-      int paletteSize=palette.length;
-      for(int i=0;i<4096;i++){
-        int index=readPacked(packetData,bitsPerEntry,i);
-        if(index<0||index>=paletteSize)
-          throw new IllegalArgumentException("palette index "+index+" outside "+paletteSize);
-        localIndexes[i]=index;
-      }
+      if(packetData.length < ((4096*bitsPerEntry+63)/64))
+        throw new IllegalArgumentException("packed data is shorter than the 4096-entry section requires");
       return new PackedSection(sectionY,palette,packetData,bitsPerEntry,Map.of());
     }
 
