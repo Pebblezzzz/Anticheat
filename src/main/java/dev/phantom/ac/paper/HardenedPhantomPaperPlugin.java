@@ -188,7 +188,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         var state=toCoreState(packet.getBlockState());
         long sequence=capture.sequence.incrementAndGet();
         long receivedNanos=System.nanoTime();
-        capture.clientWorld.queueBlock(sequence,pos,state);
+        capture.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.BlockChange(
+              new dev.phantom.ac.Phase4WorldReplica.Order(authoritativeTick(capture)==null?0:authoritativeTick(capture),receivedNanos,sequence,sequence),
+              new dev.phantom.ac.Phase4WorldReplica.Provenance("paper-block-change","BLOCK_CHANGE",sequence,authoritativeTick(capture)==null?0:authoritativeTick(capture),null,false,"clientbound"),pos,state));
         Packets.Packet blockChange=blockStatePacket(pos,state);
         appendPacket(capture,new RawPacket(sequence,receivedNanos,blockChange,
             Packets.CaptureProvenance.fromAdapter("paper-block-change",blockChange,null)));
@@ -199,7 +201,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           var state=toCoreState(change.getBlockState(event.getUser().getClientVersion()));
           long sequence=capture.sequence.incrementAndGet();
           long receivedNanos=System.nanoTime();
-          capture.clientWorld.queueBlock(sequence,pos,state);
+          capture.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.BlockChange(
+              new dev.phantom.ac.Phase4WorldReplica.Order(authoritativeTick(capture)==null?0:authoritativeTick(capture),receivedNanos,sequence,sequence),
+              new dev.phantom.ac.Phase4WorldReplica.Provenance("paper-multi-block-change","MULTI_BLOCK_CHANGE",sequence,authoritativeTick(capture)==null?0:authoritativeTick(capture),null,false,"clientbound"),pos,state));
           Packets.Packet blockChange=blockStatePacket(pos,state);
           appendPacket(capture,new RawPacket(sequence,receivedNanos,blockChange,
               Packets.CaptureProvenance.fromAdapter("paper-multi-block-change",blockChange,null)));
@@ -209,7 +213,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         var chunk=new World.Chunk(packet.getChunkX(),packet.getChunkZ());
         long sequence=capture.sequence.incrementAndGet();
         long receivedNanos=System.nanoTime();
-        capture.clientWorld.queueUnload(sequence,new dev.phantom.ac.world.Chunk(packet.getChunkX(),packet.getChunkZ()));
+        capture.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.ChunkUnload(
+            new dev.phantom.ac.Phase4WorldReplica.Order(authoritativeTick(capture)==null?0:authoritativeTick(capture),receivedNanos,sequence,sequence),
+            new dev.phantom.ac.Phase4WorldReplica.Provenance("paper-client-chunk-unload","UNLOAD_CHUNK",sequence,authoritativeTick(capture)==null?0:authoritativeTick(capture),null,false,"clientbound"),
+            new dev.phantom.ac.world.Chunk(packet.getChunkX(),packet.getChunkZ())));
         Packets.ChunkUnload unload=new Packets.ChunkUnload(chunk);
         appendPacket(capture,new RawPacket(sequence,receivedNanos,unload,
             Packets.CaptureProvenance.fromAdapter("paper-client-chunk-unload",unload,null)));
@@ -220,7 +227,17 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         long receivedNanos=System.nanoTime();
         ClientVersion clientVersion=event.getUser().getClientVersion();
         capture.chunkPackets.incrementAndGet();
-        capture.clientWorld.queueChunk(sequence,column,column.isFullChunk(),clientVersion);
+        long tick=authoritativeTick(capture)==null?0:authoritativeTick(capture);
+        var order=new dev.phantom.ac.Phase4WorldReplica.Order(tick,receivedNanos,sequence,sequence);
+        var provenance=new dev.phantom.ac.Phase4WorldReplica.Provenance("paper-client-chunk-data","CHUNK_DATA",sequence,tick,null,false,"clientbound");
+        var decoded=decodeColumn(column,clientVersion,capture.minY,capture.maxY);
+        if(column.isFullChunk()){
+          capture.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.ChunkData(order,provenance,
+              new dev.phantom.ac.world.Chunk(column.getX(),column.getZ()),decoded));
+        }else{
+          capture.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.ChunkSections(order,provenance,
+              new dev.phantom.ac.world.Chunk(column.getX(),column.getZ()),decodedSections(column,clientVersion,capture.minY,capture.maxY)));
+        }
         if (debugLevel(capture.playerId).trace()) {
           getLogger().info("[PhantomAC][CHUNK] player=" + capture.playerName
               + " chunk=" + column.getX() + "," + column.getZ()
@@ -1058,6 +1075,40 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   private static Vec3 vector(double x,double y,double z){return new Vec3(x,y,z);}
 
+  private static Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> decodeColumn(Column column,ClientVersion clientVersion,int minY,int maxY){
+    Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> states=new HashMap<>();
+    BaseChunk[] sections=column.getChunks();
+    for(int sectionIndex=0;sectionIndex<sections.length;sectionIndex++){
+      BaseChunk section=sections[sectionIndex]; if(section==null||section.isEmpty())continue;
+      int y0=minY+sectionIndex*16;
+      for(int ly=0;ly<16;ly++){int y=y0+ly;if(y<minY||y>maxY)continue;
+        for(int lx=0;lx<16;lx++)for(int lz=0;lz<16;lz++){
+          WrappedBlockState raw=section.get(clientVersion,lx,ly,lz); if(raw==null||raw.getType().isAir())continue;
+          dev.phantom.ac.world.BlockState state=toCoreState(raw);
+          states.put(new dev.phantom.ac.world.Pos(column.getX()*16+lx,y,column.getZ()*16+lz),state);
+        }
+      }
+    }
+    return Map.copyOf(states);
+  }
+
+  private static Map<Integer,Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState>> decodedSections(Column column,ClientVersion clientVersion,int minY,int maxY){
+    Map<Integer,Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState>> result=new TreeMap<>();
+    BaseChunk[] sections=column.getChunks();
+    for(int sectionIndex=0;sectionIndex<sections.length;sectionIndex++){
+      BaseChunk section=sections[sectionIndex]; if(section==null||section.isEmpty())continue;
+      int y0=minY+sectionIndex*16; Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> states=new HashMap<>();
+      for(int ly=0;ly<16;ly++){int y=y0+ly;if(y<minY||y>maxY)continue;
+        for(int lx=0;lx<16;lx++)for(int lz=0;lz<16;lz++){
+          WrappedBlockState raw=section.get(clientVersion,lx,ly,lz); if(raw==null||raw.getType().isAir())continue;
+          states.put(new dev.phantom.ac.world.Pos(column.getX()*16+lx,y,column.getZ()*16+lz),toCoreState(raw));
+        }
+      }
+      result.put(sectionIndex,Map.copyOf(states));
+    }
+    return Map.copyOf(result);
+  }
+
   private static dev.phantom.ac.world.BlockState toCoreState(WrappedBlockState state){
     if(state==null||state.getType().isAir())return dev.phantom.ac.world.BlockState.air();
     String name=state.getType().getName();
@@ -1105,7 +1156,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     volatile Vec3 lastDebugMovePosition;
     final List<RawPacket> packets=new ArrayList<>();
     final ClientTickTracker clientTickTracker=new ClientTickTracker();
-    final LiveClientWorldReplica clientWorld=new LiveClientWorldReplica(Contracts.TARGET_VERSION,-64,319);
+    final dev.phantom.ac.Phase4WorldReplica clientWorld=new dev.phantom.ac.Phase4WorldReplica(Contracts.TARGET_VERSION);
     volatile Channel nettyChannel;
     volatile String playerName;
     final AtomicBoolean nettyValidationQueued=new AtomicBoolean();
