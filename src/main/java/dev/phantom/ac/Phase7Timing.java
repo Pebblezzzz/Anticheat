@@ -1660,7 +1660,7 @@ public final class Phase7Timing {
         timing.clientProcessingClientTickEnvelope(),
         timing.simulationClientTickEnvelope(),
         timing.inputClientTickEnvelope(),
-        timing.explicitClientTick(), timing.source(), timing.uncertain(),
+        timing.explicitClientTick(), timing.source(), true,
         timing.orderingConstraints(), timing.windows(), reasons);
   }
 
