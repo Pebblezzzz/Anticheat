@@ -271,16 +271,20 @@ public final class Phase8PredictionRunner {
 
       if (value instanceof Packets.PlayerContext authority) {
         clientState = State.apply(clientState, normalized);
+        long authorityServerTick = packet.provenance().authoritativeServerTick() == null
+            ? 0L
+            : packet.provenance().authoritativeServerTick();
+        Packets.PlayerContext effectiveAuthority =
+            deriveAuthoritativeVelocity(latestAuthority, authorityServerTick, authority);
         latestAuthority = new AuthorityAnchor(
             sequence,
             packet.receivedNanos(),
-            packet.provenance().authoritativeServerTick() == null
-                ? 0L
-                : packet.provenance().authoritativeServerTick(),
+            authorityServerTick,
             packet.provenance().authoritativeClientTick(),
-            authority);
+            effectiveAuthority);
         if (!prediction.isEmpty()) {
-          Set<Candidate> updated = overlayAuthorityState(prediction, authority, maximumCandidates);
+          Set<Candidate> updated =
+              overlayAuthorityState(prediction, effectiveAuthority, maximumCandidates);
           if (!updated.isEmpty()) prediction = updated;
         }
         continue;
@@ -843,10 +847,16 @@ public final class Phase8PredictionRunner {
       Set<Candidate> existingPrediction) {
     Player authority = playerFromAuthority(context);
     Optional<Candidate> retained = existingPrediction.stream().findFirst();
-    double horizontalX = retained.map(candidate -> candidate.context().player().velocity().x())
-        .orElse(authority.velocity().x());
-    double horizontalZ = retained.map(candidate -> candidate.context().player().velocity().z())
-        .orElse(authority.velocity().z());
+    boolean authoritativeHorizontalVelocity =
+        Math.hypot(authority.velocity().x(), authority.velocity().z()) > 1.0E-12;
+    double horizontalX = authoritativeHorizontalVelocity
+        ? authority.velocity().x()
+        : retained.map(candidate -> candidate.context().player().velocity().x())
+            .orElse(0.0);
+    double horizontalZ = authoritativeHorizontalVelocity
+        ? authority.velocity().z()
+        : retained.map(candidate -> candidate.context().player().velocity().z())
+            .orElse(0.0);
     double verticalVelocity = authority.velocity().y();
 
     Phase5Mechanics.MovementEnvironment environment = context.movementEnvironment();
@@ -875,6 +885,50 @@ public final class Phase8PredictionRunner {
         authority.effects(), authority.awaitingTeleport(), authority.uncertain(), authority.input(),
         authority.attributes(), authority.pose(), authority.environment(),
         authority.clientTickRange(), authority.provenance(), authority.uncertaintyReasons());
+  }
+
+  private static Packets.PlayerContext deriveAuthoritativeVelocity(
+      AuthorityAnchor previous,
+      long currentServerTick,
+      Packets.PlayerContext current) {
+    if (previous == null || currentServerTick <= previous.serverTick()) return current;
+
+    long tickDelta = currentServerTick - previous.serverTick();
+    if (tickDelta < 1L || tickDelta > 2L) return current;
+
+    Vec3 delta = new Vec3(
+        current.serverPosition().x() - previous.context().serverPosition().x(),
+        current.serverPosition().y() - previous.context().serverPosition().y(),
+        current.serverPosition().z() - previous.context().serverPosition().z());
+    double distance = Math.sqrt(delta.x() * delta.x()
+        + delta.y() * delta.y()
+        + delta.z() * delta.z());
+    double maximumPlausibleDistance = 1.5 * tickDelta;
+
+    /*
+     * Consecutive authoritative positions are safer than Bukkit getVelocity():
+     * the latter is not the player's packet-to-packet locomotion vector. Only
+     * derive velocity across a short, bounded interval so teleports/corrections
+     * do not become a synthetic movement velocity.
+     */
+    if (!Double.isFinite(distance) || distance > maximumPlausibleDistance) return current;
+
+    Vec3 derived = new Vec3(
+        delta.x() / tickDelta,
+        delta.y() / tickDelta,
+        delta.z() / tickDelta);
+    return new Packets.PlayerContext(
+        current.gamemode(),
+        current.attributes(),
+        current.effects(),
+        current.pose(),
+        current.movementEnvironment(),
+        current.sleeping(),
+        current.entityBoxes(),
+        current.serverPosition(),
+        derived,
+        current.canFly(),
+        current.flying());
   }
 
   private static Player playerFromAuthority(Packets.PlayerContext context) {
