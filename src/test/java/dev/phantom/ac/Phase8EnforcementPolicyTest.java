@@ -79,4 +79,17 @@ class Phase8EnforcementPolicyTest {
         "punish Alice MOVEMENT_REACHABILITY tick=9 replay=replay:9 first=7",
         command);
   }
+  @Test void enforcementDoesNotRepeatAfterThresholdWithinSameEpisode() {
+    Evidence e = evidence(
+        Verdict.IMPOSSIBLE,
+        "all exhaustively modeled legitimate candidates disagree with the observed movement state",
+        4, OptionalLong.of(4));
+    var decision = Phase8EnforcementPolicy.evaluate(
+        e, new State(3, 3, 0, 0, 4, -1), config());
+    assertFalse(decision.eligible());
+    assertTrue(decision.actions().isEmpty());
+    assertTrue(decision.reason().contains("already"));
+  }
+
+
 }
