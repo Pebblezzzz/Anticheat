@@ -56,10 +56,14 @@ class Phase7ClientTickIntegrationTest {
     Phase7Timing.Reconstruction reconstruction =
         Phase7Timing.reconstruct(timeline, Phase7Timing.Config.defaultConfig());
 
-    assertEquals(Range.exact(0L), reconstruction.frames().get(0).timing().packetGenerationClientTicks());
-    assertEquals(Range.exact(1L), reconstruction.frames().get(1).timing().packetGenerationClientTicks());
-    assertFalse(reconstruction.frames().get(0).timing().uncertain());
-    assertFalse(reconstruction.frames().get(1).timing().uncertain());
+    EventTiming first = reconstruction.frames().get(0).timing();
+    EventTiming second = reconstruction.frames().get(1).timing();
+    assertEquals(Range.exact(0L), first.packetGenerationClientTicks());
+    assertEquals(Range.exact(1L), second.packetGenerationClientTicks());
+    assertEquals(new Range(0L, 1L), second.simulationClientTicks());
+    assertTrue(second.possibleSimulationClientTicks().containsAll(List.of(0L, 1L)));
+    assertFalse(first.uncertain());
+    assertFalse(second.uncertain());
     assertEquals(Consistency.CONSISTENT, reconstruction.consistency());
   }
 
