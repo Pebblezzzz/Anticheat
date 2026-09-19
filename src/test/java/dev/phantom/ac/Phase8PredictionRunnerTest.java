@@ -338,12 +338,19 @@ class Phase8PredictionRunnerTest {
         Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST * Vanilla12111RichPhysics.GROUND_FRICTION,
         velocityDelta,
         1e-7,
-        "sprint jump should add the vanilla horizontal impulse to post-tick velocity");
+        "sprint jump velocity"
+            + " noSprintPos=" + noSprint.state().position()
+            + " sprintPos=" + sprint.state().position()
+            + " noSprintVel=" + noSprint.state().velocity()
+            + " sprintVel=" + sprint.state().velocity()
+            + " noSprintGround=" + noSprint.state().onGround()
+            + " sprintGround=" + sprint.state().onGround()
+            + " positionDelta=" + positionDelta);
     assertEquals(
         Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST,
         positionDelta,
         1e-9,
-        "sprint jump should add the vanilla forward impulse to displacement");
+        "sprint jump displacement");
     assertEquals(
         Vanilla12111RichPhysics.JUMP,
         noSprint.state().position().y() - state.position().y(), 1e-7);
