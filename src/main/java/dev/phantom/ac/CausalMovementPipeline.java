@@ -355,16 +355,29 @@ public final class CausalMovementPipeline {
       }
 
       long movementTick = eventTiming.simulationClientTicks().min();
+      long priorPositionPacketTick = previousPositionPacketTick;
+      Phase7Timing.Range priorPositionPacketGenerationRange = previousPositionPacketGenerationRange;
+      Long priorExplicitClientTick = previousExplicitClientTick;
+      previousPositionPacketTick = movementTick;
+      previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
+      previousExplicitClientTick = movement.move().clientTick();
 
       /*
        * A position-bearing packet that reports exactly the same position,
        * rotation, and client ground state as the immediately preceding client
-       * state contains no movement delta to validate. Treat it as a no-op
-       * observation rather than forcing it through an old/incomplete prediction
-       * frontier. This is especially important for AFK clients, which may emit
-       * periodic position packets without changing state.
+       * state contains no movement delta to validate. Only treat it as inert
+       * when a prior position packet exists and the authoritative server snapshot
+       * agrees with the unchanged state. This prevents AFK keepalive packets from
+       * entering physics while retaining genuine sustained-hover contradictions.
        */
-      if (previousPositionPacketTick >= 0
+      boolean authoritativeNoOp =
+          movement.authority().snapshot().isPresent()
+              && movement.authority().snapshot().get().context().serverPosition()
+                  .equals(observedAfter.position())
+              && movement.authority().snapshot().get().context().movementEnvironment().onGround()
+                  == observedAfter.onGround();
+      if (priorPositionPacketTick >= 0
+          && authoritativeNoOp
           && observedAfter.position().equals(observedBefore.position())
           && Float.compare(observedAfter.yaw(), observedBefore.yaw()) == 0
           && Float.compare(observedAfter.pitch(), observedBefore.pitch()) == 0
@@ -397,11 +410,6 @@ public final class CausalMovementPipeline {
                 Phase6Reachability.ObservedField.ROTATION,
                 Phase6Reachability.ObservedField.GROUND)));
         frontier = new Frontier(Set.of(noOp), movementTick, frontier.anchored());
-        previousPositionPacketTick = movementTick;
-        previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
-        if (movement.move().clientTick() != null) {
-          previousExplicitClientTick = movement.move().clientTick();
-        }
         trace.add("NO_OP_MOVEMENT position=" + observedAfter.position()
             + " clientGround=" + observedAfter.onGround());
         frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
@@ -411,17 +419,17 @@ public final class CausalMovementPipeline {
 
       boolean sameExplicitClientTick =
           movement.move().clientTick() != null
-              && previousExplicitClientTick != null
-              && movement.move().clientTick().longValue() == previousExplicitClientTick.longValue();
+              && priorExplicitClientTick != null
+              && movement.move().clientTick().longValue() == priorExplicitClientTick.longValue();
       boolean distinctExplicitClientTicks =
           movement.move().clientTick() != null
-              && previousExplicitClientTick != null
-              && movement.move().clientTick().longValue() != previousExplicitClientTick.longValue();
+              && priorExplicitClientTick != null
+              && movement.move().clientTick().longValue() != priorExplicitClientTick.longValue();
       boolean overlappingGenerationWindow =
-          previousPositionPacketGenerationRange != null
+          priorPositionPacketGenerationRange != null
               && !distinctExplicitClientTicks
               && rangesOverlapForSubTickDetection(
-                  previousPositionPacketGenerationRange,
+                  priorPositionPacketGenerationRange,
                   eventTiming.packetGenerationClientTicks());
       if (!frontier.candidates().isEmpty() && movement.authority().snapshot().isPresent()) {
         /*
@@ -450,8 +458,9 @@ public final class CausalMovementPipeline {
         lastAmbiguitySequence = sequence;
         recoveryRequired = true;
         frontier = Frontier.empty();
-        previousPositionPacketTick = -1L;
-        previousPositionPacketGenerationRange = null;
+        previousPositionPacketTick = movementTick;
+        previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
+        previousExplicitClientTick = movement.move().clientTick();
         trace.add("FRONTIER_RESET reason=SUB_TICK_AMBIGUITY");
         SearchResult uncertain = uncertainSearch(
             frontier.candidates(),
@@ -836,7 +845,7 @@ public final class CausalMovementPipeline {
          * movement to re-root from current authority.
          */
         frontier = Frontier.empty();
-        previousPositionPacketGenerationRange = null;
+        previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
         previousExplicitClientTick = movement.move().clientTick();
         trace.add("FRONTIER_RESET reason=UNCERTAIN_REQUIRES_FRESH_AUTHORITY");
       }
