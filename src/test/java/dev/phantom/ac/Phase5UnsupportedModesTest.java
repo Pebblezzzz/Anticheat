@@ -26,7 +26,16 @@ import org.junit.jupiter.api.Test;
  * rather than treating creative/spectator/flying as permanently uncertain.</p>
  */
 class Phase5UnsupportedModesTest {
-  private static final WorldSnapshot WORLD = WorldSnapshot.emptyOverworld12111();
+  private static final WorldSnapshot WORLD = floorWorld();
+
+  private static WorldSnapshot floorWorld() {
+    var stone = dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone", Map.of());
+    var builder = WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0, 0);
+    for (int x = -8; x <= 16; x++) for (int z = -8; z <= 16; z++) {
+      builder.setBlock(x, 63, z, stone);
+    }
+    return builder.build();
+  }
   private static final EntityCollisions ENTITIES = EntityCollisions.of(List.of(), true);
 
   @Test void creativeFlightIsModeled() {
