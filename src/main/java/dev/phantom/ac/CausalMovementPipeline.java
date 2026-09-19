@@ -637,7 +637,8 @@ public final class CausalMovementPipeline {
         }
         Candidate rootCandidate = root.orElseThrow();
         frontier = new Frontier(Set.of(rootCandidate), rootCandidate.context().simulationTick(), true);
-        rootedFromLocalAuthority = preferLocalAuthoritativeRoot;
+        rootedFromLocalAuthority = preferLocalAuthoritativeRoot
+            && movement.simulationAuthority().isPresent();
         if (preferLocalAuthoritativeRoot) {
           AuthoritativeSnapshot snapshot = movement.simulationAuthority().orElseThrow();
           trace.add("ROOT LOCAL_AUTHORITATIVE snapshotSeq=" + snapshot.sequence()
@@ -1532,22 +1533,12 @@ public final class CausalMovementPipeline {
     if (sameTick.isPresent()) return sameTick;
 
     /*
-     * Very early captures may have no usable server-side context packet yet.
-     * Retain the immutable join anchor as a final fallback. This also covers
-     * legacy/test PlayerContext packets constructed through the compact overload
-     * whose position and velocity intentionally default to zero.
+     * If no timestamped authoritative context is available, the caller may
+     * still use the immutable initial anchor as a plain replay root. Do not
+     * expose it as a simulation authority: that would make an offline anchor
+     * indistinguishable from a live server snapshot and could bypass world
+     * coverage uncertainty.
      */
-    if (initialAnchor != null
-        && !initialAnchor.uncertain()
-        && initialAnchorReceivedNanos >= 0
-        && received >= initialAnchorReceivedNanos) {
-      return Optional.of(new AuthoritativeSnapshot(
-          0L,
-          initialAnchorReceivedNanos,
-          Math.max(0L, serverTick - 1L),
-          contextFromAnchor(initialAnchor)));
-    }
-
     return Optional.empty();
   }
 
