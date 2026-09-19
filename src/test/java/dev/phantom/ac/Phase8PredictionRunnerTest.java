@@ -251,6 +251,58 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void sameClientTickAuthorityWatermarkDoesNotApplyAnExtraPhysicsStep() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+
+    runner.process(
+        "same-client-tick-watermark",
+        List.of(
+            new RawPacket(1, 10, new ClientTickEnd()),
+            new RawPacket(2, 20, new Move(
+                new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 1L))),
+        floorWorld(), anchor(), 0L);
+
+    double authorityY = 66.92159999847412;
+    double authorityVy = -0.15523200634002686;
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(false, false, false),
+        new Maths.Vec3(.5, authorityY, .5),
+        new Maths.Vec3(0.0, authorityVy, 0.0),
+        false, false, false, List.of());
+
+    // The live server sample is stamped with the same client watermark as the
+    // movement packet. It must be compared as the current logical state, not
+    // advanced once more to manufacture a prior tick.
+    var report = runner.process(
+        "same-client-tick-watermark",
+        List.of(
+            new RawPacket(3, 30, authority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "paper-live", authority, 200L, 7L)),
+            new RawPacket(4, 40, new Move(
+                new Maths.Vec3(.5, authorityY, .5), 0f, 0f, false, 7L),
+                Packets.CaptureProvenance.fromAdapter(
+                    "paper-client-tick-boundary",
+                    new Move(new Maths.Vec3(.5, authorityY, .5), 0f, 0f, false, 7L),
+                    200L, 7L))),
+        floorWorld(), anchor(), 0L);
+
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(), report.results().toString());
+    assertTrue(report.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
+        .anyMatch(line -> line.contains("mode=SAME_CLIENT_TICK_OBSERVATION")),
+        report.frames().toString());
+    assertTrue(report.frames().stream()
+        .flatMap(frame -> frame.predictedAfter().stream())
+        .anyMatch(candidate ->
+            candidate.context().simulationTick() == 7L
+                && Math.abs(candidate.context().player().position().y() - authorityY) < 1.0E-9),
+        report.frames().toString());
+  }
+
+  @Test
   void staleAuthorityDerivesHorizontalVelocityFromConsecutivePositions() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
