@@ -113,7 +113,8 @@ public final class Phase8PredictionRunner {
   private AuthorityAnchor latestAuthority;
   private Set<Candidate> prediction = Set.of();
   private long predictionTick = -1L;
-  private long relativeClientTick = -1L;
+  private long relativeClientTick = 0L;
+  private boolean hasClientTickBoundary;
   private long lastProcessedSequence = -1L;
   private long lastPositionClientTick = -1L;
   private long nextCandidateId;
@@ -163,7 +164,8 @@ public final class Phase8PredictionRunner {
     latestAuthority = null;
     prediction = Set.of();
     predictionTick = -1L;
-    relativeClientTick = -1L;
+    relativeClientTick = 0L;
+    hasClientTickBoundary = false;
     lastProcessedSequence = sequenceBoundary;
     lastPositionClientTick = -1L;
     nextCandidateId = 1L;
@@ -237,7 +239,8 @@ public final class Phase8PredictionRunner {
 
     for (Packets.RawPacket packet : packets) {
       long sequence = packet.sequence();
-      if (sequence > lastProcessedSequence + 1L && lastProcessedSequence >= 0L) {
+      long previousSequence = lastProcessedSequence;
+      if (sequence > previousSequence + 1L && previousSequence >= 0L) {
         /*
          * A missing packet is not allowed to destroy the frontier. It makes
          * the next affected observation uncertain, but the existing prediction
@@ -248,9 +251,6 @@ public final class Phase8PredictionRunner {
       lastProcessedSequence = sequence;
 
       EnumSet<Packets.PacketFlag> flags = EnumSet.of(Packets.PacketFlag.NORMAL);
-      if (lastProcessedSequence - sequence > 0L) {
-        flags.add(Packets.PacketFlag.OUT_OF_ORDER);
-      }
 
       Packets.NormalizedPacket normalized = new Packets.NormalizedPacket(
           sequence,
@@ -264,6 +264,7 @@ public final class Phase8PredictionRunner {
       if (value instanceof Packets.ClientTickEnd) {
         clientState = State.apply(clientState, normalized);
         relativeClientTick = Math.addExact(relativeClientTick, 1L);
+        hasClientTickBoundary = true;
         continue;
       }
 
@@ -278,7 +279,8 @@ public final class Phase8PredictionRunner {
             packet.provenance().authoritativeClientTick(),
             authority);
         if (!prediction.isEmpty()) {
-          prediction = overlayAuthorityState(prediction, authority, maximumCandidates);
+          Set<Candidate> updated = overlayAuthorityState(prediction, authority, maximumCandidates);
+          if (!updated.isEmpty()) prediction = updated;
         }
         continue;
       }
@@ -286,7 +288,10 @@ public final class Phase8PredictionRunner {
       if (value instanceof Packets.ClientInput input) {
         clientState = State.apply(clientState, normalized);
         currentInput = InputConstraint.fromClientInput(input);
-        prediction = overlayClientInput(prediction, clientState, maximumCandidates);
+        if (!prediction.isEmpty()) {
+          Set<Candidate> updated = overlayClientInput(prediction, clientState, maximumCandidates);
+          if (!updated.isEmpty()) prediction = updated;
+        }
         continue;
       }
 
@@ -312,11 +317,16 @@ public final class Phase8PredictionRunner {
           || value instanceof Packets.Gamemode) {
         clientState = State.apply(clientState, normalized);
         if (value instanceof Packets.Velocity velocity) {
-          prediction = overlayVelocity(prediction, velocity.velocity(), maximumCandidates);
-        } else if (value instanceof Packets.TeleportConfirm) {
-          prediction = overlayClientState(prediction, clientState, maximumCandidates, false);
+          if (!prediction.isEmpty()) {
+            Set<Candidate> updated = overlayVelocity(prediction, velocity.velocity(), maximumCandidates);
+            if (!updated.isEmpty()) prediction = updated;
+          }
         } else {
-          prediction = overlayClientState(prediction, clientState, maximumCandidates, true);
+          if (!prediction.isEmpty()) {
+            Set<Candidate> updated = overlayClientState(
+                prediction, clientState, maximumCandidates, true);
+            if (!updated.isEmpty()) prediction = updated;
+          }
         }
         continue;
       }
@@ -581,10 +591,8 @@ public final class Phase8PredictionRunner {
         uncertaintySources.addAll(advance.reasons());
         latestContinuation = Continuation.UNCERTAIN;
         SearchResult search = uncertainSearch(
-            advance.candidates().isEmpty() ? prediction : advance.candidates(),
+            prediction,
             String.join("; ", uncertaintySources));
-        Set<Candidate> afterState = advance.candidates().isEmpty() ? prediction : advance.candidates();
-        prediction = afterState;
         Phase8MovementValidation.Result result = validate(
             playerId, packet, move, observedBefore, observedAfter, world,
             tick, uncertaintySources, search, false);
@@ -681,7 +689,7 @@ public final class Phase8PredictionRunner {
       relativeClientTick = Math.max(relativeClientTick, tick);
       return new TickResolution(tick, true, true, "packet-client-tick");
     }
-    if (relativeClientTick >= 0L) {
+    if (hasClientTickBoundary) {
       return new TickResolution(relativeClientTick, true, true, "client-tick-boundary-watermark");
     }
     return new TickResolution(0L, false, false, "pre-boundary");
@@ -1213,8 +1221,8 @@ public final class Phase8PredictionRunner {
         && !"adventure".equals(context.gamemode())) return null;
     TickResolution tick = new TickResolution(
         relativeClientTick < 0L ? 0L : relativeClientTick,
-        relativeClientTick >= 0L,
-        relativeClientTick >= 0L,
+        hasClientTickBoundary,
+        hasClientTickBoundary,
         "flight-toggle-observation");
     return Phase8MovementValidation.authoritativeImpossible(
         playerId,
