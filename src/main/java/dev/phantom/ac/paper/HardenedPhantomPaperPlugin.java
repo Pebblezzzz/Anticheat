@@ -154,7 +154,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     @Override public void onPacketSend(PacketSendEvent event){
       UUID playerId=event.getUser().getUUID();
       Capture capture=captures.computeIfAbsent(playerId,ignored->new Capture(playerId,System.nanoTime(),validationBudget));
-      capture.nettyChannel=event.getChannel();
+      capture.nettyChannel=asNettyChannel(event.getChannel());
       capture.playerName=event.getUser().getName();
 
       if(event.getPacketType()==PacketType.Play.Server.PLAYER_POSITION_AND_LOOK){
