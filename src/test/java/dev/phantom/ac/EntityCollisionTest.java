@@ -20,4 +20,15 @@ class EntityCollisionTest {
     assertFalse(result.state().uncertain());
     assertTrue(result.collided()||result.state().position().x()<1.0);
   }
+  @Test
+  void incompleteFixedEntityProviderReportsIncompleteResult() {
+    var entity = new EntityCollisions.EntityBox(
+        7, new dev.phantom.ac.geometry.BlockBox(0, 0, 0, 1, 2, 1));
+    var provider = EntityCollisions.of(List.of(entity), false);
+    var result = provider.boxesIn(new dev.phantom.ac.geometry.BlockBox(-1, -1, -1, 2, 3, 2));
+    assertFalse(result.complete());
+    assertEquals(1, result.entities().size());
+  }
+
+
 }
