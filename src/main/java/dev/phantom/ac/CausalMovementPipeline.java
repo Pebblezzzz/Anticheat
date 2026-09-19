@@ -1213,18 +1213,26 @@ public final class CausalMovementPipeline {
       if (!(event.packet().packet() instanceof Packets.ClientInput input)) continue;
       Phase7Timing.EventTiming eventTiming =
           timing.timingFor(event.packet().sequence()).orElse(null);
-      if (eventTiming == null || !eventTiming.inputClientTicks().isExact()
+      if (eventTiming == null
           || event.packet().flags().contains(Packets.PacketFlag.DUPLICATE)
           || event.packet().flags().contains(Packets.PacketFlag.OUT_OF_ORDER)
           || event.packet().flags().contains(Packets.PacketFlag.SEQUENCE_GAP)) {
         continue;
       }
-      long clientTick = eventTiming.inputClientTicks().min();
-      result.computeIfAbsent(clientTick, ignored -> new ArrayList<>())
-          .add(new TimedInput(
-              event.packet().sequence(),
-              clientTick,
-              InputConstraint.fromClientInput(input)));
+      List<Long> ticks = Phase7Timing.possibleInputTicks(eventTiming);
+      if (!Phase7Timing.inputTickEnumerationComplete(eventTiming)) {
+        // Preserve the timing uncertainty by leaving the input unconstrained for
+        // Phase 6; a partial tick subset would fabricate precision.
+        continue;
+      }
+      InputConstraint constraint = InputConstraint.fromClientInput(input);
+      for (long clientTick : ticks) {
+        result.computeIfAbsent(clientTick, ignored -> new ArrayList<>())
+            .add(new TimedInput(
+                event.packet().sequence(),
+                clientTick,
+                constraint));
+      }
     }
     for (List<TimedInput> inputs : result.values()) {
       inputs.sort(Comparator.comparingLong(TimedInput::sequence));
@@ -1305,12 +1313,20 @@ public final class CausalMovementPipeline {
           && !(packet instanceof Packets.TeleportConfirm)) continue;
       Phase7Timing.EventTiming eventTiming =
           timing.timingFor(event.packet().sequence()).orElse(null);
-      if (eventTiming == null || !eventTiming.simulationClientTicks().isExact()) {
+      if (eventTiming == null) {
+        unmodeledSequences.add(event.packet().sequence());
+        continue;
+      }
+      if (!Phase7Timing.simulationTickEnumerationComplete(eventTiming)) {
+        unmodeledSequences.add(event.packet().sequence());
+        continue;
+      }
+      List<Long> ticks = Phase7Timing.possibleSimulationTicks(eventTiming);
+      if (ticks.isEmpty()) {
         unmodeledSequences.add(event.packet().sequence());
         continue;
       }
 
-      long tick = eventTiming.simulationClientTicks().min();
       ExternalTransition transition;
       if (packet instanceof Packets.Velocity velocity) {
         transition = new Phase6Reachability.VelocityImpulse(
@@ -1338,11 +1354,15 @@ public final class CausalMovementPipeline {
         transition = new Phase6Reachability.TeleportCorrection(
             teleport.id(), target, Vec3.ZERO, Pose.STANDING, true, yaw, pitch);
       }
-      result.computeIfAbsent(tick, ignored -> new ArrayList<>()).add(transition);
+      for (long tick : ticks) {
+        result.computeIfAbsent(tick, ignored -> new ArrayList<>()).add(transition);
+      }
     }
     Map<Long, List<ExternalTransition>> immutable = new HashMap<>();
     for (Map.Entry<Long, List<ExternalTransition>> entry : result.entrySet()) {
-      immutable.put(entry.getKey(), List.copyOf(entry.getValue()));
+      List<ExternalTransition> transitions = new ArrayList<>(entry.getValue());
+      transitions.sort(Comparator.comparing(Object::toString));
+      immutable.put(entry.getKey(), List.copyOf(transitions));
     }
     return Map.copyOf(immutable);
   }
