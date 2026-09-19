@@ -197,7 +197,7 @@ public final class Phase8MovementValidation {
     Player observed = observation.observed();
     for (ObservedField field : observation.known()) {
       switch (field) {
-        case POSITION -> { if (!candidate.position().equals(observed.position())) return false; }
+        case POSITION -> { if (!Phase6Reachability.positionMatches(candidate.position(), observed.position())) return false; }
         case VELOCITY -> { if (!candidate.velocity().equals(observed.velocity())) return false; }
         case ROTATION -> { if (Float.compare(candidate.yaw(), observed.yaw()) != 0 || Float.compare(candidate.pitch(), observed.pitch()) != 0) return false; }
         case GROUND -> { if (candidate.onGround() != observed.onGround()) return false; }
