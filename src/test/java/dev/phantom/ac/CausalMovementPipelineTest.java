@@ -536,11 +536,10 @@ class CausalMovementPipelineTest {
         MovementEnvironment.dry(true, false, false),
         previous.position(), previous.velocity(), false, false, false, List.of());
 
-    // This is a deterministic one-tick state from the same root under one
-    // concrete input branch; the test isolates timing-root selection rather than
-    // relying on a guessed movement constant.
+    // Keep the observation stationary so this test isolates timing-root selection
+    // instead of depending on a movement constant.
     Packets.Move move = new Move(
-        new Maths.Vec3(.47242283553372466, 64, .5275771644662753), 0f, 0f, true, 1L);
+        new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 1L);
 
     List<Packets.RawPacket> packets = List.of(
         new Packets.RawPacket(
