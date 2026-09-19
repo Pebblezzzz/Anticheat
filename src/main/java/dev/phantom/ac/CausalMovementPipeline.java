@@ -262,6 +262,7 @@ public final class CausalMovementPipeline {
     Phase7Timing.Range previousPositionPacketGenerationRange = null;
     Long previousExplicitClientTick = null;
     boolean recoveryRequired = false;
+    boolean contradictionActive = false;
     long lastAmbiguitySequence = -1L;
     long lastHandledUnmodeledExternalSequence = -1L;
     boolean haveAuthoritativeSeed = initialAnchor != null && !initialAnchor.uncertain();
@@ -466,6 +467,62 @@ public final class CausalMovementPipeline {
         uncertainty.add("capture chronology is incomplete; missing or reordered packets cannot be treated as inactivity");
       }
 
+      /*
+       * When the client does not provide an explicit tick, a repeated observation
+       * is a safe zero-delta witness only when the local world volume is known.
+       * This runs after same-tick ambiguity detection so duplicated movements
+       * remain UNCERTAIN rather than being silently accepted.
+       */
+      if (!recoveryRequired
+          && !contradictionActive
+          && movement.move().clientTick() == null
+          && Phase7Timing.Range.exact(Math.max(0L, movementTick)).isExact()
+          && Phase6Reachability.positionMatches(observedBefore.position(), observedAfter.position())
+          && Float.compare(observedBefore.yaw(), observedAfter.yaw()) == 0
+          && Float.compare(observedBefore.pitch(), observedAfter.pitch()) == 0
+          && observedBefore.onGround() == observedAfter.onGround()
+          && movement.world().fullyKnown(playerCollisionBox(observedAfter))) {
+        MovementEnvironment environment = environmentFromWorld(movement.world(), observedAfter);
+        State.Environment stateEnvironment = environment.fluid() == Phase5Mechanics.Fluid.WATER
+            ? State.Environment.WATER
+            : environment.fluid() == Phase5Mechanics.Fluid.LAVA
+                ? State.Environment.LAVA
+                : environment.climbable()
+                    ? State.Environment.CLIMBABLE
+                    : State.Environment.DRY;
+        Player witnessPlayer = new Player(
+            observedAfter.position(), observedBefore.velocity(), observedAfter.yaw(), observedAfter.pitch(),
+            observedAfter.onGround(), observedBefore.gamemode(), observedBefore.effects(),
+            observedBefore.awaitingTeleport(), false, observedAfter.input(), observedBefore.attributes(),
+            observedBefore.pose(), stateEnvironment, observedAfter.clientTickRange(),
+            observedBefore.provenance(), observedBefore.uncertaintyReasons());
+        long witnessTick = Math.max(0L, movementTick);
+        Context context = new Context(
+            witnessTick, witnessPlayer, simulationEnvironmentFor(environment), witnessPlayer.attributes(),
+            movementEffects(witnessPlayer), witnessPlayer.pose(), environment,
+            witnessPlayer.pose() == Pose.SLEEPING, entityCollisionsFor(movement));
+        Candidate witness = new Candidate(
+            0, context,
+            new Phase6Reachability.Provenance(
+                0, -1, witnessTick, "OBSERVED_ZERO_DELTA", "OBSERVATION", "None",
+                List.of("consecutive identical client observations require no physics displacement"),
+                1, List.of()));
+        SearchResult witnessSearch = new SearchResult(
+            Verdict.POSSIBLE, Set.of(witness), 0, 1, 0, 0, 0, 0,
+            List.of("consecutive identical client observations form a deterministic zero-delta witness"));
+        results.add(Phase8MovementValidation.validate(
+            playerId, serverTick, observedBefore, observedAfter, movement.world(),
+            worldReference, sync, assumptions, witnessSearch, replayReference, true));
+        frontier = new Frontier(Set.of(witness), witnessTick, true);
+        previousPositionPacketTick = witnessTick;
+        previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
+        trace.add("EVIDENCE POSSIBLE reason=OBSERVED_ZERO_DELTA_WITNESS");
+        trace.add("MATCHING candidates=1 frontierTick=" + movementTick);
+        frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+            assumptions, uncertainty, trace));
+        continue;
+      }
+
       Optional<AuthoritativeSnapshot> freshLocalAuthority =
           causallyFreshLocalAuthority(movement, 1L, -1L);
       boolean localAuthoritativeRootAvailable = freshLocalAuthority.isPresent();
@@ -650,6 +707,7 @@ public final class CausalMovementPipeline {
                     Phase6Reachability.ObservedField.POSITION,
                     Phase6Reachability.ObservedField.ROTATION));
         results.add(validation);
+        contradictionActive = false;
         frontier = new Frontier(flightCandidates, movementTick, true);
         previousPositionPacketTick = movementTick;
         previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
@@ -687,6 +745,18 @@ public final class CausalMovementPipeline {
             movement,
             maximumCandidates,
             preferLocalAuthoritativeRoot);
+        if (root.isEmpty() && initialAnchor != null && !initialAnchor.uncertain()) {
+          Optional<Candidate> fallbackRoot =
+              rootCandidate(initialAnchor, movement, maximumCandidates, false);
+          if (fallbackRoot.isPresent()) {
+            Candidate fallback = fallbackRoot.get();
+            frontier = new Frontier(Set.of(fallback), fallback.context().simulationTick(), true);
+            rootedFromLocalAuthority = false;
+            clientClockLocalAuthority = false;
+            trace.add("ROOT FALLBACK_EXPLICIT_ANCHOR simulationTick=" + fallback.context().simulationTick());
+            root = fallbackRoot;
+          }
+        }
         if (root.isEmpty()) {
           uncertainty.add("authoritative local root is outside the finite causal horizon");
           SearchResult uncertain = uncertainSearch(Set.of(), String.join("; ", uncertainty));
@@ -712,6 +782,103 @@ public final class CausalMovementPipeline {
         } else {
           trace.add("ROOT authoritative anchor=" + initialAnchor.position());
         }
+      }
+
+      /*
+       * A conservative exact-tick kinematic bound is independent of block collision
+       * coverage, but it must start from a known state. This is placed immediately
+       * after root establishment so recovery validation can reject a deterministic
+       * excessive displacement before Phase 5 encounters an incomplete sweep.
+       */
+      if (!recoveryRequired
+          && movement.chronologyClean()
+          && (eventTiming.simulationClientTicks().isExact()
+              || movement.move().clientTick() != null)) {
+        Optional<Candidate> kinematicReference = frontier.candidates().stream().findFirst();
+        if (kinematicReference.isEmpty()) {
+          kinematicReference = rootCandidate(initialAnchor, movement, maximumCandidates, true);
+        }
+        if (kinematicReference.isPresent()
+            && movement.world().hasChunk(
+                Math.floorDiv((int) Math.floor(
+                    kinematicReference.get().context().player().position().x()), 16),
+                Math.floorDiv((int) Math.floor(
+                    kinematicReference.get().context().player().position().z()), 16))
+            && movement.world().hasChunk(
+                Math.floorDiv((int) Math.floor(observedAfter.position().x()), 16),
+                Math.floorDiv((int) Math.floor(observedAfter.position().z()), 16))
+            && exceedsConservativeKinematicBound(
+                kinematicReference.get(), observedAfter, movementTick)) {
+          Candidate reference = kinematicReference.get();
+          SearchResult impossible = new SearchResult(
+              Verdict.IMPOSSIBLE,
+              Set.of(reference),
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              List.of(
+                  "conservative kinematic displacement bound exceeded; world collision state is not required to reject this movement",
+                  "all exhaustively modeled legitimate candidates disagree with the observed movement state"));
+          results.add(Phase8MovementValidation.validate(
+              playerId, serverTick, observedBefore, observedAfter, movement.world(),
+              worldReference, sync, assumptions, impossible, replayReference, true));
+          contradictionActive = true;
+          previousPositionPacketTick = movementTick;
+          previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
+          if (movement.move().clientTick() != null) previousExplicitClientTick = movement.move().clientTick();
+          frontier = Frontier.empty();
+          trace.add("EVIDENCE REACHABILITY_CONTRADICTION reason=KINEMATIC_BOUND_EXCEEDED");
+          frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+              assumptions, uncertainty, trace));
+          continue;
+        }
+      }
+
+      /*
+       * A matching authoritative/previous-frontier position is already a
+       * deterministic zero-delta witness. Evaluate this before demanding a replay
+       * root or world swept-volume coverage; both can be unavailable even though
+       * the observation itself is causally witnessed.
+       */
+      Optional<Candidate> earlyAuthorityWitness =
+          authorityObservationWitness(movement, movementTick);
+      Optional<Candidate> earlyFrontierWitness =
+          earlyAuthorityWitness.isPresent()
+              ? earlyAuthorityWitness
+              : frontierObservationWitness(frontier, movement, movementTick);
+      if (earlyFrontierWitness.isEmpty()) {
+        earlyFrontierWitness = initialAnchorObservationWitness(initialAnchor, movement, movementTick);
+      }
+      if (!recoveryRequired && earlyFrontierWitness.isPresent()) {
+        Candidate witness = earlyFrontierWitness.get();
+        SearchResult witnessSearch = new SearchResult(
+            Verdict.POSSIBLE,
+            Set.of(witness),
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            List.of(
+                "observed position matches a causally valid known state; zero-delta witness requires no physics replay"));
+        results.add(Phase8MovementValidation.validate(
+            playerId, serverTick, observedBefore, observedAfter, movement.world(),
+            worldReference, sync, assumptions, witnessSearch, replayReference,
+            true));
+        frontier = new Frontier(Set.of(witness), movementTick, true);
+        previousPositionPacketTick = movementTick;
+        previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
+        if (movement.move().clientTick() != null) previousExplicitClientTick = movement.move().clientTick();
+        trace.add("CANDIDATES count=1 exhaustive=true");
+        trace.add("EVIDENCE POSSIBLE reason=AUTHORITATIVE_ZERO_DELTA_WITNESS");
+        trace.add("MATCHING candidates=1 frontierTick=" + movementTick);
+        frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+            assumptions, uncertainty, trace));
+        continue;
       }
 
       /*
@@ -750,6 +917,7 @@ public final class CausalMovementPipeline {
                   Phase6Reachability.ObservedField.ROTATION,
                   Phase6Reachability.ObservedField.GROUND));
           results.add(validation);
+          contradictionActive = false;
           long baselineTick = baselineMatches.stream()
               .mapToLong(candidate -> candidate.context().simulationTick())
               .max()
@@ -763,6 +931,47 @@ public final class CausalMovementPipeline {
           trace.add("EVIDENCE POSSIBLE reason=INITIAL_BASELINE_WITHOUT_WORLD");
           trace.add("MATCHING candidates=" + baselineMatches.size()
               + " frontierTick=" + baselineTick);
+          frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+              assumptions, uncertainty, trace));
+          continue;
+        }
+      }
+
+      /*
+       * A deterministic kinematic certificate does not need swept-world coverage.
+       * Check it before the conservative world-coverage gate so an obviously
+       * excessive exact-tick displacement can still be proven impossible when
+       * collision data is incomplete.
+       */
+      if (eventTiming.simulationClientTicks().isExact()) {
+        Optional<Candidate> kinematicReference = frontier.candidates().stream().findFirst();
+        if (kinematicReference.isEmpty()) {
+          kinematicReference = rootCandidate(initialAnchor, movement, maximumCandidates, true);
+        }
+        if (kinematicReference.isPresent()
+            && movement.world().fullyKnown(playerCollisionBox(kinematicReference.get().context().player()))
+            && exceedsConservativeKinematicBound(kinematicReference.get(), observedAfter, movementTick)) {
+          Candidate reference = kinematicReference.get();
+          SearchResult impossible = new SearchResult(
+              Verdict.IMPOSSIBLE,
+              Set.of(reference),
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              List.of(
+                  "conservative kinematic displacement bound exceeded; world collision state is not required to reject this movement",
+                  "all exhaustively modeled legitimate candidates disagree with the observed movement state"));
+          results.add(Phase8MovementValidation.validate(
+              playerId, serverTick, observedBefore, observedAfter, movement.world(),
+              worldReference, sync, assumptions, impossible, replayReference, true));
+          previousPositionPacketTick = movementTick;
+          previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
+          if (movement.move().clientTick() != null) previousExplicitClientTick = movement.move().clientTick();
+          frontier = Frontier.empty();
+          trace.add("EVIDENCE REACHABILITY_CONTRADICTION reason=KINEMATIC_BOUND_EXCEEDED");
           frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
               assumptions, uncertainty, trace));
           continue;
@@ -875,6 +1084,9 @@ public final class CausalMovementPipeline {
                   Phase6Reachability.ObservedField.POSITION,
                   Phase6Reachability.ObservedField.ROTATION));
       results.add(validation);
+      if (validation.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
+        trace.add("EVIDENCE REACHABILITY_CONTRADICTION");
+      }
 
       // The candidate frontier advances only through a POSSIBLE observation.
       // IMPOSSIBLE/UNCERTAIN evidence never becomes a trusted baseline. UNCERTAIN
@@ -901,6 +1113,7 @@ public final class CausalMovementPipeline {
               + " frontierTick=" + resultingTick);
         }
       } else if (validation.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
+        contradictionActive = true;
         previousPositionPacketTick = movementTick;
         previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
         if (movement.move().clientTick() != null) {
@@ -1719,7 +1932,12 @@ public final class CausalMovementPipeline {
     if (rootTick < 0 || target - rootTick > Phase6Reachability.MAX_HORIZON_TICKS) {
       return Optional.empty();
     }
-    MovementEnvironment movementEnvironment = movementEnvironmentOf(anchor);
+    MovementEnvironment movementEnvironment;
+    try {
+      movementEnvironment = movementEnvironmentOf(anchor);
+    } catch (IllegalStateException unknownEnvironment) {
+      return Optional.empty();
+    }
     Context context = new Context(
         rootTick,
         anchor,
@@ -2117,6 +2335,189 @@ public final class CausalMovementPipeline {
       if (timeline.events().get(i).packet().packet().mutatesWorld()) return true;
     }
     return false;
+  }
+
+  private static Optional<Candidate> initialAnchorObservationWitness(
+      Player initialAnchor,
+      MovementEvent movement,
+      long simulationTick) {
+    if (initialAnchor == null || initialAnchor.uncertain()
+        || initialAnchor.environment() == State.Environment.UNKNOWN
+        || simulationTick < 0) return Optional.empty();
+    if (!movement.world().fullyKnown(playerCollisionBox(initialAnchor))) return Optional.empty();
+    Player observed = movement.stateFrame().after();
+    if (!Phase6Reachability.positionMatches(initialAnchor.position(), observed.position())) return Optional.empty();
+    if (initialAnchor.onGround() != observed.onGround()) return Optional.empty();
+    if (movement.move().onGround() != null && initialAnchor.onGround() != movement.move().onGround()) return Optional.empty();
+    if (movement.move().yaw() != null
+        && Float.compare(initialAnchor.yaw(), movement.move().yaw()) != 0) return Optional.empty();
+    if (movement.move().pitch() != null
+        && Float.compare(initialAnchor.pitch(), movement.move().pitch()) != 0) return Optional.empty();
+    float yaw = movement.move().yaw() == null ? observed.yaw() : movement.move().yaw();
+    float pitch = movement.move().pitch() == null ? observed.pitch() : movement.move().pitch();
+    Player witnessPlayer = new Player(
+        observed.position(),
+        initialAnchor.velocity(),
+        yaw,
+        pitch,
+        observed.onGround(),
+        initialAnchor.gamemode(),
+        initialAnchor.effects(),
+        initialAnchor.awaitingTeleport(),
+        false,
+        observed.input(),
+        initialAnchor.attributes(),
+        initialAnchor.pose(),
+        initialAnchor.environment(),
+        observed.clientTickRange(),
+        initialAnchor.provenance(),
+        initialAnchor.uncertaintyReasons());
+    MovementEnvironment environment = movementEnvironmentOf(witnessPlayer);
+    Context context = new Context(
+        simulationTick,
+        witnessPlayer,
+        simulationEnvironmentFor(environment),
+        witnessPlayer.attributes(),
+        movementEffects(witnessPlayer),
+        witnessPlayer.pose(),
+        environment,
+        witnessPlayer.pose() == Pose.SLEEPING,
+        entityCollisionsFor(movement));
+    return Optional.of(new Candidate(
+        0,
+        context,
+        new Phase6Reachability.Provenance(
+            0,
+            0,
+            simulationTick,
+            "INITIAL_ANCHOR_ZERO_DELTA",
+            "ANCHOR",
+            "None",
+            List.of("observed position matches the explicit initial authoritative anchor; no physics replay required"),
+            1,
+            List.of(),
+            List.of())));
+  }
+
+  private static Optional<Candidate> frontierObservationWitness(
+      Frontier frontier,
+      MovementEvent movement,
+      long simulationTick) {
+    if (frontier.candidates().isEmpty() || simulationTick < 0) return Optional.empty();
+    Player observed = movement.stateFrame().after();
+    if (!movement.world().fullyKnown(playerCollisionBox(observed))) return Optional.empty();
+    for (Candidate candidate : frontier.candidates()) {
+      if (candidate.context().simulationTick() > simulationTick) continue;
+      Player player = candidate.context().player();
+      if (!matchesObserved(player, observed, movement.move())) continue;
+      Context context = candidate.context().withTick(simulationTick);
+      return Optional.of(new Candidate(
+          candidate.id(),
+          context,
+          new Phase6Reachability.Provenance(
+              candidate.id(),
+              candidate.provenance().parentId(),
+              simulationTick,
+              "FRONTIER_ZERO_DELTA",
+              candidate.provenance().worldBranch(),
+              candidate.provenance().externalTransition(),
+              List.of("trusted frontier already matches the observed state; no physics replay required"),
+              candidate.provenance().mergedPathCount(),
+              candidate.provenance().mergedParentIds(),
+              candidate.provenance().assumptions())));
+    }
+    return Optional.empty();
+  }
+
+  private static Optional<Candidate> authorityObservationWitness(
+      MovementEvent movement,
+      long simulationTick) {
+    Optional<AuthoritativeSnapshot> authority = movement.authority().snapshot();
+    if (authority.isEmpty() || simulationTick < 0) return Optional.empty();
+    AuthoritativeSnapshot snapshot = authority.get();
+    if (snapshot.sequence() == 0L) return Optional.empty();
+    long age = movement.event().serverTick() - snapshot.serverTick();
+    if (age < 0 || age > 1L) return Optional.empty();
+    Long explicitClientTick = movement.move().clientTick();
+    if (explicitClientTick != null
+        && snapshot.clientTick() != null
+        && !explicitClientTick.equals(snapshot.clientTick())) return Optional.empty();
+    Player authoritative = playerFromAuthority(snapshot.context());
+    Player observed = movement.stateFrame().after();
+    if (!Phase6Reachability.positionMatches(authoritative.position(), observed.position())) return Optional.empty();
+    if (!movement.world().fullyKnown(playerCollisionBox(observed))) return Optional.empty();
+    if (authoritative.onGround() != observed.onGround()) return Optional.empty();
+    if (movement.move().onGround() != null && authoritative.onGround() != movement.move().onGround()) return Optional.empty();
+    if (movement.move().yaw() != null
+        && Float.compare(authoritative.yaw(), movement.move().yaw()) != 0) return Optional.empty();
+    if (movement.move().pitch() != null
+        && Float.compare(authoritative.pitch(), movement.move().pitch()) != 0) return Optional.empty();
+    float yaw = movement.move().yaw() == null ? observed.yaw() : movement.move().yaw();
+    float pitch = movement.move().pitch() == null ? observed.pitch() : movement.move().pitch();
+    Player witnessPlayer = new Player(
+        observed.position(),
+        authoritative.velocity(),
+        yaw,
+        pitch,
+        movement.move().onGround() == null ? authoritative.onGround() : movement.move().onGround(),
+        authoritative.gamemode(),
+        authoritative.effects(),
+        authoritative.awaitingTeleport(),
+        false,
+        observed.input(),
+        authoritative.attributes(),
+        authoritative.pose(),
+        authoritative.environment(),
+        observed.clientTickRange(),
+        authoritative.provenance(),
+        authoritative.uncertaintyReasons());
+    MovementEnvironment environment = movementEnvironmentOf(witnessPlayer);
+    Context context = new Context(
+        simulationTick,
+        witnessPlayer,
+        simulationEnvironmentFor(environment),
+        witnessPlayer.attributes(),
+        movementEffects(witnessPlayer),
+        witnessPlayer.pose(),
+        environment,
+        witnessPlayer.pose() == Pose.SLEEPING,
+        entityCollisionsFor(movement));
+    return Optional.of(new Candidate(
+        0,
+        context,
+        new Phase6Reachability.Provenance(
+            0,
+            snapshot.sequence(),
+            simulationTick,
+            "AUTHORITATIVE_ZERO_DELTA",
+            "AUTHORITY",
+            "None",
+            List.of("observed position matches authoritative snapshot; no client physics step required"),
+            1,
+            List.of())));
+  }
+
+  private static boolean exceedsConservativeKinematicBound(
+      Candidate candidate,
+      Player observed,
+      long targetTick) {
+    long startTick = candidate.context().simulationTick();
+    long ticks = targetTick - startTick;
+    if (ticks < 0 || ticks > 2L) return false;
+    double dx = observed.position().x() - candidate.context().player().position().x();
+    double dy = observed.position().y() - candidate.context().player().position().y();
+    double dz = observed.position().z() - candidate.context().player().position().z();
+    double horizontalDistance = Math.hypot(dx, dz);
+    double horizontalVelocity = Math.hypot(
+        candidate.context().player().velocity().x(), candidate.context().player().velocity().z());
+    double speedMultiplier = Math.max(1.0, candidate.context().effects().speedMultiplier());
+    double configuredSpeed = Math.max(0.05, candidate.context().attributes().value()) * speedMultiplier;
+    double horizontalPerTick = horizontalVelocity + configuredSpeed * 4.0 + 0.25;
+    double verticalVelocity = Math.abs(candidate.context().player().velocity().y());
+    double verticalPerTick = verticalVelocity + 1.0 + configuredSpeed + 0.25;
+    double horizontalBound = horizontalPerTick * Math.max(1L, ticks);
+    double verticalBound = verticalPerTick * Math.max(1L, ticks);
+    return horizontalDistance > horizontalBound || Math.abs(dy) > verticalBound;
   }
 
   private static Set<Candidate> retargetRotation(
