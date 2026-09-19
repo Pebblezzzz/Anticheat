@@ -205,50 +205,57 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
-  void staleAuthorityUsesAuthoritativeHorizontalVelocity() {
+  void staleAuthorityDerivesHorizontalVelocityFromConsecutivePositions() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
     Player movingAnchor = new Player(
         new Maths.Vec3(.5, 70.0, .5),
-        new Maths.Vec3(.1, 0.0, 0.0),
+        Maths.Vec3.ZERO,
         0f, 0f, false, "survival", Map.of(), OptionalInt.empty(), false,
         Optional.empty(), Simulation.Attributes.DEFAULT, Pose.STANDING,
         State.Environment.DRY, State.TickRange.unknown(), State.Provenance.UNKNOWN, Set.of());
 
     runner.process(
-        "stale-horizontal",
+        "stale-horizontal-derived",
         List.of(
             new RawPacket(1, 10, new ClientTickEnd()),
             new RawPacket(2, 20, new Move(
-                new Maths.Vec3(.6, 70.0, .5), 0f, 0f, false, 1L))),
+                new Maths.Vec3(.5, 70.0, .5), 0f, 0f, false, 1L))),
         floorWorld(), movingAnchor, 0L);
 
-    PlayerContext authority = new PlayerContext(
+    PlayerContext previousAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(false, false, false),
+        new Maths.Vec3(.4, 70.0, .5),
+        Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    PlayerContext currentAuthority = new PlayerContext(
         "survival", Simulation.Attributes.DEFAULT, Map.of(),
         Pose.STANDING, MovementEnvironment.dry(false, false, false),
         new Maths.Vec3(.6, 70.0, .5),
-        new Maths.Vec3(.2, 0.0, 0.0),
+        Maths.Vec3.ZERO,
         false, false, false, List.of());
 
-    double expectedX=.6+0.2;
-    double expectedY=70.0 - Vanilla12111RichPhysics.GRAVITY * Vanilla12111RichPhysics.AIR_VERTICAL_FRICTION;
-
-    var second = runner.process(
-        "stale-horizontal",
+    var report = runner.process(
+        "stale-horizontal-derived",
         List.of(
-            new RawPacket(3, 30, authority,
+            new RawPacket(3, 30, previousAuthority,
                 Packets.CaptureProvenance.fromAdapter(
-                    "test-authority", authority, 100L, 10L)),
-            new RawPacket(4, 200, new Move(
-                new Maths.Vec3(expectedX, expectedY, .5), 0f, 0f, false, 10L))),
+                    "test-authority", previousAuthority, 99L, 9L)),
+            new RawPacket(4, 40, currentAuthority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-authority", currentAuthority, 100L, 10L)),
+            new RawPacket(5, 200, new Move(
+                new Maths.Vec3(.8, 70.0, .5), 0f, 0f, false, 10L))),
         floorWorld(), movingAnchor, 0L);
 
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
-        second.results().getFirst().verdict(), second.results().toString());
-    assertEquals(1, second.frames().size());
-    assertTrue(second.frames().getFirst().trace().stream()
+        report.results().getFirst().verdict(), report.results().toString());
+    assertTrue(report.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
         .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
-        second.frames().toString());
+        report.frames().toString());
   }
 
   @Test
