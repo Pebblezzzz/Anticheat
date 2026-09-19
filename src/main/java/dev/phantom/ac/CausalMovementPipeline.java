@@ -1378,7 +1378,21 @@ public final class CausalMovementPipeline {
         continue;
       }
       Advance one;
-      if (root.get().context().simulationTick() + 1L == target) {
+      if (root.get().context().simulationTick() == target) {
+        /*
+         * The local authoritative snapshot is itself the deterministic state for
+         * this timing candidate. A bounded packet->simulation offset can therefore
+         * legitimately select the root tick and require zero physics steps.
+         *
+         * Treating this case as an "intermediate chronology" failure discards the
+         * exact authority state and turns stationary or zero-delta movements into
+         * false UNCERTAIN evidence.
+         */
+        one = new Advance(
+            Set.of(root.get()),
+            List.of("client-tick timing candidate matches the authoritative root; no physics step required"),
+            true);
+      } else if (root.get().context().simulationTick() + 1L == target) {
         one = advanceTo(
             Set.of(root.get()),
             target,
