@@ -590,19 +590,15 @@ public final class Phase4WorldReplica implements Serializable {
         Chunk chunk=Chunk.containing(x,z);
         return selected.contains(chunk)?source.coverageAt(x,y,z):Coverage.UNLOADED;
       }
-      @Override public java.util.Optional<VoxelShape> resolveCollisionShape(WorldSnapshot snapshot,int x,int y,int z){
-      if(collisionResolver==null)return java.util.Optional.empty();
-      BlockState state=blockAtOrNull(x,y,z);
-      if(state==null)return java.util.Optional.of(VoxelShape.empty());
-      return collisionResolver.resolve(snapshot,state,x,y,z);
-    }
-
-    @Override public BlockState blockAtOrNull(int x,int y,int z){
+      @Override public BlockState blockAtOrNull(int x,int y,int z){
         Chunk chunk=Chunk.containing(x,z);
         return selected.contains(chunk)?source.blockAtOrNull(x,y,z):null;
       }
       @Override public java.util.Optional<VoxelShape> resolveCollisionShape(WorldSnapshot snapshot,int x,int y,int z){
-        return resolver==null?java.util.Optional.empty():resolver.resolve(snapshot,snapshot.blockAtOrNull(x,y,z),x,y,z);
+        if(resolver==null)return java.util.Optional.empty();
+        BlockState state=source.blockAtOrNull(x,y,z);
+        if(state==null)return java.util.Optional.of(VoxelShape.empty());
+        return resolver.resolve(snapshot,state,x,y,z);
       }
     };
     return WorldSnapshot.backed(source.version(),source.minY(),source.maxY(),backend);
@@ -799,6 +795,13 @@ public final class Phase4WorldReplica implements Serializable {
           ?BlockState.air()
           :chunk.section(sectionIndex).stateAt((Math.floorMod(y,16)<<8)|((z&15)<<4)|(x&15));
       return state.isUnsupported()?Coverage.UNSUPPORTED:Coverage.KNOWN;
+    }
+
+    @Override public java.util.Optional<VoxelShape> resolveCollisionShape(WorldSnapshot snapshot,int x,int y,int z){
+      if(collisionResolver==null)return java.util.Optional.empty();
+      BlockState state=blockAtOrNull(x,y,z);
+      if(state==null)return java.util.Optional.of(VoxelShape.empty());
+      return collisionResolver.resolve(snapshot,state,x,y,z);
     }
 
     @Override public java.util.Optional<VoxelShape> resolveCollisionShape(WorldSnapshot snapshot,int x,int y,int z){
