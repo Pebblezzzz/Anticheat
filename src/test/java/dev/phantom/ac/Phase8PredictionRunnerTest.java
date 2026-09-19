@@ -197,7 +197,8 @@ class Phase8PredictionRunnerTest {
         .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
         report.frames().toString());
     assertTrue(report.results().stream()
-        .flatMap(result -> result.evidence().uncertaintySources().stream())        .noneMatch(reason -> reason.contains("support block is unavailable")
+        .flatMap(result -> result.evidence().uncertaintySources().stream())
+        .noneMatch(reason -> reason.contains("support block is unavailable")
             || reason.contains("Phase 5 could not deterministically simulate")),
         report.results().toString());
     assertTrue(report.candidateFrontierRetained(), report.toString());
@@ -254,8 +255,7 @@ class Phase8PredictionRunnerTest {
   void staleResyncUsesInputFromTheSimulatedTickNotTheLatestInput() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
-    // Sprint is represented in the effective movement-speed attribute, as it is
-    // on the Paper capture path.
+    // Sprint is represented in the effective movement-speed attribute on Paper.
     double movementSpeed = 0.13;
     PlayerContext authority = new PlayerContext(
         "survival", new Simulation.Attributes(movementSpeed), Map.of(),
@@ -430,6 +430,7 @@ class Phase8PredictionRunnerTest {
 
     var first = runner.process("duplicate-call", raw, floorWorld(), anchor(), 10L);
     var second = runner.process("duplicate-call", raw, floorWorld(), anchor(), 10L);
+
     assertEquals(2, first.packetsProcessed());
     assertEquals(0, second.packetsProcessed());
     assertEquals(first.lastProcessedSequence(), second.lastProcessedSequence());
