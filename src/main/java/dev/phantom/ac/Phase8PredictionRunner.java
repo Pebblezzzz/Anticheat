@@ -753,7 +753,7 @@ public final class Phase8PredictionRunner {
         : authorityTick;
 
     Player rootPlayer = withClientRotation(
-        playerFromAuthority(authority.context()),
+        predictionAnchorFromAuthority(authority.context()),
         observedBefore.yaw(),
         observedBefore.pitch());
 
@@ -788,7 +788,7 @@ public final class Phase8PredictionRunner {
     long rootTick;
 
     if (authority != null) {
-      rootPlayer = playerFromAuthority(authority.context());
+      rootPlayer = predictionAnchorFromAuthority(authority.context());
       /*
        * Same-server-tick PlayerContext is a server-side sample, not an atomic
        * pre-movement timestamp. Treat it as a prior state for target-1 rather
@@ -836,6 +836,36 @@ public final class Phase8PredictionRunner {
     if (latestAuthority.sequence() >= movementPacket.sequence()) return null;
     if (latestAuthority.receivedNanos() > movementPacket.receivedNanos()) return null;
     return latestAuthority;
+  }
+
+  private static Player predictionAnchorFromAuthority(Packets.PlayerContext context) {
+    Player player = playerFromAuthority(context);
+    Phase5Mechanics.MovementEnvironment environment = context.movementEnvironment();
+    if (environment.fluid() == Fluid.NONE
+        && !environment.climbable()
+        && !environment.gliding()
+        && !environment.onGround()
+        && !context.effects().containsKey("minecraft:levitation")
+        && !context.effects().containsKey("levitation")) {
+      MovementEffects effects = new MovementEffects(
+          amplifier(context.effects(), "minecraft:speed", "speed"),
+          amplifier(context.effects(), "minecraft:slowness", "slowness"),
+          amplifier(context.effects(), "minecraft:jump_boost", "jump_boost"),
+          amplifier(context.effects(), "minecraft:levitation", "levitation"),
+          context.effects().containsKey("minecraft:slow_falling")
+              || context.effects().containsKey("slow_falling"));
+      double gravity = Vanilla12111RichPhysics.GRAVITY * environment.gravityMultiplier();
+      double correctedY = player.velocity().y() * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG
+          - gravity * effects.fallGravityMultiplier() * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG;
+      player = new Player(
+          player.position(),
+          new Vec3(player.velocity().x(), correctedY, player.velocity().z()),
+          player.yaw(), player.pitch(), player.onGround(), player.gamemode(), player.effects(),
+          player.awaitingTeleport(), player.uncertain(), player.input(), player.attributes(),
+          player.pose(), player.environment(), player.clientTickRange(), player.provenance(),
+          player.uncertaintyReasons());
+    }
+    return player;
   }
 
   private static Player playerFromAuthority(Packets.PlayerContext context) {
