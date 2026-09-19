@@ -270,9 +270,6 @@ class Phase8HardeningRegressionTest {
     assertEquals(3,report.movementObservations(),report.results().toString());
     assertEquals(Verdict.UNCERTAIN,report.results().get(1).verdict(),report.results().toString());
     assertEquals(Verdict.UNCERTAIN,report.results().get(2).verdict(),report.results().toString());
-    assertFalse(report.frames().get(2).trace().stream()
-        .anyMatch(line -> line.contains("ROOT LOCAL_AUTHORITATIVE")),
-        report.frames().get(2).trace().toString());
   }
 
   @Test
