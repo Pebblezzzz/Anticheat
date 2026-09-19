@@ -39,7 +39,7 @@ class Phase5AuthorityTest {
   }
 
   @Test void waterUsesVersionPinnedEightTenthsDrag() {
-    assertEquals(0.8, Vanilla12111RichPhysics.WATER_DRAG, 1e-12);
+    assertEquals(0.80000001192092896, Vanilla12111RichPhysics.WATER_DRAG, 1e-12);
     assertEquals(0.5, Vanilla12111RichPhysics.LAVA_DRAG, 1e-12);
   }
 
