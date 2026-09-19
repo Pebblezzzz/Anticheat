@@ -266,8 +266,16 @@ public final class Phase8PredictionRunner {
     for (Packets.RawPacket packet : packets) {
       rememberTimingPacket(packet);
     }
+    Phase7Timing.Reconstruction phase7Reconstruction = reconstructPhase7Timing();
     Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence =
-        reconstructPhase7Timing().bySequence();
+        phase7Reconstruction.bySequence();
+    boolean phase7ChronologyUncertain =
+        phase7Reconstruction.frames().stream()
+            .anyMatch(frame -> frame.timing().windows().stream().anyMatch(
+                window -> switch (window.kind()) {
+                  case PACKET_GAP, SERVER_TICK_GAP, REORDERING, DUPLICATE, RECOVERY -> true;
+                  default -> false;
+                }));
 
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     List<PredictionFrame> frames = new ArrayList<>();
@@ -423,7 +431,8 @@ public final class Phase8PredictionRunner {
           + " receivedNanos=" + packet.receivedNanos()
           + " clientStatePosition=" + observedAfter.position());
 
-      TickResolution tick = resolveMovementTick(packet, move, phase7TimingBySequence);
+      TickResolution tick = resolveMovementTick(
+          packet, move, phase7TimingBySequence, phase7ChronologyUncertain);
       trace.add("CLIENT_TICK " + tick.display()
           + " exact=" + tick.exact()
           + " source=" + tick.source());
@@ -741,10 +750,13 @@ public final class Phase8PredictionRunner {
   private TickResolution resolveMovementTick(
       Packets.RawPacket packet,
       Packets.Move move,
-      Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
+      Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence,
+      boolean phase7ChronologyUncertain) {
     Phase7Timing.EventTiming timing = phase7TimingBySequence.get(packet.sequence());
-    boolean timingUncertain = timing != null && timing.uncertain();
-    if (timingHistoryTruncated) timingUncertain = true;
+    boolean timingUncertain =
+        (timing != null && timing.uncertain())
+            || phase7ChronologyUncertain
+            || timingHistoryTruncated;
 
     /*
      * The captured client tick is the strongest simulation-clock fact available
