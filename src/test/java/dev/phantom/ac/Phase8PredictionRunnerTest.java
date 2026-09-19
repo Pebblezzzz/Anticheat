@@ -270,7 +270,7 @@ class Phase8PredictionRunnerTest {
             new RawPacket(1, 10, authority,
                 Packets.CaptureProvenance.fromAdapter("test-authority", authority, 100L, 0L)),
             new RawPacket(2, 20, new ClientInput(
-                false, false, true, false, false, false, false)),
+                false, false, false, false, true, false, false)),
             new RawPacket(3, 30, new ClientTickEnd()),
             new RawPacket(4, 200, new Move(
                 new Maths.Vec3(.5, 64.41999998688698, .5), 0f, 0f, false, 1L))),
@@ -328,7 +328,7 @@ class Phase8PredictionRunnerTest {
                 Packets.CaptureProvenance.fromAdapter(
                     "test-authority", currentAuthority, 100L, 10L)),
             new RawPacket(5, 200, new Move(
-                new Maths.Vec3(.8, 69.92159999847412, .5), 0f, 0f, false, 10L))),
+                new Maths.Vec3(.8, 69.8447679954834, .5), 0f, 0f, false, 10L))),
         floorWorld(), movingAnchor, 0L);
 
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
