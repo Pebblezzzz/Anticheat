@@ -280,7 +280,7 @@ class Phase8PredictionRunnerTest {
         "survival", Simulation.Attributes.DEFAULT, Map.of(),
         Pose.STANDING, MovementEnvironment.dry(false, false, false),
         new Maths.Vec3(.6, 70.0, .5),
-        Maths.Vec3.ZERO,
+        new Maths.Vec3(0.0, -0.0784000015258789, 0.0),
         false, false, false, List.of());
 
     var report = runner.process(
