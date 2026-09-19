@@ -281,15 +281,17 @@ public final class Phase8PredictionRunner {
         long authorityServerTick = packet.provenance().authoritativeServerTick() == null
             ? 0L
             : packet.provenance().authoritativeServerTick();
+        PlayerContext effectiveAuthority =
+            deriveAuthoritativeHorizontalVelocity(latestAuthority, authorityServerTick, authority);
         latestAuthority = new AuthorityAnchor(
             sequence,
             packet.receivedNanos(),
             authorityServerTick,
             packet.provenance().authoritativeClientTick(),
-            authority);
+            effectiveAuthority);
         if (!prediction.isEmpty()) {
           Set<Candidate> updated =
-              overlayAuthorityState(prediction, authority, maximumCandidates);
+              overlayAuthorityState(prediction, effectiveAuthority, maximumCandidates);
           if (!updated.isEmpty()) prediction = updated;
         }
         continue;
@@ -884,6 +886,49 @@ public final class Phase8PredictionRunner {
         authority.effects(), authority.awaitingTeleport(), authority.uncertain(), authority.input(),
         authority.attributes(), authority.pose(), authority.environment(),
         authority.clientTickRange(), authority.provenance(), authority.uncertaintyReasons());
+  }
+
+  private static Packets.PlayerContext deriveAuthoritativeHorizontalVelocity(
+      AuthorityAnchor previous,
+      long currentServerTick,
+      Packets.PlayerContext current) {
+    if (previous == null || currentServerTick <= previous.serverTick()) return current;
+
+    long tickDelta = currentServerTick - previous.serverTick();
+    if (tickDelta < 1L || tickDelta > 2L) return current;
+
+    double dx = current.serverPosition().x() - previous.context().serverPosition().x();
+    double dz = current.serverPosition().z() - previous.context().serverPosition().z();
+    double horizontalDistance = Math.hypot(dx, dz);
+    double maximumPlausibleDistance = 1.5 * tickDelta;
+
+    /*
+     * Bukkit getVelocity() is not the packet-to-packet locomotion vector used
+     * by the client's movement prediction. Consecutive authoritative positions
+     * are a safer short-window source for the horizontal anchor. Keep vertical
+     * velocity untouched because Phase 8 already normalizes its tick phase.
+     */
+    if (!Double.isFinite(horizontalDistance)
+        || horizontalDistance > maximumPlausibleDistance) {
+      return current;
+    }
+
+    Vec3 horizontal = new Vec3(
+        dx / tickDelta,
+        current.serverVelocity().y(),
+        dz / tickDelta);
+    return new Packets.PlayerContext(
+        current.gamemode(),
+        current.attributes(),
+        current.effects(),
+        current.pose(),
+        current.movementEnvironment(),
+        current.sleeping(),
+        current.entityBoxes(),
+        current.serverPosition(),
+        horizontal,
+        current.canFly(),
+        current.flying());
   }
 
   private static Player playerFromAuthority(Packets.PlayerContext context) {
