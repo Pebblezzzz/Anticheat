@@ -2199,7 +2199,7 @@ public final class CausalMovementPipeline {
     Optional<AuthoritativeSnapshot> authority = movement.authority().snapshot();
     if (authority.isEmpty() || simulationTick < 0) return Optional.empty();
     AuthoritativeSnapshot snapshot = authority.get();
-    if (isPlaceholderAuthority(snapshot, null)) return Optional.empty();
+    if (snapshot.sequence() == 0L) return Optional.empty();
     long age = movement.event().serverTick() - snapshot.serverTick();
     if (age < 0 || age > 1L) return Optional.empty();
     Long explicitClientTick = movement.move().clientTick();
