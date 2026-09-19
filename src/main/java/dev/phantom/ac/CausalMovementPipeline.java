@@ -291,22 +291,6 @@ public final class CausalMovementPipeline {
           + "serverTick=" + serverTick
           + ":chunks=" + movement.world().loadedChunks().size();
 
-      if (!worldCoversMovement(movement.world(), observedBefore, observedAfter)) {
-        frontier = Frontier.empty();
-        uncertainty.add("client world coverage is incomplete for the observed movement; unloaded blocks cannot safely be treated as air");
-        recoveryRequired = true;
-        SearchResult uncertain = uncertainSearch(
-            frontier.candidates(),
-            "movement world coverage is incomplete");
-        results.add(Phase8MovementValidation.validate(
-            playerId, serverTick, observedBefore, observedAfter, movement.world(),
-            worldReference, sync, assumptions, uncertain, replayReference, false));
-        trace.add("EVIDENCE UNCERTAIN reason=INCOMPLETE_WORLD_COVERAGE");
-        frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
-            assumptions, uncertainty, trace));
-        continue;
-      }
-
       long unmodeledExternalSequence = unmodeledExternalSequences.stream()
           .filter(transitionSequence -> transitionSequence < sequence)
           .max(Long::compareTo)
@@ -663,6 +647,30 @@ public final class CausalMovementPipeline {
         } else {
           trace.add("ROOT authoritative anchor=" + initialAnchor.position());
         }
+      }
+
+      /*
+       * Once a causal frontier exists, world coverage must include the simulated
+       * starting positions as well as the observed destination. The very first
+       * position observation is allowed to establish the baseline frontier even
+       * when no client-world chunks have arrived yet; later movement cannot safely
+       * be called IMPOSSIBLE from an incomplete world replica.
+       */
+      if (previousPositionPacketTick >= 0
+          && !worldCoversFrontierMovement(movement.world(), frontier, observedAfter)) {
+        frontier = Frontier.empty();
+        uncertainty.add("client world coverage is incomplete for the causal movement frontier; unloaded blocks cannot safely be treated as air");
+        recoveryRequired = true;
+        SearchResult uncertain = uncertainSearch(
+            frontier.candidates(),
+            "movement world coverage is incomplete");
+        results.add(Phase8MovementValidation.validate(
+            playerId, serverTick, observedBefore, observedAfter, movement.world(),
+            worldReference, sync, assumptions, uncertain, replayReference, false));
+        trace.add("EVIDENCE UNCERTAIN reason=INCOMPLETE_WORLD_COVERAGE");
+        frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+            assumptions, uncertainty, trace));
+        continue;
       }
 
       Optional<Advance> advanced;
@@ -1689,6 +1697,22 @@ public final class CausalMovementPipeline {
     int afterChunkZ = Math.floorDiv((int) Math.floor(after.position().z()), 16);
     return world.hasChunk(beforeChunkX, beforeChunkZ)
         && world.hasChunk(afterChunkX, afterChunkZ);
+  }
+
+  private static boolean worldCoversFrontierMovement(
+      WorldSnapshot world,
+      Frontier frontier,
+      Player observedAfter) {
+    if (world == null || frontier.candidates().isEmpty()) return false;
+    int afterChunkX = Math.floorDiv((int) Math.floor(observedAfter.position().x()), 16);
+    int afterChunkZ = Math.floorDiv((int) Math.floor(observedAfter.position().z()), 16);
+    if (!world.hasChunk(afterChunkX, afterChunkZ)) return false;
+    for (Candidate candidate : frontier.candidates()) {
+      int chunkX = Math.floorDiv((int) Math.floor(candidate.context().player().position().x()), 16);
+      int chunkZ = Math.floorDiv((int) Math.floor(candidate.context().player().position().z()), 16);
+      if (!world.hasChunk(chunkX, chunkZ)) return false;
+    }
+    return true;
   }
 
   private static boolean containsChronologyProblem(
