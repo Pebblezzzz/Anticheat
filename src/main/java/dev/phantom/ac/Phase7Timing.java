@@ -1038,16 +1038,15 @@ public final class Phase7Timing {
         uncertain = true;
       }
 
-      materializedTimingCandidates += packetTicks.candidateCount()
+      long eventCandidateCount = packetTicks.candidateCount()
           + processingTicks.candidateCount()
           + simulationTicks.candidateCount()
           + inputTicks.candidateCount();
+      materializedTimingCandidates += eventCandidateCount;
       peakMaterializedTimingCandidates = Math.max(
           peakMaterializedTimingCandidates,
-          packetTicks.candidateCount()
-              + processingTicks.candidateCount()
-              + simulationTicks.candidateCount()
-              + inputTicks.candidateCount());
+          eventCandidateCount > Integer.MAX_VALUE
+              ? Integer.MAX_VALUE : (int) eventCandidateCount);
 
       EventTiming timing = new EventTiming(
           index++, normalized.sequence(), event.serverTick(), capture, direction, kind,
