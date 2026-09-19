@@ -97,7 +97,8 @@ public final class Phase8PredictionRunner {
       long receivedNanos,
       long serverTick,
       Long clientTick,
-      Packets.PlayerContext context) {}
+      Packets.PlayerContext context,
+      boolean entityCollisionComplete) {}
 
   private record TimedInput(
       long sequence,
@@ -107,8 +108,13 @@ public final class Phase8PredictionRunner {
   private static final double POSITION_TOLERANCE = Phase6Reachability.POSITION_MATCH_TOLERANCE;
   private static final long MAX_INCREMENTAL_HORIZON = Phase6Reachability.MAX_HORIZON_TICKS;
   private static final long PREDICTION_RESYNC_LAG_TICKS = 2L;
+  private static final int MAX_TIMING_HISTORY_EVENTS = 512;
 
   private final int maximumCandidates;
+  private final Phase7Timing.Config phase7TimingConfig;
+  private final ArrayDeque<Packets.RawPacket> timingHistory = new ArrayDeque<>();
+  private long timingEpochNanos = -1L;
+  private boolean timingHistoryTruncated;
   private final InputConstraint neutralInput;
 
   private Player initialAnchor;
@@ -133,8 +139,13 @@ public final class Phase8PredictionRunner {
   private Continuation latestContinuation = Continuation.UNANCHORED;
 
   public Phase8PredictionRunner(int maximumCandidates) {
+    this(maximumCandidates, Phase7Timing.Config.defaultConfig());
+  }
+
+  public Phase8PredictionRunner(int maximumCandidates, Phase7Timing.Config phase7TimingConfig) {
     Contracts.requireCandidateBudget(maximumCandidates);
     this.maximumCandidates = maximumCandidates;
+    this.phase7TimingConfig = Objects.requireNonNull(phase7TimingConfig, "phase7TimingConfig");
     this.neutralInput = InputConstraint.fromClientInput(
         new Packets.ClientInput(false, false, false, false, false, false, false));
     this.currentInput = neutralInput;
@@ -174,6 +185,9 @@ public final class Phase8PredictionRunner {
     clientState = authoritativeAnchor;
     currentInput = neutralInput;
     inputHistory.clear();
+    timingHistory.clear();
+    timingEpochNanos = -1L;
+    timingHistoryTruncated = false;
     latestAuthority = null;
     prediction = Set.of();
     predictionTick = -1L;
@@ -244,6 +258,17 @@ public final class Phase8PredictionRunner {
           !prediction.isEmpty(), List.of());
     }
 
+    /*
+     * Phase 7 is the sole live client/server timing authority. The history is
+     * bounded so timing reconstruction cannot grow without limit; a retained
+     * prefix can be truncated only at the cost of becoming conservative.
+     */
+    for (Packets.RawPacket packet : packets) {
+      rememberTimingPacket(packet);
+    }
+    Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence =
+        reconstructPhase7Timing().bySequence();
+
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     List<PredictionFrame> frames = new ArrayList<>();
     int movementObservations = 0;
@@ -288,12 +313,15 @@ public final class Phase8PredictionRunner {
             ? 0L
             : packet.provenance().authoritativeServerTick();
         Packets.PlayerContext effectiveAuthority = authority;
+        boolean entityCollisionComplete =
+            !"entity-collision-incomplete".equals(packet.provenance().sourceId());
         latestAuthority = new AuthorityAnchor(
             sequence,
             packet.receivedNanos(),
             authorityServerTick,
             packet.provenance().authoritativeClientTick(),
-            effectiveAuthority);
+            effectiveAuthority,
+            entityCollisionComplete);
         if (!prediction.isEmpty()) {
           Set<Candidate> updated =
               overlayAuthorityState(prediction, effectiveAuthority, maximumCandidates);
@@ -358,7 +386,17 @@ public final class Phase8PredictionRunner {
               unauthorizedFlightResult(playerId, packet, clientState);
           if (violation != null) {
             results.add(violation);
-            impossible++;
+            switch (violation.verdict()) {
+              case POSSIBLE -> possible++;
+              case UNCERTAIN -> {
+                uncertain++;
+                latestContinuation = Continuation.UNCERTAIN;
+              }
+              case IMPOSSIBLE -> {
+                impossible++;
+                latestContinuation = Continuation.IMPOSSIBLE;
+              }
+            }
           }
         }
         continue;
@@ -385,7 +423,7 @@ public final class Phase8PredictionRunner {
           + " receivedNanos=" + packet.receivedNanos()
           + " clientStatePosition=" + observedAfter.position());
 
-      TickResolution tick = resolveMovementTick(move);
+      TickResolution tick = resolveMovementTick(packet, move, phase7TimingBySequence);
       trace.add("CLIENT_TICK " + tick.display()
           + " exact=" + tick.exact()
           + " source=" + tick.source());
@@ -488,6 +526,9 @@ public final class Phase8PredictionRunner {
       if (!tick.known()) {
         uncertaintySources.add("client simulation tick has not been established by a client-tick boundary");
       }
+      if (tick.timingUncertain()) {
+        uncertaintySources.add(tick.uncertaintyReason());
+      }
 
       if (prediction.isEmpty()) {
         uncertaintySources.add("persistent prediction frontier is not anchored to an authoritative or correction state");
@@ -585,58 +626,6 @@ public final class Phase8PredictionRunner {
             sequence, packet, tick, move, observedBefore, observedAfter,
             predictedBefore, prediction, world, uncertaintySources, trace));
         continue;
-      }
-
-      /*
-       * A conservative certificate catches obviously excessive exact-tick
-       * displacement even when the packet world is incomplete. It is deliberately
-       * skipped for fluid/gliding/climbable contexts where the vanilla profile has
-       * additional movement modes that need the full Phase 5 model.
-       */
-      if (tick.exact() && deltaTicks >= 1L) {
-        Optional<Candidate> reference = prediction.stream().findFirst();
-        if (reference.isPresent()
-            && movementAllowsKinematicCertificate(reference.get())
-            && exceedsConservativeKinematicBound(
-                reference.get(), observedAfter, deltaTicks)) {
-          Candidate certificateRoot = reference.get();
-          SearchResult search = new SearchResult(
-              Verdict.POSSIBLE,
-              Set.of(certificateRoot),
-              0,
-              1,
-              0, 0, 0, 0,
-              List.of(
-                  "conservative kinematic certificate exceeded; collision replay is not required for this rejection",
-                  "prediction frontier remains retained for subsequent packets"));
-          Phase8MovementValidation.Result result = validate(
-              playerId, packet, move, observedBefore, observedAfter, world,
-              tick, uncertaintySources, search, true);
-          results.add(result);
-          /*
-           * The certificate proves only that this observation is outside the
-           * conservative envelope. The last fully simulated prediction remains
-           * the trusted expected state for the next packet.
-           */
-          prediction = Set.of(certificateRoot);
-          if (result.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
-            latestContinuation = Continuation.IMPOSSIBLE;
-            impossible++;
-          } else if (result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE) {
-            latestContinuation = Continuation.ACTIVE;
-            possible++;
-          } else {
-            latestContinuation = Continuation.UNCERTAIN;
-            uncertain++;
-          }
-          lastPositionClientTick = targetTick;
-          trace.add("EVIDENCE KINEMATIC_CERTIFICATE");
-          trace.add("FRONTIER_RETAINED after="+prediction.size()+" tick="+predictionTick);
-          frames.add(frame(
-              sequence, packet, tick, move, observedBefore, observedAfter,
-              predictedBefore, prediction, world, uncertaintySources, trace));
-          continue;
-        }
       }
 
       AdvanceResult advance = advancePrediction(
@@ -737,22 +726,97 @@ public final class Phase8PredictionRunner {
         frames);
   }
 
-  private record TickResolution(long clientTick, boolean known, boolean exact, String source) {
+  private record TickResolution(
+      long clientTick,
+      boolean known,
+      boolean exact,
+      boolean timingUncertain,
+      String source,
+      String uncertaintyReason) {
     String display() {
       return known ? Long.toString(clientTick) : "unknown";
     }
   }
 
-  private TickResolution resolveMovementTick(Packets.Move move) {
+  private TickResolution resolveMovementTick(
+      Packets.RawPacket packet,
+      Packets.Move move,
+      Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
+    Phase7Timing.EventTiming timing = phase7TimingBySequence.get(packet.sequence());
+    if (timing != null) {
+      Phase7Timing.Range range = timing.simulationClientTicks();
+      if (timing.simulationClientTickEnvelope().known()) {
+        long tick = Math.max(0L, range.min());
+        relativeClientTick = Math.max(relativeClientTick, tick);
+        boolean explicit = timing.explicitClientTick().isPresent();
+        boolean exact = explicit || (
+            range.isExact()
+                && timing.simulationCandidatesExhaustive()
+                && !timing.uncertain());
+        /*
+         * An explicit client tick is stronger than the packet's wall-clock timing
+         * range: it pins the simulation tick while unrelated packet-generation
+         * uncertainty remains diagnostic context.
+         */
+        boolean timingUncertain = (timing.uncertain() && !explicit) || timingHistoryTruncated;
+        String source = explicit
+            ? "phase7-explicit-client-tick"
+            : exact
+                ? "phase7-temporal-envelope-exact"
+                : "phase7-temporal-envelope-range";
+        String reason;
+        if (timingHistoryTruncated) {
+          reason = "Phase 7 history prefix was truncated at the deterministic live bound; timing remains conservative: "
+              + timing.reasons();
+        } else if (explicit && timing.uncertain()) {
+          reason = "explicit client tick pins simulation time; Phase 7 retains other timing uncertainty: " + timing.reasons();
+        } else if (timing.uncertain()) {
+          reason = "Phase 7 timing envelope is explicitly uncertain: " + timing.reasons();
+        } else {
+          reason = "Phase 7 timing envelope is exact and exhaustively materialized";
+        }
+        return new TickResolution(
+            tick, true, exact && !timingHistoryTruncated, timingUncertain, source, reason);
+      }
+      return new TickResolution(
+          0L, false, false, true,
+          "phase7-temporal-envelope-unknown",
+          "Phase 7 did not produce a known simulation-tick envelope");
+    }
     if (move.clientTick() != null) {
       long tick = move.clientTick();
       relativeClientTick = Math.max(relativeClientTick, tick);
-      return new TickResolution(tick, true, true, "packet-client-tick");
+      return new TickResolution(
+          tick, true, true, false, "packet-client-tick-fallback",
+          "Phase 7 timing record was unavailable; explicit packet client tick used only as a conservative fallback");
     }
-    if (hasClientTickBoundary) {
-      return new TickResolution(relativeClientTick, true, true, "client-tick-boundary-watermark");
+    return new TickResolution(
+        0L, false, false, true, "phase7-timing-missing",
+        "Phase 7 timing record was unavailable and no explicit client tick was captured");
+  }
+
+  private void rememberTimingPacket(Packets.RawPacket packet) {
+    if (timingEpochNanos < 0L) timingEpochNanos = packet.receivedNanos();
+    timingHistory.addLast(packet);
+    while (timingHistory.size() > MAX_TIMING_HISTORY_EVENTS) {
+      timingHistory.removeFirst();
+      timingHistoryTruncated = true;
     }
-    return new TickResolution(0L, false, false, "pre-boundary");
+  }
+
+  private Phase7Timing.Reconstruction reconstructPhase7Timing() {
+    if (timingHistory.isEmpty()) {
+      return Phase7Timing.reconstruct(
+          Timeline.assign(List.of(), 0L, phase7TimingConfig.serverTickNanos()),
+          phase7TimingConfig);
+    }
+    List<Packets.RawPacket> raw = List.copyOf(timingHistory);
+    List<Packets.NormalizedPacket> normalized = new Packets.Normalizer().normalize(raw);
+    Timeline.Snapshot timeline = Timeline.assign(
+        normalized,
+        Math.max(0L, timingEpochNanos),
+        phase7TimingConfig.serverTickNanos());
+    return Phase7Timing.reconstruct(timeline, phase7TimingConfig);
   }
 
   private long resolvedCorrectionTick() {
@@ -1296,7 +1360,7 @@ public final class Phase8PredictionRunner {
             + " startVel=" + beforeCandidate.context().player().velocity()
             + " startGround=" + beforeCandidate.context().player().onGround());
       }
-      SearchResult result = new Phase6Reachability(new Vanilla12111RichPhysics()).search(
+      SearchResult result = new Phase6Reachability().search(
           current.stream()
               .map(candidate -> candidate.context().withTick(simulationTick))
               .toList(),
@@ -1373,36 +1437,6 @@ public final class Phase8PredictionRunner {
         && Double.compare(left.z(), right.z()) == 0;
   }
 
-  private static boolean movementAllowsKinematicCertificate(Candidate candidate) {
-    MovementEnvironment environment = candidate.context().movementEnvironment();
-    return environment.fluid() == Fluid.NONE
-        && !environment.climbable()
-        && !environment.gliding()
-        && candidate.context().pose() != Pose.FALL_FLYING;
-  }
-
-  private static boolean exceedsConservativeKinematicBound(
-      Candidate candidate,
-      Player observed,
-      long ticks) {
-    if (ticks < 1L || ticks > 2L) return false;
-    double dx = observed.position().x() - candidate.context().player().position().x();
-    double dy = observed.position().y() - candidate.context().player().position().y();
-    double dz = observed.position().z() - candidate.context().player().position().z();
-    double horizontalDistance = Math.hypot(dx, dz);
-    double horizontalVelocity = Math.hypot(
-        candidate.context().player().velocity().x(),
-        candidate.context().player().velocity().z());
-    double speedMultiplier = Math.max(1.0, candidate.context().effects().speedMultiplier());
-    double configuredSpeed = Math.max(0.05, candidate.context().attributes().value()) * speedMultiplier;
-    double horizontalPerTick = horizontalVelocity + configuredSpeed * 4.0 + 0.25;
-    double verticalVelocity = Math.abs(candidate.context().player().velocity().y());
-    double verticalPerTick = verticalVelocity + 1.0 + configuredSpeed + 0.25;
-    double horizontalBound = horizontalPerTick * ticks;
-    double verticalBound = verticalPerTick * ticks;
-    return horizontalDistance > horizontalBound || Math.abs(dy) > verticalBound;
-  }
-
   private long movementServerTick(Packets.RawPacket packet) {
     Long value = packet.provenance().authoritativeServerTick();
     return value == null ? 0L : value;
@@ -1411,7 +1445,9 @@ public final class Phase8PredictionRunner {
   private EntityCollisions entityCollisions(AuthorityAnchor authority) {
     return authority == null
         ? EntityCollisions.NONE_TRACKED
-        : EntityCollisions.of(authority.context().entityBoxes());
+        : EntityCollisions.of(
+            authority.context().entityBoxes(),
+            authority.entityCollisionComplete());
   }
 
   private Phase8MovementValidation.Result validate(
@@ -1490,8 +1526,12 @@ public final class Phase8PredictionRunner {
         relativeClientTick,
         hasClientTickBoundary,
         hasClientTickBoundary,
-        "flight-toggle-observation");
-    return Phase8MovementValidation.authoritativeImpossible(
+        !hasClientTickBoundary,
+        "flight-toggle-observation",
+        hasClientTickBoundary
+            ? "client-tick boundary observed"
+            : "no client-tick boundary observed for authoritative flight toggle");
+    return Phase8MovementValidation.authoritativeObservation(
         playerId,
         movementServerTick(packet),
         state,
