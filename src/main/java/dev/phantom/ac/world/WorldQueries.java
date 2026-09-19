@@ -53,7 +53,7 @@ public final class WorldQueries {
 
     /** True when the answer could change if the missing world data were known. */
     public boolean isUncertain() {
-      return coverage.contains(Coverage.UNLOADED) || coverage.contains(Coverage.UNSUPPORTED);
+      return coverage.contains(Coverage.UNLOADED) || coverage.contains(Coverage.UNKNOWN) || coverage.contains(Coverage.UNSUPPORTED);
     }
 
     public boolean collides() {
