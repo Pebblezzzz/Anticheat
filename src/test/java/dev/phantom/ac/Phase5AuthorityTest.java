@@ -24,7 +24,7 @@ class Phase5AuthorityTest {
     var authority = new Phase5MovementAuthority();
     var state = State.Player.initial(new Maths.Vec3(0.5,65,0.5));
     var input = new Simulation.AdvancedInput(1, -1, false, false, false);
-    var c = context(state, input, Phase5Mechanics.MovementEnvironment.dry(true,false,false), Phase5Mechanics.Pose.STANDING);
+    var c = context(state, input, Phase5Mechanics.MovementEnvironment.dry(false,false,false), Phase5Mechanics.Pose.STANDING);
     assertEquals(authority.simulate(c).delegate(), authority.simulate(c).delegate());
   }
 
