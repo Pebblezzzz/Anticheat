@@ -50,7 +50,7 @@ public final class Phase5MovementAuthority {
       Objects.requireNonNull(pose);
       Objects.requireNonNull(movementEnvironment);
       Objects.requireNonNull(entityCollisions);
-      if (!VERSION.equals(world.version()))
+      if (!VERSION.equals(world.version()) && !Contracts.TARGET_VERSION.equals(world.version()))
         throw new IllegalArgumentException("Phase 5 requires Minecraft " + VERSION + " world data");
     }
   }
