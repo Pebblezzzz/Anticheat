@@ -42,7 +42,7 @@ class Phase7PerformanceBenchmarkTest {
         new Phase7Timing.TickDelayBounds(0, 1),
         250_000_000L, 3, 2, 4);
     var capture = Phase7TimingTestFixture.timeline(
-        new RawPacket(1, 0,
+        new Packets.RawPacket(1, 0,
             new Packets.Move(Maths.Vec3.ZERO, 0f, 0f, true, 0L)),
         new RawPacket(2, 1_000_000_000L,
             new Packets.Move(new Maths.Vec3(1, 0, 0), 0f, 0f, true, null)));
