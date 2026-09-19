@@ -3,6 +3,7 @@ package dev.phantom.ac.world.v12111;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 import dev.phantom.ac.geometry.BlockBox;
 import dev.phantom.ac.geometry.Directions.Direction;
@@ -91,6 +92,20 @@ public final class BlockCatalogue12111 {
    * @param properties raw property name to value, already lower-cased
    */
   public static BlockState decode(String blockId, Map<String, String> properties) {
+    Map<String, String> wireProperties = properties == null ? Map.of() : canonicalProperties(properties);
+    return decodeInternal(blockId, wireProperties).withProperties(wireProperties);
+  }
+
+  private static Map<String,String> canonicalProperties(Map<String,String> properties) {
+    Map<String,String> canonical = new TreeMap<>();
+    for (var entry : properties.entrySet()) {
+      if (entry.getKey() == null || entry.getValue() == null) continue;
+      canonical.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue().toLowerCase(Locale.ROOT));
+    }
+    return Map.copyOf(canonical);
+  }
+
+  private static BlockState decodeInternal(String blockId, Map<String, String> properties) {
     if (blockId == null || blockId.isBlank()) return BlockState.unsupported(blockId);
     Map<String, String> p = properties == null ? Map.of() : properties;
     String name = blockId.toLowerCase(Locale.ROOT);
@@ -649,7 +664,7 @@ public final class BlockCatalogue12111 {
       return new FluidState(state.fluidName(), state.level(), FluidState.HeightSource.UNAVAILABLE,
           FluidState.HEIGHT_UNKNOWN, false);
     }
-    if (state.waterlogged() || state.up()) {
+    if (state.waterlogged()) {
       return new FluidState(FluidState.Type.WATER, 0, FluidState.HeightSource.SOURCE, 1.0, false);
     }
     return FluidState.NONE;
