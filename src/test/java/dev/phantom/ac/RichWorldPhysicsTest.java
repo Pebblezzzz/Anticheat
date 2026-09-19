@@ -3,6 +3,7 @@ package dev.phantom.ac;
 import dev.phantom.ac.geometry.BlockBox;
 import dev.phantom.ac.world.Coverage;
 import dev.phantom.ac.world.WorldSnapshot;
+import dev.phantom.ac.world.v12111.BlockCatalogue12111;
 import org.junit.jupiter.api.Test;
 import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
