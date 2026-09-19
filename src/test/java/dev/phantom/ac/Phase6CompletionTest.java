@@ -440,7 +440,8 @@ class Phase6CompletionTest {
     List<Scenario> scenarios = List.of(
         new Scenario("walking", start(), List.of(new AdvancedInput(1, 0, false, false, false)), floor),
         new Scenario("sprinting", start(), List.of(new AdvancedInput(1, 0, false, true, false)), floor),
-        new Scenario("sneaking", start(), List.of(new AdvancedInput(1, 0, false, false, true)), floor),
+        new Scenario("sneaking", startAt(new Maths.Vec3(0.5, 65.0, 0.5), true, 0, Pose.STANDING,
+            Simulation.Environment.DRY, MovementEnvironment.dry(true, false, true), Attributes.DEFAULT, MovementEffects.NONE), List.of(new AdvancedInput(1, 0, false, false, true)), floor),
         new Scenario("strafing", start(), List.of(new AdvancedInput(0, 1, false, false, false)), floor),
         new Scenario("diagonal", start(), List.of(new AdvancedInput(1, 1, false, false, false)), floor),
         new Scenario("jump", start(), List.of(new AdvancedInput(0, 0, true, false, false)), floor),
