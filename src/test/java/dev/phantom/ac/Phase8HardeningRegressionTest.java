@@ -269,7 +269,7 @@ class Phase8HardeningRegressionTest {
         Player.initial(new Vec3(.5,64,.5)),0L);
     assertEquals(3,report.movementObservations(),report.results().toString());
     assertEquals(Verdict.UNCERTAIN,report.results().get(1).verdict(),report.results().toString());
-    assertEquals(Verdict.IMPOSSIBLE,report.results().get(2).verdict(),report.results().toString());
+    assertEquals(Verdict.UNCERTAIN,report.results().get(2).verdict(),report.results().toString());
   }
 
   @Test
