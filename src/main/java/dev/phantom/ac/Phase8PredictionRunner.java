@@ -762,9 +762,21 @@ public final class Phase8PredictionRunner {
     if (authorityTick > tick.clientTick()) return;
 
     long previousPredictionTick = predictionTick;
-    long rootTick = authorityTick == tick.clientTick()
-        ? Math.max(0L, tick.clientTick() - 1L)
-        : authorityTick;
+    long rootTick;
+    if (authorityTick == tick.clientTick()) {
+      /*
+       * The live Bukkit authority sample is not an atomic client-tick snapshot.
+       * When its client watermark equals the movement's explicit client tick,
+       * the server position must never be advanced once more just to manufacture
+       * a "prior" state. Treat the sample as the state at the current logical
+       * client tick and let the observation compare against it at zero delta.
+       * This prevents the deterministic one-tick vertical overshoot seen in live
+       * falling traces.
+       */
+      rootTick = tick.clientTick();
+    } else {
+      rootTick = authorityTick;
+    }
 
     Player rootPlayer = withClientRotation(
         predictionAnchorFromAuthority(authority.context(), prediction),
@@ -784,6 +796,7 @@ public final class Phase8PredictionRunner {
         + " predictionTickBefore=" + previousPredictionTick
         + " authorityClientTick=" + authorityTick
         + " rootTick=" + rootTick
+        + " mode=" + (authorityTick == tick.clientTick() ? "SAME_CLIENT_TICK_OBSERVATION" : "CAUSAL_REPLAY")
         + " authoritySequence=" + authority.sequence()
         + " authorityServerTick=" + authority.serverTick());
   }
@@ -808,7 +821,15 @@ public final class Phase8PredictionRunner {
        * pre-movement timestamp. Treat it as a prior state for target-1 rather
        * than pretending the server's same-tick position is the client state.
        */
-      if (authority.serverTick() == movementServerTick(movementPacket)) {
+      if (authority.clientTick() != null && authority.clientTick() == targetTick) {
+        /*
+         * A same-client-tick live authority sample already carries the server's
+         * state for the logical movement tick. Do not run a synthetic physics step
+         * before comparing the movement packet.
+         */
+        rootTick = targetTick;
+        trace.add("ROOT authority=same-client-tick observation; zero-delta anchor");
+      } else if (authority.serverTick() == movementServerTick(movementPacket)) {
         rootTick = Math.max(0L, targetTick - 1L);
         trace.add("ROOT authority=same-server-tick observation; aligned to target-1");
       } else if (authority.clientTick() != null && authority.clientTick() <= targetTick) {
