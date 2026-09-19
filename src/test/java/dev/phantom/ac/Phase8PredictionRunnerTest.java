@@ -286,57 +286,73 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
-  void staleAuthorityDerivesHorizontalVelocityFromConsecutivePositions() {
+  void staleResyncUsesClientObservedHorizontalBoundaryAfterGroundJump() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
-    Player movingAnchor = new Player(
-        new Maths.Vec3(.5, 70.0, .5),
-        Maths.Vec3.ZERO,
-        0f, 0f, false, "survival", Map.of(), OptionalInt.empty(), false,
-        Optional.empty(), Simulation.Attributes.DEFAULT, Pose.STANDING,
-        State.Environment.DRY, State.TickRange.unknown(), State.Provenance.UNKNOWN, Set.of());
+    var emptyWorld = WorldSnapshot.builder(Contracts.TARGET_VERSION).build();
 
-    runner.process(
-        "stale-horizontal-derived",
-        List.of(
-            new RawPacket(1, 10, new ClientTickEnd()),
-            new RawPacket(2, 20, new Move(
-                new Maths.Vec3(.5, 70.0, .5), 0f, 0f, false, 1L))),
-        floorWorld(), movingAnchor, 0L);
-
-    PlayerContext previousAuthority = new PlayerContext(
-        "survival", Simulation.Attributes.DEFAULT, Map.of(),
-        Pose.STANDING, MovementEnvironment.dry(false, false, false),
-        new Maths.Vec3(.4, 70.0, .5),
-        Maths.Vec3.ZERO,
+    PlayerContext initialAuthority = new PlayerContext(
+        "survival", new Simulation.Attributes(0.1), Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
         false, false, false, List.of());
 
-    PlayerContext currentAuthority = new PlayerContext(
-        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+    // Tick 2 is a jump launched from a known stone floor. Its displacement is
+    // intentionally retained as observed evidence because the stale prediction
+    // cannot simulate the incomplete empty world.
+    double jumpX = .5
+        + new Simulation.Attributes(0.1).value()
+            * Vanilla12111RichPhysics.FRICTION_SPEED_FACTOR
+            / Math.pow(0.6, 3.0)
+            * Vanilla12111RichPhysics.INPUT_FRICTION;
+    double rootHorizontalX =
+        (jumpX - .5) * (0.6 * Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION);
+    double sprintAirAcceleration =
+        Vanilla12111RichPhysics.SPRINT_AIR_ACCEL * Vanilla12111RichPhysics.INPUT_FRICTION;
+    double observedX = jumpX + rootHorizontalX + sprintAirAcceleration;
+    double authorityY = 64.41999998688698;
+    double authorityVy = 0.41999998688697815;
+    double observedY = authorityY
+        + (authorityVy - Vanilla12111RichPhysics.GRAVITY)
+            * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG;
+
+    PlayerContext staleAuthority = new PlayerContext(
+        "survival", new Simulation.Attributes(0.1), Map.of(),
         Pose.STANDING, MovementEnvironment.dry(false, false, false),
-        new Maths.Vec3(.6, 70.0, .5),
-        new Maths.Vec3(0.0, -0.0784000015258789, 0.0),
+        new Maths.Vec3(jumpX, authorityY, .5),
+        new Maths.Vec3(0.0, authorityVy, 0.0),
         false, false, false, List.of());
 
-    var report = runner.process(
-        "stale-horizontal-derived",
-        List.of(
-            new RawPacket(3, 30, previousAuthority,
-                Packets.CaptureProvenance.fromAdapter(
-                    "test-authority", previousAuthority, 99L, 9L)),
-            new RawPacket(4, 40, currentAuthority,
-                Packets.CaptureProvenance.fromAdapter(
-                    "test-authority", currentAuthority, 100L, 10L)),
-            new RawPacket(5, 200, new Move(
-                new Maths.Vec3(.8, 69.8447679954834, .5), 0f, 0f, false, 10L))),
-        floorWorld(), movingAnchor, 0L);
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 10, initialAuthority,
+            Packets.CaptureProvenance.fromAdapter("test-authority", initialAuthority, 100L, 0L)),
+        new RawPacket(2, 20, new Move(
+            new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 0L)),
+        new RawPacket(3, 30, new Move(
+            new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 1L)),
+        new RawPacket(4, 40, new ClientInput(
+            false, false, false, true, true, false, false)),
+        new RawPacket(5, 50, new Move(
+            new Maths.Vec3(jumpX, authorityY, .5), 0f, 0f, false, 2L)),
+        new RawPacket(6, 60, new ClientInput(
+            false, false, false, true, false, false, true)),
+        new RawPacket(7, 70, staleAuthority,
+            Packets.CaptureProvenance.fromAdapter("test-authority", staleAuthority, 103L, 3L)),
+        new RawPacket(8, 200, new Move(
+            new Maths.Vec3(observedX, observedY, .5), 0f, 0f, false, 3L)));
 
+    var report = runner.processWithWorldProvider(
+        "stale-horizontal-boundary",
+        packets,
+        sequence -> sequence >= 8 ? floorWorld() : emptyWorld,
+        anchor(),
+        0L);
+
+    assertEquals(4, report.movementObservations(), report.results().toString());
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
-        report.results().getFirst().verdict(), report.results().toString());
-    assertTrue(report.frames().stream()
-        .flatMap(frame -> frame.trace().stream())
-        .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
-        report.frames().toString());
+        report.results().getLast().verdict(), report.results().toString());
+    assertFalse(report.results().get(2).evidence().uncertaintySources().isEmpty(),
+        report.results().toString());
   }
 
   @Test

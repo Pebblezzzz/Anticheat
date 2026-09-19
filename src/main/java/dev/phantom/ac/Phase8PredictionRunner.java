@@ -124,6 +124,11 @@ public final class Phase8PredictionRunner {
   private boolean hasClientTickBoundary;
   private long lastProcessedSequence = -1L;
   private long lastPositionClientTick = -1L;
+  private Vec3 previousObservedMovementPosition;
+  private Vec3 lastObservedMovementPosition;
+  private long previousObservedMovementClientTick = -1L;
+  private long lastObservedMovementClientTick = -1L;
+  private boolean lastObservedMovementPriorGround;
   private long nextCandidateId;
   private Continuation latestContinuation = Continuation.UNANCHORED;
 
@@ -175,6 +180,7 @@ public final class Phase8PredictionRunner {
     relativeClientTick = 0L;
     hasClientTickBoundary = false;
     lastProcessedSequence = sequenceBoundary;
+    clearObservedMovementHistory();
     lastPositionClientTick = -1L;
     nextCandidateId = 1L;
     latestContinuation = Continuation.UNANCHORED;
@@ -281,8 +287,7 @@ public final class Phase8PredictionRunner {
         long authorityServerTick = packet.provenance().authoritativeServerTick() == null
             ? 0L
             : packet.provenance().authoritativeServerTick();
-        Packets.PlayerContext effectiveAuthority =
-            deriveAuthoritativeHorizontalVelocity(latestAuthority, authorityServerTick, authority);
+        Packets.PlayerContext effectiveAuthority = authority;
         latestAuthority = new AuthorityAnchor(
             sequence,
             packet.receivedNanos(),
@@ -321,6 +326,7 @@ public final class Phase8PredictionRunner {
             entityCollisions(latestAuthority));
         prediction = Set.of(correction);
         predictionTick = correctionTick;
+        clearObservedMovementHistory();
         lastPositionClientTick = correctionTick;
         latestContinuation = Continuation.ACTIVE;
         continue;
@@ -397,6 +403,9 @@ public final class Phase8PredictionRunner {
             tick, sources, search, false);
         results.add(result);
         uncertain++;
+        if (move.position() != null) {
+          rememberObservedMovement(observedBefore, observedAfter, tick);
+        }
         frames.add(frame(
             sequence, packet, tick, move, observedBefore, observedAfter,
             prediction, prediction, worldOrEmpty(world), sources, trace));
@@ -408,7 +417,10 @@ public final class Phase8PredictionRunner {
           + " chunks=" + world.loadedChunks().size());
 
       ensureRoot(playerId, packet, move, observedBefore, tick, trace);
-      refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, trace);
+      refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, world, trace);
+      if (move.position() != null) {
+        rememberObservedMovement(observedBefore, observedAfter, tick);
+      }
 
       boolean stationaryPositionObservation = move.position() != null
           && positionExactlyMatches(observedBefore.position(), observedAfter.position())
@@ -633,6 +645,7 @@ public final class Phase8PredictionRunner {
           + " targetTick=" + targetTick
           + " steps=" + advance.simulatedTicks()
           + " exhaustive=" + advance.exhaustive());
+      trace.addAll(advance.trace());
 
       if (!advance.exhaustive()) {
         uncertaintySources.addAll(advance.reasons());
@@ -751,6 +764,7 @@ public final class Phase8PredictionRunner {
       Packets.Move move,
       Player observedBefore,
       TickResolution tick,
+      WorldSnapshot world,
       List<String> trace) {
     if (prediction.isEmpty() || !tick.known()) return;
     AuthorityAnchor authority = latestCausalAuthority(movementPacket);
@@ -767,7 +781,7 @@ public final class Phase8PredictionRunner {
         : authorityTick;
 
     Player rootPlayer = withClientRotation(
-        predictionAnchorFromAuthority(authority.context(), prediction),
+        predictionAnchorFromAuthority(authority.context(), tick.clientTick(), world, trace),
         observedBefore.yaw(),
         observedBefore.pitch());
 
@@ -802,7 +816,7 @@ public final class Phase8PredictionRunner {
     long rootTick;
 
     if (authority != null) {
-      rootPlayer = predictionAnchorFromAuthority(authority.context(), prediction);
+      rootPlayer = predictionAnchorFromAuthority(authority.context(), targetTick, null, trace);
       /*
        * Same-server-tick PlayerContext is a server-side sample, not an atomic
        * pre-movement timestamp. Treat it as a prior state for target-1 rather
@@ -852,9 +866,11 @@ public final class Phase8PredictionRunner {
     return latestAuthority;
   }
 
-  private static Player predictionAnchorFromAuthority(
+  private Player predictionAnchorFromAuthority(
       Packets.PlayerContext context,
-      Set<Candidate> existingPrediction) {
+      long targetTick,
+      WorldSnapshot world,
+      List<String> trace) {
     Player authority = playerFromAuthority(context);
     /*
      * The live authoritative velocity is captured from the server-side movement
@@ -864,6 +880,19 @@ public final class Phase8PredictionRunner {
      */
     double horizontalX = authority.velocity().x();
     double horizontalZ = authority.velocity().z();
+    Optional<Vec3> inferredHorizontal =
+        inferredHorizontalBoundaryVelocity(context, targetTick, world);
+    if (inferredHorizontal.isPresent()) {
+      horizontalX = inferredHorizontal.get().x();
+      horizontalZ = inferredHorizontal.get().z();
+      trace.add("ROOT_HORIZONTAL source=client-observed-prev-displacement"
+          + " velocity=" + inferredHorizontal.get()
+          + " authorityVelocity=" + authority.velocity());
+    } else {
+      trace.add("ROOT_HORIZONTAL source=authoritative-velocity"
+          + " velocity=" + authority.velocity()
+          + " clientInference=unavailable");
+    }
     double verticalVelocity = authority.velocity().y();
     MovementEnvironment movementEnvironment = context.movementEnvironment();
     if (!authority.onGround()
@@ -887,47 +916,68 @@ public final class Phase8PredictionRunner {
         authority.clientTickRange(), authority.provenance(), authority.uncertaintyReasons());
   }
 
-  private static Packets.PlayerContext deriveAuthoritativeHorizontalVelocity(
-      AuthorityAnchor previous,
-      long currentServerTick,
-      Packets.PlayerContext current) {
-    if (previous == null || currentServerTick <= previous.serverTick()) return current;
+  private void clearObservedMovementHistory() {
+    previousObservedMovementPosition = null;
+    lastObservedMovementPosition = null;
+    previousObservedMovementClientTick = -1L;
+    lastObservedMovementClientTick = -1L;
+    lastObservedMovementPriorGround = false;
+  }
 
-    long tickDelta = currentServerTick - previous.serverTick();
-    if (tickDelta < 1L || tickDelta > 2L) return current;
+  private void rememberObservedMovement(
+      Player observedBefore,
+      Player observedAfter,
+      TickResolution tick) {
+    if (!tick.known()) return;
+    previousObservedMovementPosition = lastObservedMovementPosition;
+    previousObservedMovementClientTick = lastObservedMovementClientTick;
+    lastObservedMovementPosition = observedAfter.position();
+    lastObservedMovementClientTick = tick.clientTick();
+    lastObservedMovementPriorGround = observedBefore.onGround();
+  }
 
-    double dx = current.serverPosition().x() - previous.context().serverPosition().x();
-    double dz = current.serverPosition().z() - previous.context().serverPosition().z();
-    double horizontalDistance = Math.hypot(dx, dz);
-    double maximumPlausibleDistance = 1.5 * tickDelta;
-
-    /*
-     * Bukkit getVelocity() is not the packet-to-packet locomotion vector used
-     * by the client's movement prediction. Consecutive authoritative positions
-     * are a safer short-window source for the horizontal anchor. Keep vertical
-     * velocity untouched because Phase 8 already normalizes its tick phase.
-     */
-    if (!Double.isFinite(horizontalDistance)
-        || horizontalDistance > maximumPlausibleDistance) {
-      return current;
+  private Optional<Vec3> inferredHorizontalBoundaryVelocity(
+      Packets.PlayerContext authority,
+      long targetTick,
+      WorldSnapshot world) {
+    if (world == null
+        || targetTick < 2L
+        || previousObservedMovementPosition == null
+        || lastObservedMovementPosition == null
+        || previousObservedMovementClientTick != targetTick - 2L
+        || lastObservedMovementClientTick != targetTick - 1L
+        || !positionMatches(lastObservedMovementPosition, authority.serverPosition())) {
+      return Optional.empty();
     }
 
-    Vec3 horizontal = new Vec3(
-        dx / tickDelta,
-        current.serverVelocity().y(),
-        dz / tickDelta);
-    return new Packets.PlayerContext(
-        current.gamemode(),
-        current.attributes(),
-        current.effects(),
-        current.pose(),
-        current.movementEnvironment(),
-        current.serverPosition(),
-        horizontal,
-        current.canFly(),
-        current.flying(),
-        current.sleeping(),
-        current.entityBoxes());
+    MovementEnvironment environment = authority.movementEnvironment();
+    if (environment.fluid() != Fluid.NONE
+        || environment.climbable()
+        || environment.gliding()) {
+      return Optional.empty();
+    }
+
+    double dx = lastObservedMovementPosition.x() - previousObservedMovementPosition.x();
+    double dz = lastObservedMovementPosition.z() - previousObservedMovementPosition.z();
+    if (Math.hypot(dx, dz) <= 1.0E-12) return Optional.empty();
+
+    double horizontalFactor;
+    if (lastObservedMovementPriorGround) {
+      // Ground friction for the prior movement was determined from the block
+      // beneath the pre-movement position, not beneath the post-jump position.
+      dev.phantom.ac.world.BlockState support = world.blockAtOrNull(
+          (int) Math.floor(previousObservedMovementPosition.x()),
+          (int) Math.floor(previousObservedMovementPosition.y() - 1.0E-4),
+          (int) Math.floor(previousObservedMovementPosition.z()));
+      if (support == null || support.isUnsupported()) return Optional.empty();
+      horizontalFactor =
+          dev.phantom.ac.world.v12111.BlockCatalogue12111.slipperiness(support)
+              * Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION;
+    } else {
+      horizontalFactor = Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION;
+    }
+
+    return Optional.of(new Vec3(dx * horizontalFactor, 0.0, dz * horizontalFactor));
   }
 
   private static Player playerFromAuthority(Packets.PlayerContext context) {
@@ -1195,10 +1245,12 @@ public final class Phase8PredictionRunner {
       Set<Candidate> candidates,
       boolean exhaustive,
       int simulatedTicks,
-      List<String> reasons) {
+      List<String> reasons,
+      List<String> trace) {
     AdvanceResult {
       candidates = Set.copyOf(candidates);
       reasons = List.copyOf(reasons);
+      trace = List.copyOf(trace);
     }
   }
 
@@ -1210,24 +1262,34 @@ public final class Phase8PredictionRunner {
       WorldSnapshot world,
       int maximumCandidates) {
     if (start.isEmpty()) {
-      return new AdvanceResult(Set.of(), false, 0, List.of("prediction frontier is empty"));
+      return new AdvanceResult(Set.of(), false, 0,
+          List.of("prediction frontier is empty"), List.of());
     }
     if (targetTick < startTick) {
       return new AdvanceResult(Set.copyOf(start), false, 0,
-          List.of("target client tick precedes retained prediction state"));
+          List.of("target client tick precedes retained prediction state"), List.of());
     }
     if (targetTick - startTick > MAX_INCREMENTAL_HORIZON) {
       return new AdvanceResult(Set.copyOf(start), false, 0,
-          List.of("incremental prediction horizon exceeded"));
+          List.of("incremental prediction horizon exceeded"), List.of());
     }
 
     Set<Candidate> current = Set.copyOf(start);
     LinkedHashSet<String> reasons = new LinkedHashSet<>();
+    List<String> trace = new ArrayList<>();
     int simulatedTicks = 0;
 
     for (long tick = startTick; tick < targetTick; tick++) {
       final long simulationTick = tick;
       InputConstraint input = inputForSimulationTick(inputHistory, simulationTick);
+      Candidate beforeCandidate = current.stream().findFirst().orElse(null);
+      if (beforeCandidate != null) {
+        trace.add("SIM_INPUT tick=" + simulationTick
+            + " input=" + input
+            + " startPos=" + beforeCandidate.context().player().position()
+            + " startVel=" + beforeCandidate.context().player().velocity()
+            + " startGround=" + beforeCandidate.context().player().onGround());
+      }
       SearchResult result = new Phase6Reachability(new Vanilla12111RichPhysics()).search(
           current.stream()
               .map(candidate -> candidate.context().withTick(simulationTick))
@@ -1247,18 +1309,34 @@ public final class Phase8PredictionRunner {
           || !result.exhaustive()) {
         reasons.addAll(result.reasons());
         reasons.add("prediction step " + tick + " was not exhaustively modeled");
-        return new AdvanceResult(current, false, simulatedTicks, List.copyOf(reasons));
+        trace.add("SIM_STEP tick=" + tick
+            + " exhaustive=false"
+            + " resultVerdict=" + result.verdict()
+            + " reasons=" + result.reasons());
+        return new AdvanceResult(current, false, simulatedTicks,
+            List.copyOf(reasons), List.copyOf(trace));
       }
 
       current = Set.copyOf(result.candidates());
+      Candidate afterCandidate = current.stream().findFirst().orElse(null);
+      if (afterCandidate != null) {
+        trace.add("SIM_STEP tick=" + tick
+            + " exhaustive=true"
+            + " resultPos=" + afterCandidate.context().player().position()
+            + " resultVel=" + afterCandidate.context().player().velocity()
+            + " resultGround=" + afterCandidate.context().player().onGround());
+      }
       if (current.size() > maximumCandidates) {
         reasons.add("prediction candidate budget exceeded");
-        return new AdvanceResult(Set.of(), false, simulatedTicks, List.copyOf(reasons));
+        trace.add("SIM_STEP tick=" + tick + " candidateBudgetExceeded=true");
+        return new AdvanceResult(Set.of(), false, simulatedTicks,
+            List.copyOf(reasons), List.copyOf(trace));
       }
     }
 
     reasons.add("persistent prediction advanced using client input history indexed by simulation tick");
-    return new AdvanceResult(current, true, simulatedTicks, List.copyOf(reasons));
+    return new AdvanceResult(current, true, simulatedTicks,
+        List.copyOf(reasons), List.copyOf(trace));
   }
 
   private static Set<Candidate> matchingCandidates(
