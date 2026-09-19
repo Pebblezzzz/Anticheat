@@ -106,7 +106,7 @@ class Phase8AdversarialMatrixTest {
 
   private static SearchResult possible(Player player, long tick) {
     return new SearchResult(
-        Verdict.POSSIBLE,
+        Phase6Reachability.Verdict.POSSIBLE,
         Set.of(candidate(player, tick)),
         1, 1, 0, 0, 0, 0,
         List.of("matrix possible witness"));
@@ -116,7 +116,7 @@ class Phase8AdversarialMatrixTest {
     return new Validation.SyncWindow(20, 20, false, List.of("stable timing"));
   }
 
-  private static DynamicTest dynamic(String name, Runnable assertion) {
+  private static DynamicTest dynamic(String name, org.junit.jupiter.api.function.Executable assertion) {
     return DynamicTest.dynamicTest(name, assertion);
   }
 
@@ -388,7 +388,7 @@ class Phase8AdversarialMatrixTest {
         new Validation.SyncWindow(19, 23, true, List.of("wide timing")),
         List.of("budget deliberately exhausted"),
         new SearchResult(
-            Verdict.UNCERTAIN, Set.of(), 1, 4097, 0, 0, 1, 0,
+            Phase6Reachability.Verdict.UNCERTAIN, Set.of(), 1, 4097, 0, 0, 1, 0,
             List.of("candidate budget exceeded")),
         "budget-replay");
     assertEquals(Verdict.UNCERTAIN, evidence.verdict());
@@ -455,7 +455,7 @@ class Phase8AdversarialMatrixTest {
         new Validation.SyncWindow(39, 42, true, List.of("world missing")),
         List.of("world coverage missing"),
         new SearchResult(
-            Verdict.UNCERTAIN, Set.of(), 0, 1, 0, 0, 1, 0,
+            Phase6Reachability.Verdict.UNCERTAIN, Set.of(), 0, 1, 0, 0, 1, 0,
             List.of("world coverage incomplete")),
         "acc-replay-uncertain").evidence();
 
