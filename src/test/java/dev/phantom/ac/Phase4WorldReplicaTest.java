@@ -9,6 +9,7 @@ import dev.phantom.ac.world.WorldSnapshot;
 import dev.phantom.ac.world.v12111.BlockCatalogue12111;
 import org.junit.jupiter.api.Test;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 final class Phase4WorldReplicaTest {
@@ -204,7 +205,7 @@ final class Phase4WorldReplicaTest {
     AtomicInteger calls=new AtomicInteger();
     r.setCollisionResolver((snapshot,state,x,y,z)->{
       calls.incrementAndGet();
-      return Optional.of(VoxelShape.fullCube(x,y,z));
+      return Optional.of(VoxelShape.fullCube().toWorld(x,y,z));
     });
 
     assertEquals(Coverage.UNLOADED,r.getWorldState().coverageAt(0,64,0));
