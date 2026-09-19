@@ -70,8 +70,12 @@ class CausalMovementPipelineTest {
     assertEquals(Verdict.POSSIBLE, report.results().getFirst().verdict(),
         report.results().toString());
     assertTrue(report.frames().getFirst().trace().stream()
-        .anyMatch(line -> line.contains("ROTATION_INPUT applied packet yaw/pitch")),
+        .anyMatch(line -> line.contains("ROOT LOCAL_AUTHORITATIVE")),
         report.frames().getFirst().trace().toString());
+    assertTrue(report.results().getFirst().evidence().closestCandidate().isPresent());
+    var closest = report.results().getFirst().evidence().closestCandidate().orElseThrow();
+    assertEquals(90f, closest.yaw(), 0.0f);
+    assertEquals(0f, closest.pitch(), 0.0f);
   }
 
   @Test

@@ -699,7 +699,7 @@ public final class CausalMovementPipeline {
         Candidate rootCandidate = root.orElseThrow();
         frontier = new Frontier(Set.of(rootCandidate), rootCandidate.context().simulationTick(), true);
         rootedFromLocalAuthority = preferLocalAuthoritativeRoot
-            && movement.simulationAuthority().isPresent();
+            && movement.simulationAuthority().map(AuthoritativeSnapshot::clientTick).isPresent();
         if (rootedFromLocalAuthority) {
           AuthoritativeSnapshot snapshot = movement.simulationAuthority().orElseThrow();
           trace.add("ROOT LOCAL_AUTHORITATIVE snapshotSeq=" + snapshot.sequence()
@@ -1643,8 +1643,11 @@ public final class CausalMovementPipeline {
         .filter(snapshot -> movement.event().serverTick() - snapshot.serverTick() <= maxServerTickAge)
         .filter(snapshot -> {
           Long clientTick = movement.move().clientTick();
-          return clientTick == null
-              || (snapshot.clientTick() != null && snapshot.clientTick().longValue() == clientTick.longValue());
+          if (clientTick == null || !movement.event().packet().provenance().sourceId().startsWith("paper-")) {
+            return true;
+          }
+          return snapshot.clientTick() != null
+              && snapshot.clientTick().longValue() == clientTick.longValue();
         });
   }
 
@@ -1673,7 +1676,7 @@ public final class CausalMovementPipeline {
      */
     if (movement.packet().packet() instanceof Packets.Move move && move.clientTick() != null) {
       long target = move.clientTick();
-      return authorities.stream()
+      Optional<AuthoritativeSnapshot> exactClient = authorities.stream()
           .filter(snapshot -> snapshot.sequence() < sequence)
           .filter(snapshot -> snapshot.receivedNanos() <= received)
           .filter(snapshot -> snapshot.clientTick() != null)
@@ -1681,6 +1684,20 @@ public final class CausalMovementPipeline {
           .filter(snapshot -> !isPlaceholderAuthority(snapshot, initialAnchor))
           .max(Comparator.comparingLong(AuthoritativeSnapshot::receivedNanos)
               .thenComparingLong(AuthoritativeSnapshot::sequence));
+      if (exactClient.isPresent()) return exactClient;
+
+      /*
+       * Live Paper captures have explicit client ticks only after the protocol
+       * tick boundary has been observed. Their authoritative snapshots should
+       * therefore carry the same watermark. A missing live watermark is not
+       * promoted to an exact client-clock root.
+       *
+       * Historical/synthetic captures may contain explicit client ticks without
+       * the live watermark; preserve their legacy server-tick replay semantics.
+       */
+      if (movement.packet().provenance().sourceId().startsWith("paper-")) {
+        return Optional.empty();
+      }
     }
 
     /*
