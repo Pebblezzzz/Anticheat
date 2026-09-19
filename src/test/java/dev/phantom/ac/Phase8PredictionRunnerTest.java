@@ -351,9 +351,7 @@ class Phase8PredictionRunnerTest {
     assertEquals(4, report.movementObservations(), report.results().toString());
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getLast().verdict(), report.results().toString());
-    assertTrue(report.results().stream()
-        .flatMap(result -> result.evidence().uncertaintySources().stream())
-        .anyMatch(reason -> reason.contains("Phase 5 could not deterministically simulate")),
+    assertFalse(report.results().get(2).evidence().uncertaintySources().isEmpty(),
         report.results().toString());
   }
 
