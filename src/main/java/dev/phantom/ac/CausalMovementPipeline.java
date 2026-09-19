@@ -1678,8 +1678,6 @@ public final class CausalMovementPipeline {
     return Set.copyOf(refreshed);
   }
 
-
-      EnumSet<Packets.PacketFlag> flags) {
   private static boolean worldCoversMovement(
       WorldSnapshot world,
       Player before,
