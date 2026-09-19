@@ -753,8 +753,22 @@ public final class Phase6Reachability {
       LongFunction<List<WorldBranch>> worlds,
       LongFunction<List<ExternalTransition>> externalTransitions,
       int maximumCandidates) {
-    SearchConfig config = SearchConfig.defaults(maximumCandidates).withTimingReference(
-        "phase6-consumed-client-tick-window");
+    return searchWithinTimingWindow(
+        start, earliestTick, latestTick, timingUncertain, inputs, worlds, externalTransitions,
+        SearchConfig.defaults(maximumCandidates).withTimingReference(
+            "phase6-consumed-client-tick-window"));
+  }
+
+  public TimingSearchResult searchWithinTimingWindow(
+      Context start,
+      long earliestTick,
+      long latestTick,
+      boolean timingUncertain,
+      List<InputConstraint> inputs,
+      LongFunction<List<WorldBranch>> worlds,
+      LongFunction<List<ExternalTransition>> externalTransitions,
+      SearchConfig config) {
+    Objects.requireNonNull(config);
     if (earliestTick < 0 || latestTick < earliestTick) {
       throw new IllegalArgumentException("invalid timing window");
     }
