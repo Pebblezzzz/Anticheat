@@ -793,10 +793,11 @@ public final class Phase7Timing {
 
       List<SynchronizationWindow> windows = new ArrayList<>();
       List<String> reasons = new ArrayList<>(bounds.reasons);
-      boolean uncertain = bounds.uncertain
-          || !packetTicks.exhaustive()
+      boolean uncertain = !packetTicks.exhaustive()
           || !simulationTicks.exhaustive()
-          || (direction == Direction.SERVER_TO_CLIENT && !processingTicks.exhaustive());
+          || (direction == Direction.SERVER_TO_CLIENT && !processingTicks.exhaustive())
+          || (packetTicks.known() && !packetTicks.range().isExact())
+          || (simulationTicks.known() && !simulationTicks.range().isExact());
       if (packetDerivation.evidenceConflict()) {
         uncertain = true;
         if (consistency == Consistency.CONSISTENT) consistency = Consistency.UNCERTAIN;
