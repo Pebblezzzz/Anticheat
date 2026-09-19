@@ -188,6 +188,22 @@ final class Phase4WorldReplicaTest {
             .get(new Pos(0,64,0)).properties());
   }
 
+  @Test void snapshotMergePreservesExactCollisionResolver() {
+    var left=new Phase4WorldReplica(V,"world",-64,319);
+    var right=new Phase4WorldReplica(V,"world",-64,319);
+    var stone=BlockCatalogue12111.decode("minecraft:stone",Map.of());
+    left.accept(new Phase4WorldReplica.ChunkData(o(1,1),p(1,1),new Chunk(0,0),
+        Map.of(new Pos(0,64,0),stone)));
+    right.accept(new Phase4WorldReplica.ChunkData(o(1,2),p(1,2),new Chunk(1,0),
+        Map.of(new Pos(16,64,0),stone)));
+    var exact=VoxelShape.local(BlockBox.of(0.25,0,0.25,0.75,1,0.75));
+    left.setCollisionResolver((snapshot,state,x,y,z)->Optional.of(exact.toWorld(x,y,z)));
+    right.setCollisionResolver((snapshot,state,x,y,z)->Optional.of(exact.toWorld(x,y,z)));
+    var merged=WorldSnapshot.merge(left.getWorldState(),right.getWorldState());
+    assertEquals(exact.toWorld(0,64,0),merged.collisionShapeAt(0,64,0));
+    assertEquals(exact.toWorld(16,64,0),merged.collisionShapeAt(16,64,0));
+  }
+
   @Test void entityTrackingCompletenessIsExplicitAndReplayable() {
     var box=BlockBox.of(0,64,0,1,66,1);
     var replica=new Phase4WorldReplica(V);
