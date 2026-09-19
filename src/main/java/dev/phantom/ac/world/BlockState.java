@@ -92,10 +92,10 @@ public record BlockState(
     FLUID,
     /** Vanilla {@code Blocks.COBWEB}, {@code POWDER_SNOW}, {@code SWEET_BERRY_BUSH}. */
     NO_COLLISION_SPECIAL,
-    /** A fully validated 1.21.11 registry state whose exact collision comes from the generated catalogue. */
-    CATALOGUE,
     /** A state received from the wire that this adapter cannot map to a verified shape. */
-    UNSUPPORTED
+    UNSUPPORTED,
+    /** A fully validated 1.21.11 registry state whose exact collision comes from the generated catalogue. */
+    CATALOGUE
   }
 
   /**
