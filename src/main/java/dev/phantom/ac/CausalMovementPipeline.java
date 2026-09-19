@@ -1328,7 +1328,7 @@ public final class CausalMovementPipeline {
          * replay cannot preserve every application order without fabricating
          * intermediate chronology, so keep the result uncertain.
          */
-        unmodeledExternalSequences.add(event.packet().sequence());
+        unmodeledSequences.add(event.packet().sequence());
         continue;
       }
       List<Long> ticks = Phase7Timing.possibleSimulationTicks(eventTiming);
