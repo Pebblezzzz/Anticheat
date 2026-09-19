@@ -584,6 +584,7 @@ public final class CausalMovementPipeline {
                 assumptions,
                 flightSearch,
                 replayReference,
+                eventTiming.simulationClientTicks().isExact() && movement.chronologyClean(),
                 EnumSet.of(
                     Phase6Reachability.ObservedField.POSITION,
                     Phase6Reachability.ObservedField.ROTATION));
