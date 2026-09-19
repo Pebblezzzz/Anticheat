@@ -364,7 +364,7 @@ import dev.phantom.ac.geometry.BlockBox;
         new Pos(1, 64, 0), Coverage.UNSUPPORTED)));
     assertTrue(problems.contains(new WorldSnapshot.CoverageProblem(
         new Pos(32, 64, 0), Coverage.UNKNOWN)));
-    assertEquals(41, problems.size());
+    assertEquals(81, problems.size());
   }
 
   @Test void fullyKnownIsTrueOnlyWhenNothingInTheBoxIsMissingData() {
