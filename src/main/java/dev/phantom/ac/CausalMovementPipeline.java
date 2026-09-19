@@ -400,6 +400,17 @@ public final class CausalMovementPipeline {
               && rangesOverlapForSubTickDetection(
                   previousPositionPacketGenerationRange,
                   eventTiming.packetGenerationClientTicks());
+      if (overlappingGenerationWindow) {
+        /*
+         * Overlap between bounded packet-generation windows is normal when upstream
+         * latency is allowed to vary. It is timing evidence, not proof that both
+         * packets occupied the same client simulation tick. The actual tick search
+         * below already exhaustively evaluates the bounded window.
+         */
+        trace.add("TIMING_RANGE_OVERLAP observation-only previous="
+            + previousPositionPacketGenerationRange
+            + " current=" + eventTiming.packetGenerationClientTicks());
+      }
       if (!frontier.candidates().isEmpty() && movement.authority().snapshot().isPresent()) {
         /*
          * PlayerContext carries the entity boxes observed by the server at the
@@ -421,8 +432,7 @@ public final class CausalMovementPipeline {
       if ((previousPositionPacketTick >= 0
               && eventTiming.simulationClientTicks().isExact()
               && movementTick == previousPositionPacketTick)
-          || sameExplicitClientTick
-          || overlappingGenerationWindow) {
+          || sameExplicitClientTick) {
         uncertainty.add("multiple position-bearing movement packets occurred in one client tick; sub-tick motion is not modeled");
         lastAmbiguitySequence = sequence;
         recoveryRequired = true;
