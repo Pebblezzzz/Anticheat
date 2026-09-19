@@ -2438,20 +2438,19 @@ public final class CausalMovementPipeline {
     if (snapshot.sequence() == 0L) return Optional.empty();
     long age = movement.event().serverTick() - snapshot.serverTick();
     if (age < 0 || age > 1L) return Optional.empty();
-    Long explicitClientTick = movement.move().clientTick();
-    if (explicitClientTick != null
-        && snapshot.clientTick() != null
-        && !explicitClientTick.equals(snapshot.clientTick())) return Optional.empty();
     Player authoritative = playerFromAuthority(snapshot.context());
     Player observed = movement.stateFrame().after();
     if (!Phase6Reachability.positionMatches(authoritative.position(), observed.position())) return Optional.empty();
     if (!movement.world().fullyKnown(playerCollisionBox(observed))) return Optional.empty();
     if (authoritative.onGround() != observed.onGround()) return Optional.empty();
     if (movement.move().onGround() != null && authoritative.onGround() != movement.move().onGround()) return Optional.empty();
-    if (movement.move().yaw() != null
-        && Float.compare(authoritative.yaw(), movement.move().yaw()) != 0) return Optional.empty();
-    if (movement.move().pitch() != null
-        && Float.compare(authoritative.pitch(), movement.move().pitch()) != 0) return Optional.empty();
+    /*
+     * PlayerContext intentionally has no server yaw/pitch. The movement packet's
+     * orientation is therefore the observed client orientation and must not be
+     * compared against the synthetic 0/0 values used by playerFromAuthority().
+     * Likewise, the authority's client-tick watermark identifies its capture
+     * boundary; it need not equal the later movement's reconstructed client tick.
+     */
     float yaw = movement.move().yaw() == null ? observed.yaw() : movement.move().yaw();
     float pitch = movement.move().pitch() == null ? observed.pitch() : movement.move().pitch();
     Player witnessPlayer = new Player(
