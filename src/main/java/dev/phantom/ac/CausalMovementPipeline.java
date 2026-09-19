@@ -1648,6 +1648,17 @@ public final class CausalMovementPipeline {
       long targetTick,
       World.VisibilityHistory history,
       MovementEvent movement) {
+    /*
+     * The live provider is already a causal client-visible replica at the
+     * movement sequence. When it is explicitly available, use it directly for
+     * physics: merging it with an incomplete historical reconstruction can
+     * reintroduce UNKNOWN coverage into an otherwise complete live chunk.
+     * Historical replay remains the fallback when no live causal replica exists.
+     */
+    if (movement.liveWorldUsed() && !movement.world().loadedChunks().isEmpty()) {
+      return movement.world();
+    }
+
     WorldSnapshot historical = history.statesAt(simulationTick);
     if (!movement.world().loadedChunks().isEmpty()) {
       Player causalRoot = movement.simulationAuthority()
@@ -1657,15 +1668,7 @@ public final class CausalMovementPipeline {
           historical.fullyKnown(playerCollisionBox(causalRoot));
       boolean historicalCoversObserved =
           historical.fullyKnown(playerCollisionBox(movement.stateFrame().after()));
-
-      /*
-       * Use the historical client-visible world where it is complete. If it is
-       * missing the root or observed volume, merge the supplied/current client
-       * replica so disjoint known chunks fill the coverage hole. Overlapping
-       * disagreement is rejected by WorldSnapshot.merge().
-       */
-      if (!historicalCoversRoot || !historicalCoversObserved
-          || movement.liveWorldUsed()) {
+      if (!historicalCoversRoot || !historicalCoversObserved) {
         return WorldSnapshot.merge(historical, movement.world());
       }
     }
