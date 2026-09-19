@@ -33,7 +33,7 @@ public final class Vanilla12111RichPhysics {
 
     public StepResult step(Context context) {
         Objects.requireNonNull(context);
-        if (!VERSION.equals(context.world().version())) throw new IllegalArgumentException("Phase 5 requires world version "+VERSION);
+        if (!VERSION.equals(context.world().version()) && !Contracts.TARGET_VERSION.equals(context.world().version())) throw new IllegalArgumentException("Phase 5 requires world version "+VERSION);
         Player source=context.state();
         if (source.awaitingTeleport().isPresent()) return uncertain(context,"teleport correction is still awaiting confirmation");
         if (context.environment()==Simulation.Environment.UNKNOWN) return uncertain(context,"movement environment is unknown");
