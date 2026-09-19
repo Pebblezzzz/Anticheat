@@ -40,6 +40,7 @@ import dev.phantom.ac.State;
 import dev.phantom.ac.Timeline;
 import dev.phantom.ac.ValidationResultGate;
 import dev.phantom.ac.World;
+import dev.phantom.ac.world.BlockState;
 import dev.phantom.ac.world.EntityCollisions;
 import dev.phantom.ac.world.WorldSnapshot;
 import org.bukkit.Material;
@@ -163,7 +164,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
                 Packets.WorldTransactionAck ack=new Packets.WorldTransactionAck(transaction);
                 appendPacket(capture,new RawPacket(sequence,receivedNanos,ack,
                     Packets.CaptureProvenance.fromAdapter("paper-transaction-ack",ack,null)));
-                scheduleNettyValidation(capture,event.getChannel());
+                scheduleNettyValidation(capture,capture.nettyChannel);
               }
             });
           }catch(RejectedExecutionException rejected){
