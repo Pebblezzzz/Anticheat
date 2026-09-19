@@ -221,35 +221,50 @@ class Phase8AdversarialMatrixTest {
         "known-world-displacement-" + distance,
         () -> {
           Player start = anchor();
-          List<RawPacket> packets = List.of(
-              new RawPacket(
-                  1, 0L,
-                  new ChunkStates(
-                      new dev.phantom.ac.world.Chunk(0, 0),
-                      floorStates(-8, 12, -8, 8))),
-              new RawPacket(
-                  2, 0L,
-                  new Packets.PlayerContext(
-                      "survival",
-                      Simulation.Attributes.DEFAULT,
-                      Map.of(),
-                      Pose.STANDING,
-                      MovementEnvironment.dry(true, false, false),
-                      start.position(),
-                      start.velocity(),
-                      false,
-                      false,
-                      false,
-                      List.of())),
-              new RawPacket(
-                  3, 0L,
-                  new ClientInput(false, false, false, false, false, false, false)),
-              new RawPacket(
-                  4, 0L,
-                  new Move(start.position(), 0f, 0f, true, 0L)),
-              new RawPacket(
-                  5, TICK_NANOS,
-                  new Move(new Maths.Vec3(.5 + distance, 64, .5), 0f, 0f, true, 1L)));
+          List<RawPacket> packets = new ArrayList<>();
+          long sequence = 1L;
+          packets.add(new RawPacket(
+              sequence++, 0L,
+              new ChunkStates(
+                  new dev.phantom.ac.world.Chunk(0, 0),
+                  floorStates(-8, 15, -8, 8))));
+          if (distance >= 16.0) {
+            packets.add(new RawPacket(
+                sequence++, 0L,
+                new ChunkStates(
+                    new dev.phantom.ac.world.Chunk(1, 0),
+                    floorStates(16, 31, -8, 8))));
+          }
+          if (distance >= 32.0) {
+            packets.add(new RawPacket(
+                sequence++, 0L,
+                new ChunkStates(
+                    new dev.phantom.ac.world.Chunk(2, 0),
+                    floorStates(32, 47, -8, 8))));
+          }
+          packets.add(new RawPacket(
+              sequence++, 0L,
+              new Packets.PlayerContext(
+                  "survival",
+                  Simulation.Attributes.DEFAULT,
+                  Map.of(),
+                  Pose.STANDING,
+                  MovementEnvironment.dry(true, false, false),
+                  start.position(),
+                  start.velocity(),
+                  false,
+                  false,
+                  false,
+                  List.of())));
+          packets.add(new RawPacket(
+              sequence++, 0L,
+              new ClientInput(false, false, false, false, false, false, false)));
+          packets.add(new RawPacket(
+              sequence++, 0L,
+              new Move(start.position(), 0f, 0f, true, 0L)));
+          packets.add(new RawPacket(
+              sequence, TICK_NANOS,
+              new Move(new Maths.Vec3(.5 + distance, 64, .5), 0f, 0f, true, 1L)));
           var report = Phase8LiveValidation.analyze(
               "known-teleport-" + distance,
               capture(packets),

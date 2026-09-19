@@ -181,7 +181,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             Packets.CaptureProvenance.fromAdapter("paper-block-change",blockChange,null)));
       }else if(event.getPacketType()==PacketType.Play.Server.MULTI_BLOCK_CHANGE){
         var packet=new WrapperPlayServerMultiBlockChange(event);
-        boolean near=false;
         for(var change:packet.getBlocks()){
           var pos=new dev.phantom.ac.world.Pos(change.getX(),change.getY(),change.getZ());
           var state=toCoreState(change.getBlockState(event.getUser().getClientVersion()));
@@ -191,7 +190,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           Packets.Packet blockChange=blockStatePacket(pos,state);
           appendPacket(capture,new RawPacket(sequence,receivedNanos,blockChange,
               Packets.CaptureProvenance.fromAdapter("paper-multi-block-change",blockChange,null)));
-          near|=isNearBlock(capture,pos);
         }
       }else if(event.getPacketType()==PacketType.Play.Server.UNLOAD_CHUNK){
         var packet=new WrapperPlayServerUnloadChunk(event);
@@ -210,8 +208,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         ClientVersion clientVersion=event.getUser().getClientVersion();
         capture.chunkPackets.incrementAndGet();
         capture.clientWorld.queueChunk(sequence,column,column.isFullChunk(),clientVersion);
-        if (debugLevel(player.getUniqueId()).trace()) {
-          getLogger().info("[PhantomAC][CHUNK] player=" + player.getName()
+        if (debugLevel(capture.playerId).trace()) {
+          getLogger().info("[PhantomAC][CHUNK] player=" + capture.playerName
               + " chunk=" + column.getX() + "," + column.getZ()
               + " cached=true fullChunk=" + column.isFullChunk()
               + " seq=" + sequence);

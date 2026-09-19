@@ -103,8 +103,17 @@ public final class Phase7Timing {
             && bounds.latency.isExact()
             && config.clientTickMinNanos()==config.clientTickMaxNanos()
             && !isWithinDerivedWindow(packetTicks,bounds.clientEventNanos,anchorGeneration,anchorTick,config)){
-          consistency=Consistency.INCONSISTENT;
-          consistencyReasons.add("explicit client tick "+explicit.getAsLong()+" is outside timing bounds; exact wall-clock comparison failed for sequence "+normalized.sequence());
+          boolean captureChronologyPerturbed=
+              duplicate
+              || normalized.flags().contains(PacketFlag.OUT_OF_ORDER)
+              || normalized.flags().contains(PacketFlag.SEQUENCE_GAP);
+          if(captureChronologyPerturbed){
+            if(consistency!=Consistency.INCONSISTENT)consistency=Consistency.UNCERTAIN;
+            consistencyReasons.add("explicit client tick falls outside the wall-clock bound, but capture chronology is perturbed; treating the mismatch as timing uncertainty for conservative reconstruction");
+          }else{
+            consistency=Consistency.INCONSISTENT;
+            consistencyReasons.add("explicit client tick "+explicit.getAsLong()+" is outside timing bounds; exact wall-clock comparison failed for sequence "+normalized.sequence());
+          }
         }}
       else if(kind==EventKind.CLIENT_TICK_END&&clientBoundarySeen){packetTicks=Range.exact(clientBoundaryTick);source=TimingSource.RELATIVE_CLIENT_ANCHOR;}
       else if(clientBoundarySeen&&direction==Direction.CLIENT_TO_SERVER){packetTicks=Range.exact(clientBoundaryTick);source=TimingSource.RELATIVE_CLIENT_ANCHOR;}
