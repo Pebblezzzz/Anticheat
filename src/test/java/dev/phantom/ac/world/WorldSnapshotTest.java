@@ -360,10 +360,17 @@ import dev.phantom.ac.geometry.BlockBox;
     List<WorldSnapshot.CoverageProblem> problems = world.coverageProblemsIn(
         BlockBox.of(0, 64, 0, 35, 65, 1));
 
-    assertTrue(problems.contains(new WorldSnapshot.CoverageProblem(
-        new Pos(1, 64, 0), Coverage.UNSUPPORTED)));
-    assertTrue(problems.contains(new WorldSnapshot.CoverageProblem(
-        new Pos(32, 64, 0), Coverage.UNKNOWN)));
+    WorldSnapshot.CoverageProblem unsupported = problems.stream()
+        .filter(problem -> problem.position().equals(new Pos(1, 64, 0)))
+        .findFirst().orElseThrow();
+    assertEquals(Coverage.UNSUPPORTED, unsupported.coverage());
+    assertTrue(unsupported.detail().contains("block=minecraft:unknown_shape"));
+
+    WorldSnapshot.CoverageProblem unknown = problems.stream()
+        .filter(problem -> problem.position().equals(new Pos(32, 64, 0)))
+        .findFirst().orElseThrow();
+    assertEquals(Coverage.UNKNOWN, unknown.coverage());
+    assertEquals("UNKNOWN", unknown.detail());
     assertEquals(81, problems.size());
   }
 
