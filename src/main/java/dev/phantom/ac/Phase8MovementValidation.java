@@ -252,8 +252,8 @@ public final class Phase8MovementValidation {
                       int recoveries, long lastObservationTick, long lastAlertTick) implements Serializable {
     public static State empty() { return new State(0, 0, 0, 0, -1, -1); }
     State impossible(long tick) { return new State(consecutiveImpossible + 1, supportingImpossible + 1, uncertaintyPeriods, recoveries, tick, lastAlertTick); }
-    State recovered(long tick) { return new State(0, 0, uncertaintyPeriods, recoveries + 1, tick, lastAlertTick); }
-    State uncertain() { return new State(0, 0, uncertaintyPeriods + 1, recoveries, lastObservationTick, lastAlertTick); }
+    State recovered(long tick) { return new State(0, supportingImpossible, uncertaintyPeriods, recoveries + 1, tick, lastAlertTick); }
+    State uncertain() { return new State(0, supportingImpossible, uncertaintyPeriods + 1, recoveries, lastObservationTick, lastAlertTick); }
     State alerted(long tick) { return new State(consecutiveImpossible, supportingImpossible, uncertaintyPeriods, recoveries, lastObservationTick, tick); }
   }
 
