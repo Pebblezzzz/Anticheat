@@ -1726,10 +1726,6 @@ public final class CausalMovementPipeline {
      * explicit client-tick movement, where the adapter can provide stronger
      * chronology.
      */
-    if (movement.packet().packet() instanceof Packets.Move move && move.clientTick() != null) {
-      return Optional.empty();
-    }
-
     Optional<AuthoritativeSnapshot> previous = authorities.stream()
         .filter(snapshot -> snapshot.sequence() < sequence)
         .filter(snapshot -> snapshot.receivedNanos() <= received)
