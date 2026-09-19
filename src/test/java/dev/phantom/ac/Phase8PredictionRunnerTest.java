@@ -40,7 +40,7 @@ class Phase8PredictionRunnerTest {
         List.of(
             new RawPacket(1, 20, new PlayerContext(
                 "survival", Simulation.Attributes.DEFAULT, Map.of(),
-                MovementEnvironment.dry(true, false, false), Pose.STANDING,
+                Pose.STANDING, MovementEnvironment.dry(true, false, false),
                 new Maths.Vec3(.5, 64, .5), Maths.Vec3.ZERO,
                 false, false, false, List.of())),
             new RawPacket(2, 30, new ClientTickEnd()),
