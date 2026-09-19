@@ -168,6 +168,7 @@ SearchMetrics records:
 - branch evaluations;
 - Phase 5 simulation steps;
 - peak candidate count;
+- candidates remaining after each evaluated tick (`candidatesPerTick`);
 - evaluated ticks;
 - whether a budget was reached;
 - whether the search was exhaustive.
