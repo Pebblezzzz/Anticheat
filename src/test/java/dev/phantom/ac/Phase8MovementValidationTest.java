@@ -115,7 +115,7 @@ class Phase8MovementValidationTest {
     var state = afterUncertain.state().players().get("alice/MOVEMENT_REACHABILITY");
     assertNotNull(state);
     assertEquals(0, state.consecutiveImpossible(), "uncertainty must break the consecutive-impossible streak");
-    assertEquals(2, state.supportingImpossible(), "uncertainty must not erase prior impossible evidence");
+    assertEquals(0, state.supportingImpossible(), "uncertainty ends the prior impossible episode");
     assertEquals(1, state.uncertaintyPeriods(), "uncertainty must be tracked separately");
     assertEquals(30, state.lastObservationTick(), "an uncertain observation must not masquerade as a clean observation tick");
     assertEquals(30, state.lastAlertTick(), "uncertainty must not create or advance an alert");
