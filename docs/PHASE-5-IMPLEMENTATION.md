@@ -1,23 +1,140 @@
-# Phase 5 implementation
+# Phase 5 — deterministic vanilla movement authority
 
-Phase 5 is the deterministic movement layer. The implementation deliberately separates mechanics from empirical parity: code may model a mechanic, but the validator must not call a value vanilla-accurate until it has a 1.21.11 observation trace behind it.
+## Purpose
 
-## Implemented in this branch
+Phase 5 is the sole movement transition authority. It consumes a reconstructed client state, explicit client input, the client-visible Phase 4 world, environment facts, movement attributes/effects, pose, movement mode, entity-collision facts, and a simulation tick. It returns one deterministic next state plus collision and diagnostic information.
 
-- Pose-aware player collision bounds for standing, crouching, swimming and fall-flying.
-- Collision-safe pose transitions: expanding a pose is rejected when the requested box intersects known world geometry.
-- Explicit survival and adventure simulation; creative and spectator are treated as non-physical modes.
-- Explicit unknown-environment barrier. Unknown environment returns an uncertain simulation result instead of silently using dry-land physics.
-- Movement input acceleration, sprint/sneak scaling, gravity, drag, ground friction and jump integration remain deterministic and replayable.
-- Water, lava and climbable movement remain explicit environment inputs rather than inferred from server truth.
-- Movement effects include speed, slowness, jump boost, levitation and slow-falling state representation.
-- Attribute modifier ordering remains explicit: ADD_VALUE, ADD_MULTIPLIED_BASE, then ADD_MULTIPLIED_TOTAL.
-- Server velocity packets continue to enter the state as velocity provenance, so knockback is simulated from the authoritative velocity rather than invented by a separate heuristic.
-- Teleport confirmation remains a hard simulation barrier.
-- One-command Windows validation runner at `tools/phase5/run-capture.ps1`.
+It does not perform reachability search, timing inference, violation scoring, alerts, punishments, or other anti-cheat decisions.
 
-## Empirical gate
+## Target
 
-A Phase 5 release is only considered empirically complete after the local 1.21.11 observation harness produces traces for the required scenario manifest and the replay/audit tests show no unexplained first divergence. The harness observes the normal client; it does not replace Minecraft movement or collision code.
+The implementation is explicitly pinned to **Minecraft Java Edition 1.21.11**. The core simulator is independent of Bukkit/Paper and rejects a world snapshot for another model version.
 
-The remaining human step is starting the legitimate 1.21.11 client when the local script launches it. Everything else in the capture/audit loop is automated by the repository tooling.
+The public 1.21.11 Yarn mappings expose distinct vanilla travel paths for air, fluids, flying and gliding, and expose movement helpers such as `applyMovementInput`, `getMovementSpeed(float)`, and `applyFluidMovingSpeed`. The implementation follows those conceptual boundaries rather than treating movement as a single speed threshold.
+
+## Deterministic inputs
+
+`Phase5MovementAuthority.SimulationContext` is the stable API:
+
+- simulation tick;
+- immutable `State.Player`;
+- forward/strafe/jump/sprint/sneak input;
+- 1.21.11 `WorldSnapshot`;
+- explicit movement environment;
+- movement attributes and ordered modifiers;
+- movement effects;
+- pose;
+- sleeping/flying mode state;
+- deterministic entity collision provider.
+
+No wall-clock time, random value, mutable global state, thread scheduling, server TPS, Bukkit physics, or unordered iteration is used by the authority.
+
+## Movement model
+
+The 1.21.11 model now has explicit paths for:
+
+- ground and air acceleration;
+- input normalization and yaw rotation;
+- sprint and sneak scaling;
+- jump impulse and sprint-jump impulse;
+- gravity before collision movement and post-move vertical drag;
+- water and lava movement;
+- climbing;
+- fall-flying;
+- creative flight;
+- spectator no-physics movement;
+- collision-safe pose transitions;
+- speed, slowness, jump boost, levitation and slow falling;
+- externally applied velocity already reconstructed into `PlayerState`;
+- teleport/correction barriers already reconstructed into `PlayerState`.
+
+Vanilla float constants are represented with explicit float-to-double widening where the client uses float literals, preserving Java's rounding behavior.
+
+## Collision
+
+Phase 4 `WorldSnapshot` remains the authoritative client-visible collision source. Phase 5 does not contain a second block-shape catalogue.
+
+The resolver consumes Phase 4 voxel shapes, preserves UNKNOWN/UNLOADED/UNSUPPORTED coverage, resolves Y first and then the larger horizontal movement axis before the smaller horizontal axis, and exposes deterministic step/collision diagnostics. Partial shapes therefore remain geometry facts rather than tolerance bands.
+
+Entity movement collision is a separate Phase 4 provider seam. An incomplete entity list produces uncertainty instead of pretending the missing entities are absent.
+
+## Unknown world
+
+Missing collision information is never converted to air. A simulation whose required world volume is not fully known returns the unchanged state marked uncertain, with a diagnostic describing the missing authority.
+
+## Attributes and effects
+
+Attribute modifiers are applied in the required operation sequence:
+
+1. ADD_VALUE
+2. ADD_MULTIPLIED_BASE
+3. ADD_MULTIPLIED_TOTAL
+
+Modifier input is canonicalized by stable identifier for replay determinism.
+
+Effects are explicit simulation inputs. `MovementEffects.fromStateEffects` maps the reconstructed effect state into movement-relevant Speed, Slowness, Jump Boost, Levitation and Slow Falling behavior.
+
+## Corrections and velocity
+
+Teleport corrections remain hard simulation barriers through `PlayerState.awaitingTeleport`. A pending correction is not simulated through.
+
+Velocity packets are represented by the reconstructed velocity state rather than by a separate speed exception. `Phase5Mechanics.applyVelocityImpulse` and `Knockback` retain explicit provenance at the Phase 5 boundary.
+
+## Validation status
+
+### IMPLEMENTED
+
+- deterministic authority API;
+- 1.21.11 version gate;
+- ground/air acceleration and friction;
+- sprint/sneak;
+- jump and sprint jump;
+- gravity/drag;
+- pose transitions;
+- water/lava/climb/glide mode separation;
+- movement effects;
+- deterministic attribute modifier ordering;
+- creative/spectator movement modes;
+- Phase 4 collision integration;
+- unknown-world propagation;
+- correction barriers;
+- first-divergence trace infrastructure;
+- deterministic regression coverage.
+
+### INTERNALLY TESTED
+
+The Maven test suite contains deterministic movement, collision, pose, replay, trace and Phase 5 regression tests, including new authority tests for gravity ordering, unknown-world propagation and explicit movement modes.
+
+### TARGETED VANILLA VALIDATED
+
+Existing repository traces labelled as independent 1.21.11 observations remain targeted evidence only. They are not reclassified as full empirical parity by source inspection.
+
+### PARTIAL / NOT EMPIRICALLY VALIDATED
+
+The repository does not claim a complete independent real-client 1.21.11 corpus for every mechanic. In particular, fall-flying, fluid edge cases, climbable transitions, exact step candidate parity, entity-push/riding interactions, and some pose transitions still require targeted real-client regression captures before being labelled empirically validated.
+
+## First divergence
+
+Trace comparison remains the preferred debugging loop:
+
+real client observation -> earliest meaningful divergence -> identify input/timing/world/collision/physics cause -> fix source mechanic -> add regression.
+
+A tolerance increase is not an acceptable substitute for a first-divergence investigation.
+
+## Performance
+
+The existing Phase 5 benchmark remains in place. The authority is allocation-light at the API boundary and reuses the immutable world snapshot; repeated simulation does not rebuild Phase 4 block geometry.
+
+Performance is measured by the existing benchmark rather than by an arbitrary target. Correctness remains the primary requirement.
+
+## Phase boundary
+
+Phase 5 owns the physical state transition.
+
+Phase 6 owns possible-state exploration.
+
+Phase 7 owns temporal synchronization.
+
+Phase 8 owns movement validation and enforcement.
+
+No Phase 6/7/8 movement decision logic is added by this redesign.
