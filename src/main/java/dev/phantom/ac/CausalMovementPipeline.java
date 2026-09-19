@@ -514,6 +514,11 @@ public final class CausalMovementPipeline {
       }
 
       if (recoveryRequired) {
+        /*
+         * An authoritative server flight state is a separate evidence channel.
+         * It cannot make an ambiguous packet chronology exact, so chronology
+         * recovery still wins here.
+         */
         uncertainty.add(
             "prediction frontier was invalidated by chronology ambiguity; waiting for a clean causally aligned movement");
         SearchResult uncertain = uncertainSearch(
@@ -525,6 +530,81 @@ public final class CausalMovementPipeline {
         frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
             assumptions, uncertainty, trace));
         continue;
+      }
+
+      Optional<AuthoritativeSnapshot> currentAuthority = movement.authority().snapshot();
+      boolean authoritativeFlight =
+          currentAuthority.isPresent()
+              && currentAuthority.get().context().canFly()
+              && currentAuthority.get().context().flying();
+      boolean contradictoryFlightState =
+          currentAuthority.isPresent()
+              && !currentAuthority.get().context().canFly()
+              && currentAuthority.get().context().flying();
+
+      /*
+       * Flight authorization is authoritative server state, not a client movement
+       * claim. The movement reachability engine has no configured survival-flight
+       * speed/profile, so do not invent one and then classify legitimate flight as
+       * impossible. Instead retain the exact client observation as the next
+       * frontier while recording the authoritative authorization explicitly.
+       */
+      if (authoritativeFlight) {
+        assumptions.add(
+            "authoritative server state reports flight is allowed and currently active; movement is validated as an authorized flight observation");
+        trace.add(
+            "AUTHORIZED_FLIGHT serverCanFly=true serverFlying=true serverGround="
+                + currentAuthority.get().context().movementEnvironment().onGround());
+        Set<Candidate> flightCandidates = Set.of(
+            observedFlightCandidate(
+                movement,
+                observedAfter,
+                currentAuthority.get(),
+                movementTick,
+                inputByTick));
+        SearchResult flightSearch = new SearchResult(
+            Verdict.POSSIBLE,
+            flightCandidates,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            List.of("movement accepted under authoritative active-flight state"));
+        Phase8MovementValidation.Result validation =
+            Phase8MovementValidation.validate(
+                playerId,
+                serverTick,
+                observedBefore,
+                observedAfter,
+                movement.world(),
+                worldReference,
+                sync,
+                assumptions,
+                flightSearch,
+                eventTiming.simulationClientTicks().isExact() && movement.chronologyClean(),
+                EnumSet.of(
+                    Phase6Reachability.ObservedField.POSITION,
+                    Phase6Reachability.ObservedField.ROTATION));
+        results.add(validation);
+        frontier = new Frontier(flightCandidates, movementTick, true);
+        previousPositionPacketTick = movementTick;
+        previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
+        if (movement.move().clientTick() != null) {
+          previousExplicitClientTick = movement.move().clientTick();
+        }
+        trace.add("MATCHING candidates=1 frontierTick=" + movementTick);
+        frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+            assumptions, uncertainty, trace));
+        continue;
+      }
+
+      if (contradictoryFlightState) {
+        uncertainty.add(
+            "authoritative server state reports flying=true while canFly=false; flight authorization is contradictory");
+        trace.add("AUTHORITY_INCONSISTENT_FLIGHT serverCanFly=false serverFlying=true"
+            + " clientGround=" + movement.move().onGround());
       }
 
       boolean rootedFromLocalAuthority = false;
@@ -757,7 +837,7 @@ public final class CausalMovementPipeline {
     merged.add("OBSERVED position=" + after.position()
         + " yaw=" + after.yaw()
         + " pitch=" + after.pitch()
-        + " ground=" + movement.move().onGround());
+        + " clientGround=" + movement.move().onGround());
     merged.add("UNCERTAINTY " + (uncertainty.isEmpty() ? "none" : uncertainty));
     return new Frame(
         sequence,
@@ -1645,6 +1725,82 @@ public final class CausalMovementPipeline {
     if (Float.compare(candidate.yaw(), observed.yaw()) != 0) return false;
     if (Float.compare(candidate.pitch(), observed.pitch()) != 0) return false;
     return movement.onGround() == null || candidate.onGround() == movement.onGround();
+  }
+
+  private static Candidate observedFlightCandidate(
+      MovementEvent movement,
+      Player observed,
+      AuthoritativeSnapshot authority,
+      long simulationTick,
+      NavigableMap<Long, InputConstraint> inputByTick) {
+    Packets.PlayerContext context = authority.context();
+    Player authoritative = playerFromAuthority(context);
+    Player baseline = new Player(
+        observed.position(),
+        authoritative.velocity(),
+        observed.yaw(),
+        observed.pitch(),
+        observed.onGround(),
+        authoritative.gamemode(),
+        authoritative.effects(),
+        authority.context().serverPosition().equals(observed.position())
+            ? authoritative.awaitingTeleport()
+            : OptionalInt.empty(),
+        false,
+        Optional.ofNullable(inputByTick.floorEntry(Math.max(0L, simulationTick)))
+            .map(Map.Entry::getValue)
+            .flatMap(CausalMovementPipeline::inputConstraintToAdvancedInput),
+        authoritative.attributes(),
+        authoritative.pose(),
+        authoritative.environment(),
+        State.TickRange.exact(Math.max(0L, simulationTick)),
+        new State.Provenance(
+            movement.event().packet().sequence(),
+            movement.event().serverTick(),
+            "AUTHORIZED_FLIGHT"),
+        Set.of());
+    MovementEnvironment movementEnvironment = movementEnvironmentOf(authoritative);
+    Context contextValue = new Context(
+        Math.max(0L, simulationTick),
+        baseline,
+        simulationEnvironmentFor(movementEnvironment),
+        authoritative.attributes(),
+        movementEffects(authoritative),
+        authoritative.pose(),
+        movementEnvironment,
+        authoritative.pose() == Pose.SLEEPING,
+        entityCollisionsFor(movement),
+        Set.of());
+    return new Candidate(
+        0,
+        contextValue,
+        new Phase6Reachability.Provenance(
+            0,
+            authority.sequence(),
+            Math.max(0L, simulationTick),
+            "AUTHORIZED_FLIGHT",
+            "AUTHORIZED",
+            "None",
+            List.of("authoritative server reports canFly=true and flying=true"),
+            1,
+            List.of()));
+  }
+
+  private static Optional<Simulation.AdvancedInput> inputConstraintToAdvancedInput(
+      InputConstraint constraint) {
+    if (constraint.forward().isEmpty()
+        || constraint.strafe().isEmpty()
+        || constraint.jump().isEmpty()
+        || constraint.sprint().isEmpty()
+        || constraint.sneak().isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.of(new Simulation.AdvancedInput(
+        constraint.forward().getAsInt(),
+        constraint.strafe().getAsInt(),
+        constraint.jump().get(),
+        constraint.sprint().get(),
+        constraint.sneak().get()));
   }
 
   private static SearchResult uncertainSearch(
