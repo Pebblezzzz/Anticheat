@@ -1,6 +1,7 @@
 package dev.phantom.ac;
 
 import dev.phantom.ac.geometry.BlockBox;
+import dev.phantom.ac.geometry.VoxelShape;
 import dev.phantom.ac.world.BlockState;
 import dev.phantom.ac.world.Chunk;
 import dev.phantom.ac.world.Coverage;
