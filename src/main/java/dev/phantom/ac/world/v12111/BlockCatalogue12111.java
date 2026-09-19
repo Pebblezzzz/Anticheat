@@ -155,8 +155,15 @@ public final class BlockCatalogue12111 {
 
     if (isLikelyFullCube(name)) return fullCube(name, p);
 
-    // Unknown block: explicitly unsupported, never assumed to be air or a cube.
-    return BlockState.unsupported(name);
+    // Every remaining target-version registry state is represented by the generated exact
+    // collision catalogue. Validate its property tuple before admitting it as a usable state.
+    if (BlockCollisionCatalogue12111.knowsBlock(name)) {
+      BlockState candidate = simpleVariant(name, Variant.CATALOGUE, p);
+      if (BlockCollisionCatalogue12111.shapeFor(candidate).isPresent()) return candidate;
+    }
+
+    // Unknown block or invalid state tuple: explicitly unsupported, never assumed to be air or a cube.
+    return BlockState.unsupported(name).withProperties(p);
   }
 
   private static BlockState fluidStateBlock(String name, Map<String, String> p) {
@@ -571,6 +578,7 @@ public final class BlockCatalogue12111 {
       case SEA_PICKLE -> Shapes.SEA_PICKLE;
       case PLATE -> Shapes.PLATE_1PX_INSET;
       case NO_COLLISION_SPECIAL -> Shapes.EMPTY;
+      case CATALOGUE -> BlockCollisionCatalogue12111.shapeFor(state).orElse(Shapes.EMPTY);
       case UNSUPPORTED -> Shapes.EMPTY;
     };
   }
