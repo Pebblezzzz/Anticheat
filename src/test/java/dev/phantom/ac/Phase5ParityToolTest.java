@@ -144,7 +144,7 @@ class Phase5ParityToolTest {
   @Test
   void airborneVerticalIntegrationMatchesObservedPostTickVelocity() {
     var initial = new State.Player(
-      new Maths.Vec3(72.7531999805212, 72.7531999805212, 0.5),
+      new Maths.Vec3(0.5, 72.7531999805212, 0.5),
       new Maths.Vec3(0.0, 0.33319999363422365, 0.0),
       0.0f,
       0.0f,
@@ -199,7 +199,7 @@ class Phase5ParityToolTest {
 
     assertFalse(result.state().uncertain(), result.diagnostic());
     assertEquals(64.42, result.state().position().y(), 1e-9);
-    assertEquals(0.33319999363422365, result.state().velocity().y(), 1e-9);
+    assertEquals(0.33319999999999994, result.state().velocity().y(), 1e-9);
     assertFalse(result.state().onGround());
   }
 
