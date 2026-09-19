@@ -413,7 +413,7 @@ public final class Phase4WorldReplica implements Serializable {
   private final NavigableMap<Long,Event> unassigned=new TreeMap<>();
   private final Map<Short,List<Event>> pending=new LinkedHashMap<>();
   private transient volatile WorldSnapshot.CollisionResolver collisionResolver;
-  private volatile boolean entityTrackingComplete=true;
+  private volatile boolean entityTrackingComplete=false;
   private final Deque<Short> sentOrder=new ArrayDeque<>();
 
   private long generationId;
