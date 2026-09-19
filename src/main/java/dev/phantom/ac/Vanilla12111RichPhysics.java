@@ -89,10 +89,10 @@ public final class Vanilla12111RichPhysics {
         if(jumped){
             velocity=new Vec3(velocity.x(),JUMP+context.effects().jumpVelocityAdd(),velocity.z());
             if(context.input().sprint()){
-                velocity=velocity.add(
+                velocity=velocity.add(new Vec3(
                         -Math.sin(radians)*SPRINT_JUMP_HORIZONTAL_BOOST,
                         0.0,
-                        Math.cos(radians)*SPRINT_JUMP_HORIZONTAL_BOOST);
+                        Math.cos(radians)*SPRINT_JUMP_HORIZONTAL_BOOST));
             }
         }
         if(context.effects().levitation())
