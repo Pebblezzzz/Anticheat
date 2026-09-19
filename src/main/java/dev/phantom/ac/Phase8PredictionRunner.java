@@ -393,34 +393,59 @@ public final class Phase8PredictionRunner {
           + " causalSequence=" + world.causalSequence()
           + " chunks=" + world.loadedChunks().size());
 
-      if (move.position() == null) {
+      boolean stationaryPositionObservation = move.position() != null
+          && positionExactlyMatches(observedBefore.position(), observedAfter.position())
+          && observedBefore.onGround()
+          && observedAfter.onGround();
+
+      if (move.position() == null || stationaryPositionObservation) {
+        boolean positionlessRotationObservation = move.position() == null;
         ensureRoot(playerId, packet, move, observedBefore, tick, trace);
         prediction = retargetRotation(prediction, move, maximumCandidates);
         Set<Candidate> rotated = prediction;
-        boolean possibleRotation = !rotated.isEmpty();
-        SearchResult rotationSearch = possibleRotation
+        boolean possibleObservation = !rotated.isEmpty();
+        Set<Phase6Reachability.ObservedField> observedFields =
+            positionlessRotationObservation
+                ? EnumSet.of(Phase6Reachability.ObservedField.ROTATION)
+                : EnumSet.of(
+                    Phase6Reachability.ObservedField.POSITION,
+                    Phase6Reachability.ObservedField.ROTATION,
+                    Phase6Reachability.ObservedField.GROUND);
+        SearchResult observationSearch = possibleObservation
             ? new SearchResult(
                 Verdict.POSSIBLE,
                 rotated,
                 0,
                 rotated.size(),
                 0, 0, 0, 0,
-                List.of("rotation is a retained client-state observation; no physics step is advanced"))
-            : uncertainSearch(prediction, "no prediction root exists for rotation observation");
-        boolean exact = tick.exact() && possibleRotation;
+                List.of(positionlessRotationObservation
+                    ? "rotation is a retained client-state observation; no physics step is advanced"
+                    : "stationary position/rotation observation; no physics step is advanced"))
+            : uncertainSearch(prediction, "no prediction root exists for observation-only movement packet");
+        /*
+         * Observation-only look/stationary packets do not advance physics, so
+         * their exact client tick is not required to model a trajectory. This
+         * prevents harmless head movement from inheriting Phase 5 world-coverage
+         * uncertainty from a zero-displacement physics step.
+         */
+        boolean timingExhaustive = possibleObservation;
         Phase8MovementValidation.Result result = validate(
             playerId, packet, move, observedBefore, observedAfter, world,
-            tick, List.of(), rotationSearch, exact,
-            EnumSet.of(Phase6Reachability.ObservedField.ROTATION));
+            tick, List.of(), observationSearch, timingExhaustive, observedFields);
         results.add(result);
         if (result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE) {
           possible++;
+          latestContinuation = Continuation.ACTIVE;
         } else if (result.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
           impossible++;
+          latestContinuation = Continuation.IMPOSSIBLE;
         } else {
           uncertain++;
+          latestContinuation = Continuation.UNCERTAIN;
         }
-        trace.add("OBSERVATION rotation-only prediction frontier retained=" + !prediction.isEmpty());
+        trace.add(positionlessRotationObservation
+            ? "OBSERVATION rotation-only prediction frontier retained=" + !prediction.isEmpty()
+            : "OBSERVATION stationary-position packet retained=" + !prediction.isEmpty());
         frames.add(frame(
             sequence, packet, tick, move, observedBefore, observedAfter,
             prediction, prediction, world, List.of(), trace));
@@ -1163,6 +1188,12 @@ public final class Phase8PredictionRunner {
     return Math.abs(left.x() - right.x()) <= POSITION_TOLERANCE
         && Math.abs(left.y() - right.y()) <= POSITION_TOLERANCE
         && Math.abs(left.z() - right.z()) <= POSITION_TOLERANCE;
+  }
+
+  private static boolean positionExactlyMatches(Vec3 left, Vec3 right) {
+    return Double.compare(left.x(), right.x()) == 0
+        && Double.compare(left.y(), right.y()) == 0
+        && Double.compare(left.z(), right.z()) == 0;
   }
 
   private static boolean movementAllowsKinematicCertificate(Candidate candidate) {
