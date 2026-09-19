@@ -576,7 +576,7 @@ class Phase8PredictionRunnerTest {
             new RawPacket(2, 50_000_000L, new ClientTickEnd()),
             // Sequence 3 is intentionally missing; the explicit client tick must
             // not bypass Phase 7's chronology uncertainty.
-            new RawPacket(4, 100_000_000L, new Move(
+            new RawPacket(4, 400_000_000L, new Move(
                 new Maths.Vec3(.6, 64, .5), 0f, 0f, true, 1L))),
         floorWorld(), anchor(), 0L);
 
