@@ -92,4 +92,40 @@ class Phase5FullMechanicsTest {
                 Phase5Mechanics.Pose.SWIMMING, env));
         assertEquals(Phase5Mechanics.Pose.STANDING, result.pose());
     }
+  @Test void unsupportedCreativeSpectatorAndFlyingModesPropagateUncertainty() {
+    State.Player creative = new State.Player(
+        new Maths.Vec3(.5, 70, .5), Maths.Vec3.ZERO, 0f, 0f, false, "creative",
+        Map.of(), OptionalInt.empty(), false, Optional.empty(),
+        Attributes.DEFAULT, Phase5Mechanics.Pose.STANDING, State.Environment.DRY,
+        State.TickRange.unknown(), State.Provenance.UNKNOWN, Set.of());
+    var creativeResult = new Vanilla12111RichPhysics().step(new Vanilla12111RichPhysics.Context(
+        1, creative, new AdvancedInput(1,0,false,true,false), WORLD,
+        Simulation.Environment.DRY, Attributes.DEFAULT, MovementEffects.NONE,
+        Pose.STANDING, MovementEnvironment.dry(false,true,false), false, true,
+        EntityCollisions.of(List.of(), true)));
+    assertTrue(creativeResult.state().uncertain());
+    assertTrue(creativeResult.diagnostic().contains("creative"));
+
+    State.Player spectator = new State.Player(
+        creative.position(), creative.velocity(), creative.yaw(), creative.pitch(), false, "spectator",
+        creative.effects(), creative.awaitingTeleport(), false, creative.input(),
+        creative.attributes(), creative.pose(), creative.environment(),
+        creative.clientTickRange(), creative.provenance(), creative.uncertaintyReasons());
+    var spectatorResult = new Vanilla12111RichPhysics().step(new Vanilla12111RichPhysics.Context(
+        1, spectator, new AdvancedInput(1,0,false,false,false), WORLD,
+        Simulation.Environment.DRY, Attributes.DEFAULT, MovementEffects.NONE,
+        Pose.STANDING, MovementEnvironment.dry(false,false,false), false, false,
+        EntityCollisions.of(List.of(), true)));
+    assertTrue(spectatorResult.state().uncertain());
+    assertTrue(spectatorResult.diagnostic().contains("spectator"));
+
+    var flyingResult = new Vanilla12111RichPhysics().step(new Vanilla12111RichPhysics.Context(
+        1, State.Player.initial(new Maths.Vec3(.5,70,.5)), new AdvancedInput(1,0,false,true,false), WORLD,
+        Simulation.Environment.DRY, Attributes.DEFAULT, MovementEffects.NONE,
+        Pose.STANDING, MovementEnvironment.dry(false,true,false), false, true,
+        EntityCollisions.of(List.of(), true)));
+    assertTrue(flyingResult.state().uncertain());
+  }
+
+
 }
