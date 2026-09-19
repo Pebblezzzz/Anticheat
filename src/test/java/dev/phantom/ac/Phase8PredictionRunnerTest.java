@@ -256,6 +256,54 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void consecutiveAuthoritativePositionsReconstructLocomotionVelocityForStaleResync() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+
+    PlayerContext firstAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    PlayerContext secondAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.5, 64.0, .8), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    var report = runner.process(
+        "authority-velocity",
+        List.of(
+            new RawPacket(1, 10, firstAuthority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-authority", firstAuthority, 100L, 1L)),
+            new RawPacket(2, 20, new ClientTickEnd()),
+            new RawPacket(3, 30, new Move(
+                new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 1L)),
+            new RawPacket(4, 40, secondAuthority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-authority", secondAuthority, 101L, 2L)),
+            new RawPacket(5, 50, new ClientTickEnd()),
+            new RawPacket(6, 60, new ClientTickEnd()),
+            new RawPacket(7, 70, new ClientTickEnd()),
+            new RawPacket(8, 80, new Move(
+                new Maths.Vec3(.5, 64.0, 1.2638), 0f, 0f, true, 4L))),
+        floorWorld(), anchor(), 0L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(), report.results().toString());
+    assertTrue(report.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
+        .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
+        report.frames().toString());
+    assertTrue(report.frames().stream()
+        .flatMap(frame -> frame.predictedAfter().stream())
+        .anyMatch(candidate -> Math.abs(candidate.context().player().position().z() - 1.2638) < 1.0E-9),
+        report.frames().toString());
+  }
+
+  @Test
   void stationaryObservationIsComparedAgainstRetainedPrediction() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     var report = runner.process(
