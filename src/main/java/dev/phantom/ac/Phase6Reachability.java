@@ -800,7 +800,7 @@ public final class Phase6Reachability {
       for (Candidate candidate : result.candidates()) {
         union.put(candidateKey(candidate).toString(), candidate);
       }
-      while (union.size() > maximumCandidates) {
+      while (union.size() > config.maximumCandidates()) {
         union.pollLastEntry();
         uncertain = true;
         reasons.add("combined timing-window candidate budget pruned deterministic excess state");
