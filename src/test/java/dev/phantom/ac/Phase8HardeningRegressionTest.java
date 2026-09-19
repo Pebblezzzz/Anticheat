@@ -196,8 +196,11 @@ class Phase8HardeningRegressionTest {
             Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),false,List.of())),
         new RawPacket(3,0,new Packets.ClientInput(false,false,false,false,false,false,false)),
         new RawPacket(4,0,new Packets.ClientTickEnd()),
-        new RawPacket(5,50_000_000L,new Move(new Vec3(.5,64,.5),0f,0f,true,null)),
-        new RawPacket(6,55_000_000L,new Move(new Vec3(.7,64,.5),15f,0f,true,null)),
+        // Both position-bearing packets explicitly belong to the same observed
+        // client tick. The default bounded-latency model cannot infer that from
+        // arrival windows alone, so encode the protocol chronology directly.
+        new RawPacket(5,50_000_000L,new Move(new Vec3(.5,64,.5),0f,0f,true,1L)),
+        new RawPacket(6,55_000_000L,new Move(new Vec3(.7,64,.5),15f,0f,true,1L)),
         new RawPacket(7,100_000_000L,new Packets.ClientTickEnd()),
         new RawPacket(8,150_000_000L,new Move(new Vec3(.9,64,.5),15f,0f,true,null))
     );
@@ -259,7 +262,7 @@ class Phase8HardeningRegressionTest {
             Phase5Mechanics.Pose.STANDING,Phase5Mechanics.MovementEnvironment.dry(true,false,false),
             new Vec3(.7,64,.5),Vec3.ZERO,false,false,false,List.of())),
         new RawPacket(8,100_000_000L,new Packets.ClientTickEnd()),
-        new RawPacket(9,110_000_000L,new Move(new Vec3(5.7,64,.5),15f,0f,true,null))
+        new RawPacket(9,110_000_000L,new Move(new Vec3(5.7,64,.5),15f,0f,true,2L))
     );
     var report=Phase8LiveValidation.analyze(
         "recovery",capture(packets),4096,Phase7Timing.Config.defaultConfig(),null,
