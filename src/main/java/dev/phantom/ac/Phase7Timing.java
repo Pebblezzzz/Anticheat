@@ -677,8 +677,7 @@ public final class Phase7Timing {
             boundaryEnvelope, TickEnvelope.unknown(),
             explicit, TimingSource.RELATIVE_CLIENT_ANCHOR, uncertain,
             ordering, windows, reasons);
-        sync = stabilizeOrRetain(sync, timing, config, event.serverTick(), boundaries);
-        EventTiming finalized = withSyncUncertainty(timing, sync, kind);
+        EventTiming finalized = timing;
         frames.add(new Frame(finalized, before, sync));
         continue;
       }
@@ -1600,6 +1599,31 @@ public final class Phase7Timing {
         old.synchronizationEpoch(),
         append(old.activeWindows(), window),
         List.of(window.reason()));
+  }
+
+  private static EventTiming withSyncUncertainty(
+      EventTiming timing,
+      SynchronizationState sync,
+      EventKind kind) {
+    if (!affectsMovementSynchronization(kind)
+        || sync.status() == SyncStatus.SYNCHRONIZED
+        || timing.uncertain()) {
+      return timing;
+    }
+    List<String> reasons = new ArrayList<>(timing.reasons());
+    reasons.add("Phase 7 synchronization state is " + sync.status()
+        + "; movement timing is not fully synchronized");
+    return new EventTiming(
+        timing.timelineIndex(), timing.sequence(), timing.serverTick(),
+        timing.captureNanos(), timing.direction(), timing.kind(),
+        timing.provenance(), timing.authoritativeServerTick(),
+        timing.packetGenerationNanos(), timing.clientProcessingNanos(),
+        timing.packetGenerationClientTickEnvelope(),
+        timing.clientProcessingClientTickEnvelope(),
+        timing.simulationClientTickEnvelope(),
+        timing.inputClientTickEnvelope(),
+        timing.explicitClientTick(), timing.source(), true,
+        timing.orderingConstraints(), timing.windows(), reasons);
   }
 
   private static boolean affectsMovementSynchronization(EventKind kind) {
