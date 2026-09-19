@@ -474,6 +474,26 @@ public final class WorldSnapshot implements Serializable {
     return List.copyOf(positions);
   }
 
+  /** One concrete block cell whose coverage cannot be fully verified by this snapshot. */
+  public record CoverageProblem(Pos position, Coverage coverage) implements Serializable {}
+
+  /**
+   * Returns every block cell in the query whose coverage is UNLOADED, UNKNOWN,
+   * or UNSUPPORTED, in the snapshot's canonical XYZ order. Diagnostic-only.
+   */
+  public List<CoverageProblem> coverageProblemsIn(BlockBox query) {
+    List<CoverageProblem> result = new ArrayList<>();
+    for (Pos position : positionsIntersecting(query)) {
+      Coverage coverage = coverageAt(position.x(), position.y(), position.z());
+      if (coverage == Coverage.UNLOADED
+          || coverage == Coverage.UNKNOWN
+          || coverage == Coverage.UNSUPPORTED) {
+        result.add(new CoverageProblem(position, coverage));
+      }
+    }
+    return List.copyOf(result);
+  }
+
   /**
    * The distinct coverage values present in the block cells a query box
    * overlaps. This is how the reachability layer learns that its answer must be
