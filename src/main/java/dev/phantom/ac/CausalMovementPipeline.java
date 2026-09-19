@@ -118,6 +118,19 @@ public final class CausalMovementPipeline {
       boolean liveWorldUsed,
       boolean chronologyClean) {}
 
+  /**
+   * Client input is a state update, not proof that the update had already affected
+   * a movement packet that arrived earlier in the same server tick. Sequence is
+   * therefore retained so future input packets cannot leak backwards into an
+   * earlier movement observation.
+   */
+  private record TimedInput(long sequence, long clientTick, InputConstraint constraint) {
+    TimedInput {
+      if (sequence < 0 || clientTick < 0) throw new IllegalArgumentException("invalid input provenance");
+      Objects.requireNonNull(constraint);
+    }
+  }
+
   private record Frontier(Set<Candidate> candidates, long lastMovementTick, boolean anchored) {
     Frontier {
       candidates = Set.copyOf(candidates);
@@ -179,7 +192,7 @@ public final class CausalMovementPipeline {
     }
 
     List<AuthoritativeSnapshot> authorities = collectAuthorities(timeline);
-    NavigableMap<Long, InputConstraint> inputByTick = collectInputs(timeline, timing);
+    NavigableMap<Long, List<TimedInput>> inputByTick = collectInputs(timeline, timing);
     Set<Long> unmodeledExternalSequences = new HashSet<>();
     Map<Long, List<ExternalTransition>> externalByTick =
         collectExternalTransitions(
@@ -265,6 +278,24 @@ public final class CausalMovementPipeline {
               : ""));
       trace.add("WORLD source=" + (movement.liveWorldUsed() ? "acknowledged-live" : "timeline")
           + " chunks=" + movement.world().loadedChunks().size());
+
+      movement.simulationAuthority().ifPresent(snapshot -> {
+        Packets.PlayerContext context = snapshot.context();
+        trace.add("SIMULATION_AUTHORITY seq=" + snapshot.sequence()
+            + " serverTick=" + snapshot.serverTick()
+            + " receivedNanos=" + snapshot.receivedNanos()
+            + " pos=" + context.serverPosition()
+            + " vel=" + context.serverVelocity()
+            + " ground=" + context.movementEnvironment().onGround()
+            + " gamemode=" + context.gamemode()
+            + " canFly=" + context.canFly()
+            + " flying=" + context.flying());
+      });
+      appendInputTrace(
+          trace,
+          inputByTick,
+          eventTiming.simulationClientTicks(),
+          sequence);
 
       Validation.SyncWindow sync = Phase7Timing.toPhase6Window(eventTiming);
       List<String> assumptions = new ArrayList<>();
@@ -774,6 +805,7 @@ public final class CausalMovementPipeline {
 
       Advance advance = advanced.get();
       Set<Candidate> reachable = advance.candidates();
+      trace.add("INPUT_POLICY future input packets cannot affect this movement sequence");
       trace.add("CANDIDATES count=" + reachable.size()
           + " exhaustive=" + advance.exhaustive());
 
@@ -1139,10 +1171,10 @@ public final class CausalMovementPipeline {
         List.of("no causally alignable authoritative server snapshot was captured"));
   }
 
-  private static NavigableMap<Long, InputConstraint> collectInputs(
+  private static NavigableMap<Long, List<TimedInput>> collectInputs(
       Timeline.Snapshot timeline,
       Phase7Timing.Reconstruction timing) {
-    NavigableMap<Long, InputConstraint> result = new TreeMap<>();
+    NavigableMap<Long, List<TimedInput>> result = new TreeMap<>();
     for (Timeline.Event event : timeline.events()) {
       if (!(event.packet().packet() instanceof Packets.ClientInput input)) continue;
       Phase7Timing.EventTiming eventTiming =
@@ -1153,9 +1185,76 @@ public final class CausalMovementPipeline {
           || event.packet().flags().contains(Packets.PacketFlag.SEQUENCE_GAP)) {
         continue;
       }
-      result.put(eventTiming.inputClientTicks().min(), InputConstraint.fromClientInput(input));
+      long clientTick = eventTiming.inputClientTicks().min();
+      result.computeIfAbsent(clientTick, ignored -> new ArrayList<>())
+          .add(new TimedInput(
+              event.packet().sequence(),
+              clientTick,
+              InputConstraint.fromClientInput(input)));
     }
-    return Collections.unmodifiableNavigableMap(new TreeMap<>(result));
+    for (List<TimedInput> inputs : result.values()) {
+      inputs.sort(Comparator.comparingLong(TimedInput::sequence));
+    }
+    return Collections.unmodifiableNavigableMap(
+        result.entrySet().stream().collect(
+            TreeMap::new,
+            (map, entry) -> map.put(entry.getKey(), List.copyOf(entry.getValue())),
+            TreeMap::putAll));
+  }
+
+  /**
+   * Returns the last client input that could causally have affected this
+   * simulation step. In particular, a ClientInput packet received after the
+   * movement packet being validated is excluded even when both events were
+   * assigned to the same reconstructed client tick.
+   */
+  private static InputConstraint inputForSimulationTick(
+      NavigableMap<Long, List<TimedInput>> inputs,
+      long simulationTick,
+      long movementSequence) {
+    if (inputs.isEmpty() || simulationTick < 0) return InputConstraint.any();
+    for (var entry : inputs.headMap(simulationTick, true).descendingMap().entrySet()) {
+      TimedInput selected = null;
+      for (TimedInput input : entry.getValue()) {
+        if (input.sequence() > movementSequence) break;
+        selected = input;
+      }
+      if (selected != null) return selected.constraint();
+    }
+    return InputConstraint.any();
+  }
+
+  private static void appendInputTrace(
+      List<String> trace,
+      NavigableMap<Long, List<TimedInput>> inputs,
+      Phase7Timing.Range simulationTicks,
+      long movementSequence) {
+    List<TimedInput> recent = new ArrayList<>();
+    for (var entry : inputs.subMap(
+        Math.max(0L, simulationTicks.min() - 1L),
+        true,
+        simulationTicks.max() + 1L,
+        true).entrySet()) {
+      for (TimedInput input : entry.getValue()) {
+        if (input.sequence() <= movementSequence) recent.add(input);
+        else if (input.sequence() <= movementSequence + 8L) {
+          trace.add("INPUT_FUTURE_EXCLUDED seq=" + input.sequence()
+              + " tick=" + input.clientTick()
+              + " constraint=" + input.constraint());
+        }
+      }
+    }
+    recent.sort(Comparator.comparingLong(TimedInput::sequence));
+    int start = Math.max(0, recent.size() - 6);
+    for (int i = start; i < recent.size(); i++) {
+      TimedInput input = recent.get(i);
+      trace.add("INPUT_CAUSAL seq=" + input.sequence()
+          + " tick=" + input.clientTick()
+          + " constraint=" + input.constraint());
+    }
+    if (recent.isEmpty()) {
+      trace.add("INPUT_CAUSAL none for simulationTicks=" + simulationTicks);
+    }
   }
 
   private static Map<Long, List<ExternalTransition>> collectExternalTransitions(
@@ -1223,7 +1322,7 @@ public final class CausalMovementPipeline {
   private static Advance advanceAcrossLocalAuthorityTimingRange(
       long earliest,
       long latest,
-      NavigableMap<Long, InputConstraint> inputs,
+      NavigableMap<Long, List<TimedInput>> inputs,
       Map<Long, List<ExternalTransition>> external,
       World.VisibilityHistory worldHistory,
       MovementEvent movement,
@@ -1269,7 +1368,7 @@ public final class CausalMovementPipeline {
       Frontier frontier,
       long earliest,
       long latest,
-      NavigableMap<Long, InputConstraint> inputs,
+      NavigableMap<Long, List<TimedInput>> inputs,
       Map<Long, List<ExternalTransition>> external,
       World.VisibilityHistory worldHistory,
       MovementEvent movement,
@@ -1308,7 +1407,7 @@ public final class CausalMovementPipeline {
   private static Advance advanceTo(
       Set<Candidate> start,
       long targetTick,
-      NavigableMap<Long, InputConstraint> inputs,
+      NavigableMap<Long, List<TimedInput>> inputs,
       Map<Long, List<ExternalTransition>> external,
       World.VisibilityHistory worldHistory,
       MovementEvent movement,
@@ -1344,10 +1443,10 @@ public final class CausalMovementPipeline {
 
         for (Candidate candidate : local) {
           Context context = candidate.context().withTick(localTick);
-          Map.Entry<Long, InputConstraint> heldInput = inputs.floorEntry(localTick);
-          InputConstraint input = heldInput == null
-              ? InputConstraint.any()
-              : heldInput.getValue();
+          InputConstraint input = inputForSimulationTick(
+              inputs,
+              localTick,
+              movement.event().packet().sequence());
 
           long simulationTick = localTick;
           WorldSnapshot world = worldForTick(
