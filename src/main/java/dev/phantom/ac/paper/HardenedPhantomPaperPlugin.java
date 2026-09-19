@@ -88,6 +88,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private final Map<UUID,Boolean> setbackOverrides=new ConcurrentHashMap<>();
   private ExecutorService chunkExecutor;
   private ExecutorService worldPublishExecutor;
+  private ExecutorService validationExecutor;
   private volatile int chunkDecoderThreads;
   private final AtomicInteger chunkInFlight=new AtomicInteger();
 
@@ -273,6 +274,12 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       thread.setDaemon(true);
       return thread;
     });
+    int validationThreads=Math.max(1,Math.min(4,Math.max(1,processors/2)));
+    validationExecutor=Executors.newFixedThreadPool(validationThreads,r->{
+      Thread thread=new Thread(r,"Phantom-Phase8Validator");
+      thread.setDaemon(true);
+      return thread;
+    });
     stateTask=getServer().getScheduler().runTaskTimer(this,()->{drainChunkQueues();captureLiveContext();},1L,1L);
     getLogger().info("[PhantomAC] Hardened Phase 8 adapter enabled; movement validation runs on per-connection Netty EventLoops");
   }
@@ -282,6 +289,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     if(chunkExecutor!=null){
       chunkExecutor.shutdownNow();
       try{chunkExecutor.awaitTermination(1,java.util.concurrent.TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}
+    }
+    if(validationExecutor!=null){
+      validationExecutor.shutdownNow();
+      try{validationExecutor.awaitTermination(1,java.util.concurrent.TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}
     }
     PacketEvents.getAPI().getEventManager().unregisterListener(listener);
     captures.clear();
@@ -730,21 +741,46 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
    * Bukkit/Paper actions remain on the server's main thread.
    */
   private void scheduleNettyValidation(Capture capture,Object rawChannel){
-    if(capture==null||rawChannel==null)return;
-    if(!(rawChannel instanceof Channel channel)){
-      getLogger().warning("[PhantomAC][NETTY] packet channel is not a Netty Channel for "+capture.playerId);
-      return;
-    }
-    capture.nettyChannel=channel;
+    if(capture==null)return;
+    if(rawChannel instanceof Channel channel) capture.nettyChannel=channel;
+    ExecutorService executor=validationExecutor;
+    if(executor==null)return;
+
+    /*
+     * Validation is CPU-heavy and reconstructs causal history. Never execute it
+     * on the packet connection's Netty EventLoop: doing so turns anti-cheat work
+     * into client-visible packet/movement latency.
+     *
+     * nettyValidationQueued is deliberately a coalescing gate. While one batch
+     * is running, additional movement/world packets only cause a single follow-up
+     * batch, rather than one expensive replay per packet.
+     */
     if(!capture.nettyValidationQueued.compareAndSet(false,true))return;
-    channel.eventLoop().execute(()->{
+    try{
+      executor.execute(()->{
+        try{
+          runNettyValidation(capture);
+        }finally{
+          capture.nettyValidationQueued.set(false);
+          /*
+           * Packets may have arrived while replay was running. Submit exactly one
+           * follow-up batch so the validator catches up without unbounded task
+           * accumulation.
+           */
+          if(validationExecutor!=null
+              && !capture.copySince(capture.movementRunner.lastProcessedSequence()).isEmpty()){
+            scheduleNettyValidation(capture,capture.nettyChannel);
+          }
+        }
+      });
+    }catch(RejectedExecutionException rejected){
       capture.nettyValidationQueued.set(false);
-      runNettyValidation(capture);
-    });
+    }
   }
 
   private void runNettyValidation(Capture capture){
     long startedNanos=System.nanoTime();
+    capture.validationRuns.incrementAndGet();
     try{
       List<RawPacket> raw=capture.copySince(capture.movementRunner.lastProcessedSequence());
       if(raw.isEmpty())return;
@@ -791,13 +827,21 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           }
         }
       }
-      if(debugLevel(capture.playerId).summary())logValidationSummary(capture,playerName,report);
+      capture.lastValidationElapsedMicros=(System.nanoTime()-startedNanos)/1_000L;
+      capture.lastValidationBatchPackets=raw.size();
+      capture.lastValidationBatchMovements=incremental.movementObservations();
+      capture.validationPackets.addAndGet(raw.size());
+      capture.validationMovements.addAndGet(incremental.movementObservations());
+
+      if(debugLevel(capture.playerId).summary())
+        logValidationSummary(capture,playerName,report,incremental.frames());
 
       // The only hop back is the immutable validation report for Bukkit actions.
       getServer().getScheduler().runTask(this,()->applyResult(capture,report));
     }catch(RuntimeException failure){
+      capture.lastValidationElapsedMicros=(System.nanoTime()-startedNanos)/1_000L;
       getLogger().log(java.util.logging.Level.WARNING,
-          "[PhantomAC][PHASE8] Netty validation failed for "+capture.playerId,
+          "[PhantomAC][PHASE8] async validation failed for "+capture.playerId,
           failure);
     }
   }
@@ -889,7 +933,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     return false;
   }
 
-  private void logValidationSummary(Capture capture,String playerName,Phase8LiveValidation.Report report){
+  private void logValidationSummary(Capture capture,String playerName,Phase8LiveValidation.Report report,
+                                     List<CausalMovementPipeline.Frame> frames){
     if(report.results().isEmpty())return;
 
     Phase8MovementValidation.Result latest=report.results().getLast();
@@ -914,6 +959,28 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         +",ground="+candidate.onGround()
         +",yaw="+candidate.yaw()
         +",pitch="+candidate.pitch()).orElse("none");
+
+    double dx=e.observedState().position().x()-e.priorState().position().x();
+    double dy=e.observedState().position().y()-e.priorState().position().y();
+    double dz=e.observedState().position().z()-e.priorState().position().z();
+    String observedDelta=String.format(Locale.ROOT,"(%.6f,%.6f,%.6f)",dx,dy,dz);
+
+    String diagnosticTrace="none";
+    for(CausalMovementPipeline.Frame frame:frames){
+      if(!e.replayReference().endsWith(":"+frame.sequence()))continue;
+      List<String> highlights=frame.trace().stream()
+          .filter(line->line.startsWith("EVIDENCE ")
+              ||line.startsWith("RECOVERY_")
+              ||line.startsWith("FRONTIER_")
+              ||line.startsWith("ROOT ")
+              ||line.startsWith("ROOT_")
+              ||line.startsWith("CANDIDATES ")
+              ||line.startsWith("WORLD ")
+              ||line.startsWith("TIMING_"))
+          .toList();
+      if(!highlights.isEmpty())diagnosticTrace=String.join(" | ",highlights);
+      break;
+    }
 
     getLogger().info("[PhantomAC][PHASE8][SUMMARY] player="+playerName
         +" verdict="+latest.verdict()
@@ -941,6 +1008,21 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         +",pendingBarriers="+capture.clientWorld.pendingBarrierCount()
         +",causalSequence="+capture.clientWorld.causalSequence()+"}"
         +" paperRejectionsInWindow="+capture.paperMoveFailureCount
+        +" observedDelta="+observedDelta
+        +" priorVelocity="+e.priorState().velocity()
+        +" observedVelocity="+e.observedState().velocity()
+        +" uncertaintySources="+e.uncertaintySources()
+        +" simulationDiagnostics="+e.simulationDiagnostics()
+        +" runner={continuation="+capture.movementRunner.continuation()
+        +",candidateCount="+capture.movementRunner.candidateCount()
+        +",lastProcessedSequence="+capture.movementRunner.lastProcessedSequence()+"}"
+        +" validationCost={lastMicros="+capture.lastValidationElapsedMicros
+        +",lastBatchPackets="+capture.lastValidationBatchPackets
+        +",lastBatchMovements="+capture.lastValidationBatchMovements
+        +",runs="+capture.validationRuns.get()
+        +",packets="+capture.validationPackets.get()
+        +",movements="+capture.validationMovements.get()+"}"
+        +" decisionTrace="+diagnosticTrace
         +" replay="+e.replayReference());
   }
 
@@ -1315,6 +1397,12 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     volatile int paperMoveFailureCount;
     volatile Phase8MovementValidation.Accumulator accumulator=Phase8MovementValidation.Accumulator.empty();
     final ValidationResultGate validationGate=new ValidationResultGate();
+    final AtomicLong validationRuns=new AtomicLong();
+    final AtomicLong validationPackets=new AtomicLong();
+    final AtomicLong validationMovements=new AtomicLong();
+    volatile long lastValidationElapsedMicros=-1L;
+    volatile int lastValidationBatchPackets;
+    volatile int lastValidationBatchMovements;
     int processedResults;
     volatile int minY=-64,maxY=319;
     volatile double lastServerX,lastServerY,lastServerZ;
