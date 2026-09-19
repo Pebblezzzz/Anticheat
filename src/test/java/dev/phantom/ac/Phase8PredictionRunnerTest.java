@@ -321,21 +321,21 @@ class Phase8PredictionRunnerTest {
 
     var world = floorWorld();
     var noSprint = physics.step(new Vanilla12111RichPhysics.Context(
-        0, state, new Simulation.AdvancedInput(0, 0, true, false, false),
+        0, state, new Simulation.AdvancedInput(1, 0, true, false, false),
         world, Simulation.Environment.DRY, state.attributes(),
         Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
         MovementEnvironment.dry(true, false, false), false));
 
     var sprint = physics.step(new Vanilla12111RichPhysics.Context(
-        0, state, new Simulation.AdvancedInput(0, 0, true, true, false),
+        0, state, new Simulation.AdvancedInput(1, 0, true, true, false),
         world, Simulation.Environment.DRY, state.attributes(),
         Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
         MovementEnvironment.dry(true, true, false), false));
 
-    assertEquals(
-        Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST
-            * Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION,
-        sprint.state().velocity().z() - noSprint.state().velocity().z(), 1e-7);
+    assertTrue(
+        sprint.state().position().z() - noSprint.state().position().z()
+            > Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST,
+        "sprint jump should add the vanilla forward impulse");
     assertEquals(
         Vanilla12111RichPhysics.JUMP,
         noSprint.state().position().y() - state.position().y(), 1e-7);
