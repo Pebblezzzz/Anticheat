@@ -275,7 +275,8 @@ public final class Phase8PredictionRunner {
                 window -> switch (window.kind()) {
                   case PACKET_GAP, SERVER_TICK_GAP, REORDERING, DUPLICATE, RECOVERY -> true;
                   default -> false;
-                }));
+                }))
+        || captureSequenceGap(packets);
 
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     List<PredictionFrame> frames = new ArrayList<>();
@@ -745,6 +746,15 @@ public final class Phase8PredictionRunner {
     String display() {
       return known ? Long.toString(clientTick) : "unknown";
     }
+  }
+
+  private static boolean captureSequenceGap(List<Packets.RawPacket> packets) {
+    long previous = -1L;
+    for (Packets.RawPacket packet : packets) {
+      if (previous >= 0L && packet.sequence() > previous + 1L) return true;
+      previous = packet.sequence();
+    }
+    return false;
   }
 
   private TickResolution resolveMovementTick(
