@@ -515,6 +515,13 @@ public final class WorldSnapshot implements Serializable {
    * empty shape only when the block's own shape is empty; otherwise the missing
    * neighbour is reported through {@link #coverageIn} on the connection check.</p>
    */
+  /** Returns only the platform-native collision answer, without invoking deterministic fallbacks. */
+  private java.util.Optional<VoxelShape> resolveCollisionShape(int x,int y,int z) {
+    return backend == null
+        ? java.util.Optional.empty()
+        : backend.resolveCollisionShape(this,x,y,z);
+  }
+
   public VoxelShape collisionShapeAt(int x, int y, int z) {
     Coverage coverage = coverageAt(x, y, z);
     if (coverage != Coverage.KNOWN) return VoxelShape.empty();
