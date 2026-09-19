@@ -266,8 +266,16 @@ public final class Phase8PredictionRunner {
     for (Packets.RawPacket packet : packets) {
       rememberTimingPacket(packet);
     }
+    Phase7Timing.Reconstruction phase7Reconstruction = reconstructPhase7Timing();
     Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence =
-        reconstructPhase7Timing().bySequence();
+        phase7Reconstruction.bySequence();
+    /*
+     * Chronology uncertainty must be associated with the affected capture
+     * sequence, not broadcast from unrelated timing events in the same batch.
+     * Phase 7's per-event timing flag remains authoritative below; this batch
+     * flag only covers a concrete Phase 1 sequence gap.
+     */
+    boolean phase7ChronologyUncertain = captureSequenceGap(packets);
 
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     List<PredictionFrame> frames = new ArrayList<>();
@@ -423,7 +431,8 @@ public final class Phase8PredictionRunner {
           + " receivedNanos=" + packet.receivedNanos()
           + " clientStatePosition=" + observedAfter.position());
 
-      TickResolution tick = resolveMovementTick(packet, move, phase7TimingBySequence);
+      TickResolution tick = resolveMovementTick(
+          packet, move, phase7TimingBySequence, phase7ChronologyUncertain);
       trace.add("CLIENT_TICK " + tick.display()
           + " exact=" + tick.exact()
           + " source=" + tick.source());
@@ -738,58 +747,74 @@ public final class Phase8PredictionRunner {
     }
   }
 
+  private static boolean captureSequenceGap(List<Packets.RawPacket> packets) {
+    long previous = -1L;
+    for (Packets.RawPacket packet : packets) {
+      if (previous >= 0L && packet.sequence() > previous + 1L) return true;
+      previous = packet.sequence();
+    }
+    return false;
+  }
+
   private TickResolution resolveMovementTick(
       Packets.RawPacket packet,
       Packets.Move move,
-      Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
+      Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence,
+      boolean phase7ChronologyUncertain) {
     Phase7Timing.EventTiming timing = phase7TimingBySequence.get(packet.sequence());
-    if (timing != null) {
-      Phase7Timing.Range range = timing.simulationClientTicks();
-      if (timing.simulationClientTickEnvelope().known()) {
-        long tick = Math.max(0L, range.min());
-        relativeClientTick = Math.max(relativeClientTick, tick);
-        boolean explicit = timing.explicitClientTick().isPresent();
-        boolean exact = explicit || (
-            range.isExact()
-                && timing.simulationCandidatesExhaustive()
-                && !timing.uncertain());
-        /*
-         * An explicit client tick is stronger than the packet's wall-clock timing
-         * range: it pins the simulation tick while unrelated packet-generation
-         * uncertainty remains diagnostic context.
-         */
-        boolean timingUncertain = (timing.uncertain() && !explicit) || timingHistoryTruncated;
-        String source = explicit
-            ? "phase7-explicit-client-tick"
-            : exact
-                ? "phase7-temporal-envelope-exact"
-                : "phase7-temporal-envelope-range";
-        String reason;
-        if (timingHistoryTruncated) {
-          reason = "Phase 7 history prefix was truncated at the deterministic live bound; timing remains conservative: "
-              + timing.reasons();
-        } else if (explicit && timing.uncertain()) {
-          reason = "explicit client tick pins simulation time; Phase 7 retains other timing uncertainty: " + timing.reasons();
-        } else if (timing.uncertain()) {
-          reason = "Phase 7 timing envelope is explicitly uncertain: " + timing.reasons();
-        } else {
-          reason = "Phase 7 timing envelope is exact and exhaustively materialized";
-        }
-        return new TickResolution(
-            tick, true, exact && !timingHistoryTruncated, timingUncertain, source, reason);
-      }
-      return new TickResolution(
-          0L, false, false, true,
-          "phase7-temporal-envelope-unknown",
-          "Phase 7 did not produce a known simulation-tick envelope");
-    }
+    boolean timingUncertain =
+        (timing != null && timing.uncertain())
+            || phase7ChronologyUncertain
+            || timingHistoryTruncated;
+
+    /*
+     * The captured client tick is the strongest simulation-clock fact available
+     * for a movement packet. Phase 7 is still authoritative for chronology:
+     * when its envelope is uncertain, that uncertainty is retained as evidence
+     * even though an explicit client tick may keep the simulation step exact.
+     */
     if (move.clientTick() != null) {
       long tick = move.clientTick();
       relativeClientTick = Math.max(relativeClientTick, tick);
+      String source = timing != null
+          ? "phase7-explicit-client-tick"
+          : "packet-client-tick";
+      String reason = timingUncertain
+          ? "Phase 7 timing envelope retains chronology uncertainty for an explicitly captured client tick"
+          : "explicit client tick captured from the protocol movement chronology";
       return new TickResolution(
-          tick, true, true, false, "packet-client-tick-fallback",
-          "Phase 7 timing record was unavailable; explicit packet client tick used only as a conservative fallback");
+          tick, true, true, timingUncertain, source, reason);
     }
+
+    /*
+     * Preserve the existing boundary-watermark behavior for captures that do
+     * not carry an explicit client tick on the movement packet.
+     */
+    if (hasClientTickBoundary) {
+      String source = timing != null ? "phase7-client-tick-boundary-watermark"
+          : "client-tick-boundary-watermark";
+      String reason = timingUncertain
+          ? "Phase 7 timing envelope retains chronology uncertainty around the boundary watermark"
+          : "client tick boundary established the current relative client tick";
+      return new TickResolution(
+          relativeClientTick, true, true, timingUncertain, source, reason);
+    }
+
+    if (timing != null && timing.simulationClientTickEnvelope().known()) {
+      long tick = Math.max(0L, timing.simulationClientTicks().min());
+      relativeClientTick = Math.max(relativeClientTick, tick);
+      boolean exact = timing.simulationClientTickEnvelope().isExact()
+          && timing.simulationCandidatesExhaustive()
+          && !timingUncertain;
+      String reason = timingUncertain
+          ? "Phase 7 timing envelope is uncertain and no explicit client tick was captured"
+          : "Phase 7 timing envelope supplied the movement simulation tick";
+      return new TickResolution(
+          tick, true, exact, timingUncertain,
+          exact ? "phase7-temporal-envelope-exact" : "phase7-temporal-envelope-range",
+          reason);
+    }
+
     return new TickResolution(
         0L, false, false, true, "phase7-timing-missing",
         "Phase 7 timing record was unavailable and no explicit client tick was captured");
@@ -1484,13 +1509,21 @@ public final class Phase8PredictionRunner {
       SearchResult search,
       boolean timingExhaustivelyModeled,
       Set<Phase6Reachability.ObservedField> observedFields) {
+    List<String> timingReasons = new ArrayList<>();
+    if (tick.timingUncertain()) {
+      timingReasons.add(tick.uncertaintyReason());
+    }
+    if (!tick.exact()) {
+      timingReasons.add("client simulation tick is not represented by one exact timing state");
+    }
+    if (timingReasons.isEmpty()) {
+      timingReasons.add("persistent client-tick clock is exact for this packet");
+    }
     Validation.SyncWindow timing = new Validation.SyncWindow(
         Math.max(0L, tick.clientTick()),
         Math.max(0L, tick.clientTick()),
-        !tick.exact(),
-        tick.exact()
-            ? List.of("persistent client-tick clock is exact for this packet")
-            : List.of(tick.source()));
+        tick.timingUncertain() || !tick.exact(),
+        List.copyOf(timingReasons));
     List<String> assumptions = new ArrayList<>();
     assumptions.add("client input is retained as held state until the next ClientInput packet");
     assumptions.add("server position is used only for anchor/correction state, never as the predicted client position");
