@@ -86,6 +86,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private boolean alertsEnabled,broadcastAlerts,setbacksEnabled,setbacksOnlyExhaustive;
   private final Map<UUID,Boolean> setbackOverrides=new ConcurrentHashMap<>();
   private ExecutorService chunkExecutor;
+  private ExecutorService worldPublishExecutor;
   private volatile int chunkDecoderThreads;
   private final AtomicInteger chunkInFlight=new AtomicInteger();
 
@@ -156,11 +157,17 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         if(capture.outstandingTransactions.remove(transaction)){
           long sequence=capture.sequence.incrementAndGet();
           long receivedNanos=System.nanoTime();
-          if(capture.clientWorld.acknowledge(transaction,sequence)){
-            Packets.WorldTransactionAck ack=new Packets.WorldTransactionAck(transaction);
-            appendPacket(capture,new RawPacket(sequence,receivedNanos,ack,
-                Packets.CaptureProvenance.fromAdapter("paper-transaction-ack",ack,null)));
-            scheduleNettyValidation(capture,event.getChannel());
+          try{
+            worldPublishExecutor.execute(()->{
+              if(capture.clientWorld.acknowledge(transaction,sequence)){
+                Packets.WorldTransactionAck ack=new Packets.WorldTransactionAck(transaction);
+                appendPacket(capture,new RawPacket(sequence,receivedNanos,ack,
+                    Packets.CaptureProvenance.fromAdapter("paper-transaction-ack",ack,null)));
+                scheduleNettyValidation(capture,event.getChannel());
+              }
+            });
+          }catch(RejectedExecutionException rejected){
+            capture.outstandingTransactions.add(transaction);
           }
         }
       }
@@ -256,6 +263,12 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     chunkDecoderThreads=Math.max(1,Math.min(4,Math.max(1,processors/2)));
     chunkExecutor=Executors.newFixedThreadPool(chunkDecoderThreads,r->{
       Thread thread=new Thread(r,"Phantom-ClientChunkDecoder");
+      thread.setDaemon(true);
+      return thread;
+    });
+    int worldPublisherThreads=Math.max(1,Math.min(2,Math.max(1,processors/4)));
+    worldPublishExecutor=Executors.newFixedThreadPool(worldPublisherThreads,r->{
+      Thread thread=new Thread(r,"Phantom-ClientWorldPublisher");
       thread.setDaemon(true);
       return thread;
     });
@@ -533,6 +546,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   private void requestWorldBarrier(Player player,Capture capture){
+    // Do not open a visibility barrier while a previously captured chunk is
+    // still being decoded. This makes the ACK boundary deterministic without
+    // ever waiting on a decoder from the Netty thread.
+    if(capture.pendingChunkDecodes.get()>0)return;
     if(!capture.clientWorld.hasUnassignedMutations())return;
     long now=System.nanoTime();
     long last=capture.lastWorldBarrierNanos.get();
@@ -543,7 +560,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private void sendWorldTransaction(Player player,Capture capture){
     if(!capture.clientWorld.hasUnassignedMutations())return;
     short transactionId=capture.nextWorldTransaction();
-    capture.clientWorld.openBarrier(transactionId);
+    long sequenceBoundary=capture.sequence.get();
+    capture.clientWorld.openBarrier(transactionId,sequenceBoundary);
     capture.outstandingTransactions.add(transactionId);
 
     try{
@@ -1093,6 +1111,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       if(selected==null)return;
       Capture target=selected; PendingChunk work=pending;
       if(!chunkInFlight.compareAndSet(chunkInFlight.get(),chunkInFlight.get()+1)){target.chunkQueue.add(work);continue;}
+      target.pendingChunkDecodes.incrementAndGet();
       try{
         chunkExecutor.execute(()->{
           try{
@@ -1100,20 +1119,20 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             var order=new dev.phantom.ac.Phase4WorldReplica.Order(work.serverTick(),work.receivedNanos(),work.sequence(),work.sequence());
             var provenance=new dev.phantom.ac.Phase4WorldReplica.Provenance(
                 "paper-client-chunk-data","CHUNK_DATA",work.sequence(),work.serverTick(),null,false,"clientbound");
-            if(work.column().isFullChunk()){
-              target.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.ChunkData(
-                  order,provenance,new dev.phantom.ac.world.Chunk(work.column().getX(),work.column().getZ()),decoded.states()));
-            }else{
-              target.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.ChunkSections(
-                  order,provenance,new dev.phantom.ac.world.Chunk(work.column().getX(),work.column().getZ()),decoded.sections()));
-            }
+            target.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.PackedChunkData(
+                order,provenance,new dev.phantom.ac.world.Chunk(work.column().getX(),work.column().getZ()),
+                decoded.sections(),work.column().isFullChunk()));
           }catch(RuntimeException failure){
             getLogger().log(java.util.logging.Level.WARNING,
                 "[PhantomAC][CHUNK] asynchronous client chunk decode failed player="+target.playerId
                     +" chunk="+work.column().getX()+","+work.column().getZ(),failure);
-          }finally{chunkInFlight.decrementAndGet();}
+          }finally{
+            target.pendingChunkDecodes.decrementAndGet();
+            chunkInFlight.decrementAndGet();
+          }
         });
       }catch(RejectedExecutionException rejected){
+        target.pendingChunkDecodes.decrementAndGet();
         chunkInFlight.decrementAndGet();
         target.chunkQueue.add(work);
         return;
@@ -1123,50 +1142,89 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   private record PendingChunk(long sequence,long receivedNanos,long serverTick,Column column,ClientVersion clientVersion,int minY,int maxY){}
   private record DecodedChunk(
-      Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> states,
-      Map<Integer,Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState>> sections){}
+      Map<Integer,dev.phantom.ac.Phase4WorldReplica.PackedSection> sections){}
 
   private static DecodedChunk decodeChunk(PendingChunk pending){
-    Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> states=new LinkedHashMap<>();
-    Map<Integer,Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState>> sections=new TreeMap<>();
+    Map<Integer,dev.phantom.ac.Phase4WorldReplica.PackedSection> sections=new TreeMap<>();
     BaseChunk[] chunks=pending.column().getChunks();
+
     for(int sectionIndex=0;sectionIndex<chunks.length;sectionIndex++){
       BaseChunk section=chunks[sectionIndex];
-      if(section==null||section.isEmpty())continue;
       int sectionY=Math.floorDiv(pending.minY(),16)+sectionIndex;
-      int baseY=sectionY*16;
-      Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> sectionStates=new LinkedHashMap<>();
+
+      if(section==null||section.isEmpty()){
+        // Empty is still known data for this section. Do not turn it into UNKNOWN.
+        sections.put(sectionIndex,dev.phantom.ac.Phase4WorldReplica.PackedSection.empty(sectionY));
+        continue;
+      }
+
       if(section instanceof com.github.retrooper.packetevents.protocol.world.chunk.impl.v_1_18.Chunk_v1_18 modernSection){
-        var palette=modernSection.getChunkData();
-        if(palette.storage==null){
-          int globalId=palette.palette.idToState(0);
-          var core=decodeGlobalState(pending.clientVersion(),globalId);
-          if(!core.isAir())for(int ly=0;ly<16;ly++)for(int lz=0;lz<16;lz++)for(int lx=0;lx<16;lx++){
-            if(baseY+ly>=pending.minY()&&baseY+ly<=pending.maxY())
-              sectionStates.put(new dev.phantom.ac.world.Pos(pending.column().getX()*16+lx,baseY+ly,pending.column().getZ()*16+lz),core);
+        var packetStorage=modernSection.getChunkData();
+        if(packetStorage.storage==null){
+          int globalId=packetStorage.palette.idToState(0);
+          sections.put(sectionIndex,
+              dev.phantom.ac.Phase4WorldReplica.PackedSection.uniform(sectionY,
+                  decodeGlobalState(pending.clientVersion(),globalId)));
+          continue;
+        }
+
+        int bits=packetStorage.storage.getBitsPerEntry();
+        if(bits<=0){
+          int globalId=packetStorage.palette.idToState(0);
+          sections.put(sectionIndex,
+              dev.phantom.ac.Phase4WorldReplica.PackedSection.uniform(sectionY,
+                  decodeGlobalState(pending.clientVersion(),globalId)));
+          continue;
+        }
+        if(bits>32)throw new IllegalStateException("invalid palette bits="+bits);
+
+        long[] data=packetStorage.storage.getData();
+        int maxPaletteIndex=0;
+        for(int linear=0;linear<4096;linear++){
+          int paletteIndex=readPackedValue(data,bits,linear);
+          if(paletteIndex>maxPaletteIndex)maxPaletteIndex=paletteIndex;
+        }
+
+        BlockState[] corePalette=new BlockState[maxPaletteIndex+1];
+        for(int paletteIndex=0;paletteIndex<corePalette.length;paletteIndex++){
+          int globalId=packetStorage.palette.idToState(paletteIndex);
+          corePalette[paletteIndex]=decodeGlobalState(pending.clientVersion(),globalId);
+        }
+
+        sections.put(sectionIndex,
+            dev.phantom.ac.Phase4WorldReplica.PackedSection.fromPaletteStorage(
+                sectionY,corePalette,data,bits));
+        continue;
+      }
+
+      // Conservative fallback for older PacketEvents section implementations:
+      // decode on the dedicated worker, never on the connection EventLoop.
+      BlockState[] states=new BlockState[4096];
+      Arrays.fill(states,BlockState.air());
+      for(int ly=0;ly<16;ly++){
+        for(int lz=0;lz<16;lz++){
+          for(int lx=0;lx<16;lx++){
+            WrappedBlockState raw=section.get(pending.clientVersion(),lx,ly,lz);
+            if(raw==null)continue;
+            states[(ly<<8)|(lz<<4)|lx]=toCoreState(raw);
           }
-        }else if(palette.storage instanceof com.github.retrooper.packetevents.protocol.world.chunk.storage.BitStorage storage){
-          long[] data=storage.getData();int bits=storage.getBitsPerEntry();if(bits<=0||bits>32)throw new IllegalStateException("invalid palette bits="+bits);
-          int valuesPerLong=Math.max(1,64/bits);long mask=(1L<<bits)-1L;int linearIndex=0;
-          outer:for(long cell:data){for(int slot=0;slot<valuesPerLong&&linearIndex<4096;slot++,linearIndex++){
-            int paletteId=(int)((cell>>>(slot*bits))&mask);int globalId=palette.palette.idToState(paletteId);if(globalId<=0)continue;
-            var core=decodeGlobalState(pending.clientVersion(),globalId);if(core.isAir())continue;
-            int ly=linearIndex>>>8,lz=(linearIndex>>>4)&15,lx=linearIndex&15;int y=baseY+ly;
-            if(y>=pending.minY()&&y<=pending.maxY())
-              sectionStates.put(new dev.phantom.ac.world.Pos(pending.column().getX()*16+lx,y,pending.column().getZ()*16+lz),core);
-          }if(linearIndex>=4096)break outer;}
         }
       }
-      if(sectionStates.isEmpty()&&!(section instanceof com.github.retrooper.packetevents.protocol.world.chunk.impl.v_1_18.Chunk_v1_18))
-        for(int lx=0;lx<16;lx++)for(int ly=0;ly<16;ly++)for(int lz=0;lz<16;lz++){
-          int y=baseY+ly;if(y<pending.minY()||y>pending.maxY())continue;int globalId=section.getBlockId(lx,ly,lz);if(globalId<=0)continue;
-          var core=decodeGlobalState(pending.clientVersion(),globalId);if(!core.isAir())
-            sectionStates.put(new dev.phantom.ac.world.Pos(pending.column().getX()*16+lx,y,pending.column().getZ()*16+lz),core);
-        }
-      if(!sectionStates.isEmpty())sections.put(sectionIndex,Map.copyOf(sectionStates));
-      states.putAll(sectionStates);
+      sections.put(sectionIndex,
+          dev.phantom.ac.Phase4WorldReplica.PackedSection.fromStates(sectionY,states));
     }
-    return new DecodedChunk(Map.copyOf(states),Map.copyOf(sections));
+    return new DecodedChunk(Map.copyOf(sections));
+  }
+
+  private static int readPackedValue(long[] data,int bits,int index){
+    if(bits==0)return 0;
+    int bit=index*bits;
+    int word=bit>>>6;
+    int offset=bit&63;
+    long mask=(1L<<bits)-1L;
+    long value=data[word]>>>offset;
+    if(offset+bits>64)value|=data[word+1]<<(64-offset);
+    return (int)(value&mask);
   }
 
   private static final Map<ClientVersion,ConcurrentHashMap<Integer,dev.phantom.ac.world.BlockState>> STATE_CACHE=new ConcurrentHashMap<>();
@@ -1177,40 +1235,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     WrappedBlockState raw=WrappedBlockState.getByGlobalId(version,globalId,false);
     var core=raw==null||raw.getType().isAir()?dev.phantom.ac.world.BlockState.air():toCoreState(raw);
     var existing=cache.putIfAbsent(globalId,core);return existing==null?core:existing;
-  }
-
-  private static Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> decodeColumn(Column column,ClientVersion clientVersion,int minY,int maxY){
-    Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> states=new HashMap<>();
-    BaseChunk[] sections=column.getChunks();
-    for(int sectionIndex=0;sectionIndex<sections.length;sectionIndex++){
-      BaseChunk section=sections[sectionIndex]; if(section==null||section.isEmpty())continue;
-      int y0=minY+sectionIndex*16;
-      for(int ly=0;ly<16;ly++){int y=y0+ly;if(y<minY||y>maxY)continue;
-        for(int lx=0;lx<16;lx++)for(int lz=0;lz<16;lz++){
-          WrappedBlockState raw=section.get(clientVersion,lx,ly,lz); if(raw==null||raw.getType().isAir())continue;
-          dev.phantom.ac.world.BlockState state=toCoreState(raw);
-          states.put(new dev.phantom.ac.world.Pos(column.getX()*16+lx,y,column.getZ()*16+lz),state);
-        }
-      }
-    }
-    return Map.copyOf(states);
-  }
-
-  private static Map<Integer,Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState>> decodedSections(Column column,ClientVersion clientVersion,int minY,int maxY){
-    Map<Integer,Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState>> result=new TreeMap<>();
-    BaseChunk[] sections=column.getChunks();
-    for(int sectionIndex=0;sectionIndex<sections.length;sectionIndex++){
-      BaseChunk section=sections[sectionIndex]; if(section==null||section.isEmpty())continue;
-      int y0=minY+sectionIndex*16; Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> states=new HashMap<>();
-      for(int ly=0;ly<16;ly++){int y=y0+ly;if(y<minY||y>maxY)continue;
-        for(int lx=0;lx<16;lx++)for(int lz=0;lz<16;lz++){
-          WrappedBlockState raw=section.get(clientVersion,lx,ly,lz); if(raw==null||raw.getType().isAir())continue;
-          states.put(new dev.phantom.ac.world.Pos(column.getX()*16+lx,y,column.getZ()*16+lz),toCoreState(raw));
-        }
-      }
-      result.put(sectionIndex,Map.copyOf(states));
-    }
-    return Map.copyOf(result);
   }
 
   private static dev.phantom.ac.world.BlockState toCoreState(WrappedBlockState state){
@@ -1270,6 +1294,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final Set<Short> outstandingTransactions=ConcurrentHashMap.newKeySet();
     final Set<Short> reservedTransactions=ConcurrentHashMap.newKeySet();
     final ConcurrentLinkedQueue<PendingChunk> chunkQueue=new ConcurrentLinkedQueue<>();
+    final AtomicInteger pendingChunkDecodes=new AtomicInteger();
     final AtomicLong transactionCounter=new AtomicLong(1);
     final AtomicLong paperMoveFailureSequence=new AtomicLong();
     final AtomicLong authoritativeServerTick=new AtomicLong(-1L);
