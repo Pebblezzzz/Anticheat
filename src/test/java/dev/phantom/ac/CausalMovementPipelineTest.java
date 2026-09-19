@@ -79,6 +79,43 @@ class CausalMovementPipelineTest {
   }
 
   @Test
+  void repeatedStationaryExplicitTickPacketsRemainPossible() {
+    Packets.PlayerContext liveAuthority = authority();
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 0, liveAuthority,
+            Packets.CaptureProvenance.fromAdapter("paper-live", liveAuthority, 0L, 1L)),
+        new RawPacket(2, 10, new Move(
+            new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 1L),
+            Packets.CaptureProvenance.fromAdapter("paper-client-tick-boundary",
+                new Move(new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 1L), 0L, 1L)),
+        new RawPacket(3, 20, new Move(
+            new Maths.Vec3(.5, 64, .5), 15f, 0f, true, 1L),
+            Packets.CaptureProvenance.fromAdapter("paper-client-tick-boundary",
+                new Move(new Maths.Vec3(.5, 64, .5), 15f, 0f, true, 1L), 0L, 1L)));
+
+    var report = CausalMovementPipeline.analyze(
+        "stationary-explicit-tick",
+        Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L),
+        4096,
+        exactTiming(),
+        floorWorld(),
+        null,
+        0L);
+
+    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertEquals(Verdict.POSSIBLE, report.results().getFirst().verdict(),
+        report.results().toString());
+    assertEquals(Verdict.POSSIBLE, report.results().get(1).verdict(),
+        report.results().toString());
+    assertTrue(report.frames().get(1).trace().stream()
+        .anyMatch(line -> line.contains("MATCHING candidates=")),
+        report.frames().get(1).trace().toString());
+    assertFalse(report.frames().get(1).trace().stream()
+        .anyMatch(line -> line.contains("SUB_TICK_AMBIGUITY")),
+        report.frames().get(1).trace().toString());
+  }
+
+  @Test
   void boundedExplicitMovementAcceptsAuthoritativeZeroStepCandidate() {
     Packets.PlayerContext liveAuthority = authority();
     Packets.Move liveMove = new Move(new Maths.Vec3(.5, 64, .5), 90f, 0f, true, 1L);
