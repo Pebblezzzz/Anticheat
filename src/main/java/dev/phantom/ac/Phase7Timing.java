@@ -1220,11 +1220,11 @@ public final class Phase7Timing {
       Range anchorTick,
       Config config) {
     LinkedHashSet<String> reasons = new LinkedHashSet<>();
-    Range wall = anchorSetRange(anchorGeneration, anchorTick)
+    boolean known = !anchorDerivation;
+    Range wall = known
         ? relativeClientTicks(generation, anchorGeneration, anchorTick, config)
         : Range.empty();
     Range constrained = wall;
-    boolean known = anchorSetRange(anchorGeneration, anchorTick);
     if (!boundaries.isEmpty()) {
       BoundaryConstraint result = applyBoundaryConstraints(generation, boundaries);
       if (result.known()) {
@@ -1276,7 +1276,7 @@ public final class Phase7Timing {
           List.of("client generation time exists only as a network bound until a relative client anchor exists"));
     }
 
-    if (!generation.isExact() || (anchorSetRange(anchorGeneration, anchorTick) && !anchorTick.isExact())) {
+    if (!generation.isExact() || !anchorTick.isExact()) {
       reasons.add("client tick is inferred from bounded generation time and remains a range where evidence overlaps");
     } else {
       reasons.add("client tick inferred from relative client-clock chronology");
@@ -1399,7 +1399,7 @@ public final class Phase7Timing {
     if (left.sequence() != right.sequence()) differences.add("sequence");
     if (left.serverTick() != right.serverTick()) differences.add("serverTick");
     if (!left.authoritativeServerTick().equals(right.authoritativeServerTick())) differences.add("authoritativeServerTick");
-    if (!left.captureNanosAsLong().equals(right.captureNanosAsLong())) differences.add("captureNanos");
+    if (left.captureNanos() != right.captureNanos()) differences.add("captureNanos");
     if (left.direction() != right.direction()) differences.add("direction");
     if (left.kind() != right.kind()) differences.add("kind");
     if (!left.provenance().equals(right.provenance())) differences.add("provenance");
