@@ -1,5 +1,5 @@
 # Phases 1–8 requirements audit
-Audit date: 2026-09-17. Phase 5 implementation is complete except for the external real-client corpus; Phase 6 is code-complete and internally tested; Phase 7 now has its deterministic timing implementation and regression layer, with empirical validation still external.
+Audit date: 2026-09-19. Phase 5 implementation is complete except for the external real-client corpus; Phase 6 has been re-audited as a deterministic reachable-state engine with explicit uncertainty, provenance, budgets, replay, diagnostics, and dedicated regression coverage; Phase 7 timing implementation and Phase 8 remain outside this Phase 6-only change.
 
 ## Summary
 | Phase | Status | Main limitation |
@@ -9,7 +9,7 @@ Audit date: 2026-09-17. Phase 5 implementation is complete except for the extern
 | 3 | PARTIAL | Downstream world/timing/validation result capture is not one complete replay artifact |
 | 4 | PARTIAL | Exact client-payload decoding and exhaustive 1.21.11 shapes remain incomplete |
 | 5 | PARTIAL / BLOCKED BY EXTERNAL DATA | Empirical capture workflow exists, but no real 1.21.11 vanilla corpus is present in this environment |
-| 6 | IMPLEMENTED / INTERNALLY TESTED / BLOCKED BY EXTERNAL DATA | Deterministic rich reachable-state search is implemented; real-client numeric validation remains external |
+| 6 | IMPLEMENTED / INTERNALLY TESTED / BLOCKED BY EXTERNAL DATA | Deterministic rich reachable-state search, uncertainty propagation, provenance, budgets, replay, diagnostics, and Phase 6-specific regressions are implemented; real-client numeric validation remains external |
 | 7 | IMPLEMENTED / INTERNALLY TESTED / BLOCKED BY EXTERNAL DATA | Client/server clock reconstruction, latency/jitter bounds, synchronization state/recovery, replay, Phase 6 timing integration, and synthetic timing regressions are implemented; real-client timing validation remains external |
 | 8 | PARTIAL | Policy/enforcement remains a later milestone and was not expanded by this Phase 7 work |
 
