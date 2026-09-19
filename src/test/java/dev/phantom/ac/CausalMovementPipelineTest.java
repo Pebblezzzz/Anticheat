@@ -99,7 +99,7 @@ class CausalMovementPipelineTest {
         4096,
         exactTiming(),
         floorWorld(),
-        null,
+        anchor(),
         0L);
 
     assertEquals(2, report.movementObservations(), report.results().toString());
