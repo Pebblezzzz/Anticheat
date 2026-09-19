@@ -197,8 +197,7 @@ public final class Phase8PredictionRunner {
   /**
    * Processes only packets after the last consumed sequence.
    *
-   * <p>The world provider is expected to return the client-visible world
-   * acknowledged no later than the supplied packet sequence. The provider is
+   * <p>The world provider is expected to return the client-visible world   * acknowledged no later than the supplied packet sequence. The provider is
    * therefore the latency-compensation boundary for physics.</p>
    */
   public synchronized Report processWithWorldProvider(
@@ -397,8 +396,7 @@ public final class Phase8PredictionRunner {
         uncertain++;
         frames.add(frame(
             sequence, packet, tick, move, observedBefore, observedAfter,
-            prediction, prediction, worldOrEmpty(world), sources, trace));
-        continue;
+            prediction, prediction, worldOrEmpty(world), sources, trace));        continue;
       }
 
       trace.add("WORLD source=latency-compensated-packet-world"
@@ -597,8 +595,7 @@ public final class Phase8PredictionRunner {
                   "prediction frontier remains retained for subsequent packets"));
           Phase8MovementValidation.Result result = validate(
               playerId, packet, move, observedBefore, observedAfter, world,
-              tick, uncertaintySources, search, true);
-          results.add(result);
+              tick, uncertaintySources, search, true);          results.add(result);
           /*
            * The certificate proves only that this observation is outside the
            * conservative envelope. The last fully simulated prediction remains
@@ -798,7 +795,6 @@ public final class Phase8PredictionRunner {
     AuthorityAnchor authority = latestCausalAuthority(movementPacket);
     Player rootPlayer;
     long rootTick;
-
     if (authority != null) {
       rootPlayer = predictionAnchorFromAuthority(authority.context(), prediction);
       /*
@@ -852,13 +848,10 @@ public final class Phase8PredictionRunner {
 
   private static Player predictionAnchorFromAuthority(
       Packets.PlayerContext context,
-      Set<Candidate> existingPrediction) {
+      Set<Candidate> ignoredExistingPrediction) {
     Player authority = playerFromAuthority(context);
-    Optional<Candidate> retained = existingPrediction.stream().findFirst();
-    double horizontalX = retained.map(candidate -> candidate.context().player().velocity().x())
-        .orElse(authority.velocity().x());
-    double horizontalZ = retained.map(candidate -> candidate.context().player().velocity().z())
-        .orElse(authority.velocity().z());
+    double horizontalX = authority.velocity().x();
+    double horizontalZ = authority.velocity().z();
     double verticalVelocity = authority.velocity().y();
 
     Phase5Mechanics.MovementEnvironment environment = context.movementEnvironment();
@@ -997,8 +990,7 @@ public final class Phase8PredictionRunner {
       Set<Candidate> candidates,
       Packets.PlayerContext authority,
       int maximumCandidates) {
-    if (candidates.isEmpty() || candidates.size() > maximumCandidates) return Set.of();
-    EntityCollisions collisions = EntityCollisions.of(authority.entityBoxes());
+    if (candidates.isEmpty() || candidates.size() > maximumCandidates) return Set.of();    EntityCollisions collisions = EntityCollisions.of(authority.entityBoxes());
     Player base = playerFromAuthority(authority);
     Set<Candidate> result = new LinkedHashSet<>();
     for (Candidate candidate : candidates) {
@@ -1197,8 +1189,7 @@ public final class Phase8PredictionRunner {
               world,
               true,
               "latency-compensated client-visible world")),
-          ignored -> List.of(new Phase6Reachability.None()),
-          Phase6Reachability.SearchConfig.defaults(maximumCandidates));
+          ignored -> List.of(new Phase6Reachability.None()),          Phase6Reachability.SearchConfig.defaults(maximumCandidates));
       simulatedTicks++;
 
       if (result.verdict() != Verdict.POSSIBLE
@@ -1397,8 +1388,7 @@ public final class Phase8PredictionRunner {
     for (var entry : history.headMap(simulationTick, true).descendingMap().entrySet()) {
       TimedInput selected = null;
       for (TimedInput input : entry.getValue()) {
-        if (input.sequence() > lastProcessedSequence) break;
-        selected = input;
+        if (input.sequence() > lastProcessedSequence) break;        selected = input;
       }
       if (selected != null) return selected.constraint();
     }
