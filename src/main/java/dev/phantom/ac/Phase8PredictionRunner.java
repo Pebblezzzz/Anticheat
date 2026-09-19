@@ -856,28 +856,16 @@ public final class Phase8PredictionRunner {
       Packets.PlayerContext context,
       Set<Candidate> existingPrediction) {
     Player authority = playerFromAuthority(context);
+    /*
+     * Bukkit's live velocity is the velocity attached to the captured authoritative
+     * position, i.e. the velocity used for the next movement step from that position.
+     * Do not apply gravity/drag here: doing so advances the anchor one physics tick
+     * before Phase 6/5 simulates the target tick and creates a deterministic one-tick
+     * vertical overshoot (for example -0.155232 -> -0.230527 before the first step).
+     */
     double horizontalX = authority.velocity().x();
     double horizontalZ = authority.velocity().z();
     double verticalVelocity = authority.velocity().y();
-
-    Phase5Mechanics.MovementEnvironment environment = context.movementEnvironment();
-    if (environment.fluid() == Fluid.NONE
-        && !environment.climbable()
-        && !environment.gliding()
-        && !environment.onGround()
-        && !context.effects().containsKey("minecraft:levitation")
-        && !context.effects().containsKey("levitation")) {
-      MovementEffects effects = new MovementEffects(
-          amplifier(context.effects(), "minecraft:speed", "speed"),
-          amplifier(context.effects(), "minecraft:slowness", "slowness"),
-          amplifier(context.effects(), "minecraft:jump_boost", "jump_boost"),
-          amplifier(context.effects(), "minecraft:levitation", "levitation"),
-          context.effects().containsKey("minecraft:slow_falling")
-              || context.effects().containsKey("slow_falling"));
-      double gravity = Vanilla12111RichPhysics.GRAVITY * environment.gravityMultiplier();
-      verticalVelocity = verticalVelocity * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG
-          - gravity * effects.fallGravityMultiplier() * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG;
-    }
 
     return new Player(
         authority.position(),
