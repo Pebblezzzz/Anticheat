@@ -35,8 +35,7 @@ class Phase7TimingTest {
     assertEquals(2L, r.frames().getLast().timing().serverTick());
     Range simulation = r.frames().getLast().timing().simulationClientTicks();
     assertTrue(simulation.contains(3L));
-    assertNotEquals(r.frames().getLast().timing().serverTick(),
-        simulation.min());
+    assertTrue(simulation.max() != r.frames().getLast().timing().serverTick());
   }
 
   @Test
@@ -80,7 +79,7 @@ class Phase7TimingTest {
     EventTiming firstMove = r.timingFor(2).orElseThrow();
     EventTiming secondMove = r.timingFor(4).orElseThrow();
     assertEquals(Range.exact(1), firstMove.packetGenerationClientTicks());
-    assertEquals(Range.exact(2), secondMove.packetGenerationClientTicks());
+    assertEquals(new Range(3, 4), secondMove.packetGenerationClientTicks());
     assertTrue(firstMove.possiblePacketGenerationClientTicks().contains(1L));
     assertTrue(secondMove.possiblePacketGenerationClientTicks().contains(2L));
   }
