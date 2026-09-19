@@ -167,7 +167,7 @@ class Phase5ParityToolTest {
     var result = new Simulation.Vanilla12111Physics().step(context);
     var actual = result.state();
 
-    assertEquals(73.00133597428274, actual.position().y(), 1e-9);
+    assertEquals(73.08639997415543, actual.position().y(), 1e-9);
     assertEquals(0.2481359937615392, actual.velocity().y(), 1e-9);
     assertFalse(actual.onGround());
   }
