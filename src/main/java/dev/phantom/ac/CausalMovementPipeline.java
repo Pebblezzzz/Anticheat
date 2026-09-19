@@ -355,81 +355,19 @@ public final class CausalMovementPipeline {
       }
 
       long movementTick = eventTiming.simulationClientTicks().min();
-      long priorPositionPacketTick = previousPositionPacketTick;
-      Phase7Timing.Range priorPositionPacketGenerationRange = previousPositionPacketGenerationRange;
-      Long priorExplicitClientTick = previousExplicitClientTick;
-      previousPositionPacketTick = movementTick;
-      previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
-      previousExplicitClientTick = movement.move().clientTick();
-
-      /*
-       * A position-bearing packet that reports exactly the same position,
-       * rotation, and client ground state as the immediately preceding client
-       * state contains no movement delta to validate. Only treat it as inert
-       * when a prior position packet exists and the authoritative server snapshot
-       * agrees with the unchanged state. This prevents AFK keepalive packets from
-       * entering physics while retaining genuine sustained-hover contradictions.
-       */
-      boolean authoritativeNoOp =
-          movement.authority().snapshot().isPresent()
-              && movement.authority().snapshot().get().context().serverPosition()
-                  .equals(observedAfter.position())
-              && movement.authority().snapshot().get().context().movementEnvironment().onGround()
-                  == observedAfter.onGround();
-      if (priorPositionPacketTick >= 0
-          && authoritativeNoOp
-          && observedAfter.position().equals(observedBefore.position())
-          && Float.compare(observedAfter.yaw(), observedBefore.yaw()) == 0
-          && Float.compare(observedAfter.pitch(), observedBefore.pitch()) == 0
-          && observedAfter.onGround() == observedBefore.onGround()) {
-        Candidate noOp = noOpObservationCandidate(movement, observedAfter, movementTick);
-        SearchResult noOpSearch = new SearchResult(
-            Verdict.POSSIBLE,
-            Set.of(noOp),
-            0,
-            1,
-            0,
-            0,
-            0,
-            0,
-            List.of("no movement delta observed; packet is causally inert"));
-        results.add(Phase8MovementValidation.validate(
-            playerId,
-            serverTick,
-            observedBefore,
-            observedAfter,
-            movement.world(),
-            worldReference,
-            sync,
-            assumptions,
-            noOpSearch,
-            replayReference,
-            true,
-            EnumSet.of(
-                Phase6Reachability.ObservedField.POSITION,
-                Phase6Reachability.ObservedField.ROTATION,
-                Phase6Reachability.ObservedField.GROUND)));
-        frontier = new Frontier(Set.of(noOp), movementTick, frontier.anchored());
-        trace.add("NO_OP_MOVEMENT position=" + observedAfter.position()
-            + " clientGround=" + observedAfter.onGround());
-        frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
-            assumptions, uncertainty, trace));
-        continue;
-      }
-
       boolean sameExplicitClientTick =
           movement.move().clientTick() != null
-              && priorExplicitClientTick != null
-              && movement.move().clientTick().longValue() == priorExplicitClientTick.longValue();
+              && previousExplicitClientTick != null
+              && movement.move().clientTick().longValue() == previousExplicitClientTick.longValue();
       boolean distinctExplicitClientTicks =
           movement.move().clientTick() != null
-              && priorExplicitClientTick != null
-              && movement.move().clientTick().longValue() != priorExplicitClientTick.longValue();
+              && previousExplicitClientTick != null
+              && movement.move().clientTick().longValue() != previousExplicitClientTick.longValue();
       boolean overlappingGenerationWindow =
-          priorPositionPacketGenerationRange != null
+          previousPositionPacketGenerationRange != null
               && !distinctExplicitClientTicks
               && rangesOverlapForSubTickDetection(
-                  priorPositionPacketGenerationRange,
+                  previousPositionPacketGenerationRange,
                   eventTiming.packetGenerationClientTicks());
       if (!frontier.candidates().isEmpty() && movement.authority().snapshot().isPresent()) {
         /*
@@ -458,9 +396,8 @@ public final class CausalMovementPipeline {
         lastAmbiguitySequence = sequence;
         recoveryRequired = true;
         frontier = Frontier.empty();
-        previousPositionPacketTick = movementTick;
-        previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
-        previousExplicitClientTick = movement.move().clientTick();
+        previousPositionPacketTick = -1L;
+        previousPositionPacketGenerationRange = null;
         trace.add("FRONTIER_RESET reason=SUB_TICK_AMBIGUITY");
         SearchResult uncertain = uncertainSearch(
             frontier.candidates(),
@@ -1799,39 +1736,6 @@ public final class CausalMovementPipeline {
     if (Float.compare(candidate.yaw(), observed.yaw()) != 0) return false;
     if (Float.compare(candidate.pitch(), observed.pitch()) != 0) return false;
     return movement.onGround() == null || candidate.onGround() == movement.onGround();
-  }
-
-  private static Candidate noOpObservationCandidate(
-      MovementEvent movement,
-      Player observed,
-      long simulationTick) {
-    MovementEnvironment environment = MovementEnvironment.dry(
-        observed.onGround(),
-        false,
-        false);
-    Context context = new Context(
-        Math.max(0L, simulationTick),
-        observed,
-        simulationEnvironmentFor(environment),
-        observed.attributes(),
-        movementEffects(observed),
-        observed.pose(),
-        environment,
-        observed.pose() == Pose.SLEEPING,
-        entityCollisionsFor(movement));
-    return new Candidate(
-        0,
-        context,
-        new Phase6Reachability.Provenance(
-            0,
-            movement.event().packet().sequence(),
-            Math.max(0L, simulationTick),
-            "NO_OP",
-            "NONE",
-            "None",
-            List.of("observed movement state is identical to the immediately preceding client state"),
-            1,
-            List.of()));
   }
 
   private static Candidate observedFlightCandidate(
