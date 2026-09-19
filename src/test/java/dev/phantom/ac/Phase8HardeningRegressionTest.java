@@ -155,8 +155,13 @@ class Phase8HardeningRegressionTest {
   @Test
   void unchangedAfkMovementPacketIsCausallyInert() {
     var packets=List.of(
-        new RawPacket(1,0,new Move(new Vec3(10.5,70.0,10.5),0f,0f,true,10L)),
-        new RawPacket(2,50_000_000L,new Move(new Vec3(10.5,70.0,10.5),0f,0f,true,11L)));
+        new RawPacket(1,0,new Packets.PlayerContext(
+            "survival",Simulation.Attributes.DEFAULT,Map.of(),
+            Phase5Mechanics.Pose.STANDING,
+            Phase5Mechanics.MovementEnvironment.dry(true,false,false),
+            new Vec3(10.5,70.0,10.5),Vec3.ZERO,false,false,false,List.of())),
+        new RawPacket(2,0,new Move(new Vec3(10.5,70.0,10.5),0f,0f,true,10L)),
+        new RawPacket(3,50_000_000L,new Move(new Vec3(10.5,70.0,10.5),0f,0f,true,11L)));
     var report=CausalMovementPipeline.analyze(
         "afk",capture(packets),256,exactTiming(),null,
         Player.initial(new Vec3(10.5,70.0,10.5)),0L);
