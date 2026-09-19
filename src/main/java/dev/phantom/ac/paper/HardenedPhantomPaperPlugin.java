@@ -735,9 +735,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   /**
-   * The expensive movement path is deliberately pinned to the Netty EventLoop
-   * owning the client connection. Packet capture stays lightweight and all
-   * Bukkit/Paper actions remain on the server's main thread.
+   * The expensive prediction path runs on the dedicated validation executor.
+   * Packet capture stays lightweight and all Bukkit/Paper actions remain on the
+   * server's main thread.
    */
   private void schedulePredictionValidation(Capture capture){
     if(capture==null)return;
@@ -745,29 +745,29 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     if(executor==null)return;
 
     /*
-     * Validation is CPU-heavy and reconstructs causal history. Never execute it
+     * Validation is CPU-heavy but stateful; never execute it
      * on the packet connection's Netty EventLoop: doing so turns anti-cheat work
      * into client-visible packet/movement latency.
      *
      * predictionValidationQueued is deliberately a coalescing gate. While one batch
      * is running, additional movement/world packets only cause a single follow-up
-     * batch, rather than one expensive replay per packet.
+     * batch, rather than one expensive prediction pass per packet.
      */
-    if(!capture.nettyValidationQueued.compareAndSet(false,true))return;
+    if(!capture.predictionValidationQueued.compareAndSet(false,true))return;
     try{
       executor.execute(()->{
         try{
           runPredictionValidation(capture);
         }finally{
-          capture.nettyValidationQueued.set(false);
+          capture.predictionValidationQueued.set(false);
           /*
            * Packets may have arrived while replay was running. Submit exactly one
-           * follow-up batch so the validator catches up without unbounded task
+           * follow-up batch so the predictor catches up without unbounded task
            * accumulation.
            */
           if(validationExecutor!=null
               && !capture.copySince(capture.movementRunner.lastProcessedSequence()).isEmpty()){
-            scheduleNettyValidation(capture,capture.nettyChannel);
+            schedulePredictionValidation(capture);
           }
         }
       });
@@ -785,8 +785,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
       String playerName=capture.playerName==null?capture.playerId.toString():capture.playerName;
       State.Player anchor=capture.initialState;
-      Vec3 authoritativePosition=capture.lastAuthoritativePosition;
-
       if(debugLevel(capture.playerId).trace()){
         getLogger().info("[PhantomAC][PHASE8][PREDICT_START] player="+playerName
             +" thread="+Thread.currentThread().getName()
@@ -815,7 +813,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             +" candidates="+capture.movementRunner.candidateCount()
             +" continuation="+incremental.continuation()
             +" frontierRetained="+incremental.candidateFrontierRetained());
-        for(CausalMovementPipeline.Frame frame:incremental.frames()){
+        for(Phase8PredictionRunner.PredictionFrame frame:incremental.frames()){
           for(String traceLine:frame.trace()){
             getLogger().info("[PhantomAC][PHASE8][TRACE] player="+playerName
                 +" seq="+frame.sequence()+" "+traceLine);
