@@ -324,13 +324,15 @@ class Phase8PredictionRunnerTest {
         0, state, new Simulation.AdvancedInput(1, 0, true, false, false),
         world, Simulation.Environment.DRY, state.attributes(),
         Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
-        MovementEnvironment.dry(true, false, false), false));
+        MovementEnvironment.dry(true, false, false), false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of())));
 
     var sprint = physics.step(new Vanilla12111RichPhysics.Context(
         0, state, new Simulation.AdvancedInput(1, 0, true, true, false),
         world, Simulation.Environment.DRY, state.attributes(),
         Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
-        MovementEnvironment.dry(true, true, false), false));
+        MovementEnvironment.dry(true, true, false), false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of())));
 
     double positionDelta = sprint.state().position().z() - noSprint.state().position().z();
     double velocityDelta = sprint.state().velocity().z() - noSprint.state().velocity().z();
