@@ -1195,11 +1195,11 @@ public final class CausalMovementPipeline {
     for (List<TimedInput> inputs : result.values()) {
       inputs.sort(Comparator.comparingLong(TimedInput::sequence));
     }
-    return Collections.unmodifiableNavigableMap(
-        result.entrySet().stream().collect(
-            TreeMap::new,
-            (map, entry) -> map.put(entry.getKey(), List.copyOf(entry.getValue())),
-            TreeMap::putAll));
+    NavigableMap<Long, List<TimedInput>> immutable = new TreeMap<>();
+    for (var entry : result.entrySet()) {
+      immutable.put(entry.getKey(), List.copyOf(entry.getValue()));
+    }
+    return Collections.unmodifiableNavigableMap(immutable);
   }
 
   /**
