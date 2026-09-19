@@ -86,7 +86,7 @@ final class Phase4WorldReplicaTest {
 
   @Test void entityHistoryIsDeterministic(){
     var r=new Phase4WorldReplica(V);
-    var e=new dev.phantom.ac.world.EntityCollisions.EntityBox(4,BlockBox.of(0,64,0,1,2,1));
+    var e=new dev.phantom.ac.world.EntityCollisions.EntityBox(4,BlockBox.of(0,64,0,1,66,1));
     r.accept(new Phase4WorldReplica.EntitySpawn(o(1,1),p(1,1),e));
     assertEquals(1,r.getWorldGeneration().entities().boxesIn(BlockBox.of(-1,63,-1,2,3,2)).boxes().size());
     r.accept(new Phase4WorldReplica.EntityDespawn(o(2,2),p(2,2),4));
