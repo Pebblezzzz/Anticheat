@@ -101,6 +101,7 @@ public final class Phase8PredictionRunner {
 
   private static final double POSITION_TOLERANCE = Phase6Reachability.POSITION_MATCH_TOLERANCE;
   private static final long MAX_INCREMENTAL_HORIZON = Phase6Reachability.MAX_HORIZON_TICKS;
+  private static final long PREDICTION_RESYNC_LAG_TICKS = 2L;
 
   private final int maximumCandidates;
   private final InputConstraint neutralInput;
@@ -434,6 +435,7 @@ public final class Phase8PredictionRunner {
       }
 
       ensureRoot(playerId, packet, move, observedBefore, tick, trace);
+      refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, trace);
       if (prediction.isEmpty()) {
         uncertaintySources.add("persistent prediction frontier is not anchored to an authoritative or correction state");
         latestContinuation = Continuation.UNCERTAIN;
@@ -703,6 +705,48 @@ public final class Phase8PredictionRunner {
 
   private long resolvedCorrectionTick() {
     return Math.max(0L, relativeClientTick);
+  }
+
+  private void refreshFromCausalAuthorityIfStale(
+      Packets.RawPacket movementPacket,
+      Packets.Move move,
+      Player observedBefore,
+      TickResolution tick,
+      List<String> trace) {
+    if (prediction.isEmpty() || !tick.known()) return;
+    AuthorityAnchor authority = latestCausalAuthority(movementPacket);
+    if (authority == null || authority.clientTick() == null) return;
+
+    long authorityTick = authority.clientTick();
+    long lag = tick.clientTick() - predictionTick;
+    if (predictionTick < 0L || lag <= PREDICTION_RESYNC_LAG_TICKS) return;
+    if (authorityTick > tick.clientTick()) return;
+
+    long previousPredictionTick = predictionTick;
+    long rootTick = authorityTick == tick.clientTick()
+        ? Math.max(0L, tick.clientTick() - 1L)
+        : authorityTick;
+
+    Player rootPlayer = withClientRotation(
+        playerFromAuthority(authority.context()),
+        observedBefore.yaw(),
+        observedBefore.pitch());
+
+    prediction = Set.of(candidateFromPlayer(
+        rootPlayer,
+        rootTick,
+        "CAUSAL_AUTHORITY_RESYNC",
+        authority.sequence(),
+        EntityCollisions.of(authority.context().entityBoxes())));
+    predictionTick = rootTick;
+    latestContinuation = Continuation.ACTIVE;
+
+    trace.add("ROOT_REFRESH reason=PREDICTION_LAG"
+        + " predictionTickBefore=" + previousPredictionTick
+        + " authorityClientTick=" + authorityTick
+        + " rootTick=" + rootTick
+        + " authoritySequence=" + authority.sequence()
+        + " authorityServerTick=" + authority.serverTick());
   }
 
   private void ensureRoot(
