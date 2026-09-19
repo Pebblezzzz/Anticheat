@@ -1926,9 +1926,21 @@ public final class CausalMovementPipeline {
     float yaw = movement.move().yaw() == null ? observedBefore.yaw() : movement.move().yaw();
     float pitch = movement.move().pitch() == null ? observedBefore.pitch() : movement.move().pitch();
     Player anchor = withClientRotation(authoritative, yaw, pitch);
-    long rootTick = snapshot.clientTick() != null
-        ? Math.max(0L, snapshot.clientTick() - 1L)
-        : Math.max(0L, target + (snapshot.serverTick() - movement.event().serverTick()));
+    boolean liveClientTickMovement =
+        movement.move().clientTick() != null
+            && movement.event().packet().provenance().sourceId().startsWith("paper-client-tick");
+    long rootTick;
+    if (liveClientTickMovement && snapshot.serverTick() < movement.event().serverTick()) {
+      // The live authority watermark is not atomically paired with the Bukkit
+      // state sample. For a strictly preceding server-tick root, align it to
+      // the target movement tick using the observed server-tick age instead.
+      long serverTickAge = movement.event().serverTick() - snapshot.serverTick();
+      rootTick = Math.max(0L, target - Math.max(1L, serverTickAge));
+    } else {
+      rootTick = snapshot.clientTick() != null
+          ? Math.max(0L, snapshot.clientTick() - 1L)
+          : Math.max(0L, target + (snapshot.serverTick() - movement.event().serverTick()));
+    }
     if (rootTick < 0 || target - rootTick > Phase6Reachability.MAX_HORIZON_TICKS) {
       return Optional.empty();
     }
@@ -1982,12 +1994,10 @@ public final class CausalMovementPipeline {
         .filter(snapshot -> snapshot.serverTick() <= movement.event().serverTick())
         .filter(snapshot -> movement.event().serverTick() - snapshot.serverTick() <= maxServerTickAge)
         .filter(snapshot -> {
-          Long clientTick = movement.move().clientTick();
-          if (clientTick == null || !movement.event().packet().provenance().sourceId().startsWith("paper-")) {
-            return true;
-          }
-          return snapshot.clientTick() != null
-              && snapshot.clientTick().longValue() == clientTick.longValue();
+          // The live Paper PlayerContext tick watermark is sampled independently
+          // from the Bukkit player state, so it is not an atomic simulation timestamp.
+          // Causal server-tick ordering is the trusted boundary here.
+          return true;
         });
   }
 
@@ -2032,11 +2042,8 @@ public final class CausalMovementPipeline {
             .filter(snapshot -> snapshot.receivedNanos() <= received)
             .filter(snapshot -> snapshot.serverTick() < movement.serverTick())
             .filter(snapshot -> movement.serverTick() - snapshot.serverTick() <= 1L)
-            .filter(snapshot -> snapshot.clientTick() != null)
-            .filter(snapshot -> snapshot.clientTick() <= target)
             .filter(snapshot -> !isPlaceholderAuthority(snapshot, initialAnchor))
             .max(Comparator.comparingLong(AuthoritativeSnapshot::serverTick)
-                .thenComparingLong(AuthoritativeSnapshot::clientTick)
                 .thenComparingLong(AuthoritativeSnapshot::receivedNanos)
                 .thenComparingLong(AuthoritativeSnapshot::sequence));
         if (precedingLive.isPresent()) return precedingLive;
@@ -2198,9 +2205,17 @@ public final class CausalMovementPipeline {
       float yaw = movement.move().yaw() == null ? observedBefore.yaw() : movement.move().yaw();
       float pitch = movement.move().pitch() == null ? observedBefore.pitch() : movement.move().pitch();
       anchor = withClientRotation(authoritative, yaw, pitch);
-      rootTick = snapshot.clientTick() != null
-          ? Math.max(0L, snapshot.clientTick() - 1L)
-          : Math.max(0L, target - 1L);
+      boolean liveClientTickMovement =
+          movement.move().clientTick() != null
+              && movement.event().packet().provenance().sourceId().startsWith("paper-client-tick");
+      if (liveClientTickMovement && snapshot.serverTick() < movement.event().serverTick()) {
+        long serverTickAge = movement.event().serverTick() - snapshot.serverTick();
+        rootTick = Math.max(0L, target - Math.max(1L, serverTickAge));
+      } else {
+        rootTick = snapshot.clientTick() != null
+            ? Math.max(0L, snapshot.clientTick() - 1L)
+            : Math.max(0L, target - 1L);
+      }
     }
 
     if (target < rootTick) {
