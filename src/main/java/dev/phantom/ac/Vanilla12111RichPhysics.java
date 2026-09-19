@@ -29,9 +29,9 @@ public final class Vanilla12111RichPhysics {
             SPRINT_JUMP_HORIZONTAL_BOOST=0.2,
             SPRINTING_SPEED_MULTIPLIER=1.3,
             AIR_VERTICAL_FRICTION=0.98f;
-    private static final double
+    static final double
             SNEAKING_SPEED_MULTIPLIER=0.3,
-            WATER_DRAG=0.9,
+            WATER_DRAG=0.8,
             LAVA_DRAG=0.5,
             CLIMB_MAX_DOWN=0.15,
             CLIMB_MAX_UP=0.15,
