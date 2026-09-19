@@ -187,7 +187,7 @@ class CausalMovementPipelineTest {
         .anyMatch(line -> line.contains("RECOVERY_CLEARED")),
         report.frames().get(2).trace().toString());
     assertTrue(report.frames().get(2).trace().stream()
-        .anyMatch(line -> line.contains("authoritative snapshot") && line.contains("observation witness")),
+        .anyMatch(line -> line.contains("AUTHORITATIVE_ZERO_DELTA_WITNESS")),
         report.frames().get(2).trace().toString());
   }
 
