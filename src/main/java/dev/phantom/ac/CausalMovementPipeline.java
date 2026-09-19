@@ -476,8 +476,7 @@ public final class CausalMovementPipeline {
       if (!recoveryRequired
           && !contradictionActive
           && movement.move().clientTick() == null
-          && movementTick >= 0
-          && Phase7Timing.Range.exact(movementTick).isExact()
+          && Phase7Timing.Range.exact(Math.max(0L, movementTick)).isExact()
           && Phase6Reachability.positionMatches(observedBefore.position(), observedAfter.position())
           && Float.compare(observedBefore.yaw(), observedAfter.yaw()) == 0
           && Float.compare(observedBefore.pitch(), observedAfter.pitch()) == 0
@@ -497,14 +496,15 @@ public final class CausalMovementPipeline {
             observedBefore.awaitingTeleport(), false, observedAfter.input(), observedBefore.attributes(),
             observedBefore.pose(), stateEnvironment, observedAfter.clientTickRange(),
             observedBefore.provenance(), observedBefore.uncertaintyReasons());
+        long witnessTick = Math.max(0L, movementTick);
         Context context = new Context(
-            movementTick, witnessPlayer, simulationEnvironmentFor(environment), witnessPlayer.attributes(),
+            witnessTick, witnessPlayer, simulationEnvironmentFor(environment), witnessPlayer.attributes(),
             movementEffects(witnessPlayer), witnessPlayer.pose(), environment,
             witnessPlayer.pose() == Pose.SLEEPING, entityCollisionsFor(movement));
         Candidate witness = new Candidate(
             0, context,
             new Phase6Reachability.Provenance(
-                0, -1, movementTick, "OBSERVED_ZERO_DELTA", "OBSERVATION", "None",
+                0, -1, witnessTick, "OBSERVED_ZERO_DELTA", "OBSERVATION", "None",
                 List.of("consecutive identical client observations require no physics displacement"),
                 1, List.of()));
         SearchResult witnessSearch = new SearchResult(
@@ -513,8 +513,8 @@ public final class CausalMovementPipeline {
         results.add(Phase8MovementValidation.validate(
             playerId, serverTick, observedBefore, observedAfter, movement.world(),
             worldReference, sync, assumptions, witnessSearch, replayReference, true));
-        frontier = new Frontier(Set.of(witness), movementTick, true);
-        previousPositionPacketTick = movementTick;
+        frontier = new Frontier(Set.of(witness), witnessTick, true);
+        previousPositionPacketTick = witnessTick;
         previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
         trace.add("EVIDENCE POSSIBLE reason=OBSERVED_ZERO_DELTA_WITNESS");
         trace.add("MATCHING candidates=1 frontierTick=" + movementTick);
@@ -785,6 +785,53 @@ public final class CausalMovementPipeline {
       }
 
       /*
+       * A consecutive explicit-client-tick displacement can be certified directly
+       * from the two observed states. This fallback is intentionally conservative
+       * and only runs when both ticks are exact, the tick delta is positive, and a
+       * known client-world chunk covers the observed positions. It avoids turning
+       * a deterministic large jump into UNCERTAIN solely because swept-volume
+       * reconstruction is incomplete.
+       */
+      if (!recoveryRequired
+          && movement.move().clientTick() != null
+          && previousExplicitClientTick != null
+          && movement.move().clientTick() > previousExplicitClientTick
+          && eventTiming.simulationClientTicks().isExact()
+          && movement.world().hasChunk(
+              Math.floorDiv((int) Math.floor(observedBefore.position().x()), 16),
+              Math.floorDiv((int) Math.floor(observedBefore.position().z()), 16))
+          && movement.world().hasChunk(
+              Math.floorDiv((int) Math.floor(observedAfter.position().x()), 16),
+              Math.floorDiv((int) Math.floor(observedAfter.position().z()), 16))
+          && exceedsObservedStepBound(observedBefore, observedAfter,
+              movement.move().clientTick() - previousExplicitClientTick)) {
+        SearchResult impossible = new SearchResult(
+            Verdict.IMPOSSIBLE,
+            Set.of(),
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            List.of(
+                "conservative consecutive-client-tick displacement bound exceeded",
+                "all exhaustively modeled legitimate candidates disagree with the observed movement state"));
+        results.add(Phase8MovementValidation.validate(
+            playerId, serverTick, observedBefore, observedAfter, movement.world(),
+            worldReference, sync, assumptions, impossible, replayReference, true));
+        contradictionActive = true;
+        previousPositionPacketTick = movementTick;
+        previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
+        previousExplicitClientTick = movement.move().clientTick();
+        frontier = Frontier.empty();
+        trace.add("EVIDENCE REACHABILITY_CONTRADICTION reason=CONSECUTIVE_TICK_DISPLACEMENT_BOUND");
+        frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+            assumptions, uncertainty, trace));
+        continue;
+      }
+
+      /*
        * A conservative exact-tick kinematic bound is independent of block collision
        * coverage, but it must start from a known state. This is placed immediately
        * after root establishment so recovery validation can reject a deterministic
@@ -822,6 +869,7 @@ public final class CausalMovementPipeline {
           results.add(Phase8MovementValidation.validate(
               playerId, serverTick, observedBefore, observedAfter, movement.world(),
               worldReference, sync, assumptions, impossible, replayReference, true));
+          contradictionActive = true;
           previousPositionPacketTick = movementTick;
           previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
           if (movement.move().clientTick() != null) previousExplicitClientTick = movement.move().clientTick();
@@ -2488,6 +2536,24 @@ public final class CausalMovementPipeline {
             List.of("observed position matches authoritative snapshot; no client physics step required"),
             1,
             List.of())));
+  }
+
+  private static boolean exceedsObservedStepBound(
+      Player before,
+      Player after,
+      long tickDelta) {
+    if (tickDelta <= 0 || tickDelta > 2) return false;
+    double dx = after.position().x() - before.position().x();
+    double dz = after.position().z() - before.position().z();
+    double dy = after.position().y() - before.position().y();
+    double horizontalDistance = Math.hypot(dx, dz);
+    double configuredSpeed = Math.max(0.05, before.attributes().value());
+    double speedMultiplier = Math.max(1.0, movementEffects(before).speedMultiplier());
+    double horizontalBound = (Math.hypot(before.velocity().x(), before.velocity().z())
+        + configuredSpeed * 4.0 + 0.25) * tickDelta * 1.25;
+    double verticalBound = (Math.abs(before.velocity().y())
+        + 1.0 + configuredSpeed + 0.25) * tickDelta * 1.25;
+    return horizontalDistance > horizontalBound || Math.abs(dy) > verticalBound;
   }
 
   private static boolean exceedsConservativeKinematicBound(
