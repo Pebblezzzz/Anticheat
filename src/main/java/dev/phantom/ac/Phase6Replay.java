@@ -98,6 +98,8 @@ public record Phase6Replay(
     b.append("worldBranches=").append(new java.util.TreeMap<>(worldBranches)).append('\n');
     b.append("externalTransitions=").append(new java.util.TreeMap<>(externalTransitions)).append('\n');
     b.append("resultSignature=").append(Phase6Reachability.canonicalSignature(result)).append('\n');
+    b.append("metrics=").append(result.metrics()).append('\n');
+    b.append("eliminations=").append(result.eliminations()).append('\n');
     return b.toString();
   }
 }
