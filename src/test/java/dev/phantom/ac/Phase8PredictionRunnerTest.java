@@ -247,7 +247,7 @@ class Phase8PredictionRunnerTest {
                 Packets.CaptureProvenance.fromAdapter(
                     "test-authority", currentAuthority, 100L, 10L)),
             new RawPacket(5, 200, new Move(
-                new Maths.Vec3(.8, 70.0, .5), 0f, 0f, false, 10L))),
+                new Maths.Vec3(.8, 69.92159999847412, .5), 0f, 0f, false, 10L))),
         floorWorld(), movingAnchor, 0L);
 
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
