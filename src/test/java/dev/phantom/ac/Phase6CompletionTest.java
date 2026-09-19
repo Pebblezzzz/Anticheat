@@ -369,7 +369,7 @@ class Phase6CompletionTest {
         Simulation.Environment.DRY,
         MovementEnvironment.dry(true, false, false),
         attributes, effects);
-    Context corrected = ENGINE.search(
+    Candidate corrected = ENGINE.search(
         richStart, List.of(InputConstraint.exact(STILL)),
         tick -> List.of(new WorldBranch("known", floorWorld(), true, "known floor")),
         tick -> List.of(new Phase6Reachability.TeleportCorrection(
