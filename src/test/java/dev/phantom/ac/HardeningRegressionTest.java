@@ -29,8 +29,13 @@ class HardeningRegressionTest {
     accumulator = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 1), config).state();
     accumulator = accumulator.accept(evidence(Verdict.POSSIBLE, 2), config).state();
     accumulator = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 3), config).state();
-    assertEquals(2, accumulator.players().get("player/MOVEMENT_REACHABILITY").supportingImpossible());
-    assertTrue(accumulator.accept(evidence(Verdict.IMPOSSIBLE, 4), config).alert().isPresent());
+    assertEquals(1, accumulator.players().get("player/MOVEMENT_REACHABILITY").supportingImpossible(),
+        "a POSSIBLE observation starts a new evidence episode");
+    assertTrue(accumulator.accept(evidence(Verdict.IMPOSSIBLE, 4), config).alert().isEmpty(),
+        "one impossible observation after recovery is insufficient");
+    var next = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 5), config);
+    assertTrue(next.alert().isPresent(),
+        "two consecutive impossible observations after recovery trigger the configured alert");
   }
 
   @Test void velocityPacketReplacesVelocity() {
