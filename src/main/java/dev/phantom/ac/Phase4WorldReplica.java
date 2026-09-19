@@ -412,6 +412,8 @@ public final class Phase4WorldReplica implements Serializable {
   private final List<Generation> history=new ArrayList<>();
   private final NavigableMap<Long,Event> unassigned=new TreeMap<>();
   private final Map<Short,List<Event>> pending=new LinkedHashMap<>();
+  private transient volatile WorldSnapshot.CollisionResolver collisionResolver;
+  private volatile boolean entityTrackingComplete=false;
   private final Deque<Short> sentOrder=new ArrayDeque<>();
 
   private long generationId;
@@ -426,7 +428,7 @@ public final class Phase4WorldReplica implements Serializable {
     WorldSnapshot worldSnapshot=snapshotFor(visible,lastVisibleSequence);
     Generation initial=new Generation(
         0,worldId,0,-1L,new Order(0,0,0,0),
-        worldSnapshot,new TrackedEntities(Map.of()),Map.of(),List.of());
+        worldSnapshot,new TrackedEntities(Map.of(),true),Map.of(),List.of());
     current=new AtomicReference<>(initial);
     history.add(initial);
   }
@@ -436,6 +438,30 @@ public final class Phase4WorldReplica implements Serializable {
   }
 
   public String version(){return version;}
+
+  /** Installs an optional platform-native collision resolver for live snapshots. */
+  public synchronized void setCollisionResolver(WorldSnapshot.CollisionResolver resolver){
+    this.collisionResolver=resolver;
+    VisibleState state=visible;
+    if (current.get().world()!=null) publish(state,lastVisibleSequence,List.of());
+  }
+
+  public WorldSnapshot.CollisionResolver collisionResolver(){return collisionResolver;}
+
+  /** Marks live entity reconstruction incomplete until a fresh capture is established. */
+  public synchronized void markEntityTrackingIncomplete(){
+    if(entityTrackingComplete){
+      entityTrackingComplete=false;
+      publish(visible,lastVisibleSequence,List.of());
+    }
+  }
+
+  public synchronized void markEntityTrackingComplete(){
+    if(!entityTrackingComplete){
+      entityTrackingComplete=true;
+      publish(visible,lastVisibleSequence,List.of());
+    }
+  }
   public Generation getWorldGeneration(){return current.get();}
   public WorldSnapshot getWorldState(){return current.get().world();}
   public WorldSnapshot snapshot(){return getWorldState();}
@@ -560,6 +586,7 @@ public final class Phase4WorldReplica implements Serializable {
       if(Math.abs(chunk.x()-cx)<=radiusChunks&&Math.abs(chunk.z()-cz)<=radiusChunks)selected.add(chunk);
     }
 
+    final WorldSnapshot.CollisionResolver resolver=this.collisionResolver;
     WorldSnapshot.Backend backend=new WorldSnapshot.Backend(){
       @Override public String version(){return source.version();}
       @Override public int minY(){return source.minY();}
@@ -582,6 +609,12 @@ public final class Phase4WorldReplica implements Serializable {
       @Override public BlockState blockAtOrNull(int x,int y,int z){
         Chunk chunk=Chunk.containing(x,z);
         return selected.contains(chunk)?source.blockAtOrNull(x,y,z):null;
+      }
+      @Override public java.util.Optional<VoxelShape> resolveCollisionShape(WorldSnapshot snapshot,int x,int y,int z){
+        if(resolver==null)return java.util.Optional.empty();
+        BlockState state=source.blockAtOrNull(x,y,z);
+        if(state==null)return java.util.Optional.of(VoxelShape.empty());
+        return resolver.resolve(snapshot,state,x,y,z);
       }
     };
     return WorldSnapshot.backed(source.version(),source.minY(),source.maxY(),backend);
@@ -611,6 +644,12 @@ public final class Phase4WorldReplica implements Serializable {
       accept(new ChunkData(order,provenance,x.chunk().toWorldChunk(),states));
     } else if(packet instanceof Packets.BlockChange x){
       accept(new BlockChange(order,provenance,x.position().toWorldPos(),World.legacyBlockState(x.block())));
+    } else if(packet instanceof Packets.EntitySpawn x){
+      accept(new EntitySpawn(order,provenance,new EntityCollisions.EntityBox(x.entityId(),x.box())));
+    } else if(packet instanceof Packets.EntityMove x){
+      accept(new EntityMove(order,provenance,new EntityCollisions.EntityBox(x.entityId(),x.box())));
+    } else if(packet instanceof Packets.EntityDespawn x){
+      accept(new EntityDespawn(order,provenance,x.entityId()));
     }
   }
 
@@ -723,7 +762,7 @@ public final class Phase4WorldReplica implements Serializable {
   private void publish(VisibleState state,long causalSequence,List<Event> delta){
     lastVisibleSequence=Math.max(lastVisibleSequence,causalSequence);
     WorldSnapshot worldSnapshot=snapshotFor(state,lastVisibleSequence);
-    EntityCollisions entities=new TrackedEntities(state.entities());
+    EntityCollisions entities=new TrackedEntities(state.entities(),entityTrackingComplete);
     long tick=delta.isEmpty()?current.get().serverTick():delta.getLast().order().serverTick();
     Order order=delta.isEmpty()?current.get().order():delta.getLast().order();
     Generation generation=new Generation(
@@ -737,16 +776,17 @@ public final class Phase4WorldReplica implements Serializable {
   }
 
   private WorldSnapshot snapshotFor(VisibleState state,long causalSequence){
-    WorldSnapshot.Backend backend=new PackedBackend(state.world,causalSequence);
+    WorldSnapshot.Backend backend=new PackedBackend(state.world,causalSequence,collisionResolver);
     return WorldSnapshot.backed(version,state.minY,state.maxY,backend);
   }
 
   private final class PackedBackend implements WorldSnapshot.Backend {
     private final PackedWorldData data;
     private final long causalSequence;
+    private final WorldSnapshot.CollisionResolver collisionResolver;
 
-    PackedBackend(PackedWorldData data,long causalSequence){
-      this.data=data;this.causalSequence=causalSequence;
+    PackedBackend(PackedWorldData data,long causalSequence,WorldSnapshot.CollisionResolver collisionResolver){
+      this.data=data;this.causalSequence=causalSequence;this.collisionResolver=collisionResolver;
     }
 
     @Override public String version(){return version;}
@@ -779,6 +819,13 @@ public final class Phase4WorldReplica implements Serializable {
       return state.isUnsupported()?Coverage.UNSUPPORTED:Coverage.KNOWN;
     }
 
+    @Override public java.util.Optional<VoxelShape> resolveCollisionShape(WorldSnapshot snapshot,int x,int y,int z){
+      if(collisionResolver==null)return java.util.Optional.empty();
+      BlockState state=blockAtOrNull(x,y,z);
+      if(state==null)return java.util.Optional.of(VoxelShape.empty());
+      return collisionResolver.resolve(snapshot,state,x,y,z);
+    }
+
     @Override public BlockState blockAtOrNull(int x,int y,int z){
       if(y<data.minY()||y>data.maxY())return null;
       PackedChunk chunk=data.chunks().get(Chunk.containing(x,z));
@@ -794,10 +841,14 @@ public final class Phase4WorldReplica implements Serializable {
 
   private static final class TrackedEntities implements EntityCollisions,Serializable {
     private final Map<Integer,EntityCollisions.EntityBox> entities;
+    private final boolean complete;
 
-    TrackedEntities(Map<Integer,EntityCollisions.EntityBox> entities){
+    TrackedEntities(Map<Integer,EntityCollisions.EntityBox> entities,boolean complete){
       this.entities=Map.copyOf(entities);
+      this.complete=complete;
     }
+
+    @Override public boolean complete(){return complete;}
 
     @Override public EntityCollisionResult boxesIn(BlockBox query){
       List<EntityCollisions.EntityBox> result=new ArrayList<>();
