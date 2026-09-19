@@ -52,7 +52,9 @@ public final class Vanilla12111RichPhysics {
             if(!worldCollision.isDefinite()||!entityCollision.isDefinite())return uncertain(context,"pose transition crosses incomplete collision coverage");
             if(!worldCollision.isEmpty()||!entityCollision.isEmpty())pose=context.pose();
         }
-        if(s.gamemode().equals("creative")||s.gamemode().equals("spectator"))return new StepResult(context.simulationTick(),richPlayer(s,s.position(),Vec3.ZERO,false,pose,context,false),false,false,false,false,false,false,false,"non-physical gamemode");
+        if(context.flying())return uncertain(context,"creative/flying movement model is not yet authoritative 1.21.11 physics");
+        if(s.gamemode().equals("creative")||s.gamemode().equals("spectator"))
+            return uncertain(context,"creative/spectator movement model is not yet authoritative 1.21.11 physics");
         if(!s.gamemode().equals("survival")&&!s.gamemode().equals("adventure"))return uncertain(context,"unsupported gamemode movement model");
         Aabb start=Aabb.playerAt(s.position(),pose);var startEntities=context.entityCollisions().boxesIn(new dev.phantom.ac.geometry.BlockBox(start.minX(),start.minY(),start.minZ(),start.maxX(),start.maxY(),start.maxZ()));if(!startEntities.isDefinite())return uncertain(context,"entity collision history is incomplete");
         if(context.world().hasUnknownOrUnsupported(new dev.phantom.ac.geometry.BlockBox(start.minX(),start.minY(),start.minZ(),start.maxX(),start.maxY(),start.maxZ())))return uncertain(context,"start collision volume is not fully known");
