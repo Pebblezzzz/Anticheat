@@ -91,4 +91,49 @@ class PacketReplayTest {
     assertThrows(IllegalArgumentException.class,()->new Gamemode(" "));
     assertThrows(IllegalArgumentException.class,()->new Move(null,null,null,null,-1L));
   }
+  @Test void duplicateReplayPreservesRichStateRatherThanDowngradingToLegacyFields(){
+    State.Player rich = new State.Player(
+        new Vec3(1,2,3), new Vec3(.1,.2,.3), 45f, 12f, true, "survival",
+        Map.of("minecraft:speed",1), OptionalInt.empty(), false,
+        Optional.of(new Simulation.AdvancedInput(1,-1,true,true,true)),
+        new Simulation.Attributes(0.2),
+        Phase5Mechanics.Pose.CROUCHING,
+        State.Environment.DRY,
+        State.TickRange.exact(7),
+        new State.Provenance(1,9,"Move"),
+        Set.of());
+    var event = new Timeline.Event(1,
+        new NormalizedPacket(1,100,new Move(new Vec3(1,2,3),45f,12f,true,7L),EnumSet.of(PacketFlag.NORMAL)));
+    var duplicateEvent = new Timeline.Event(1,
+        new NormalizedPacket(1,101,new Move(new Vec3(1,2,3),45f,12f,true,7L),EnumSet.of(PacketFlag.DUPLICATE)));
+    var replay = Replay.replay(rich,new Timeline.Snapshot(List.of(event,duplicateEvent)));
+    State.Player after = replay.frames().getLast().after();
+    assertEquals(rich.input(),after.input());
+    assertEquals(rich.attributes(),after.attributes());
+    assertEquals(rich.pose(),after.pose());
+    assertEquals(rich.environment(),after.environment());
+    assertEquals(rich.clientTickRange(),after.clientTickRange());
+    assertTrue(after.uncertain());
+    assertTrue(after.uncertaintyReasons().contains(State.UncertaintyReason.DUPLICATE_PACKET));
+  }
+
+  @Test void firstDivergenceIncludesRichPlayerStateFields(){
+    State.Player base = State.Player.initial(Vec3.ZERO);
+    State.Player expected = new State.Player(
+        base.position(),base.velocity(),base.yaw(),base.pitch(),base.onGround(),base.gamemode(),base.effects(),
+        base.awaitingTeleport(),false,
+        Optional.of(new Simulation.AdvancedInput(1,0,false,true,false)),
+        new Simulation.Attributes(0.2),Phase5Mechanics.Pose.CROUCHING,State.Environment.DRY,
+        State.TickRange.exact(3),new State.Provenance(3,4,"Move"),Set.of());
+    State.Player actual = new State.Player(
+        expected.position(),expected.velocity(),expected.yaw(),expected.pitch(),expected.onGround(),expected.gamemode(),
+        expected.effects(),expected.awaitingTeleport(),false,
+        Optional.of(new Simulation.AdvancedInput(0,0,false,false,false)),
+        expected.attributes(),expected.pose(),expected.environment(),expected.clientTickRange(),expected.provenance(),Set.of());
+    var event=new Timeline.Event(3,new NormalizedPacket(3,30,new Velocity(Vec3.ZERO),EnumSet.of(PacketFlag.NORMAL)));
+    var left=new Replay.Result(List.of(new Replay.Frame(0,event,base,expected)));
+    var right=new Replay.Result(List.of(new Replay.Frame(0,event,base,actual)));
+    assertEquals("input",Replay.firstDivergence(left,right).orElseThrow().field());
+  }
+
 }
