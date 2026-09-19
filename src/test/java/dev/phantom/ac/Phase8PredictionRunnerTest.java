@@ -137,7 +137,7 @@ class Phase8PredictionRunnerTest {
       catchUp.add(new RawPacket(i, 30L + i, new ClientTickEnd()));
     }
     catchUp.add(new RawPacket(13, 200, new Move(
-        new Maths.Vec3(.5, 72, .5), 25f, 12f, true, 10L)));
+        new Maths.Vec3(.5, 64, .5), 25f, 12f, true, 10L)));
 
     var report = runner.process(
         "stale-stationary", catchUp, floorWorld(), anchor(), 0L);
