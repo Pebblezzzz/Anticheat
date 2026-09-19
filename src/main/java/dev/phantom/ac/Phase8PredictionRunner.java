@@ -841,8 +841,14 @@ public final class Phase8PredictionRunner {
   private static Player predictionAnchorFromAuthority(
       Packets.PlayerContext context,
       Set<Candidate> existingPrediction) {
-    Player player = playerFromAuthority(context);
+    Player authority = playerFromAuthority(context);
     Optional<Candidate> retained = existingPrediction.stream().findFirst();
+    double horizontalX = retained.map(candidate -> candidate.context().player().velocity().x())
+        .orElse(authority.velocity().x());
+    double horizontalZ = retained.map(candidate -> candidate.context().player().velocity().z())
+        .orElse(authority.velocity().z());
+    double verticalVelocity = authority.velocity().y();
+
     Phase5Mechanics.MovementEnvironment environment = context.movementEnvironment();
     if (environment.fluid() == Fluid.NONE
         && !environment.climbable()
@@ -858,35 +864,17 @@ public final class Phase8PredictionRunner {
           context.effects().containsKey("minecraft:slow_falling")
               || context.effects().containsKey("slow_falling"));
       double gravity = Vanilla12111RichPhysics.GRAVITY * environment.gravityMultiplier();
-      double correctedY = player.velocity().y() * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG
+      verticalVelocity = verticalVelocity * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG
           - gravity * effects.fallGravityMultiplier() * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG;
-      double horizontalX = retained.map(candidate -> candidate.context().player().velocity().x())
-          .orElse(player.velocity().x());
-      double horizontalZ = retained.map(candidate -> candidate.context().player().velocity().z())
-          .orElse(player.velocity().z());
-      player = new Player(
-          player.position(),
-          new Vec3(horizontalX, correctedY, horizontalZ),
-          player.yaw(), player.pitch(), player.onGround(), player.gamemode(), player.effects(),
-          player.awaitingTeleport(), player.uncertain(), player.input(), player.attributes(),
-          player.pose(), player.environment(), player.clientTickRange(), player.provenance(),
-          player.uncertaintyReasons());
     }
-    if (retained.isPresent()) {
-      Player old = retained.get().context().player();
-      double horizontalX = old.velocity().x();
-      double horizontalZ = old.velocity().z();
-      if (player.velocity().x() != horizontalX || player.velocity().z() != horizontalZ) {
-        player = new Player(
-            player.position(),
-            new Vec3(horizontalX, player.velocity().y(), horizontalZ),
-            player.yaw(), player.pitch(), player.onGround(), player.gamemode(), player.effects(),
-            player.awaitingTeleport(), player.uncertain(), player.input(), player.attributes(),
-            player.pose(), player.environment(), player.clientTickRange(), player.provenance(),
-            player.uncertaintyReasons());
-      }
-    }
-    return player;
+
+    return new Player(
+        authority.position(),
+        new Vec3(horizontalX, verticalVelocity, horizontalZ),
+        authority.yaw(), authority.pitch(), authority.onGround(), authority.gamemode(),
+        authority.effects(), authority.awaitingTeleport(), authority.uncertain(), authority.input(),
+        authority.attributes(), authority.pose(), authority.environment(),
+        authority.clientTickRange(), authority.provenance(), authority.uncertaintyReasons());
   }
 
   private static Player playerFromAuthority(Packets.PlayerContext context) {
