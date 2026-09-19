@@ -154,7 +154,7 @@ class Phase5ParityToolTest {
       OptionalInt.empty(),
       false
     );
-    var world = World.Snapshot.emptyVisibleChunks(List.of(World.Chunk.containing(72, 0)));
+    var world = World.Snapshot.emptyVisibleChunks(List.of(World.Chunk.containing(0, 0)));
     var context = new Simulation.PhysicsContext(
       152,
       initial,
