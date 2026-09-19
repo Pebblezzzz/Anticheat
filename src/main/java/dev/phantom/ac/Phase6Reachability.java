@@ -7,6 +7,7 @@ import dev.phantom.ac.Simulation.AdvancedInput;
 import dev.phantom.ac.State.Player;
 import dev.phantom.ac.world.EntityCollisions;
 import dev.phantom.ac.world.WorldSnapshot;
+import dev.phantom.ac.world.WorldQueries;
 
 import java.io.Serializable;
 import java.util.*;
@@ -638,7 +639,7 @@ public final class Phase6Reachability {
               }
 
               generated++;
-              Aabb nextBox = Maths.Aabb.playerAt(
+              Maths.Aabb nextBox = Maths.Aabb.playerAt(
                   stepped.state().position(), stepped.state().pose());
               MovementEnvironment nextEnvironment =
                   movementEnvironmentFor(
