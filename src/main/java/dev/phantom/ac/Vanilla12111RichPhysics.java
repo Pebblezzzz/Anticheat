@@ -3,6 +3,7 @@ package dev.phantom.ac;
 import dev.phantom.ac.world.EntityCollisions;
 import dev.phantom.ac.world.WorldSnapshot;
 import dev.phantom.ac.world.BlockState;
+import dev.phantom.ac.world.Coverage;
 import dev.phantom.ac.world.v12111.BlockCatalogue12111;
 import java.io.Serializable;
 import java.util.List;
@@ -80,7 +81,7 @@ public final class Vanilla12111RichPhysics {
                 // calculation to perform, so a support block is not required here.
                 inputAcceleration=0.0;
             }else{
-                BlockState support=context.world().blockAtOrNull(
+                BlockState support=supportBlock(context.world(),
                         (int)Math.floor(s.position().x()),
                         (int)Math.floor(s.position().y()-GROUND_PROBE),
                         (int)Math.floor(s.position().z()));
@@ -129,7 +130,10 @@ public final class Vanilla12111RichPhysics {
             if(!horizontalMotion){
                 horizontalFactor=1.0;
             } else {
-                BlockState support=context.world().blockAtOrNull((int)Math.floor(s.position().x()),(int)Math.floor(s.position().y()-GROUND_PROBE),(int)Math.floor(s.position().z()));
+                BlockState support=supportBlock(context.world(),
+                        (int)Math.floor(s.position().x()),
+                        (int)Math.floor(s.position().y()-GROUND_PROBE),
+                        (int)Math.floor(s.position().z()));
                 if(support==null||support.isUnsupported())return uncertain(context,"support block is unavailable for friction calculation at "
                         + supportDiagnostic(context.world(),
                             (int)Math.floor(s.position().x()),
@@ -235,6 +239,11 @@ public final class Vanilla12111RichPhysics {
     }
 
     private Player richPlayer(Player source,Vec3 position,Vec3 velocity,boolean onGround,Phase5Mechanics.Pose pose,Context context,boolean uncertain){State.Environment environment=switch(context.environment()){case WATER->State.Environment.WATER;case LAVA->State.Environment.LAVA;case CLIMBABLE->State.Environment.CLIMBABLE;case DRY->State.Environment.DRY;case UNKNOWN->State.Environment.UNKNOWN;};return new Player(position,velocity,source.yaw(),source.pitch(),onGround,source.gamemode(),source.effects(),source.awaitingTeleport(),uncertain,Optional.of(context.input()),context.attributes(),pose,environment,source.clientTickRange(),source.provenance(),source.uncertaintyReasons());}
+    private static BlockState supportBlock(WorldSnapshot world,int x,int y,int z){
+        if(world.coverageAt(x,y,z)!=Coverage.KNOWN)return null;
+        return world.requireBlockAt(x,y,z);
+    }
+
     private static String supportDiagnostic(WorldSnapshot world,int x,int y,int z){
         return "("+x+","+y+","+z+") coverage="+world.coverageAt(x,y,z)
                 +" detail="+world.coverageDetailAt(x,y,z);
