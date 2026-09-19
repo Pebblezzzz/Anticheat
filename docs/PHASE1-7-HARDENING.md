@@ -1,19 +1,28 @@
-# Phase 1-7 internal hardening
+# Phase 1–8 internal hardening
 
-The internal gaps identified by the 2026-09-17 audit have now been addressed in code wherever no real Minecraft execution is required.
+The repository now contains the completed internal Phase 1–8 hardening path on `main`. No Phase 9+ work is part of this change.
 
 Closed internally:
 
-- Packet capture records carry immutable capture provenance and optional authoritative server-tick association; provenance survives normalization.
-- PlayerState is one immutable `State.Player` value carrying input, attributes, pose, environment, client-tick range, correction state, provenance, and structured uncertainty reasons.
-- `Simulation.Vanilla12111Physics` is only a compatibility adapter. The movement mechanics implementation is `Vanilla12111RichPhysics`.
-- Entity collision is an explicit deterministic provider; incomplete entity histories produce uncertainty, while complete recorded entity AABBs participate in axis clipping and stepping.
-- `PipelineReplay` is a single deterministic artifact that reconstructs player history, client-visible world history, timing/synchronization, simulation-input projection, and validation outputs from one capture.
-- Adversarial packet-ordering/provenance/replay/entity-collision regressions and packet/timeline benchmark coverage are committed.
+- Phase 1: canonical packet normalization, capture provenance, chronology handling, and adversarial packet-order tests.
+- Phase 2: one immutable rich `State.Player` model carrying movement, input, attributes, pose, environment, correction, client-tick, provenance, and uncertainty state.
+- Phase 3: deterministic replay that preserves rich state and reports first divergence across rich fields.
+- Phase 4: authoritative client-visible world replica with explicit known/unknown/unloaded/unsupported coverage, version-pinned 1.21.11 collision data, and explicit entity-collision completeness.
+- Phase 5: one deterministic 1.21.11 movement authority covering the represented movement modes and delegating collision to Phase 4.
+- Phase 6: deterministic reachable-state search that routes transitions through Phase 5 and never promotes an incomplete search to `IMPOSSIBLE`.
+- Phase 7: authoritative live timing reconstruction with bounded history and explicit chronology/timing uncertainty.
+- Phase 8: persistent live prediction, observation comparison, evidence accumulation, and a downstream exhaustive-evidence enforcement policy.
 
-Validation boundary:
+## Validation boundary
 
-- CI must pass against the current branch head before merge.
-- Empirical Minecraft Java Edition 1.21.11 validation remains external because the repository environment cannot launch/capture a licensed client.
-- No synthetic trace in this change is presented as vanilla evidence.
-- Phase 8 policy/enforcement is not implemented.
+`main` has green Maven and Phase 5 validation workflow runs for the Phase 1–8 hardening merge.
+
+The movement implementation is source-derived and pinned to Minecraft Java Edition 1.21.11. The repository does not claim that synthetic traces are real-client measurements. Real-client empirical conformance remains a separate evidence layer.
+
+## Enforcement defaults
+
+Setback, kick, and punishment-command actions are configurable and disabled by default. Enforcement requires exhaustive movement evidence and repeated impossible observations; incomplete timing/world/entity coverage remains uncertainty.
+
+## Scope
+
+This document and the current implementation stop at Phase 8.
