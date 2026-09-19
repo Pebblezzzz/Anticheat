@@ -563,6 +563,26 @@ public final class Phase7Timing {
     SynchronizationState sync = SynchronizationState.initial();
     List<Frame> frames = new ArrayList<>(timeline.events().size());
     List<BoundaryObservation> boundaries = new ArrayList<>();
+    long boundaryOrdinal = 0L;
+    // The complete supplied capture is the reconstruction input. Pre-collect
+    // CLIENT_TICK_END boundaries so a later boundary can constrain an earlier
+    // packet without inventing a timestamp or reordering the capture chronology.
+    for (Timeline.Event boundaryEvent : timeline.events()) {
+      if (kind(boundaryEvent.packet().packet()) != EventKind.CLIENT_TICK_END
+          || boundaryEvent.packet().flags().contains(PacketFlag.DUPLICATE)) {
+        continue;
+      }
+      boundaryOrdinal++;
+      TimingBounds boundaryBounds = timingBounds(
+          boundaryEvent.packet().packet(),
+          boundaryEvent.packet().receivedNanos(),
+          config);
+      boundaries.add(new BoundaryObservation(
+          boundaryOrdinal,
+          boundaryBounds.packetGenerationNanos(),
+          boundaryEvent.packet().sequence(),
+          boundaryEvent.serverTick()));
+    }
     OptionalLong anchorSequence = OptionalLong.empty();
     Range anchorTick = Range.empty();
     TimeRange anchorGeneration =
@@ -603,11 +623,6 @@ public final class Phase7Timing {
       boolean boundaryEvent = kind == EventKind.CLIENT_TICK_END && !duplicate;
       if (boundaryEvent) {
         clientBoundaryCount = safeAdd(clientBoundaryCount, 1);
-        boundaries.add(new BoundaryObservation(
-            clientBoundaryCount,
-            bounds.packetGenerationNanos,
-            normalized.sequence(),
-            event.serverTick()));
         TickEnvelope boundaryEnvelope = boundaryEnvelope(
             clientBoundaryCount, config.maxTimingCandidates());
         if (!anchorSet) {
@@ -778,8 +793,10 @@ public final class Phase7Timing {
 
       List<SynchronizationWindow> windows = new ArrayList<>();
       List<String> reasons = new ArrayList<>(bounds.reasons);
-      boolean uncertain = bounds.uncertain || !packetTicks.exhaustive()
-          || !simulationTicks.exhaustive() || !processingTicks.exhaustive();
+      boolean uncertain = bounds.uncertain
+          || !packetTicks.exhaustive()
+          || !simulationTicks.exhaustive()
+          || (direction == Direction.SERVER_TO_CLIENT && !processingTicks.exhaustive());
       if (packetDerivation.evidenceConflict()) {
         uncertain = true;
         if (consistency == Consistency.CONSISTENT) consistency = Consistency.UNCERTAIN;
