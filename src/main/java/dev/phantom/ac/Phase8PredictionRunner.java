@@ -1175,7 +1175,12 @@ public final class Phase8PredictionRunner {
     return validate(
         playerId, packet, move, prior, observed, world, tick, uncertainty,
         search, timingExhaustivelyModeled,
-        observedFields);
+        move.position() == null
+            ? EnumSet.of(Phase6Reachability.ObservedField.ROTATION)
+            : EnumSet.of(
+                Phase6Reachability.ObservedField.POSITION,
+                Phase6Reachability.ObservedField.ROTATION,
+                Phase6Reachability.ObservedField.GROUND));
   }
 
   private Phase8MovementValidation.Result validate(
@@ -1216,12 +1221,7 @@ public final class Phase8PredictionRunner {
         search,
         "prediction:phase8:" + playerId + ":" + packet.sequence(),
         timingExhaustivelyModeled,
-        move.position() == null
-            ? EnumSet.of(Phase6Reachability.ObservedField.ROTATION)
-            : EnumSet.of(
-                Phase6Reachability.ObservedField.POSITION,
-                Phase6Reachability.ObservedField.ROTATION,
-                Phase6Reachability.ObservedField.GROUND));
+        observedFields);
   }
 
   private Phase8MovementValidation.Result unauthorizedFlightResult(
@@ -1234,7 +1234,7 @@ public final class Phase8PredictionRunner {
     if (!"survival".equals(context.gamemode())
         && !"adventure".equals(context.gamemode())) return null;
     TickResolution tick = new TickResolution(
-        relativeClientTick < 0L ? 0L : relativeClientTick,
+        relativeClientTick,
         hasClientTickBoundary,
         hasClientTickBoundary,
         "flight-toggle-observation");
