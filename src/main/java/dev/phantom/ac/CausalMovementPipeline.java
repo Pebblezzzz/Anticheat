@@ -466,6 +466,60 @@ public final class CausalMovementPipeline {
         uncertainty.add("capture chronology is incomplete; missing or reordered packets cannot be treated as inactivity");
       }
 
+      /*
+       * When the client does not provide an explicit tick, a repeated observation
+       * is a safe zero-delta witness only when the local world volume is known.
+       * This runs after same-tick ambiguity detection so duplicated movements
+       * remain UNCERTAIN rather than being silently accepted.
+       */
+      if (!recoveryRequired
+          && movement.move().clientTick() == null
+          && Phase7Timing.Range.exact(movementTick).isExact()
+          && Phase6Reachability.positionMatches(observedBefore.position(), observedAfter.position())
+          && Float.compare(observedBefore.yaw(), observedAfter.yaw()) == 0
+          && Float.compare(observedBefore.pitch(), observedAfter.pitch()) == 0
+          && observedBefore.onGround() == observedAfter.onGround()
+          && movement.world().fullyKnown(playerCollisionBox(observedAfter))) {
+        MovementEnvironment environment = environmentFromWorld(movement.world(), observedAfter);
+        State.Environment stateEnvironment = environment.fluid() == Phase5Mechanics.Fluid.WATER
+            ? State.Environment.WATER
+            : environment.fluid() == Phase5Mechanics.Fluid.LAVA
+                ? State.Environment.LAVA
+                : environment.climbable()
+                    ? State.Environment.CLIMBABLE
+                    : State.Environment.DRY;
+        Player witnessPlayer = new Player(
+            observedAfter.position(), observedBefore.velocity(), observedAfter.yaw(), observedAfter.pitch(),
+            observedAfter.onGround(), observedBefore.gamemode(), observedBefore.effects(),
+            observedBefore.awaitingTeleport(), false, observedAfter.input(), observedBefore.attributes(),
+            observedBefore.pose(), stateEnvironment, observedAfter.clientTickRange(),
+            observedBefore.provenance(), observedBefore.uncertaintyReasons());
+        Context context = new Context(
+            movementTick, witnessPlayer, simulationEnvironmentFor(environment), witnessPlayer.attributes(),
+            movementEffects(witnessPlayer), witnessPlayer.pose(), environment,
+            witnessPlayer.pose() == Pose.SLEEPING, entityCollisionsFor(movement));
+        Candidate witness = new Candidate(
+            0, context,
+            new Phase6Reachability.Provenance(
+                0, -1, movementTick, "OBSERVED_ZERO_DELTA", "OBSERVATION", "None",
+                List.of("consecutive identical client observations require no physics displacement"),
+                1, List.of()));
+        SearchResult witnessSearch = new SearchResult(
+            Verdict.POSSIBLE, Set.of(witness), 0, 1, 0, 0, 0, 0,
+            List.of("consecutive identical client observations form a deterministic zero-delta witness"));
+        results.add(Phase8MovementValidation.validate(
+            playerId, serverTick, observedBefore, observedAfter, movement.world(),
+            worldReference, sync, assumptions, witnessSearch, replayReference, true));
+        frontier = new Frontier(Set.of(witness), movementTick, true);
+        previousPositionPacketTick = movementTick;
+        previousPositionPacketGenerationRange = eventTiming.packetGenerationClientTicks();
+        trace.add("EVIDENCE POSSIBLE reason=OBSERVED_ZERO_DELTA_WITNESS");
+        trace.add("MATCHING candidates=1 frontierTick=" + movementTick);
+        frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+            assumptions, uncertainty, trace));
+        continue;
+      }
+
       Optional<AuthoritativeSnapshot> freshLocalAuthority =
           causallyFreshLocalAuthority(movement, 1L, -1L);
       boolean localAuthoritativeRootAvailable = freshLocalAuthority.isPresent();
@@ -1859,7 +1913,12 @@ public final class CausalMovementPipeline {
     if (rootTick < 0 || target - rootTick > Phase6Reachability.MAX_HORIZON_TICKS) {
       return Optional.empty();
     }
-    MovementEnvironment movementEnvironment = movementEnvironmentOf(anchor);
+    MovementEnvironment movementEnvironment;
+    try {
+      movementEnvironment = movementEnvironmentOf(anchor);
+    } catch (IllegalStateException unknownEnvironment) {
+      return Optional.empty();
+    }
     Context context = new Context(
         rootTick,
         anchor,
