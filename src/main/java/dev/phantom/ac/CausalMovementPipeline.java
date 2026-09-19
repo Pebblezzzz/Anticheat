@@ -1939,7 +1939,7 @@ public final class CausalMovementPipeline {
       Player observed,
       AuthoritativeSnapshot authority,
       long simulationTick,
-      NavigableMap<Long, InputConstraint> inputByTick) {
+      NavigableMap<Long, List<TimedInput>> inputByTick) {
     Packets.PlayerContext context = authority.context();
     Player authoritative = playerFromAuthority(context);
     Player baseline = new Player(
@@ -1954,8 +1954,10 @@ public final class CausalMovementPipeline {
             ? authoritative.awaitingTeleport()
             : OptionalInt.empty(),
         false,
-        Optional.ofNullable(inputByTick.floorEntry(Math.max(0L, simulationTick)))
-            .map(Map.Entry::getValue)
+        Optional.ofNullable(inputForSimulationTick(
+            inputByTick,
+            Math.max(0L, simulationTick),
+            movement.event().packet().sequence()))
             .flatMap(CausalMovementPipeline::inputConstraintToAdvancedInput),
         authoritative.attributes(),
         authoritative.pose(),
