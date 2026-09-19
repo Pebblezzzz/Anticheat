@@ -687,14 +687,24 @@ public final class Phase7Timing {
         TickDerivation anchorDerivation = deriveClientTicks(
             bounds.packetGenerationNanos, explicit, boundaries, true,
             anchorGeneration, anchorTick, config);
+        TickEnvelope anchorEnvelope = anchorDerivation.envelope.known()
+            ? anchorDerivation.envelope
+            : TickEnvelope.exact(0L);
+        if (!anchorDerivation.envelope.known()) {
+          anchorDerivation = new TickDerivation(
+              anchorEnvelope,
+              TimingSource.RELATIVE_CLIENT_ANCHOR,
+              false,
+              List.of("first client event establishes relative tick zero; network time is retained separately"));
+        }
         anchorSet = true;
         anchorSequence = OptionalLong.of(normalized.sequence());
         anchorGeneration = bounds.packetGenerationNanos;
-        anchorTick = anchorDerivation.envelope.range();
+        anchorTick = anchorEnvelope.range();
         sync = new SynchronizationState(
-            anchorDerivation.envelope.isExact()
+            anchorEnvelope.isExact()
                 ? SyncStatus.SYNCHRONIZED : SyncStatus.PARTIALLY_SYNCHRONIZED,
-            anchorDerivation.envelope.range(),
+            anchorEnvelope.range(),
             latencyRange(bounds.latency),
             OptionalInt.empty(),
             1,
