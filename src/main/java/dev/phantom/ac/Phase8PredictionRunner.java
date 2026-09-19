@@ -857,15 +857,26 @@ public final class Phase8PredictionRunner {
       Set<Candidate> existingPrediction) {
     Player authority = playerFromAuthority(context);
     /*
-     * Bukkit's live velocity is the velocity attached to the captured authoritative
-     * position, i.e. the velocity used for the next movement step from that position.
-     * Do not apply gravity/drag here: doing so advances the anchor one physics tick
-     * before Phase 6/5 simulates the target tick and creates a deterministic one-tick
-     * vertical overshoot (for example -0.155232 -> -0.230527 before the first step).
+     * The live authoritative velocity is captured from the server-side movement
+     * phase. Phase 5 candidates are state boundaries after the prior client movement
+     * tick, so normal dry-air vertical velocity must be advanced through the vanilla
+     * gravity/drag transition before it becomes the candidate boundary velocity.
      */
     double horizontalX = authority.velocity().x();
     double horizontalZ = authority.velocity().z();
     double verticalVelocity = authority.velocity().y();
+    MovementEnvironment movementEnvironment = context.movementEnvironment();
+    if (!authority.onGround()
+        && movementEnvironment.fluid() == Fluid.NONE
+        && !movementEnvironment.climbable()
+        && !movementEnvironment.gliding()) {
+      MovementEffects effects = movementEffects(authority);
+      double gravity = Vanilla12111RichPhysics.GRAVITY
+          * movementEnvironment.gravityMultiplier();
+      verticalVelocity =
+          (verticalVelocity - gravity * effects.fallGravityMultiplier())
+              * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG;
+    }
 
     return new Player(
         authority.position(),
