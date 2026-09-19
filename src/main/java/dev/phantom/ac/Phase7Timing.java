@@ -1146,7 +1146,7 @@ public final class Phase7Timing {
     boolean synchronizationMakesThisEnvelopeUncertain =
         switch (synchronization.status()) {
           case AMBIGUOUS, UNKNOWN -> true;
-          case RECOVERING -> true;
+          case RECOVERING -> !timing.simulationClientTicks().isExact();
           case SYNCHRONIZED, PARTIALLY_SYNCHRONIZED -> false;
         };
     return new Phase6TimingEnvelope(
@@ -1660,7 +1660,7 @@ public final class Phase7Timing {
         timing.clientProcessingClientTickEnvelope(),
         timing.simulationClientTickEnvelope(),
         timing.inputClientTickEnvelope(),
-        timing.explicitClientTick(), timing.source(), true,
+        timing.explicitClientTick(), timing.source(), timing.uncertain(),
         timing.orderingConstraints(), timing.windows(), reasons);
   }
 
