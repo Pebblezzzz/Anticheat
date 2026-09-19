@@ -702,7 +702,16 @@ public final class Phase6Reachability {
               Set<UncertainDimension> stateUncertainty = EnumSet.noneOf(UncertainDimension.class);
               stateUncertainty.addAll(pre.uncertainty());
               if (!branch.exhaustive()) stateUncertainty.add(UncertainDimension.WORLD);
-              if (!inputs.get(offset).isExact()) stateUncertainty.add(UncertainDimension.INPUT);
+              /*
+               * An inexact InputConstraint is an uncertainty envelope over
+               * concrete AdvancedInput branches. Every emitted candidate below
+               * already carries the concrete input that was simulated, so the
+               * candidate state itself must remain deterministic. Marking every
+               * branch INPUT-uncertain poisons the next tick and converts a
+               * completely enumerated input envelope into permanent uncertainty.
+               * The envelope uncertainty remains represented by SearchResult and
+               * provenance/reasons.
+               */
               if (branchKnowledge != WorldKnowledge.KNOWN) stateUncertainty.add(UncertainDimension.WORLD);
               if (!nextEnvironmentKnown) {
                 stateUncertainty.add(UncertainDimension.WORLD);
