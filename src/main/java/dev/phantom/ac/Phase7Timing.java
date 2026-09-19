@@ -1262,26 +1262,26 @@ public final class Phase7Timing {
 
     if (explicit.isPresent()) {
       long tick = explicit.getAsLong();
-      if (!known) {
-        return new TickDerivation(
-            TickEnvelope.bounded(Range.exact(tick), config.maxTimingCandidates()),
-            TimingSource.EXPLICIT_CLIENT_TICK,
-            false,
-            List.of("capture-supplied client tick metadata exactly identifies packet-generation client tick; later simulation delay remains a separate envelope"));
+      if (known && !constrained.contains(tick)) {
+        reasons.add("capture-supplied client tick metadata supersedes stale relative chronology for this packet");
+      } else if (!known) {
+        reasons.add("capture-supplied client tick metadata establishes the packet-generation client tick");
+      } else {
+        reasons.add("capture-supplied client tick metadata exactly agrees with bounded chronology");
       }
-      if (constrained.contains(tick)) {
-        return new TickDerivation(
-            TickEnvelope.bounded(Range.exact(tick), config.maxTimingCandidates()),
-            TimingSource.EXPLICIT_CLIENT_TICK,
-            false,
-            List.of("capture-supplied client tick metadata exactly identifies packet-generation client tick and agrees with bounded chronology"));
-      }
-      Range widened = constrained.union(Range.exact(tick));
-      reasons.add("capture-supplied client tick metadata disagrees with independently derived timing; exactness is widened");
+      /*
+       * Capture-supplied clientTick is stronger discrete evidence than a broad
+       * latency-derived relative estimate. Preserve that exact witness rather
+       * than unioning it with an obsolete relative range (which could create a
+       * fake 0..900 envelope and exhaust the timing budget).
+       *
+       * Simulation delay remains separate and is applied later when building
+       * simulationClientTickEnvelope.
+       */
       return new TickDerivation(
-          TickEnvelope.bounded(widened, config.maxTimingCandidates()),
-          TimingSource.CAPTURED_TICK_WATERMARK,
-          true,
+          TickEnvelope.bounded(Range.exact(tick), config.maxTimingCandidates()),
+          TimingSource.EXPLICIT_CLIENT_TICK,
+          false,
           List.copyOf(reasons));
     }
 
