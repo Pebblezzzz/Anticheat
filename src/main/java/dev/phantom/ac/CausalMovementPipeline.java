@@ -1317,8 +1317,18 @@ public final class CausalMovementPipeline {
         unmodeledSequences.add(event.packet().sequence());
         continue;
       }
-      if (!Phase7Timing.simulationTickEnumerationComplete(eventTiming)) {
-        unmodeledSequences.add(event.packet().sequence());
+      if (!Phase7Timing.simulationTickEnumerationComplete(eventTiming)
+          || (eventTiming.simulationClientTicks().width() > 0
+              && (packet instanceof Packets.Velocity
+                  || packet instanceof Packets.Teleport
+                  || packet instanceof Packets.TeleportConfirm))) {
+        /*
+         * A non-exact external-transition timing window can place the effect on
+         * either side of the movement observation. The current full-tick causal
+         * replay cannot preserve every application order without fabricating
+         * intermediate chronology, so keep the result uncertain.
+         */
+        unmodeledExternalSequences.add(event.packet().sequence());
         continue;
       }
       List<Long> ticks = Phase7Timing.possibleSimulationTicks(eventTiming);
@@ -1640,13 +1650,6 @@ public final class CausalMovementPipeline {
       MovementEvent movement) {
     WorldSnapshot historical = history.statesAt(simulationTick);
     if (!movement.world().loadedChunks().isEmpty()) {
-      /*
-       * Prefer the historical world whenever it completely covers the causal
-       * simulation volume. When it does not, the currently supplied/live client
-       * snapshot may contain disjoint chunks that are the only known geometry
-       * for the authoritative root or observed destination. Merge those chunks
-       * without replacing conflicting historical blocks.
-       */
       Player causalRoot = movement.simulationAuthority()
           .map(snapshot -> playerFromAuthority(snapshot.context()))
           .orElse(movement.stateFrame().before());
@@ -1654,11 +1657,18 @@ public final class CausalMovementPipeline {
           historical.fullyKnown(playerCollisionBox(causalRoot));
       boolean historicalCoversObserved =
           historical.fullyKnown(playerCollisionBox(movement.stateFrame().after()));
-      if (movement.liveWorldUsed() || !historicalCoversRoot || !historicalCoversObserved) {
+
+      /*
+       * Use the historical client-visible world where it is complete. If it is
+       * missing the root or observed volume, merge the supplied/current client
+       * replica so disjoint known chunks fill the coverage hole. Overlapping
+       * disagreement is rejected by WorldSnapshot.merge().
+       */
+      if (!historicalCoversRoot || !historicalCoversObserved
+          || movement.liveWorldUsed()) {
         return WorldSnapshot.merge(historical, movement.world());
       }
     }
-    return historical;
   }
 
   private static Optional<Candidate> rootCandidateForTarget(
