@@ -401,8 +401,11 @@ public final class World {
       if (eventTiming == null) {
         continue;
       }
-      if (eventTiming.kind() == Phase7Timing.EventKind.WORLD) {
-        Phase7Timing.Range visibility = eventTiming.packetGenerationClientTicks();
+      if (eventTiming.kind() == Phase7Timing.EventKind.WORLD
+          || eventTiming.kind() == Phase7Timing.EventKind.WORLD_TRANSACTION_SEND) {
+        // Server->client packets have no client-side generation tick. Use the
+        // possible client-processing/visibility envelope reconstructed by Phase 7.
+        Phase7Timing.Range visibility = eventTiming.simulationClientTicks();
         clientTick = visibility.max();
       } else if (packet instanceof Packets.WorldTransactionSend) {
         clientTick = eventTiming.packetGenerationClientTicks().max();
