@@ -65,7 +65,11 @@ public final class Phase4WorldReplica implements Serializable {
   public WorldQueries.CollisionResult getCollisionShapes(BlockBox box){return WorldQueries.collisions(snapshot(),box);}
   public FluidState getFluidState(int x,int y,int z){return WorldQueries.fluidAt(snapshot(),x,y,z);}
   public synchronized List<Generation> generations(){return List.copyOf(history);}
-  public synchronized Optional<Generation> generationAtSequence(long sequence){Generation a=null;for(Generation g:history)if(g.sequence()<=sequence)a=g;return Optional.ofNullable(a);}
+  public synchronized Optional<Generation> generationAtSequence(long sequence){
+    Phase4WorldReplica r=new Phase4WorldReplica(version,current.get().worldId(),current.get().world().minY(),current.get().world().maxY());
+    for(Event e:journal.values()) if(e.order().sequence()<=sequence) r.accept(e);
+    return Optional.ofNullable(r.getWorldGeneration());
+  }
   public synchronized Optional<Generation> generationAt(Order point){Generation a=null;for(Generation g:history)if(g.order().compareTo(point)<=0)a=g;return Optional.ofNullable(a);}
   public synchronized WorldSnapshot snapshotAtSequence(long sequence){return generationAtSequence(sequence).map(Generation::world).orElseGet(this::snapshot);}
 
