@@ -1732,7 +1732,7 @@ public final class CausalMovementPipeline {
   }
 
   private static boolean matchesObserved(Player candidate, Player observed, Packets.Move movement) {
-    if (!Phase6Reachability.positionMatches(candidate.context().player().position(), observed.position())) return false;
+    if (!Phase6Reachability.positionMatches(candidate.position(), observed.position())) return false;
     if (Float.compare(candidate.yaw(), observed.yaw()) != 0) return false;
     if (Float.compare(candidate.pitch(), observed.pitch()) != 0) return false;
     return movement.onGround() == null || candidate.onGround() == movement.onGround();
