@@ -141,7 +141,7 @@ class CausalMovementPipelineTest {
     assertTrue(report.results().getFirst().evidence().matchingCandidateCount() > 0,
         report.results().toString());
     assertTrue(report.frames().getFirst().trace().stream()
-        .anyMatch(line -> line.contains("zero-delta witness")),
+        .anyMatch(line -> line.contains("ZERO_DELTA_WITNESS")),
         report.frames().getFirst().trace().toString());
   }
 
