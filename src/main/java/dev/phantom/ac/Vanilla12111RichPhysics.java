@@ -15,7 +15,8 @@ import static dev.phantom.ac.State.Player;
 public final class Vanilla12111RichPhysics {
     public static final String VERSION = "1.21.11";
     public static final double
-        GRAVITY=(double)(float)0.08, AIR_DRAG=(double)(float)0.91,
+        GRAVITY=(double)(float)0.08, AIR_DRAG=(double)(float)0.91, AIR_HORIZONTAL_FRICTION=(double)(float)0.91,
+        WALK_ACCEL=(double)(float)0.98,
         AIR_VERTICAL_DRAG=(double)(float)0.98, AIR_ACCEL=(double)(float)0.02,
         SPRINT_AIR_ACCEL=(double)(float)0.025999999, GROUND_FRICTION=(double)(float)0.546,
         JUMP=(double)(float)0.42, STEP_HEIGHT=(double)(float)0.6,
