@@ -28,8 +28,12 @@ public final class RichWorldCollision {
     List<EntityCollisions.EntityBox> entityBoxes=entityResult.boxes();
 
     AxisResult vertical=clipAxis(world,startBox,Axis.Y,requested.y(),entityBoxes);BlockBox afterY=startBox.move(0,vertical.amount(),0);
-    AxisResult horizontalX=clipAxis(world,afterY,Axis.X,requested.x(),entityBoxes);BlockBox afterX=afterY.move(horizontalX.amount(),0,0);
-    AxisResult horizontalZ=clipAxis(world,afterX,Axis.Z,requested.z(),entityBoxes);
+    boolean xFirst=Math.abs(requested.x())>=Math.abs(requested.z());
+    AxisResult first=xFirst?clipAxis(world,afterY,Axis.X,requested.x(),entityBoxes):clipAxis(world,afterY,Axis.Z,requested.z(),entityBoxes);
+    BlockBox afterFirst=xFirst?afterY.move(first.amount(),0,0):afterY.move(0,0,first.amount());
+    AxisResult second=xFirst?clipAxis(world,afterFirst,Axis.Z,requested.z(),entityBoxes):clipAxis(world,afterFirst,Axis.X,requested.x(),entityBoxes);
+    AxisResult horizontalX=xFirst?first:second;
+    AxisResult horizontalZ=xFirst?second:first;
     Vec3 direct=new Vec3(horizontalX.amount(),vertical.amount(),horizontalZ.amount());boolean collided=vertical.collided()||horizontalX.collided()||horizontalZ.collided();
     if(stepHeight<=0||requested.y()>0||!(horizontalX.collided()||horizontalZ.collided()))return new Result(direct,horizontalX.collided(),vertical.collided(),horizontalZ.collided(),false,false,false,collided?"rich voxel/entity collision":"rich voxel/entity movement");
 
