@@ -562,7 +562,7 @@ class Phase8PredictionRunnerTest {
         new Phase7Timing.LatencyBounds(0, 0),
         new Phase7Timing.TickDelayBounds(0, 0),
         new Phase7Timing.TickDelayBounds(0, 0),
-        250_000_000L, 3, 128);
+        10_000_000L, 3, 128);
 
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
     var report = runner.process(
