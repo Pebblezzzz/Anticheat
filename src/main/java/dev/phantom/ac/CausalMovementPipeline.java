@@ -586,6 +586,9 @@ public final class CausalMovementPipeline {
           earlyAuthorityWitness.isPresent()
               ? earlyAuthorityWitness
               : frontierObservationWitness(frontier, movement, movementTick);
+      if (earlyFrontierWitness.isEmpty()) {
+        earlyFrontierWitness = initialAnchorObservationWitness(initialAnchor, movement, movementTick);
+      }
       if (!recoveryRequired && earlyFrontierWitness.isPresent()) {
         Candidate witness = earlyFrontierWitness.get();
         SearchResult witnessSearch = new SearchResult(
@@ -822,6 +825,7 @@ public final class CausalMovementPipeline {
           kinematicReference = rootCandidate(initialAnchor, movement, maximumCandidates, true);
         }
         if (kinematicReference.isPresent()
+            && movement.world().fullyKnown(playerCollisionBox(kinematicReference.get().context().player()))
             && exceedsConservativeKinematicBound(kinematicReference.get(), observedAfter, movementTick)) {
           Candidate reference = kinematicReference.get();
           SearchResult impossible = new SearchResult(
@@ -2237,6 +2241,62 @@ public final class CausalMovementPipeline {
       if (timeline.events().get(i).packet().packet().mutatesWorld()) return true;
     }
     return false;
+  }
+
+  private static Optional<Candidate> initialAnchorObservationWitness(
+      Player initialAnchor,
+      MovementEvent movement,
+      long simulationTick) {
+    if (initialAnchor == null || initialAnchor.uncertain() || simulationTick < 0) return Optional.empty();
+    if (!movement.world().fullyKnown(playerCollisionBox(initialAnchor))) return Optional.empty();
+    Player observed = movement.stateFrame().after();
+    if (!Phase6Reachability.positionMatches(initialAnchor.position(), observed.position())) return Optional.empty();
+    if (initialAnchor.onGround() != observed.onGround()) return Optional.empty();
+    if (movement.move().onGround() != null && initialAnchor.onGround() != movement.move().onGround()) return Optional.empty();
+    float yaw = movement.move().yaw() == null ? observed.yaw() : movement.move().yaw();
+    float pitch = movement.move().pitch() == null ? observed.pitch() : movement.move().pitch();
+    Player witnessPlayer = new Player(
+        observed.position(),
+        initialAnchor.velocity(),
+        yaw,
+        pitch,
+        observed.onGround(),
+        initialAnchor.gamemode(),
+        initialAnchor.effects(),
+        initialAnchor.awaitingTeleport(),
+        false,
+        observed.input(),
+        initialAnchor.attributes(),
+        initialAnchor.pose(),
+        initialAnchor.environment(),
+        observed.clientTickRange(),
+        initialAnchor.provenance(),
+        initialAnchor.uncertaintyReasons());
+    MovementEnvironment environment = movementEnvironmentOf(witnessPlayer);
+    Context context = new Context(
+        simulationTick,
+        witnessPlayer,
+        simulationEnvironmentFor(environment),
+        witnessPlayer.attributes(),
+        movementEffects(witnessPlayer),
+        witnessPlayer.pose(),
+        environment,
+        witnessPlayer.pose() == Pose.SLEEPING,
+        entityCollisionsFor(movement));
+    return Optional.of(new Candidate(
+        0,
+        context,
+        new Phase6Reachability.Provenance(
+            0,
+            0,
+            simulationTick,
+            "INITIAL_ANCHOR_ZERO_DELTA",
+            "ANCHOR",
+            "None",
+            List.of("observed position matches the explicit initial authoritative anchor; no physics replay required"),
+            1,
+            List.of(),
+            List.of())));
   }
 
   private static Optional<Candidate> frontierObservationWitness(
