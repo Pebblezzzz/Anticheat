@@ -98,7 +98,9 @@ public final class Vanilla12111RichPhysics {
             grounded=probe.collidedY();
         }
         Vec3 nextPosition=source.position().add(displacement);
-        Vec3 nextVelocity=postMoveVelocity(velocity,context,grounded,collision,nextPosition);
+        Vec3 nextVelocity;
+        try { nextVelocity=postMoveVelocity(velocity,context,grounded,collision,nextPosition); }
+        catch (IncompleteSupportException missing) { return uncertain(context,missing.getMessage()); }
         Phase5Mechanics.Pose nextPose=Phase5Mechanics.nextPose(pose,context.movementEnvironment(),context.sleeping());
         Player next=richPlayer(source,source.position().add(displacement),nextVelocity,grounded,nextPose,context,false);
         String diagnostic=collision.diagnostic()+"; mode="+movementMode(context,source)+"; jumped="+jumped+"; version="+VERSION;
