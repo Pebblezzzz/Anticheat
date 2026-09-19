@@ -44,12 +44,19 @@ public final class CausalMovementPipeline {
       long sequence,
       long receivedNanos,
       long serverTick,
-      Packets.PlayerContext context) {
+      Packets.PlayerContext context,
+      Long clientTick) {
     public AuthoritativeSnapshot {
       if (sequence < 0 || receivedNanos < 0 || serverTick < 0) {
         throw new IllegalArgumentException("invalid authoritative snapshot provenance");
       }
+      if (clientTick != null && clientTick < 0) {
+        throw new IllegalArgumentException("authoritative client tick must be non-negative");
+      }
       Objects.requireNonNull(context);
+    }
+    public AuthoritativeSnapshot(long sequence,long receivedNanos,long serverTick,Packets.PlayerContext context) {
+      this(sequence,receivedNanos,serverTick,context,null);
     }
   }
 
@@ -214,9 +221,9 @@ public final class CausalMovementPipeline {
       Optional<AuthoritativeSnapshot> simulationAuthority =
           selectSimulationAuthority(
               event,
+              eventTiming,
               authorities,
-              initialAnchor,
-              initialAnchorReceivedNanos);
+              initialAnchor);
       /*
        * The compact live replica is safe only when its acknowledgement boundary
        * is no later than this movement and no later world mutation is retained
@@ -275,6 +282,8 @@ public final class CausalMovementPipeline {
           + " serverTick=" + serverTick
           + (movement.authority().snapshot().isPresent()
               ? " snapshotSeq=" + movement.authority().snapshot().get().sequence()
+                + " clientTick=" + (movement.authority().snapshot().get().clientTick() == null
+                    ? "unknown" : movement.authority().snapshot().get().clientTick())
               : ""));
       trace.add("WORLD source=" + (movement.liveWorldUsed() ? "acknowledged-live" : "timeline")
           + " chunks=" + movement.world().loadedChunks().size());
@@ -283,6 +292,7 @@ public final class CausalMovementPipeline {
         Packets.PlayerContext context = snapshot.context();
         trace.add("SIMULATION_AUTHORITY seq=" + snapshot.sequence()
             + " serverTick=" + snapshot.serverTick()
+            + " clientTick=" + (snapshot.clientTick() == null ? "unknown" : snapshot.clientTick())
             + " receivedNanos=" + snapshot.receivedNanos()
             + " pos=" + context.serverPosition()
             + " vel=" + context.serverVelocity()
@@ -510,6 +520,16 @@ public final class CausalMovementPipeline {
       if (preferLocalAuthoritativeRoot && initialAnchorFarFromObservation) {
         trace.add("ROOT_REFRESH reason=INITIAL_ANCHOR_FAR_FROM_OBSERVED distance="
             +String.format(Locale.ROOT,"%.3f",distance(initialAnchor.position(),observedAfter.position())));
+      }
+
+      if (!frontier.candidates().isEmpty()
+          && (movement.move().yaw() != null || movement.move().pitch() != null)) {
+        frontier = new Frontier(
+            retargetRotation(frontier.candidates(), movement.move(), maximumCandidates),
+            frontier.lastMovementTick(),
+            frontier.anchored());
+        trace.add("ROTATION_INPUT applied packet yaw/pitch before physics simulation");
+        assumptions.add("position-bearing movement rotation is applied before the physics step");
       }
 
       /*
@@ -1117,7 +1137,8 @@ public final class CausalMovementPipeline {
             event.packet().sequence(),
             event.packet().receivedNanos(),
             event.serverTick(),
-            context));
+            context,
+            event.packet().provenance().authoritativeClientTick()));
       }
     }
     snapshots.sort(Comparator.comparingLong(AuthoritativeSnapshot::receivedNanos)
@@ -1353,14 +1374,22 @@ public final class CausalMovementPipeline {
         reasons.add("authoritative local root could not be represented for client simulation tick " + target);
         continue;
       }
-      Advance one = advanceTo(
-          Set.of(root.get()),
-          target,
-          inputs,
-          external,
-          worldHistory,
-          movement,
-          maximumCandidates);
+      Advance one;
+      if (root.get().context().simulationTick() + 1L == target) {
+        one = advanceTo(
+            Set.of(root.get()),
+            target,
+            inputs,
+            external,
+            worldHistory,
+            movement,
+            maximumCandidates);
+      } else {
+        one = new Advance(
+            Set.of(),
+            List.of("client-tick timing offset requires intermediate rotation chronology that is not retained"),
+            false);
+      }
       if (!one.exhaustive()) exhaustive = false;
       union.addAll(one.candidates());
       reasons.addAll(one.reasons());
@@ -1559,8 +1588,12 @@ public final class CausalMovementPipeline {
     AuthoritativeSnapshot snapshot = movement.simulationAuthority().orElseThrow();
     Player authoritative = playerFromAuthority(snapshot.context());
     Player observedBefore = movement.stateFrame().before();
-    Player anchor = withClientRotation(authoritative, observedBefore.yaw(), observedBefore.pitch());
-    long rootTick = Math.max(0L, target + (snapshot.serverTick() - movement.event().serverTick()));
+    float yaw = movement.move().yaw() == null ? observedBefore.yaw() : movement.move().yaw();
+    float pitch = movement.move().pitch() == null ? observedBefore.pitch() : movement.move().pitch();
+    Player anchor = withClientRotation(authoritative, yaw, pitch);
+    long rootTick = snapshot.clientTick() != null
+        ? Math.max(0L, snapshot.clientTick() - 1L)
+        : Math.max(0L, target + (snapshot.serverTick() - movement.event().serverTick()));
     if (rootTick < 0 || target - rootTick > Phase6Reachability.MAX_HORIZON_TICKS) {
       return Optional.empty();
     }
@@ -1607,7 +1640,12 @@ public final class CausalMovementPipeline {
         .filter(snapshot -> snapshot.sequence() < movement.event().packet().sequence())
         .filter(snapshot -> snapshot.receivedNanos() <= movement.event().packet().receivedNanos())
         .filter(snapshot -> snapshot.serverTick() <= movement.event().serverTick())
-        .filter(snapshot -> movement.event().serverTick() - snapshot.serverTick() <= maxServerTickAge);
+        .filter(snapshot -> movement.event().serverTick() - snapshot.serverTick() <= maxServerTickAge)
+        .filter(snapshot -> {
+          Long clientTick = movement.move().clientTick();
+          return clientTick == null
+              || (snapshot.clientTick() != null && snapshot.clientTick().longValue() == clientTick.longValue());
+        });
   }
 
   /**
@@ -1621,47 +1659,75 @@ public final class CausalMovementPipeline {
    */
   private static Optional<AuthoritativeSnapshot> selectSimulationAuthority(
       Timeline.Event movement,
+      Phase7Timing.EventTiming eventTiming,
       List<AuthoritativeSnapshot> authorities,
-      Player initialAnchor,
-      long initialAnchorReceivedNanos) {
+      Player initialAnchor) {
     long sequence = movement.packet().sequence();
     long received = movement.packet().receivedNanos();
-    long serverTick = movement.serverTick();
+
+    /*
+     * Explicit client ticks are the strongest chronology signal available. A
+     * PlayerContext is a valid physics root only when it carries the same
+     * capture-local client-tick watermark and was captured before the movement.
+     * A server-tick match without the client watermark is not sufficient.
+     */
+    if (movement.packet().packet() instanceof Packets.Move move && move.clientTick() != null) {
+      long target = move.clientTick();
+      return authorities.stream()
+          .filter(snapshot -> snapshot.sequence() < sequence)
+          .filter(snapshot -> snapshot.receivedNanos() <= received)
+          .filter(snapshot -> snapshot.clientTick() != null)
+          .filter(snapshot -> snapshot.clientTick() == target)
+          .filter(snapshot -> !isPlaceholderAuthority(snapshot, initialAnchor))
+          .max(Comparator.comparingLong(AuthoritativeSnapshot::receivedNanos)
+              .thenComparingLong(AuthoritativeSnapshot::sequence));
+    }
+
+    /*
+     * For bounded timing, an annotated authority at the lower client-tick bound
+     * is a sound earliest root; later offsets are replayed forward from it.
+     */
+    Phase7Timing.Range targetRange = eventTiming.simulationClientTicks();
+    Optional<AuthoritativeSnapshot> annotated = authorities.stream()
+        .filter(snapshot -> snapshot.sequence() < sequence)
+        .filter(snapshot -> snapshot.receivedNanos() <= received)
+        .filter(snapshot -> snapshot.clientTick() != null)
+        .filter(snapshot -> snapshot.clientTick() == targetRange.min())
+        .filter(snapshot -> !isPlaceholderAuthority(snapshot, initialAnchor))
+        .max(Comparator.comparingLong(AuthoritativeSnapshot::receivedNanos)
+            .thenComparingLong(AuthoritativeSnapshot::sequence));
+    if (annotated.isPresent()) return annotated;
+
+    /*
+     * Legacy/historical captures without explicit client ticks may still use a
+     * strictly preceding server-tick snapshot. This fallback is never used for
+     * explicit client-tick movement, where the adapter can provide stronger
+     * chronology.
+     */
+    if (movement.packet().packet() instanceof Packets.Move move && move.clientTick() != null) {
+      return Optional.empty();
+    }
 
     Optional<AuthoritativeSnapshot> previous = authorities.stream()
         .filter(snapshot -> snapshot.sequence() < sequence)
         .filter(snapshot -> snapshot.receivedNanos() <= received)
-        .filter(snapshot -> snapshot.serverTick() < serverTick)
-        .filter(snapshot -> serverTick - snapshot.serverTick() <= 1L)
+        .filter(snapshot -> snapshot.serverTick() < movement.serverTick())
+        .filter(snapshot -> movement.serverTick() - snapshot.serverTick() <= 1L)
         .filter(snapshot -> !isPlaceholderAuthority(snapshot, initialAnchor))
+        .filter(snapshot -> snapshot.clientTick() == null)
         .max(Comparator.comparingLong(AuthoritativeSnapshot::serverTick)
             .thenComparingLong(AuthoritativeSnapshot::receivedNanos)
             .thenComparingLong(AuthoritativeSnapshot::sequence));
     if (previous.isPresent()) return previous;
 
-    /*
-     * Backward compatibility for very early captures that have exactly one
-     * same-tick authoritative sample and no preceding per-tick sample. This can
-     * still establish a first root, but it is never preferred once a preceding
-     * server-tick snapshot exists.
-     */
-    Optional<AuthoritativeSnapshot> sameTick = authorities.stream()
+    return authorities.stream()
         .filter(snapshot -> snapshot.sequence() < sequence)
         .filter(snapshot -> snapshot.receivedNanos() <= received)
-        .filter(snapshot -> snapshot.serverTick() == serverTick)
+        .filter(snapshot -> snapshot.serverTick() == movement.serverTick())
         .filter(snapshot -> !isPlaceholderAuthority(snapshot, initialAnchor))
+        .filter(snapshot -> snapshot.clientTick() == null)
         .max(Comparator.comparingLong(AuthoritativeSnapshot::receivedNanos)
             .thenComparingLong(AuthoritativeSnapshot::sequence));
-    if (sameTick.isPresent()) return sameTick;
-
-    /*
-     * If no timestamped authoritative context is available, the caller may
-     * still use the immutable initial anchor as a plain replay root. Do not
-     * expose it as a simulation authority: that would make an offline anchor
-     * indistinguishable from a live server snapshot and could bypass world
-     * coverage uncertainty.
-     */
-    return Optional.empty();
   }
 
   private static boolean isPlaceholderAuthority(
@@ -1751,11 +1817,14 @@ public final class CausalMovementPipeline {
       AuthoritativeSnapshot snapshot = simulationAuthority.orElseThrow();
       Player authoritative = playerFromAuthority(snapshot.context());
       Player observedBefore = movement.stateFrame().before();
-      // PlayerContext has no server yaw/pitch. Rotation is a client-controlled
-      // movement input, so retain the immediately preceding client orientation
-      // while taking position/velocity/ground/context exclusively from authority.
-      anchor = withClientRotation(authoritative, observedBefore.yaw(), observedBefore.pitch());
-      rootTick = Math.max(0L, target - 1L);
+      // PlayerContext has no server yaw/pitch. For a position-bearing movement,
+      // the movement packet's rotation is the client orientation used by the tick.
+      float yaw = movement.move().yaw() == null ? observedBefore.yaw() : movement.move().yaw();
+      float pitch = movement.move().pitch() == null ? observedBefore.pitch() : movement.move().pitch();
+      anchor = withClientRotation(authoritative, yaw, pitch);
+      rootTick = snapshot.clientTick() != null
+          ? Math.max(0L, snapshot.clientTick() - 1L)
+          : Math.max(0L, target - 1L);
     }
 
     if (target < rootTick || target - rootTick > Phase6Reachability.MAX_HORIZON_TICKS) {

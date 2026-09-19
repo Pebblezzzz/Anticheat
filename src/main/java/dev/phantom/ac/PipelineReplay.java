@@ -8,7 +8,7 @@ import java.util.*;
 public record PipelineReplay(String schemaVersion,Timeline.Snapshot timeline,State.Seed seed,Phase7Timing.Config timingConfig,int maximumCandidates) implements Serializable {
   public static final String SCHEMA_VERSION="pipeline-replay-v1";
   private static final int MAGIC=0x50315250;
-  private static final short FORMAT_VERSION=1;
+  private static final short FORMAT_VERSION=2;
 
   public PipelineReplay {
     if(!SCHEMA_VERSION.equals(schemaVersion))throw new IllegalArgumentException("unsupported pipeline replay schema");
@@ -37,7 +37,7 @@ public record PipelineReplay(String schemaVersion,Timeline.Snapshot timeline,Sta
       out.writeInt(timeline.events().size());
       for(Timeline.Event event:timeline.events()){
         Packets.CaptureProvenance p=event.packet().provenance();
-        out.writeLong(event.packet().sequence());writeString(out,p.sourceId());writeString(out,p.direction());writeString(out,p.packetType());out.writeBoolean(p.authoritativeServerTick()!=null);if(p.authoritativeServerTick()!=null)out.writeLong(p.authoritativeServerTick());
+        out.writeLong(event.packet().sequence());writeString(out,p.sourceId());writeString(out,p.direction());writeString(out,p.packetType());out.writeBoolean(p.authoritativeServerTick()!=null);if(p.authoritativeServerTick()!=null)out.writeLong(p.authoritativeServerTick());out.writeBoolean(p.authoritativeClientTick()!=null);if(p.authoritativeClientTick()!=null)out.writeLong(p.authoritativeClientTick());
       }
       writePlayer(out,seed.player());
       List<State.Fact> facts=new ArrayList<>(seed.known());facts.sort(Comparator.comparing(State.Fact::name));out.writeInt(facts.size());for(State.Fact fact:facts)writeString(out,fact.name());
@@ -48,12 +48,12 @@ public record PipelineReplay(String schemaVersion,Timeline.Snapshot timeline,Sta
   public static PipelineReplay decode(byte[] bytes){
     Objects.requireNonNull(bytes);
     try(var in=new DataInputStream(new ByteArrayInputStream(bytes))){
-      if(in.readInt()!=MAGIC||in.readUnsignedShort()!=FORMAT_VERSION)throw new IllegalArgumentException("unsupported pipeline replay format");
+      if(in.readInt()!=MAGIC)throw new IllegalArgumentException("unsupported pipeline replay format");int formatVersion=in.readUnsignedShort();if(formatVersion<1||formatVersion>FORMAT_VERSION)throw new IllegalArgumentException("unsupported pipeline replay format");
       int len=in.readInt();if(len<0||len>64*1024*1024)throw new IllegalArgumentException("invalid timeline payload length");byte[] timelineBytes=in.readNBytes(len);if(timelineBytes.length!=len)throw new EOFException("truncated timeline payload");
       Timeline.Snapshot base=new Timeline.Codec().decode(timelineBytes);
       int provenanceCount=in.readInt();if(provenanceCount<0||provenanceCount!=base.events().size())throw new IllegalArgumentException("provenance table length does not match timeline");
       Map<Long,Packets.CaptureProvenance> provenance=new HashMap<>();
-      for(int i=0;i<provenanceCount;i++){long seq=in.readLong();String source=readString(in),direction=readString(in),packetType=readString(in);Long authoritative=in.readBoolean()?in.readLong():null;if(provenance.put(seq,new Packets.CaptureProvenance(source,direction,packetType,authoritative))!=null)throw new IllegalArgumentException("duplicate provenance sequence "+seq);}
+      for(int i=0;i<provenanceCount;i++){long seq=in.readLong();String source=readString(in),direction=readString(in),packetType=readString(in);Long authoritative=in.readBoolean()?in.readLong():null;Long clientTick=formatVersion>=2&&in.readBoolean()?in.readLong():null;if(provenance.put(seq,new Packets.CaptureProvenance(source,direction,packetType,authoritative,clientTick))!=null)throw new IllegalArgumentException("duplicate provenance sequence "+seq);}
       List<Timeline.Event> events=new ArrayList<>(base.events().size());
       for(Timeline.Event event:base.events()){
         Packets.CaptureProvenance p=provenance.get(event.packet().sequence());if(p==null)throw new IllegalArgumentException("missing provenance for sequence "+event.packet().sequence());

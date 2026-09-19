@@ -48,6 +48,55 @@ class CausalMovementPipelineTest {
   }
 
   @Test
+  void positionMovementUsesPacketRotationBeforePhysicsAndMatching() {
+    Packets.PlayerContext auth = authority();
+    Packets.CaptureProvenance provenance =
+        Packets.CaptureProvenance.fromAdapter("test-authority", auth, 0L, 1L);
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 0, auth, provenance),
+        new RawPacket(2, 10, new Packets.ClientTickEnd()),
+        new RawPacket(3, 20, new Move(new Maths.Vec3(.5, 64, .5), 90f, 0f, true, 1L)));
+
+    var report = CausalMovementPipeline.analyze(
+        "rotation-before-physics",
+        Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L),
+        4096,
+        exactTiming(),
+        floorWorld(),
+        anchor(),
+        0L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(Verdict.POSSIBLE, report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("ROTATION_INPUT applied packet yaw/pitch")),
+        report.frames().getFirst().trace().toString());
+  }
+
+  @Test
+  void explicitMovementRefusesUnwatermarkedAuthorityRoot() {
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 0, authority()),
+        new RawPacket(2, 10, new Move(new Maths.Vec3(.5, 64, .5), 90f, 0f, true, 1L)));
+
+    var report = CausalMovementPipeline.analyze(
+        "unwatermarked-authority",
+        Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L),
+        4096,
+        exactTiming(),
+        floorWorld(),
+        null,
+        0L);
+
+    assertEquals(Verdict.UNCERTAIN, report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(report.results().getFirst().evidence().uncertaintySources().stream()
+        .anyMatch(reason -> reason.contains("authoritative") || reason.contains("anchor")),
+        report.results().getFirst().evidence().uncertaintySources().toString());
+  }
+
+  @Test
   void phantomCanProduceImpossibleWithoutPaperRejectingTheMovement() {
     List<RawPacket> packets = List.of(
         new RawPacket(1, 0, new ChunkStates(

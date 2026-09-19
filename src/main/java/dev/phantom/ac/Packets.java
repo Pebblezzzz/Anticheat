@@ -72,15 +72,21 @@ public final class Packets {
   public record ChunkUnload(World.Chunk chunk) implements Packet { public ChunkUnload { Objects.requireNonNull(chunk,"chunk"); } }
 
   /** Capture-side provenance. A missing protocol sequence is explicit rather than silently invented. */
-  public record CaptureProvenance(String sourceId,String direction,String packetType,Long authoritativeServerTick) implements Serializable {
+  public record CaptureProvenance(String sourceId,String direction,String packetType,
+                                      Long authoritativeServerTick,Long authoritativeClientTick) implements Serializable {
     public CaptureProvenance {
       if(sourceId==null||sourceId.isBlank()) throw new IllegalArgumentException("sourceId is required");
       if(direction==null||direction.isBlank()) throw new IllegalArgumentException("direction is required");
       if(packetType==null||packetType.isBlank()) throw new IllegalArgumentException("packetType is required");
       if(authoritativeServerTick!=null&&authoritativeServerTick<0) throw new IllegalArgumentException("authoritativeServerTick must be non-negative");
+      if(authoritativeClientTick!=null&&authoritativeClientTick<0) throw new IllegalArgumentException("authoritativeClientTick must be non-negative");
     }
-    public static CaptureProvenance forPacket(Packet packet){Objects.requireNonNull(packet);return new CaptureProvenance("unknown-capture-source",directionFor(packet),packet.getClass().getSimpleName(),null);}
-    public static CaptureProvenance fromAdapter(String sourceId,Packet packet,Long authoritativeServerTick){Objects.requireNonNull(packet);return new CaptureProvenance(sourceId,directionFor(packet),packet.getClass().getSimpleName(),authoritativeServerTick);}
+    public CaptureProvenance(String sourceId,String direction,String packetType,Long authoritativeServerTick){
+      this(sourceId,direction,packetType,authoritativeServerTick,null);
+    }
+    public static CaptureProvenance forPacket(Packet packet){Objects.requireNonNull(packet);return new CaptureProvenance("unknown-capture-source",directionFor(packet),packet.getClass().getSimpleName(),null,null);}
+    public static CaptureProvenance fromAdapter(String sourceId,Packet packet,Long authoritativeServerTick){Objects.requireNonNull(packet);return new CaptureProvenance(sourceId,directionFor(packet),packet.getClass().getSimpleName(),authoritativeServerTick,null);}
+    public static CaptureProvenance fromAdapter(String sourceId,Packet packet,Long authoritativeServerTick,Long authoritativeClientTick){Objects.requireNonNull(packet);return new CaptureProvenance(sourceId,directionFor(packet),packet.getClass().getSimpleName(),authoritativeServerTick,authoritativeClientTick);}
     public static String directionFor(Packet packet){
       if(packet instanceof Move||packet instanceof ClientInput||packet instanceof ClientTickEnd||packet instanceof TeleportConfirm||packet instanceof WorldTransactionAck||packet instanceof FlightToggle)return "CLIENT_TO_SERVER";
       if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof Effect||packet instanceof Gamemode||packet instanceof PlayerContext||packet instanceof WorldTransactionSend||packet.mutatesWorld())return "SERVER_TO_CLIENT";

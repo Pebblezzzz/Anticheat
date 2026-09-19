@@ -559,6 +559,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       Player player=getServer().getPlayer(capture.playerId);
       if(player==null)continue;
       long authoritativeTick=capture.authoritativeServerTick.incrementAndGet();
+      Long authoritativeClientTick=capture.clientTickTracker.hasObservedBoundary()
+          ?capture.clientTickTracker.clientTickForMovement():null;
       capture.updateServerPosition(player);
       if(capture.clientWorld.hasUnassignedMutations())requestWorldBarrier(player,capture);
       capture.lastAuthoritativePosition=new Vec3(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ());
@@ -639,7 +641,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
       long contextReceivedNanos=System.nanoTime();
       appendPacket(capture,new RawPacket(capture.sequence.incrementAndGet(),contextReceivedNanos,context,
-          Packets.CaptureProvenance.fromAdapter("paper-live",context,authoritativeTick)));
+          Packets.CaptureProvenance.fromAdapter("paper-live",context,authoritativeTick,authoritativeClientTick)));
     }
   }
 
@@ -867,7 +869,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         +",tick="+candidate.simulationTick()
         +",pos="+candidate.position()
         +",vel="+candidate.velocity()
-        +",ground="+candidate.onGround()).orElse("none");
+        +",ground="+candidate.onGround()
+        +",yaw="+candidate.yaw()
+        +",pitch="+candidate.pitch()).orElse("none");
 
     getLogger().info("[PhantomAC][PHASE8][SUMMARY] player="+playerName
         +" verdict="+latest.verdict()
