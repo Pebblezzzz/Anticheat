@@ -491,7 +491,7 @@ class Phase8AdversarialMatrixTest {
             List.of(
                 new RawPacket(1, 0L, new Move(new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 0L)),
                 new RawPacket(2, 50_000_000L, new Move(new Maths.Vec3(.7, 64, .5), 0f, 0f, true, 1L)),
-                new RawPacket(2, 50_000_001L, new Move(new Maths.Vec3(.7, 64, .5), 0f, 0f, true, 1L))));
+                new RawPacket(2, 50_000_001L, new Move(new Maths.Vec3(.7, 64, .5), 0f, 0f, true, 1L)))));
 
     return cases.stream().map(testCase -> dynamic(
         "timing-" + testCase.name(),
