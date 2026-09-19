@@ -210,9 +210,11 @@ public final class Phase6Reachability {
       WorldKnowledge worldKnowledge,
       MovementMode movementMode,
       String inputAssumption,
-      List<String> transitionDiagnostics) implements Serializable {
+      List<String> transitionDiagnostics,
+      long entityCollisionReference) implements Serializable {
     public Candidate {
       if (id < 0) throw new IllegalArgumentException("candidate id must be non-negative");
+      if (entityCollisionReference < 0) throw new IllegalArgumentException("entityCollisionReference must be non-negative");
       Objects.requireNonNull(context);
       Objects.requireNonNull(provenance);
       if (serverTickAssociation != null && serverTickAssociation < 0) {
@@ -228,7 +230,7 @@ public final class Phase6Reachability {
     public Candidate(long id, Context context, Provenance provenance) {
       this(id, context, provenance, null, "unspecified",
           provenance.worldBranch(), WorldKnowledge.KNOWN,
-          movementModeFor(context), provenance.input(), provenance.causes());
+          movementModeFor(context), provenance.input(), provenance.causes(), 0L);
     }
   }
 
@@ -263,6 +265,10 @@ public final class Phase6Reachability {
     }
     public SearchResult {
       Objects.requireNonNull(verdict);
+      if (verdict == Verdict.IMPOSSIBLE) {
+        throw new IllegalArgumentException(
+            "Phase 6 search never directly returns IMPOSSIBLE; use compare on an exhaustive result");
+      }
       candidates = Set.copyOf(candidates);
       reasons = List.copyOf(reasons);
       Objects.requireNonNull(metrics);
@@ -294,6 +300,9 @@ public final class Phase6Reachability {
     }
     public TimingSearchResult {
       Objects.requireNonNull(verdict);
+      if (verdict == Verdict.IMPOSSIBLE) {
+        throw new IllegalArgumentException("timing search never directly returns IMPOSSIBLE");
+      }
       candidates = Set.copyOf(candidates);
       byFirstTick = Map.copyOf(byFirstTick);
       reasons = List.copyOf(reasons);
@@ -382,7 +391,7 @@ public final class Phase6Reachability {
       String timingReference,
       Long serverTickAssociation,
       MovementMode movementMode,
-      long candidateIsolationId) {}
+      long entityCollisionReference) {}
 
   private static final int MAX_DIAGNOSTICS = 256;
   private static final int MAX_CLOSEST_CANDIDATES = 4;
@@ -482,12 +491,17 @@ public final class Phase6Reachability {
     int uncertainTransitions = 0;
     int provenanceMerges = 0;
     boolean budgetReached = false;
+    List<Integer> candidatesPerTick = new ArrayList<>();
+    IdentityHashMap<EntityCollisions, Long> entityCollisionReferences = new IdentityHashMap<>();
+    long nextEntityCollisionReference = 0L;
 
     for (Context root : orderedStarts) {
       if (root.player().uncertain() || !root.uncertainty().isEmpty()) {
         uncertain = true;
         reasons.add("initial state carries explicit uncertainty");
       }
+      long entityCollisionReference = entityCollisionReferences.computeIfAbsent(
+          root.entityCollisions(), ignored -> nextEntityCollisionReference++);
       Candidate candidate = new Candidate(
           nextId++, root, new Provenance(
               nextId - 1, -1, root.simulationTick(), "ROOT", "ROOT", "None",
@@ -496,7 +510,7 @@ public final class Phase6Reachability {
           config.serverTickAssociation(), config.timingReference(), "ROOT",
           root.player().uncertain() || !root.uncertainty().isEmpty()
               ? WorldKnowledge.UNKNOWN : WorldKnowledge.KNOWN,
-          movementModeFor(root), "ROOT", List.of("initial state"));
+          movementModeFor(root), "ROOT", List.of("initial state"), entityCollisionReference);
       current.put(candidateKey(candidate).toString(), candidate);
     }
     peak = current.size();
@@ -707,7 +721,8 @@ public final class Phase6Reachability {
                           "simulationTick=" + tick)),
                   config.serverTickAssociation(), config.timingReference(), branch.id(),
                   branchKnowledge, mode, input.toString(),
-                  List.of(stepped.diagnostic()));
+                  List.of(stepped.diagnostic()),
+                  parent.entityCollisionReference());
 
               String key = candidateKey(newCandidate).toString();
               Candidate existing = next.get(key);
@@ -1037,7 +1052,7 @@ public final class Phase6Reachability {
         .append(context.movementEnvironment()).append('|')
         .append(context.sleeping()).append('|')
         .append(context.entityCollisions() == EntityCollisions.NONE_TRACKED
-            ? "NONE_TRACKED" : "NON_CANONICAL_PROVIDER").append('|')
+            ? "NONE_TRACKED" : "ENTITY_PROVIDER").append('|')
         .append(sortedSet(context.uncertainty()));
     return b.toString();
   }
@@ -1054,15 +1069,13 @@ public final class Phase6Reachability {
   }
 
   private static CandidateKey candidateKey(Candidate candidate) {
-    long isolation = candidate.context().entityCollisions() == EntityCollisions.NONE_TRACKED
-        ? 0L : candidate.id();
     return new CandidateKey(
         contextKey(candidate.context()),
         candidate.worldReference(),
         candidate.timingReference(),
         candidate.serverTickAssociation(),
         candidate.movementMode(),
-        isolation);
+        candidate.entityCollisionReference());
   }
 
   private static MovementMode movementModeFor(Context context) {
