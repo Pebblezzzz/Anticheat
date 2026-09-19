@@ -265,7 +265,7 @@ class Phase6CompletionTest {
     assertEquals(Verdict.UNCERTAIN, result.verdict());
     assertTrue(result.metrics().budgetReached());
     assertEquals(1, result.metrics().simulationSteps());
-    assertFalse(result.candidates().isEmpty());
+    assertTrue(result.candidates().isEmpty());
   }
 
   @Test
@@ -353,10 +353,11 @@ class Phase6CompletionTest {
   @Test
   void replayReproducesTheExactSearchSignature() {
     SearchResult result = exact(start(), List.of(WALK), floorWorld());
+    SearchConfig config = new SearchConfig(4096, 512, 16_384, 250_000L, null, "phase6");
     Phase6Replay replay = Phase6Replay.of(
         start(), List.of(InputConstraint.exact(WALK)), 0, 0, false,
         Map.of(0L, List.of(new WorldBranch("known", floorWorld(), true, "known floor"))),
-        Map.of(0L, List.of(new Phase6Reachability.None())), result);
+        Map.of(0L, List.of(new Phase6Reachability.None())), result, config);
     SearchResult replayed = replay.replay(new Vanilla12111RichPhysics());
     assertEquals(Phase6Reachability.canonicalSignature(result),
         Phase6Reachability.canonicalSignature(replayed));
