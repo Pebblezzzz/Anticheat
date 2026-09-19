@@ -384,7 +384,17 @@ public final class Phase8PredictionRunner {
               unauthorizedFlightResult(playerId, packet, clientState);
           if (violation != null) {
             results.add(violation);
-            impossible++;
+            switch (violation.verdict()) {
+              case POSSIBLE -> possible++;
+              case UNCERTAIN -> {
+                uncertain++;
+                latestContinuation = Continuation.UNCERTAIN;
+              }
+              case IMPOSSIBLE -> {
+                impossible++;
+                latestContinuation = Continuation.IMPOSSIBLE;
+              }
+            }
           }
         }
         continue;
