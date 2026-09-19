@@ -176,8 +176,8 @@ class Phase8PredictionRunnerTest {
         new Maths.Vec3(0.0, authorityVy, 0.0),
         false, false, false, List.of());
 
-    double observedY = authorityY + authorityVy * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG
-        - Vanilla12111RichPhysics.GRAVITY * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG;
+    // The captured authority velocity is already the velocity for the next movement step.
+    double observedY = authorityY + authorityVy;
 
     var report = runner.process(
         "stale-airborne",
@@ -202,6 +202,52 @@ class Phase8PredictionRunnerTest {
             || reason.contains("Phase 5 could not deterministically simulate")),
         report.results().toString());
     assertTrue(report.candidateFrontierRetained(), report.toString());
+  }
+
+  @Test
+  void staleAirborneAuthorityUsesCapturedVelocityWithoutAnExtraGravityStep() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+
+    runner.process(
+        "stale-fall",
+        List.of(
+            new RawPacket(1, 10, new ClientTickEnd()),
+            new RawPacket(2, 20, new Move(
+                new Maths.Vec3(.5, 64, .5), 0f, 0f, true, 1L))),
+        floorWorld(), anchor(), 0L);
+
+    double authorityY = 66.92159999847412;
+    double authorityVy = -0.15523200634002686;
+    double observedY = authorityY + authorityVy;
+
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(false, false, false),
+        new Maths.Vec3(.5, authorityY, .5),
+        new Maths.Vec3(0.0, authorityVy, 0.0),
+        false, false, false, List.of());
+
+    var report = runner.process(
+        "stale-fall",
+        List.of(
+            new RawPacket(3, 30, authority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-authority", authority, 200L, 7L)),
+            new RawPacket(4, 200, new Move(
+                new Maths.Vec3(.5, observedY, .5), 0f, 0f, false, 8L))),
+        floorWorld(), anchor(), 0L);
+
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(), report.results().toString());
+    assertTrue(report.frames().stream()
+        .flatMap(frame -> frame.predictedAfter().stream())
+        .anyMatch(candidate -> Math.abs(
+            candidate.context().player().position().y() - observedY) < 1.0E-9),
+        report.frames().toString());
+    assertTrue(report.results().stream()
+        .flatMap(result -> result.evidence().uncertaintySources().stream())
+        .noneMatch(reason -> reason.contains("Phase 5 could not deterministically simulate")),
+        report.results().toString());
   }
 
   @Test
