@@ -59,6 +59,43 @@ class RichWorldPhysicsTest {
     }
 
     @Test
+    void overlappingStartDoesNotTurnUpwardVelocityIntoLargeDownwardMotion() {
+        WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+            .loadChunk(0, 0)
+            .loadChunk(-1, 0)
+            .loadChunk(0, -1)
+            .loadChunk(-1, -1)
+            .setBlock(0, 70, 0, stone())
+            .build();
+        var player = new State.Player(
+            new Maths.Vec3(0.1, 70.795, 0.1),
+            new Maths.Vec3(0.0, 0.3332, 0.0),
+            0.0f,
+            0.0f,
+            false,
+            "survival",
+            Map.of(),
+            java.util.OptionalInt.empty(),
+            false
+        );
+        var input = new Simulation.AdvancedInput(0, 0, false, false, false);
+        var env = Phase5Mechanics.MovementEnvironment.dry(false, false, false);
+        var context = new Vanilla12111RichPhysics.Context(
+            390, player, input, world, Simulation.Environment.DRY,
+            Simulation.Attributes.DEFAULT, Phase5Mechanics.MovementEffects.NONE,
+            Phase5Mechanics.Pose.STANDING, env, false,
+            dev.phantom.ac.world.EntityCollisions.of(java.util.List.of()));
+
+        var result = new Vanilla12111RichPhysics().step(context);
+
+        assertFalse(result.state().uncertain(), result.diagnostic());
+        assertTrue(result.state().position().y() > player.position().y(),
+            () -> "upward start velocity was reversed by overlap: " + result.state().position());
+        assertTrue(result.state().position().y() < 71.5,
+            () -> "overlap produced an implausibly large vertical displacement: " + result.state().position());
+    }
+
+    @Test
     void exactSnapshotCollisionRefusesAnUnloadedSweep() {
         WorldSnapshot world=WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0,0).setBlock(0,64,0,stone()).build();
         Maths.Aabb player=new Maths.Aabb(15.7,65,0.2,16.3,66.8,0.8);
