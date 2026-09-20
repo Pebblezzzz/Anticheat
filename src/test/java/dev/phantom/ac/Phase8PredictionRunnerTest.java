@@ -555,6 +555,35 @@ class Phase8PredictionRunnerTest {
     assertEquals(first.lastProcessedSequence(), second.lastProcessedSequence());
   }
   @Test
+  void earlierBatchSequenceGapDoesNotPoisonLaterExplicitTickMovement() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+
+    var report = runner.process(
+        "scoped-gap",
+        List.of(
+            new RawPacket(1, 20, new PlayerContext(
+                "survival", Simulation.Attributes.DEFAULT, Map.of(),
+                Pose.STANDING, MovementEnvironment.dry(true, false, false),
+                new Maths.Vec3(.5, 64, .5), Maths.Vec3.ZERO,
+                false, false, false, List.of())),
+            // Sequence 2 is absent, but the movement below is itself captured
+            // in-order and carries an explicit client tick.
+            new RawPacket(3, 30, new ClientTickEnd()),
+            new RawPacket(4, 60, new Move(
+                new Maths.Vec3(20.5, 64, .5), 0f, 0f, true, 1L))),
+        floorWorld(), anchor(), 20L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        report.results().getFirst().verdict(), report.results().toString());
+    assertTrue(report.results().getFirst().evidence().eliminationReason()
+            .contains("all exhaustively modeled legitimate candidates"),
+        report.results().toString());
+    assertTrue(report.results().getFirst().evidence().uncertaintySources().isEmpty(),
+        report.results().toString());
+  }
+
+  @Test
   void phase7TimingUncertaintyCannotBecomeDecisiveViaExplicitPacketTick() {
     Phase7Timing.Config timing = new Phase7Timing.Config(
         50_000_000L, 50_000_000L, 50_000_000L,
