@@ -74,7 +74,7 @@ public final class Vanilla12111RichPhysics {
         if(fluid){
             inputAcceleration=inputMagnitude>1.0?AIR_ACCEL:AIR_ACCEL*INPUT_FRICTION;
         }else if(gliding||climbing){
-            inputAcceleration=inputMagnitude>1.0?AIR_ACCEL:AIR_ACCEL*INPUT_FRICTION;
+            inputAcceleration=AIR_ACCEL;
         }else if(s.onGround()){
             if(inputMagnitude==0.0){
                 // Jump-only and stationary ground ticks have no horizontal friction
@@ -110,7 +110,7 @@ public final class Vanilla12111RichPhysics {
         // AdvancedInput keeps the project wire/trace convention: strafe +1 is right, -1 is left.
         // Vanilla's movement vector uses the opposite mathematical sideways sign.
         double vanillaStrafe=-context.input().strafe();
-        Vec3 acceleration=new Vec3(inputScale*(vanillaStrafe*inputAcceleration*Math.cos(radians)-context.input().forward()*inputAcceleration*Math.sin(radians)),0,inputScale*(context.input().forward()*inputAcceleration*Math.cos(radians)+vanillaStrafe*inputAcceleration*Math.sin(radians)));Vec3 velocity=s.velocity().add(acceleration);
+        Vec3 acceleration=new Vec3(inputScale*(vanillaStrafe*inputAcceleration*Math.cos(radians)-context.input().forward()*inputAcceleration*Math.sin(radians)),0,inputScale*(context.input().forward()*inputAcceleration*Math.cos(radians)+vanillaStrafe*inputAcceleration*Math.sin(radians)));Vec3 velocity=applyMovementThreshold(s.velocity().add(acceleration));
         if(climbing){if(context.input().forward()>0)velocity=new Vec3(velocity.x(),CLIMB_MAX_UP,velocity.z());else if(context.input().forward()<0)velocity=new Vec3(velocity.x(),-CLIMB_MAX_DOWN,velocity.z());else velocity=new Vec3(velocity.x(),Math.max(-CLIMB_MAX_DOWN,velocity.y()),velocity.z());}
         boolean jumped=context.input().jump()&&s.onGround()&&!fluid&&!climbing&&!gliding&&!context.sleeping();
         if(jumped){
@@ -244,6 +244,15 @@ public final class Vanilla12111RichPhysics {
     }
 
     private Player richPlayer(Player source,Vec3 position,Vec3 velocity,boolean onGround,Phase5Mechanics.Pose pose,Context context,boolean uncertain){State.Environment environment=switch(context.environment()){case WATER->State.Environment.WATER;case LAVA->State.Environment.LAVA;case CLIMBABLE->State.Environment.CLIMBABLE;case DRY->State.Environment.DRY;case UNKNOWN->State.Environment.UNKNOWN;};return new Player(position,velocity,source.yaw(),source.pitch(),onGround,source.gamemode(),source.effects(),source.awaitingTeleport(),uncertain,Optional.of(context.input()),context.attributes(),pose,environment,source.clientTickRange(),source.provenance(),source.uncertaintyReasons());}
+    /** Grim 1.21.5+ zeros tiny movement before collision prediction. */
+    private static Vec3 applyMovementThreshold(Vec3 velocity){
+        double horizontalSquared=velocity.x()*velocity.x()+velocity.z()*velocity.z();
+        double x=horizontalSquared<9.0E-6?0.0:velocity.x();
+        double z=horizontalSquared<9.0E-6?0.0:velocity.z();
+        double y=Math.abs(velocity.y())<0.003D?0.0:velocity.y();
+        return new Vec3(x,y,z);
+    }
+
     private static BlockState supportBlock(WorldSnapshot world,int x,int y,int z){
         if(world.coverageAt(x,y,z)!=Coverage.KNOWN)return null;
         return world.requireBlockAt(x,y,z);
