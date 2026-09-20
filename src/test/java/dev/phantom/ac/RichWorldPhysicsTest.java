@@ -134,6 +134,51 @@ class RichWorldPhysicsTest {
     }
 
     @Test
+    void grimNormalMovementDoesNotApplyAnExtraInputFrictionFactor() {
+        WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+            .loadChunk(0, 0)
+            .setBlock(0, 63, 0, stone())
+            .build();
+        var player = new State.Player(
+            new Maths.Vec3(0.5, 64.0, 0.5), Maths.Vec3.ZERO, 0.0f, 0.0f, true,
+            "survival", Map.of(), java.util.OptionalInt.empty(), false);
+        var context = new Vanilla12111RichPhysics.Context(
+            0, player, new Simulation.AdvancedInput(1, 0, false, false, false), world,
+            Simulation.Environment.DRY, new Simulation.Attributes(0.1),
+            Phase5Mechanics.MovementEffects.NONE, Phase5Mechanics.Pose.STANDING,
+            Phase5Mechanics.MovementEnvironment.dry(true, false, false), false,
+            dev.phantom.ac.world.EntityCollisions.of(java.util.List.of()));
+
+        var result = new Vanilla12111RichPhysics().step(context);
+
+        assertFalse(result.state().uncertain(), result.diagnostic());
+        assertEquals(0.1, result.state().position().z(), 0.0);
+        assertEquals(0.0546, result.state().velocity().z(), 1.0e-12);
+    }
+
+    @Test
+    void grimMovementThresholdZerosTinyHorizontalAndVerticalMotion() {
+        WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+            .loadChunk(0, 0)
+            .build();
+        var player = new State.Player(
+            new Maths.Vec3(0.5, 64.0, 0.5),
+            new Maths.Vec3(0.002, 0.002, 0.001),
+            0.0f, 0.0f, false, "survival", Map.of(), java.util.OptionalInt.empty(), false);
+        var context = new Vanilla12111RichPhysics.Context(
+            0, player, new Simulation.AdvancedInput(0, 0, false, false, false), world,
+            Simulation.Environment.DRY, new Simulation.Attributes(0.1),
+            Phase5Mechanics.MovementEffects.NONE, Phase5Mechanics.Pose.STANDING,
+            Phase5Mechanics.MovementEnvironment.dry(false, false, false), false,
+            dev.phantom.ac.world.EntityCollisions.of(java.util.List.of()));
+
+        var result = new Vanilla12111RichPhysics().step(context);
+
+        assertFalse(result.state().uncertain(), result.diagnostic());
+        assertEquals(player.position(), result.state().position());
+    }
+
+    @Test
     void exactSnapshotCollisionRefusesAnUnloadedSweep() {
         WorldSnapshot world=WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0,0).setBlock(0,64,0,stone()).build();
         Maths.Aabb player=new Maths.Aabb(15.7,65,0.2,16.3,66.8,0.8);
