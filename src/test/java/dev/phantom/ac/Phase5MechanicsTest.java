@@ -34,7 +34,9 @@ class Phase5MechanicsTest {
   }
   @Test void diagonalGroundInputMatchesTraceDerivedFirstStep() {
     var physics=new Vanilla12111Physics(); var state=Player.initial(Vec3.ZERO);
-    var diagonal=physics.step(new PhysicsContext(3,state,new AdvancedInput(1,-1,false),air(),Simulation.Environment.DRY,new Attributes(.1)));
+    var diagonal=physics.step(new PhysicsContext(3,state,new AdvancedInput(1,1,false),air(),Simulation.Environment.DRY,new Attributes(.1)));
+    assertTrue(diagonal.state().velocity().x()<0);
+    assertTrue(diagonal.state().velocity().z()>0);
     assertEquals(0.038608008, Math.abs(diagonal.state().velocity().x()), 5e-8);
     assertEquals(0.038608008, Math.abs(diagonal.state().velocity().z()), 5e-8);
     assertEquals(0.054598997, Math.hypot(diagonal.state().velocity().x(), diagonal.state().velocity().z()), 2e-6);

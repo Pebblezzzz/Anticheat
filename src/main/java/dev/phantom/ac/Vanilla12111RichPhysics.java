@@ -107,7 +107,10 @@ public final class Vanilla12111RichPhysics {
                     ?offGroundSpeed
                     :offGroundSpeed*INPUT_FRICTION;
         }if(gliding)inputAcceleration=AIR_ACCEL;
-        Vec3 acceleration=new Vec3(inputScale*(context.input().strafe()*inputAcceleration*Math.cos(radians)-context.input().forward()*inputAcceleration*Math.sin(radians)),0,inputScale*(context.input().forward()*inputAcceleration*Math.cos(radians)+context.input().strafe()*inputAcceleration*Math.sin(radians)));Vec3 velocity=s.velocity().add(acceleration);
+        // AdvancedInput keeps the project wire/trace convention: strafe +1 is right, -1 is left.
+        // Vanilla's movement vector uses the opposite mathematical sideways sign.
+        double vanillaStrafe=-context.input().strafe();
+        Vec3 acceleration=new Vec3(inputScale*(vanillaStrafe*inputAcceleration*Math.cos(radians)-context.input().forward()*inputAcceleration*Math.sin(radians)),0,inputScale*(context.input().forward()*inputAcceleration*Math.cos(radians)+vanillaStrafe*inputAcceleration*Math.sin(radians)));Vec3 velocity=s.velocity().add(acceleration);
         if(climbing){if(context.input().forward()>0)velocity=new Vec3(velocity.x(),CLIMB_MAX_UP,velocity.z());else if(context.input().forward()<0)velocity=new Vec3(velocity.x(),-CLIMB_MAX_DOWN,velocity.z());else velocity=new Vec3(velocity.x(),Math.max(-CLIMB_MAX_DOWN,velocity.y()),velocity.z());}
         boolean jumped=context.input().jump()&&s.onGround()&&!fluid&&!climbing&&!gliding&&!context.sleeping();
         if(jumped){
@@ -174,19 +177,21 @@ public final class Vanilla12111RichPhysics {
         if (spectator) {
             double horizontalForward = forward * Math.cos(pitch);
             double verticalLook = -forward * Math.sin(pitch);
+            double vanillaStrafe = -strafe;
             double x = scale * speed * (
-                    strafe * Math.cos(yaw) - horizontalForward * Math.sin(yaw));
+                    vanillaStrafe * Math.cos(yaw) - horizontalForward * Math.sin(yaw));
             double z = scale * speed * (
-                    horizontalForward * Math.cos(yaw) + strafe * Math.sin(yaw));
+                    horizontalForward * Math.cos(yaw) + vanillaStrafe * Math.sin(yaw));
             double y = scale * speed * verticalLook;
             if (context.input().jump()) y += speed;
             if (context.input().sneak()) y -= speed;
             velocity = new Vec3(x, y, z);
         } else {
+            double vanillaStrafe = -strafe;
             double x = scale * speed * (
-                    strafe * Math.cos(yaw) - forward * Math.sin(yaw));
+                    vanillaStrafe * Math.cos(yaw) - forward * Math.sin(yaw));
             double z = scale * speed * (
-                    forward * Math.cos(yaw) + strafe * Math.sin(yaw));
+                    forward * Math.cos(yaw) + vanillaStrafe * Math.sin(yaw));
             double y = 0.0;
             if (context.input().jump()) y += speed;
             if (context.input().sneak()) y -= speed;

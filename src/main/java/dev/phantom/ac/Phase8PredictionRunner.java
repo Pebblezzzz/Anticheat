@@ -1916,12 +1916,14 @@ public final class Phase8PredictionRunner {
     }
 
     double yaw = Math.toRadians(start.yaw());
+    // AdvancedInput uses the project wire/trace convention: strafe +1 is right.
+    double vanillaStrafe = -input.strafe();
     double accelerationX = inputScale * (
-        input.strafe() * inputAcceleration * Math.cos(yaw)
+        vanillaStrafe * inputAcceleration * Math.cos(yaw)
             - input.forward() * inputAcceleration * Math.sin(yaw));
     double accelerationZ = inputScale * (
         input.forward() * inputAcceleration * Math.cos(yaw)
-            + input.strafe() * inputAcceleration * Math.sin(yaw));
+            + vanillaStrafe * inputAcceleration * Math.sin(yaw));
 
     double boostX = 0.0;
     double boostZ = 0.0;

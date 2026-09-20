@@ -8,16 +8,16 @@ import dev.phantom.ac.Packets.ClientInput;
 
 class ClientInputDirectionTest {
   @Test
-  void rightInputMapsToNegativeStrafe() {
+  void rightInputMapsToPositiveStrafe() {
     var constraint = Phase6Reachability.InputConstraint.fromClientInput(
         new ClientInput(false, false, false, true, false, false, false));
-    assertEquals(-1, constraint.strafe().orElseThrow());
+    assertEquals(1, constraint.strafe().orElseThrow());
   }
 
   @Test
-  void leftInputMapsToPositiveStrafe() {
+  void leftInputMapsToNegativeStrafe() {
     var constraint = Phase6Reachability.InputConstraint.fromClientInput(
         new ClientInput(false, false, true, false, false, false, false));
-    assertEquals(1, constraint.strafe().orElseThrow());
+    assertEquals(-1, constraint.strafe().orElseThrow());
   }
 }
