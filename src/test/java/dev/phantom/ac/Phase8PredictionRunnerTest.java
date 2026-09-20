@@ -404,7 +404,7 @@ class Phase8PredictionRunnerTest {
         packets,
         floorWorld(), anchor(), 0L);
 
-    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(2, report.movementObservations(), report.results().toString());
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getLast().verdict(), report.results().toString());
     assertTrue(report.frames().stream()
