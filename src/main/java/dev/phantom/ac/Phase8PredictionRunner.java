@@ -105,6 +105,8 @@ public final class Phase8PredictionRunner {
       long clientTick,
       InputConstraint constraint) {}
 
+  private record MovementInputState(boolean sprinting, boolean sneaking) {}
+
   private static final double POSITION_TOLERANCE = Phase6Reachability.POSITION_MATCH_TOLERANCE;
   private static final long MAX_INCREMENTAL_HORIZON = Phase6Reachability.MAX_HORIZON_TICKS;
   private static final long PREDICTION_RESYNC_LAG_TICKS = 2L;
@@ -1113,7 +1115,8 @@ public final class Phase8PredictionRunner {
         rootTick,
         "CAUSAL_AUTHORITY_RESYNC",
         authority.sequence(),
-        EntityCollisions.of(authority.context().entityBoxes())));
+        EntityCollisions.of(authority.context().entityBoxes()),
+        authority.context().movementEnvironment()));
     predictionTick = rootTick;
     latestContinuation = Continuation.ACTIVE;
 
@@ -1159,7 +1162,8 @@ public final class Phase8PredictionRunner {
       rootPlayer = withClientRotation(rootPlayer, observedBefore.yaw(), observedBefore.pitch());
       prediction = Set.of(candidateFromPlayer(
           rootPlayer, rootTick, "AUTHORITATIVE_ANCHOR",
-          authority.sequence(), EntityCollisions.of(authority.context().entityBoxes())));
+          authority.sequence(), EntityCollisions.of(authority.context().entityBoxes()),
+          authority.context().movementEnvironment()));
       predictionTick = rootTick;
       latestContinuation = Continuation.ACTIVE;
       return;
@@ -1467,7 +1471,8 @@ public final class Phase8PredictionRunner {
         tick.clientTick(),
         "CLIENT_OBSERVED_INERTIAL_CONTINUATION",
         authority.sequence(),
-        EntityCollisions.of(authority.context().entityBoxes())));
+        EntityCollisions.of(authority.context().entityBoxes()),
+        environment));
   }
 
   private Optional<Candidate> bootstrapPredictionFromObservedMovement(
@@ -1494,9 +1499,17 @@ public final class Phase8PredictionRunner {
     long simulationTick = tick.clientTick() - 1L;
     InputConstraint input = inputForSimulationTick(
         inputHistory, simulationTick, movementPacket.sequence());
-    Optional<Simulation.AdvancedInput> advancedInput =
+    Optional<Simulation.AdvancedInput> keyInput =
         inputConstraintToAdvancedInput(input);
-    if (advancedInput.isEmpty()) return Optional.empty();
+    if (keyInput.isEmpty()) return Optional.empty();
+
+    MovementEnvironment environment = authority.context().movementEnvironment();
+    Simulation.AdvancedInput advancedInput = new Simulation.AdvancedInput(
+        keyInput.orElseThrow().forward(),
+        keyInput.orElseThrow().strafe(),
+        keyInput.orElseThrow().jump(),
+        environment.sprinting(),
+        environment.sneaking());
 
     Player authorityState = playerFromAuthority(authority.context());
     float yaw = move.yaw() == null ? observedBefore.yaw() : move.yaw();
@@ -1511,7 +1524,7 @@ public final class Phase8PredictionRunner {
         authorityState.effects(),
         authorityState.awaitingTeleport(),
         false,
-        Optional.of(advancedInput.orElseThrow()),
+        Optional.of(advancedInput),
         authorityState.attributes(),
         authorityState.pose(),
         observedBefore.environment(),
@@ -1519,14 +1532,15 @@ public final class Phase8PredictionRunner {
         authorityState.provenance(),
         authorityState.uncertaintyReasons());
 
-    MovementEnvironment environment = movementEnvironmentOf(startTemplate);
+    // The authoritative movement environment carries actual sprint/sneak state;
+    // PLAYER_INPUT sprint/sneak bits are key-state evidence, not movement-state authority.
     Vec3 observedDelta = new Vec3(
         observedAfter.position().x() - observedBefore.position().x(),
         observedAfter.position().y() - observedBefore.position().y(),
         observedAfter.position().z() - observedBefore.position().z());
 
     Optional<Vec3> startVelocity = reconstructCollisionFreeStartVelocity(
-        startTemplate, advancedInput.orElseThrow(), observedDelta, world);
+        startTemplate, advancedInput, observedDelta, world, environment);
     if (startVelocity.isEmpty()) return Optional.empty();
 
     double horizontalSpeed = Math.hypot(
@@ -1605,7 +1619,8 @@ public final class Phase8PredictionRunner {
         tick.clientTick(),
         "CLIENT_MOVEMENT_BOOTSTRAP",
         authority.sequence(),
-        EntityCollisions.of(authority.context().entityBoxes()));
+        EntityCollisions.of(authority.context().entityBoxes()),
+        environment);
     trace.add("BOOTSTRAP_START simulationTick=" + simulationTick
         + " observedDelta=" + observedDelta
         + " reconstructedStartVelocity=" + startVelocity.orElseThrow()
@@ -1617,8 +1632,8 @@ public final class Phase8PredictionRunner {
       Player start,
       Simulation.AdvancedInput input,
       Vec3 observedDelta,
-      WorldSnapshot world) {
-    MovementEnvironment environment = movementEnvironmentOf(start);
+      WorldSnapshot world,
+      MovementEnvironment environment) {
     if (environment.fluid() != Fluid.NONE
         || environment.climbable()
         || environment.gliding()) {
@@ -1642,8 +1657,8 @@ public final class Phase8PredictionRunner {
         var support = world.requireBlockAt(x, y, z);
         if (support == null || support.isUnsupported()) return Optional.empty();
         double movementSpeed = start.attributes().value() * movementEffects(start).speedMultiplier();
-        if (input.sprint()) movementSpeed *= Vanilla12111RichPhysics.SPRINTING_SPEED_MULTIPLIER;
-        if (input.sneak()) movementSpeed *= 0.3;
+        if (environment.sprinting()) movementSpeed *= Vanilla12111RichPhysics.SPRINTING_SPEED_MULTIPLIER;
+        if (environment.sneaking()) movementSpeed *= 0.3;
         double frictionInfluencedSpeed = movementSpeed
             * Vanilla12111RichPhysics.FRICTION_SPEED_FACTOR
             / Math.pow(dev.phantom.ac.world.v12111.BlockCatalogue12111.slipperiness(support), 3.0);
@@ -1822,7 +1837,20 @@ public final class Phase8PredictionRunner {
       String source,
       long parentSequence,
       EntityCollisions entityCollisions) {
-    MovementEnvironment environment = movementEnvironmentOf(player);
+    return candidateFromPlayer(
+        player, simulationTick, source, parentSequence, entityCollisions, null);
+  }
+
+  private Candidate candidateFromPlayer(
+      Player player,
+      long simulationTick,
+      String source,
+      long parentSequence,
+      EntityCollisions entityCollisions,
+      MovementEnvironment movementEnvironmentOverride) {
+    MovementEnvironment environment = movementEnvironmentOverride == null
+        ? movementEnvironmentOf(player)
+        : movementEnvironmentOverride;
     Context context = new Context(
         simulationTick,
         player,
@@ -1904,7 +1932,8 @@ public final class Phase8PredictionRunner {
       Player old = candidate.context().player();
       Player merged = mergeDynamicState(old, base, old.velocity(), old.position(),
           old.yaw(), old.pitch(), old.onGround());
-      result.add(rebuildCandidate(candidate, merged, collisions));
+      result.add(rebuildCandidate(
+          candidate, merged, collisions, authority.movementEnvironment()));
     }
     return Set.copyOf(result);
   }
@@ -1989,8 +2018,30 @@ public final class Phase8PredictionRunner {
       Candidate candidate,
       Player player,
       EntityCollisions entityCollisions) {
+    return rebuildCandidate(candidate, player, entityCollisions, null);
+  }
+
+  private static Candidate rebuildCandidate(
+      Candidate candidate,
+      Player player,
+      EntityCollisions entityCollisions,
+      MovementEnvironment environmentOverride) {
     Context old = candidate.context();
-    MovementEnvironment environment = movementEnvironmentOf(player);
+    MovementEnvironment oldEnvironment = old.movementEnvironment();
+    MovementEnvironment environment = environmentOverride == null
+        ? new MovementEnvironment(
+            oldEnvironment.fluid(),
+            oldEnvironment.submerged(),
+            oldEnvironment.climbable(),
+            player.onGround(),
+            oldEnvironment.sprinting(),
+            oldEnvironment.sneaking(),
+            oldEnvironment.swimmingInput(),
+            oldEnvironment.gliding(),
+            oldEnvironment.fluidSpeedMultiplier(),
+            oldEnvironment.fluidDrag(),
+            oldEnvironment.gravityMultiplier())
+        : environmentOverride;
     Context context = new Context(
         old.simulationTick(),
         player,
@@ -2196,11 +2247,28 @@ public final class Phase8PredictionRunner {
         boolean stepExhaustive = true;
 
         for (InputConstraint inputOption : inputOptions) {
-          SearchResult branch = new Phase6Reachability().search(
-              local.stream()
-                  .map(candidate -> candidate.context().withTick(simulationTick))
-                  .toList(),
-              List.of(inputOption),
+          Map<MovementInputState, List<Context>> startsByMovementState = new LinkedHashMap<>();
+          for (Candidate candidate : local) {
+            MovementEnvironment movementEnvironment = candidate.context().movementEnvironment();
+            MovementInputState movementState = new MovementInputState(
+                movementEnvironment.sprinting(), movementEnvironment.sneaking());
+            startsByMovementState
+                .computeIfAbsent(movementState, ignored -> new ArrayList<>())
+                .add(candidate.context().withTick(simulationTick));
+          }
+
+          for (var movementEntry : startsByMovementState.entrySet()) {
+            MovementInputState movementState = movementEntry.getKey();
+            InputConstraint simulationInput = new InputConstraint(
+                inputOption.forward(),
+                inputOption.strafe(),
+                inputOption.jump(),
+                Optional.of(movementState.sprinting()),
+                Optional.of(movementState.sneaking()));
+
+            SearchResult branch = new Phase6Reachability().search(
+                movementEntry.getValue(),
+                List.of(simulationInput),
               ignored -> List.of(new WorldBranch(
                   "packet-world@" + simulationTick,
                   world,
@@ -2209,8 +2277,10 @@ public final class Phase8PredictionRunner {
               ignored -> List.of(new Phase6Reachability.None()),
               Phase6Reachability.SearchConfig.defaults(maximumCandidates));
 
-          trace.add("SIM_INPUT_BRANCH tick=" + simulationTick
-              + " input=" + inputOption
+            trace.add("SIM_INPUT_BRANCH tick=" + simulationTick
+              + " input=" + simulationInput
+              + " movementSprint=" + movementState.sprinting()
+              + " movementSneak=" + movementState.sneaking()
               + " exhaustive=" + branch.exhaustive()
               + " verdict=" + branch.verdict()
               + " candidates=" + branch.candidates().size());
