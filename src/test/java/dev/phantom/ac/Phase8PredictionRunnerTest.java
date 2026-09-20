@@ -448,7 +448,7 @@ class Phase8PredictionRunnerTest {
     // intentionally retained as observed evidence because the stale prediction
     // cannot simulate the incomplete empty world.
     double jumpX = .5
-        + new Simulation.Attributes(0.1).value()
+        - new Simulation.Attributes(0.1).value()
             * Vanilla12111RichPhysics.FRICTION_SPEED_FACTOR
             / Math.pow(0.6, 3.0)
             * Vanilla12111RichPhysics.INPUT_FRICTION;
@@ -537,7 +537,7 @@ class Phase8PredictionRunnerTest {
         Packets.CaptureProvenance.fromAdapter(
             "test-authority", authority, 104L, 4L)));
 
-    double expectedZ = .5 + movementSpeed * Vanilla12111RichPhysics.SPRINTING_SPEED_MULTIPLIER
+    double expectedZ = .5 - movementSpeed * Vanilla12111RichPhysics.SPRINTING_SPEED_MULTIPLIER
         * Vanilla12111RichPhysics.WALK_ACCEL;
     packets.add(new RawPacket(10, 100, new Move(
         new Maths.Vec3(.5, 64.0, expectedZ), 0f, 0f, true, 4L)));
