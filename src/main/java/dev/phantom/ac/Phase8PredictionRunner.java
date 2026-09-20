@@ -113,6 +113,29 @@ public final class Phase8PredictionRunner {
    */
   private record UncertainInput(long sequence, long earliestClientTick) {}
 
+  private record InputEventAlternatives(
+      long sequence,
+      InputConstraint constraint,
+      List<Long> possibleTicks) {
+    InputEventAlternatives {
+      if (sequence < 0L) throw new IllegalArgumentException("input sequence must be non-negative");
+      Objects.requireNonNull(constraint);
+      possibleTicks = List.copyOf(possibleTicks);
+    }
+  }
+
+  private record InputChronology(
+      NavigableMap<Long, List<TimedInput>> history) {
+    InputChronology {
+      Objects.requireNonNull(history);
+      NavigableMap<Long, List<TimedInput>> copy = new TreeMap<>();
+      for (var entry : history.entrySet()) {
+        copy.put(entry.getKey(), List.copyOf(entry.getValue()));
+      }
+      history = Collections.unmodifiableNavigableMap(copy);
+    }
+  }
+
   private record MovementInputState(boolean sprinting, boolean sneaking) {}
 
   private static final double POSITION_TOLERANCE = Phase6Reachability.POSITION_MATCH_TOLERANCE;
@@ -127,6 +150,9 @@ public final class Phase8PredictionRunner {
   private boolean timingHistoryTruncated;
   private final InputConstraint neutralInput;
   private final List<UncertainInput> uncertainInputs = new ArrayList<>();
+  private List<InputChronology> inputChronologies = List.of();
+  private boolean inputChronologyEnumerationExhaustive = true;
+  private InputConstraint carryInInput;
 
   private Player initialAnchor;
   private long initialAnchorReceivedNanos = -1L;
@@ -160,6 +186,7 @@ public final class Phase8PredictionRunner {
     this.neutralInput = InputConstraint.fromClientInput(
         new Packets.ClientInput(false, false, false, false, false, false, false));
     this.currentInput = neutralInput;
+    this.carryInInput = neutralInput;
   }
 
   public synchronized long lastProcessedSequence() {
@@ -197,6 +224,9 @@ public final class Phase8PredictionRunner {
     currentInput = neutralInput;
     inputHistory.clear();
     uncertainInputs.clear();
+    inputChronologies = List.of();
+    inputChronologyEnumerationExhaustive = true;
+    carryInInput = neutralInput;
     timingHistory.clear();
     timingEpochNanos = -1L;
     timingHistoryTruncated = false;
@@ -1111,7 +1141,10 @@ public final class Phase8PredictionRunner {
     if (timingEpochNanos < 0L) timingEpochNanos = packet.receivedNanos();
     timingHistory.addLast(packet);
     while (timingHistory.size() > MAX_TIMING_HISTORY_EVENTS) {
-      timingHistory.removeFirst();
+      Packets.RawPacket evicted = timingHistory.removeFirst();
+      if (evicted.packet() instanceof Packets.ClientInput input) {
+        carryInInput = InputConstraint.fromClientInput(input);
+      }
       timingHistoryTruncated = true;
     }
   }
