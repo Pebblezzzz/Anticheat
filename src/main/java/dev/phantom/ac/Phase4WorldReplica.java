@@ -195,8 +195,10 @@ public final class Phase4WorldReplica implements Serializable {
       for(BlockState state:palette)Objects.requireNonNull(state);
       if(bitsPerEntry==0)return uniform(sectionY,palette[0]);
 
-      if(packetData.length < ((4096*bitsPerEntry+63)/64))
-        throw new IllegalArgumentException("packed data is shorter than the 4096-entry section requires");
+      int valuesPerLong=64/bitsPerEntry;
+      int expectedLength=(4096+valuesPerLong-1)/valuesPerLong;
+      if(packetData.length!=expectedLength)
+        throw new IllegalArgumentException("expected "+expectedLength+" packed longs but got "+packetData.length);
       return new PackedSection(sectionY,palette,packetData,bitsPerEntry,Map.of());
     }
 
@@ -229,31 +231,25 @@ public final class Phase4WorldReplica implements Serializable {
 
     private static long[] pack(int[] indexes,int bits) {
       if(bits==0)return new long[0];
-      int totalBits=4096*bits;
-      long[] result=new long[(totalBits+63)/64];
+      int valuesPerLong=64/bits;
+      long[] result=new long[(indexes.length+valuesPerLong-1)/valuesPerLong];
       long mask=(1L<<bits)-1L;
       for(int i=0;i<indexes.length;i++){
         long value=indexes[i]&mask;
-        int bit=i*bits;
-        int word=bit>>>6;
-        int offset=bit&63;
+        int word=i/valuesPerLong;
+        int offset=(i%valuesPerLong)*bits;
         result[word]|=value<<offset;
-        if(offset+bits>64){
-          result[word+1]|=value>>>(64-offset);
-        }
       }
       return result;
     }
 
     private static int readPacked(long[] data,int bits,int index) {
       if(bits==0)return 0;
-      int bit=index*bits;
-      int word=bit>>>6;
-      int offset=bit&63;
+      int valuesPerLong=64/bits;
+      int word=index/valuesPerLong;
+      int offset=(index%valuesPerLong)*bits;
       long mask=(1L<<bits)-1L;
-      long value=data[word]>>>offset;
-      if(offset+bits>64)value|=data[word+1]<<(64-offset);
-      return (int)(value&mask);
+      return (int)((data[word]>>>offset)&mask);
     }
   }
 

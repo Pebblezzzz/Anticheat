@@ -1611,13 +1611,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   private static int readPackedValue(long[] data,int bits,int index){
     if(bits==0)return 0;
-    int bit=index*bits;
-    int word=bit>>>6;
-    int offset=bit&63;
+    int valuesPerLong=64/bits;
+    int word=index/valuesPerLong;
+    int offset=(index%valuesPerLong)*bits;
     long mask=(1L<<bits)-1L;
-    long value=data[word]>>>offset;
-    if(offset+bits>64)value|=data[word+1]<<(64-offset);
-    return (int)(value&mask);
+    return (int)((data[word]>>>offset)&mask);
   }
 
   private static final Map<ClientVersion,ConcurrentHashMap<Integer,dev.phantom.ac.world.BlockState>> STATE_CACHE=new ConcurrentHashMap<>();
