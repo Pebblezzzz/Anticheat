@@ -1328,6 +1328,80 @@ class Phase8PredictionRunnerTest {
 
 
   @Test
+  void truncatedTimingHistoryUsesRetainedClientTickOrdinalAsAbsoluteAnchor() {
+    Phase7Timing.Config timing = new Phase7Timing.Config(
+        50_000_000L, 50_000_000L, 50_000_000L,
+        new Phase7Timing.LatencyBounds(0L, 100_000_000L),
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        250_000_000L, 3, 128);
+
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
+    WorldSnapshot world = floorWorld();
+    Player start = anchor();
+    MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(),
+        Pose.STANDING, environment,
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    Simulation.AdvancedInput forward =
+        new Simulation.AdvancedInput(-1, 0, false, false, false);
+    Player expected = start;
+    expected = new Vanilla12111RichPhysics().step(
+        new Vanilla12111RichPhysics.Context(
+            45L,
+            expected,
+            forward,
+            world,
+            Simulation.Environment.DRY,
+            expected.attributes(),
+            Phase5Mechanics.MovementEffects.NONE,
+            Pose.STANDING,
+            environment,
+            false,
+            dev.phantom.ac.world.EntityCollisions.of(List.of())))
+        .state();
+
+    List<RawPacket> packets = new ArrayList<>();
+    long sequence = 1L;
+    for (int i = 0; i < 480; i++) {
+      packets.add(new RawPacket(sequence++, (i + 1L) * 1_000_000L, authority));
+    }
+
+    // Keep 44 client-tick boundaries before the held input and one more boundary
+    // before the explicit movement. The retained ordinal says input tick 44 and
+    // movement tick 45, while the absolute movement witness says client tick 46.
+    for (int i = 0; i < 44; i++) {
+      long received = 480_000_000L + i * 50_000_000L;
+      packets.add(new RawPacket(sequence++, received, new ClientTickEnd()));
+    }
+    packets.add(new RawPacket(sequence++, 2_730_000_000L,
+        new ClientInput(true, false, false, false, false, false, false)));
+    packets.add(new RawPacket(sequence++, 2_780_000_000L, new ClientTickEnd()));
+    packets.add(new RawPacket(sequence++, 2_830_000_000L,
+        new Move(expected.position(), expected.yaw(), expected.pitch(), expected.onGround(), 46L)));
+
+    var report = runner.process(
+        "truncated-ordinal-anchor",
+        packets,
+        world,
+        start,
+        0L);
+
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.equals("INPUT_TICK_ORIGIN known=true offset=1")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("selectedSeq=525,selectedTick=45")),
+        report.frames().getLast().trace().toString());
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getLast().verdict(), report.results().toString());
+  }
+
+
+  @Test
   void truncatedTimingHistoryWithUnrecoverableOriginCannotProduceImpossible() {
     Phase7Timing.Config timing = new Phase7Timing.Config(
         50_000_000L, 50_000_000L, 50_000_000L,
