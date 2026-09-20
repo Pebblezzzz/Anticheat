@@ -690,9 +690,12 @@ class Phase8PredictionRunnerTest {
     }
 
     // One tick of legitimate movement cannot reach this position.
+    Move impossibleMove = new Move(
+        new Maths.Vec3(20.5, 64.0, 0.5), 0f, 0f, true, 516L);
     packets.add(new RawPacket(
-        sequence, 10_000L,
-        new Move(new Maths.Vec3(20.5, 64.0, 0.5), 0f, 0f, true, 516L)));
+        sequence, 10_000L, impossibleMove,
+        Packets.CaptureProvenance.fromAdapter(
+            "test-movement", impossibleMove, 517L, 516L)));
 
     var report = runner.process(
         "explicit-timing-after-truncation",
@@ -734,6 +737,8 @@ class Phase8PredictionRunnerTest {
         anchor(),
         0L);
 
+    Move boundaryMove = new Move(
+        authorityState.position(), 0f, 0f, true, 100L);
     var report = runner.process(
         "fresh-authority-boundary",
         List.of(
@@ -741,8 +746,9 @@ class Phase8PredictionRunnerTest {
                 3, 30L, authority,
                 Packets.CaptureProvenance.fromAdapter("test-authority", authority, 100L, 10L)),
             new RawPacket(
-                4, 40L,
-                new Move(authorityState.position(), 0f, 0f, true, 100L))),
+                4, 40L, boundaryMove,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-movement", boundaryMove, 100L, 100L))),
         floorWorld(),
         anchor(),
         0L);
