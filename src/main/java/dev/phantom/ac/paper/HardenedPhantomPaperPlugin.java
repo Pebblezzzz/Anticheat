@@ -553,7 +553,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
     if(!accepted)return;
     var accumulated=capture.accumulator.accept(evidence,
-        new Phase8MovementValidation.Config(1,20,alertsEnabled,true));
+        new Phase8MovementValidation.Config(
+            minimumImpossibleObservations,20,alertsEnabled,true));
     capture.accumulator=accumulated.state();
     capture.processedResults++;
     accumulated.alert().ifPresent(alert->{
