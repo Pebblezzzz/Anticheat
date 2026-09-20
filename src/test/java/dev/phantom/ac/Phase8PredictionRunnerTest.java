@@ -488,6 +488,77 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void contradictedMovementDoesNotEraseEarlierTrustedVelocityHistory() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    var world = floorWorld();
+    var physics = new Vanilla12111RichPhysics();
+    var start = anchor();
+    var input = new Simulation.AdvancedInput(1, 0, false, true, false);
+
+    State.Player state1 = physics.step(new Vanilla12111RichPhysics.Context(
+        0, start, input, world, Simulation.Environment.DRY, start.attributes(),
+        Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
+        MovementEnvironment.dry(true, true, false), false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    State.Player state2 = physics.step(new Vanilla12111RichPhysics.Context(
+        1, state1, input, world, Simulation.Environment.DRY, start.attributes(),
+        Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
+        MovementEnvironment.dry(true, true, false), false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    Vec3 blatant = new Vec3(8.5, 64.0, 8.5);
+    PlayerContext freshAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        blatant, Maths.Vec3.ZERO, false, false, false, List.of());
+
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 10, new PlayerContext(
+            "survival", Simulation.Attributes.DEFAULT, Map.of(),
+            Pose.STANDING, MovementEnvironment.dry(true, false, false),
+            start.position(), Maths.Vec3.ZERO, false, false, false, List.of()),
+            Packets.CaptureProvenance.fromAdapter("paper-live", freshAuthority, 0L, 0L)),
+        new RawPacket(2, 20, new ClientInput(
+            true, false, false, false, false, false, true)),
+        new RawPacket(3, 30, new Move(start.position(), 0f, 0f, true, 0L),
+            Packets.CaptureProvenance.fromAdapter(
+                "paper-client-tick-boundary",
+                new Move(start.position(), 0f, 0f, true, 0L), 1L, 0L)),
+        new RawPacket(4, 40, new Move(state1.position(), 0f, 0f, state1.onGround(), 1L),
+            Packets.CaptureProvenance.fromAdapter(
+                "paper-client-tick-boundary",
+                new Move(state1.position(), 0f, 0f, state1.onGround(), 1L), 2L, 1L)),
+        new RawPacket(5, 50, new Move(state2.position(), 0f, 0f, state2.onGround(), 2L),
+            Packets.CaptureProvenance.fromAdapter(
+                "paper-client-tick-boundary",
+                new Move(state2.position(), 0f, 0f, state2.onGround(), 2L), 3L, 2L)),
+        new RawPacket(6, 60, new Move(blatant, 0f, 0f, true, 3L),
+            Packets.CaptureProvenance.fromAdapter(
+                "paper-client-tick-boundary",
+                new Move(blatant, 0f, 0f, true, 3L), 4L, 3L)),
+        new RawPacket(7, 70, freshAuthority,
+            Packets.CaptureProvenance.fromAdapter("paper-live", freshAuthority, 4L, 3L)),
+        new RawPacket(8, 200, new Move(blatant, 0f, 0f, true, 4L),
+            Packets.CaptureProvenance.fromAdapter(
+                "paper-client-tick-boundary",
+                new Move(blatant, 0f, 0f, true, 4L), 5L, 4L)));
+
+    var report = runner.processWithWorldProvider(
+        "trusted-history", packets, ignored -> world, anchor(), 0L);
+
+    assertEquals(4, report.movementObservations(), report.results().toString());
+    assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        report.results().get(2).verdict(), report.results().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("ROOT_REFRESH reason=LOCAL_AUTHORITY_DRIFT")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("ROOT_HORIZONTAL source=client-observed-prev-displacement")),
+        report.frames().getLast().trace().toString());
+  }
+
+  @Test
   void staleResyncUsesInputFromTheSimulatedTickNotTheLatestInput() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
