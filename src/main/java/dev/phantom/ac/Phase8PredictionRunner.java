@@ -1573,7 +1573,7 @@ public final class Phase8PredictionRunner {
     Vanilla12111RichPhysics.Context context = new Vanilla12111RichPhysics.Context(
         simulationTick,
         reconstructedStart,
-        advancedInput.orElseThrow(),
+        advancedInput,
         world,
         simulationEnvironmentFor(environment),
         reconstructedStart.attributes(),
