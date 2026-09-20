@@ -455,16 +455,21 @@ public final class Phase8PredictionRunner {
           + " causalSequence=" + world.causalSequence()
           + " chunks=" + world.loadedChunks().size());
 
+      Set<Candidate> predictedBefore = prediction;
+
       /*
        * Grim keeps a client-side movement velocity separate from the server's
-       * instantaneous velocity. Mirror that principle at bootstrap: if the
-       * prediction frontier is empty but a fresh authority sample matches the
-       * observed pre-movement state, reconstruct the hidden start velocity from
-       * the actual movement observation and prove that reconstruction through
-       * the canonical Phase 5 step. This avoids treating Bukkit's server-side
-       * velocity as an atomic client-tick velocity.
+       * instantaneous velocity. Mirror that principle at bootstrap: when the
+       * current frontier is empty OR is merely an authoritative root, a fresh
+       * authority sample matching the observed pre-movement state can be used to
+       * reconstruct the hidden client-tick start velocity from the actual movement
+       * observation. This avoids treating Bukkit's server-side velocity as an
+       * atomic client-tick velocity.
        */
-      if (prediction.isEmpty() && move.position() != null) {
+      boolean authoritativeRootNeedsVelocityBootstrap = isAuthoritativeRootFrontier(
+          observedBefore, tick);
+      if ((prediction.isEmpty() || authoritativeRootNeedsVelocityBootstrap)
+          && move.position() != null) {
         Optional<Candidate> bootstrap = bootstrapPredictionFromObservedMovement(
             packet, move, observedBefore, observedAfter, tick, world, trace);
         if (bootstrap.isPresent()) {
@@ -492,7 +497,7 @@ public final class Phase8PredictionRunner {
           possible++;
           rememberObservedMovement(observedBefore, observedAfter, tick);
           trace.add("EVIDENCE POSSIBLE reason=CLIENT_MOVEMENT_BOOTSTRAP"
-              + " reconstructedStartVelocity=" + candidate.provenance());
+              + " reconstructedStartVelocityVerified=true");
           trace.add("FRONTIER_BOOTSTRAPPED source=CLIENT_MOVEMENT_OBSERVATION"
               + " tick=" + tick.clientTick());
           frames.add(frame(
@@ -568,7 +573,6 @@ public final class Phase8PredictionRunner {
         continue;
       }
 
-      Set<Candidate> predictedBefore = prediction;
       List<String> uncertaintySources = new ArrayList<>();
       Phase7Timing.EventTiming movementTiming = phase7TimingBySequence.get(sequence);
       boolean explicitTimingRangeExhaustive =
@@ -1286,6 +1290,22 @@ public final class Phase8PredictionRunner {
     }
 
     return Optional.of(new Vec3(dx * horizontalFactor, 0.0, dz * horizontalFactor));
+  }
+
+  private boolean isAuthoritativeRootFrontier(
+      Player observedBefore,
+      TickResolution tick) {
+    if (!tick.known() || prediction.size() != 1 || predictionTick < 0L) return false;
+    if (predictionTick != Math.max(0L, tick.clientTick() - 1L)) return false;
+
+    Candidate candidate = prediction.iterator().next();
+    String source = candidate.provenance().source();
+    if (!"AUTHORITATIVE_ANCHOR".equals(source)
+        && !"CAUSAL_AUTHORITY_RESYNC".equals(source)) {
+      return false;
+    }
+    return positionsMatch(candidate.context().player().position(), observedBefore.position())
+        && candidate.context().player().onGround() == observedBefore.onGround();
   }
 
   private Optional<Candidate> bootstrapPredictionFromObservedMovement(
