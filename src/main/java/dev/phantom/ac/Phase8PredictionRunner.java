@@ -799,7 +799,7 @@ public final class Phase8PredictionRunner {
       Optional<Candidate> inertialRecovery = Optional.empty();
       if (matchingCandidates(prediction, observedAfter, move).isEmpty()) {
         inertialRecovery = recoverObservedInertialContinuation(
-            movementPacket, move, observedBefore, observedAfter, tick, world, trace);
+            packet, move, observedBefore, observedAfter, tick, world, trace);
         if (inertialRecovery.isPresent()) {
           prediction = Set.of(inertialRecovery.orElseThrow());
           predictionTick = targetTick;
