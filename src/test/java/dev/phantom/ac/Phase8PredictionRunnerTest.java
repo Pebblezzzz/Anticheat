@@ -455,7 +455,7 @@ class Phase8PredictionRunnerTest {
     double rootHorizontalX =
         (jumpX - .5) * (0.6 * Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION);
     double sprintAirAcceleration =
-        Vanilla12111RichPhysics.SPRINT_AIR_ACCEL * Vanilla12111RichPhysics.INPUT_FRICTION;
+        -Vanilla12111RichPhysics.SPRINT_AIR_ACCEL * Vanilla12111RichPhysics.INPUT_FRICTION;
     double authorityX = jumpX + 0.05;
     double observedX = authorityX + rootHorizontalX + sprintAirAcceleration;
     double authorityY = 64.41999998688698;
