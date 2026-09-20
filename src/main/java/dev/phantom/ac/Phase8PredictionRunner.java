@@ -811,7 +811,7 @@ public final class Phase8PredictionRunner {
             prediction,
             earliestSimulationTick,
             latestSimulationTick,
-            inputHistory,
+            inputChronologies,
             world,
             maximumCandidates,
             sequence);
@@ -824,7 +824,7 @@ public final class Phase8PredictionRunner {
             prediction,
             startTick,
             targetTick,
-            inputHistory,
+            inputChronologies,
             world,
             maximumCandidates,
             sequence);
@@ -2212,7 +2212,7 @@ public final class Phase8PredictionRunner {
       Set<Candidate> start,
       long startTick,
       long targetTick,
-      NavigableMap<Long, List<TimedInput>> inputHistory,
+      List<InputChronology> inputChronologies,
       WorldSnapshot world,
       int maximumCandidates,
       long movementSequence) {
@@ -2229,14 +2229,14 @@ public final class Phase8PredictionRunner {
           List.of("incremental prediction horizon exceeded"), List.of());
     }
     return advancePredictionToTarget(
-        start, targetTick, inputHistory, world, maximumCandidates, movementSequence);
+        start, targetTick, inputChronologies, world, maximumCandidates, movementSequence);
   }
 
   private AdvanceResult advancePredictionAcrossTimingRange(
       Set<Candidate> start,
       long earliestTick,
       long latestTick,
-      NavigableMap<Long, List<TimedInput>> inputHistory,
+      List<InputChronology> inputChronologies,
       WorldSnapshot world,
       int maximumCandidates,
       long movementSequence) {
@@ -2269,7 +2269,7 @@ public final class Phase8PredictionRunner {
 
     for (long target = earliestTick; target <= latestTick; target++) {
       AdvanceResult one = advancePredictionToTarget(
-          start, target, inputHistory, world, maximumCandidates, movementSequence);
+          start, target, inputChronologies, world, maximumCandidates, movementSequence);
       union.addAll(one.candidates());
       reasons.addAll(one.reasons());
       trace.add("TIMING_OFFSET target=" + target
@@ -2296,7 +2296,7 @@ public final class Phase8PredictionRunner {
   private AdvanceResult advancePredictionToTarget(
       Set<Candidate> start,
       long targetTick,
-      NavigableMap<Long, List<TimedInput>> inputHistory,
+      List<InputChronology> inputChronologies,
       WorldSnapshot world,
       int maximumCandidates,
       long movementSequence) {
@@ -2312,134 +2312,146 @@ public final class Phase8PredictionRunner {
     Set<Candidate> union = new LinkedHashSet<>();
     LinkedHashSet<String> reasons = new LinkedHashSet<>();
     List<String> trace = new ArrayList<>();
-    boolean exhaustive = true;
+    boolean exhaustive = inputChronologyEnumerationExhaustive;
     int simulatedTicks = 0;
 
-    for (Candidate initial : start) {
-      long localTick = initial.context().simulationTick();
-      if (localTick > targetTick) {
-        reasons.add("candidate simulation tick " + localTick
-            + " is ahead of timing target " + targetTick);
-        continue;
-      }
+    List<InputChronology> chronologies = inputChronologies.isEmpty()
+        ? List.of(new InputChronology(new TreeMap<>()))
+        : inputChronologies;
 
-      Set<Candidate> local = Set.of(initial);
-      while (localTick < targetTick) {
-        final long simulationTick = localTick;
-        List<InputConstraint> inputOptions =
-            inputPossibilitiesForSimulationTick(inputHistory, simulationTick, movementSequence);
-        Candidate beforeCandidate = local.stream().findFirst().orElse(null);
-        if (beforeCandidate != null) {
-          MovementEnvironment frontierEnvironment = beforeCandidate.context().movementEnvironment();
-          trace.add("SIM_INPUT_OPTIONS tick=" + simulationTick
-              + " keyOptions=" + inputOptions
-              + " physicalSprint=" + frontierEnvironment.sprinting()
-              + " physicalSneak=" + frontierEnvironment.sneaking()
-              + " startPos=" + beforeCandidate.context().player().position()
-              + " startVel=" + beforeCandidate.context().player().velocity()
-              + " startGround=" + beforeCandidate.context().player().onGround());
+    for (InputChronology chronology : chronologies) {
+      for (Candidate initial : start) {
+        long localTick = initial.context().simulationTick();
+        if (localTick > targetTick) {
+          reasons.add("candidate simulation tick " + localTick
+              + " is ahead of timing target " + targetTick);
+          continue;
         }
 
-        Set<Candidate> stepCandidates = new LinkedHashSet<>();
-        LinkedHashSet<String> stepReasons = new LinkedHashSet<>();
-        boolean stepExhaustive = true;
+        Set<Candidate> local = Set.of(initial);
+        while (localTick < targetTick) {
+          final long simulationTick = localTick;
+          List<InputConstraint> inputOptions =
+              inputPossibilitiesForSimulationTick(
+                  chronology.history(), simulationTick, movementSequence);
 
-        for (InputConstraint inputOption : inputOptions) {
-          Map<MovementInputState, List<Context>> startsByMovementState = new LinkedHashMap<>();
-          for (Candidate candidate : local) {
-            MovementEnvironment movementEnvironment = candidate.context().movementEnvironment();
-            MovementInputState movementState = new MovementInputState(
-                movementEnvironment.sprinting(), movementEnvironment.sneaking());
-            startsByMovementState
-                .computeIfAbsent(movementState, ignored -> new ArrayList<>())
-                .add(candidate.context().withTick(simulationTick));
+          Candidate beforeCandidate = local.stream().findFirst().orElse(null);
+          if (beforeCandidate != null) {
+            MovementEnvironment frontierEnvironment =
+                beforeCandidate.context().movementEnvironment();
+            trace.add("SIM_INPUT_OPTIONS tick=" + simulationTick
+                + " keyOptions=" + inputOptions
+                + " physicalSprint=" + frontierEnvironment.sprinting()
+                + " physicalSneak=" + frontierEnvironment.sneaking()
+                + " startPos=" + beforeCandidate.context().player().position()
+                + " startVel=" + beforeCandidate.context().player().velocity()
+                + " startGround=" + beforeCandidate.context().player().onGround()
+                + " chronologyAlternatives=" + chronologies.size());
           }
 
-          for (var movementEntry : startsByMovementState.entrySet()) {
-            MovementInputState movementState = movementEntry.getKey();
-            InputConstraint simulationInput = new InputConstraint(
-                inputOption.forward(),
-                inputOption.strafe(),
-                inputOption.jump(),
-                Optional.of(movementState.sprinting()),
-                Optional.of(movementState.sneaking()));
+          Set<Candidate> stepCandidates = new LinkedHashSet<>();
+          LinkedHashSet<String> stepReasons = new LinkedHashSet<>();
+          boolean stepExhaustive = true;
 
-            SearchResult branch = new Phase6Reachability().search(
-                movementEntry.getValue(),
-                List.of(simulationInput),
-              ignored -> List.of(new WorldBranch(
-                  "packet-world@" + simulationTick,
-                  world,
-                  true,
-                  "latency-compensated client-visible world")),
-              ignored -> List.of(new Phase6Reachability.None()),
-              Phase6Reachability.SearchConfig.defaults(maximumCandidates));
+          for (InputConstraint inputOption : inputOptions) {
+            Map<MovementInputState, List<Context>> startsByMovementState =
+                new LinkedHashMap<>();
+            for (Candidate candidate : local) {
+              MovementEnvironment movementEnvironment =
+                  candidate.context().movementEnvironment();
+              MovementInputState movementState = new MovementInputState(
+                  movementEnvironment.sprinting(), movementEnvironment.sneaking());
+              startsByMovementState
+                  .computeIfAbsent(movementState, ignored -> new ArrayList<>())
+                  .add(candidate.context().withTick(simulationTick));
+            }
 
-            trace.add("SIM_INPUT_BRANCH tick=" + simulationTick
-              + " input=" + simulationInput
-              + " movementSprint=" + movementState.sprinting()
-              + " movementSneak=" + movementState.sneaking()
-              + " exhaustive=" + branch.exhaustive()
-              + " verdict=" + branch.verdict()
-              + " candidates=" + branch.candidates().size());
-          stepCandidates.addAll(branch.candidates());
-          stepReasons.addAll(branch.reasons());
-          boolean branchExhaustive = branch.exhaustive()
-              || exhaustivelyEnumeratedInputEnvelope(branch, inputOption);
-          if (!branchExhaustive) stepExhaustive = false;
+            for (var movementEntry : startsByMovementState.entrySet()) {
+              MovementInputState movementState = movementEntry.getKey();
+              InputConstraint simulationInput = new InputConstraint(
+                  inputOption.forward(),
+                  inputOption.strafe(),
+                  inputOption.jump(),
+                  Optional.of(movementState.sprinting()),
+                  Optional.of(movementState.sneaking()));
+
+              SearchResult branch = new Phase6Reachability().search(
+                  movementEntry.getValue(),
+                  List.of(simulationInput),
+                  ignored -> List.of(new WorldBranch(
+                      "packet-world@" + simulationTick,
+                      world,
+                      true,
+                      "latency-compensated client-visible world")),
+                  ignored -> List.of(new Phase6Reachability.None()),
+                  Phase6Reachability.SearchConfig.defaults(maximumCandidates));
+
+              trace.add("SIM_INPUT_BRANCH tick=" + simulationTick
+                  + " input=" + simulationInput
+                  + " movementSprint=" + movementState.sprinting()
+                  + " movementSneak=" + movementState.sneaking()
+                  + " exhaustive=" + branch.exhaustive()
+                  + " verdict=" + branch.verdict()
+                  + " candidates=" + branch.candidates().size());
+              stepCandidates.addAll(branch.candidates());
+              stepReasons.addAll(branch.reasons());
+
+              boolean branchExhaustive = branch.exhaustive()
+                  || exhaustivelyEnumeratedInputEnvelope(branch, inputOption);
+              if (!branchExhaustive) stepExhaustive = false;
+            }
           }
+
+          simulatedTicks++;
+          if (!stepExhaustive || stepCandidates.isEmpty()) {
+            reasons.addAll(stepReasons);
+            reasons.add("prediction step " + simulationTick
+                + " was not exhaustively modeled");
+            trace.add("SIM_STEP tick=" + simulationTick
+                + " exhaustive=false"
+                + " branchCandidates=" + stepCandidates.size()
+                + " reasons=" + stepReasons);
+            exhaustive = false;
+            local = Set.of();
+            break;
+          }
+
+          if (stepCandidates.size() > maximumCandidates) {
+            return new AdvanceResult(Set.of(), false, simulatedTicks,
+                List.of("prediction candidate budget exceeded across input chronologies"),
+                List.copyOf(trace));
+          }
+
+          local = Set.copyOf(stepCandidates);
+          Candidate afterCandidate = local.stream().findFirst().orElse(null);
+          if (afterCandidate != null) {
+            MovementEnvironment resultEnvironment =
+                afterCandidate.context().movementEnvironment();
+            trace.add("SIM_STEP tick=" + simulationTick
+                + " exhaustive=true"
+                + " resultPos=" + afterCandidate.context().player().position()
+                + " resultVel=" + afterCandidate.context().player().velocity()
+                + " resultGround=" + afterCandidate.context().player().onGround()
+                + " resultPhysicalSprint=" + resultEnvironment.sprinting()
+                + " resultPhysicalSneak=" + resultEnvironment.sneaking());
+          }
+
+          localTick++;
         }
 
-        simulatedTicks++;
-        if (!stepExhaustive || stepCandidates.isEmpty()) {
-          reasons.addAll(stepReasons);
-          reasons.add("prediction step " + simulationTick
-              + " was not exhaustively modeled");
-          trace.add("SIM_STEP tick=" + simulationTick
-              + " exhaustive=false"
-              + " branchCandidates=" + stepCandidates.size()
-              + " reasons=" + stepReasons);
-          exhaustive = false;
-          local = Set.of();
-          break;
-        }
-
-        if (stepCandidates.size() > maximumCandidates) {
+        union.addAll(local);
+        if (union.size() > maximumCandidates) {
           return new AdvanceResult(Set.of(), false, simulatedTicks,
-              List.of("prediction candidate budget exceeded across input-timing alternatives"),
+              List.of("combined prediction candidate budget exceeded across input chronologies"),
               List.copyOf(trace));
         }
-
-        local = Set.copyOf(stepCandidates);
-        Candidate afterCandidate = local.stream().findFirst().orElse(null);
-        if (afterCandidate != null) {
-          MovementEnvironment resultEnvironment = afterCandidate.context().movementEnvironment();
-          trace.add("SIM_STEP tick=" + simulationTick
-              + " exhaustive=true"
-              + " resultPos=" + afterCandidate.context().player().position()
-              + " resultVel=" + afterCandidate.context().player().velocity()
-              + " resultGround=" + afterCandidate.context().player().onGround()
-              + " resultPhysicalSprint=" + resultEnvironment.sprinting()
-              + " resultPhysicalSneak=" + resultEnvironment.sneaking());
-        }
-
-        if (local.size() > maximumCandidates) {
-          return new AdvanceResult(Set.of(), false, simulatedTicks,
-              List.of("prediction candidate budget exceeded"),
-              List.copyOf(trace));
-        }
-        localTick++;
-      }
-
-      union.addAll(local);
-      if (union.size() > maximumCandidates) {
-        return new AdvanceResult(Set.of(), false, simulatedTicks,
-            List.of("combined prediction candidate budget exceeded"),
-            List.copyOf(trace));
       }
     }
 
-    reasons.add("persistent prediction advanced using client input history indexed by simulation tick");
+    reasons.add("persistent prediction advanced across causally assigned held-input chronologies");
+    if (!inputChronologyEnumerationExhaustive) {
+      reasons.add("causal input chronology combinations exceeded the bounded enumeration budget");
+    }
     return new AdvanceResult(
         Set.copyOf(union), exhaustive, simulatedTicks,
         List.copyOf(reasons), List.copyOf(trace));
