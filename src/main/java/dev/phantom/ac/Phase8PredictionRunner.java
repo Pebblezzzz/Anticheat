@@ -2172,10 +2172,45 @@ public final class Phase8PredictionRunner {
       Player old = candidate.context().player();
       Player merged = mergeDynamicState(old, base, old.velocity(), old.position(),
           old.yaw(), old.pitch(), old.onGround());
+
+      /*
+       * Server-side movement context is authority evidence, not an atomic client
+       * locomotion state. In particular, a later PlayerContext may legitimately
+       * report sprint=false while the retained client-side prediction still has
+       * an active sprint state. Never erase client physics sprint/sneak state just
+       * because an asynchronous server snapshot says otherwise.
+       */
+      MovementEnvironment authorityEnvironment = authority.movementEnvironment();
+      MovementEnvironment clientMovementEnvironment =
+          preserveClientLocomotionState(
+              candidate.context().movementEnvironment(),
+              authorityEnvironment,
+              merged.onGround());
+
       result.add(rebuildCandidate(
-          candidate, merged, collisions, authority.movementEnvironment()));
+          candidate, merged, collisions, clientMovementEnvironment));
     }
     return Set.copyOf(result);
+  }
+
+  static MovementEnvironment preserveClientLocomotionState(
+      MovementEnvironment client,
+      MovementEnvironment authority,
+      boolean onGround) {
+    Objects.requireNonNull(client);
+    Objects.requireNonNull(authority);
+    return new MovementEnvironment(
+        authority.fluid(),
+        authority.submerged(),
+        authority.climbable(),
+        onGround,
+        client.sprinting(),
+        client.sneaking(),
+        authority.swimmingInput(),
+        authority.gliding(),
+        authority.fluidSpeedMultiplier(),
+        authority.fluidDrag(),
+        authority.gravityMultiplier());
   }
 
   private static Set<Candidate> overlayClientInput(
