@@ -1002,7 +1002,7 @@ public final class Phase8PredictionRunner {
             world,
             maximumCandidates,
             sequence,
-            tick.timingUncertain() || timingHistoryTruncated);
+            timingHistoryTruncated && !clientTickOriginKnown);
       }
       trace.add("PREDICT_FORWARD startTick=" + startTick
           + " targetTick=" + targetTick
