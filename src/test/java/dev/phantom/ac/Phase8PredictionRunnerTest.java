@@ -415,7 +415,7 @@ class Phase8PredictionRunnerTest {
     double movementSpeed = 0.1;
     PlayerContext authority = new PlayerContext(
         "survival", new Simulation.Attributes(movementSpeed), Map.of(),
-        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        Pose.STANDING, MovementEnvironment.dry(true, true, false),
         new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
         false, false, false, List.of());
 
