@@ -553,7 +553,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
     if(!accepted)return;
     var accumulated=capture.accumulator.accept(evidence,
-        new Phase8MovementValidation.Config(1,20,alertsEnabled,true));
+        new Phase8MovementValidation.Config(
+            minimumImpossibleObservations,20,alertsEnabled,true));
     capture.accumulator=accumulated.state();
     capture.processedResults++;
     accumulated.alert().ifPresent(alert->{
@@ -780,6 +781,29 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
   }
 
+  private WorldSnapshot validationWorldForSequence(
+      Capture capture,List<RawPacket> raw,long sequence){
+    RawPacket selected=null;
+    for(RawPacket packet:raw){
+      if(packet.sequence()==sequence){
+        selected=packet;
+        break;
+      }
+    }
+
+    double centerX=capture.lastServerX;
+    double centerZ=capture.lastServerZ;
+    if(selected!=null&&selected.packet() instanceof Packets.Move move
+        &&move.position()!=null){
+      centerX=move.position().x();
+      centerZ=move.position().z();
+    }
+
+    WorldSnapshot snapshot=capture.clientWorld.snapshotAroundAtOrBefore(
+        centerX,centerZ,LOCAL_SNAPSHOT_RADIUS_CHUNKS,sequence);
+    return snapshot!=null ? snapshot : capture.clientWorld.snapshotAtOrBefore(sequence);
+  }
+
   private WorldSnapshot validationSnapshot(Capture capture,double centerX,double centerZ,
                                              double observedX,double observedZ){
     double anchorX=centerX;
@@ -880,7 +904,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       Phase8PredictionRunner.Report incremental=capture.movementRunner.processWithWorldProvider(
           playerName,
           raw,
-          sequence->capture.clientWorld.snapshotAtOrBefore(sequence),
+          sequence->validationWorldForSequence(capture,raw,sequence),
           anchor,
           capture.initialStateReceivedNanos);
 

@@ -109,6 +109,67 @@ final class Phase4WorldReplicaTest {
     assertEquals(stone,r.snapshotAtSequence(3L).blockAtOrNull(0,64,0));
   }
 
+  @Test void pendingBlockMutationMasksOnlyAffectedCellInSnapshotAround(){
+    var r=new Phase4WorldReplica(V);
+    var stone=BlockCatalogue12111.decode("minecraft:stone",Map.of());
+    var dirt=BlockCatalogue12111.decode("minecraft:dirt",Map.of());
+
+    r.accept(new Phase4WorldReplica.ChunkData(
+        o(1,1),p(1,1),new Chunk(0,0),
+        Map.of(new Pos(0,64,0),stone,new Pos(1,64,0),stone)));
+
+    r.queue(new Phase4WorldReplica.BlockChange(
+        o(2,2),p(2,2),new Pos(0,64,0),dirt));
+    r.openBarrier((short)-1);
+
+    WorldSnapshot snapshot=r.snapshotAround(0.5,0.5,0);
+    assertEquals(Coverage.UNKNOWN,snapshot.coverageAt(0,64,0));
+    assertEquals(Coverage.KNOWN,snapshot.coverageAt(1,64,0));
+    assertEquals(Coverage.KNOWN,r.getWorldState().coverageAt(0,64,0));
+    assertEquals(stone,r.getWorldState().blockAtOrNull(0,64,0));
+
+    assertTrue(r.acknowledge((short)-1,3L));
+    WorldSnapshot acknowledged=r.snapshotAround(0.5,0.5,0);
+    assertEquals(Coverage.KNOWN,acknowledged.coverageAt(0,64,0));
+    assertEquals(dirt,acknowledged.blockAtOrNull(0,64,0));
+  }
+
+  @Test void pendingMutationAfterMovementSequenceDoesNotPoisonEarlierSnapshot(){
+    var r=new Phase4WorldReplica(V);
+    var stone=BlockCatalogue12111.decode("minecraft:stone",Map.of());
+    var dirt=BlockCatalogue12111.decode("minecraft:dirt",Map.of());
+
+    r.accept(new Phase4WorldReplica.ChunkData(
+        o(1,1),p(1,1),new Chunk(0,0),
+        Map.of(new Pos(0,64,0),stone)));
+    r.queue(new Phase4WorldReplica.BlockChange(
+        o(3,3),p(3,3),new Pos(0,64,0),dirt));
+    r.openBarrier((short)-1);
+
+    WorldSnapshot beforePendingPacket=r.snapshotAroundAtOrBefore(0.5,0.5,0,2L);
+    assertEquals(Coverage.KNOWN,beforePendingPacket.coverageAt(0,64,0));
+    assertEquals(stone,beforePendingPacket.blockAtOrNull(0,64,0));
+
+    WorldSnapshot atPendingPacket=r.snapshotAroundAtOrBefore(0.5,0.5,0,3L);
+    assertEquals(Coverage.UNKNOWN,atPendingPacket.coverageAt(0,64,0));
+  }
+
+  @Test void pendingChunkSnapshotMasksEntireChunk(){
+    var r=new Phase4WorldReplica(V);
+    var stone=BlockCatalogue12111.decode("minecraft:stone",Map.of());
+    r.accept(new Phase4WorldReplica.ChunkData(
+        o(1,1),p(1,1),new Chunk(0,0),
+        Map.of(new Pos(0,64,0),stone)));
+    r.queue(new Phase4WorldReplica.ChunkData(
+        o(4,4),p(4,4),new Chunk(0,0),
+        Map.of(new Pos(1,64,0),stone)));
+    r.openBarrier((short)-1);
+
+    WorldSnapshot snapshot=r.snapshotAroundAtOrBefore(0.5,0.5,0,4L);
+    assertEquals(Coverage.UNKNOWN,snapshot.coverageAt(0,64,0));
+    assertEquals(Coverage.UNKNOWN,snapshot.coverageAt(1,64,0));
+  }
+
 
   @Test void packedSectionRoundTripsAcrossLongBoundary(){
     BlockState[] states=new BlockState[4096];
