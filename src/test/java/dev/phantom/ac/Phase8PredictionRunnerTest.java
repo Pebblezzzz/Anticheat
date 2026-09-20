@@ -1371,7 +1371,9 @@ class Phase8PredictionRunnerTest {
 
     packets.add(new RawPacket(521, 521_000_000L,
         new ClientInput(true, false, false, false, false, false, false)));
-    packets.add(new RawPacket(522, 522_000_000L, new ClientTickEnd()));
+    packets.add(new RawPacket(522, 522_000_000L,
+        new Move(null, 0f, 0f, null, 100L)));
+    packets.add(new RawPacket(523, 523_000_000L, new ClientTickEnd()));
     packets.add(new RawPacket(524, 524_000_000L,
         new Move(
             new Maths.Vec3(firstPosition.x() + 0.1, firstPosition.y(), firstPosition.z()),
@@ -1435,13 +1437,33 @@ class Phase8PredictionRunnerTest {
     }
 
     packets.add(new RawPacket(
-        sequence++, 530_000_000L,
+        sequence++, 470_000_000L,
         new ClientInput(true, false, false, false, false, false, false)));
 
-    Move observed = new Move(
-        new Maths.Vec3(start.position().x() + 0.1, start.position().y(), start.position().z()),
-        0f, 0f, true, 11L);
-    packets.add(new RawPacket(sequence, 531_000_000L, observed));
+    Player expectedState = start;
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    for (long simulationTick = 0L; simulationTick <= 10L; simulationTick++) {
+      Simulation.AdvancedInput stepInput = simulationTick >= 9L
+          ? new Simulation.AdvancedInput(1, 0, false, false, false)
+          : new Simulation.AdvancedInput(0, 0, false, false, false);
+      expectedState = physics.step(
+          new Vanilla12111RichPhysics.Context(
+              simulationTick,
+              expectedState,
+              stepInput,
+              world,
+              Simulation.Environment.DRY,
+              expectedState.attributes(),
+              Phase5Mechanics.MovementEffects.NONE,
+              Pose.STANDING,
+              environment,
+              false,
+              dev.phantom.ac.world.EntityCollisions.of(List.of())))
+          .state();
+    }
+
+    Move observed = new Move(expectedState.position(), 0f, 0f, true, 11L);
+    packets.add(new RawPacket(sequence, 521_000_000L, observed));
 
     var report = runner.process(
         "truncated-origin-out-of-order",
