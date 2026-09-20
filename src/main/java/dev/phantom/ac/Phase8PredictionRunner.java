@@ -1867,7 +1867,7 @@ public final class Phase8PredictionRunner {
         + " authoritativeVelocity=" + authority.context().serverVelocity()
         + " input=" + advancedInput
         + " inputSelection=" + inputSelectionDebug(
-            inputHistory, simulationTick, movementSequence));
+            inputHistory, simulationTick, movementPacket.sequence()));
     return Optional.of(candidate);
   }
 
