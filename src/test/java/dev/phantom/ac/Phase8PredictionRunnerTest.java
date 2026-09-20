@@ -547,12 +547,14 @@ class Phase8PredictionRunnerTest {
     var report = runner.processWithWorldProvider(
         "trusted-history", packets, ignored -> world, anchor(), 0L);
 
-    assertEquals(4, report.movementObservations(), report.results().toString());
+    assertEquals(5, report.movementObservations(), report.results().toString());
     assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE,
-        report.results().get(2).verdict(), report.results().toString());
+        report.results().get(3).verdict(), report.results().toString());
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.contains("ROOT_REFRESH reason=LOCAL_AUTHORITY_DRIFT")),
         report.frames().getLast().trace().toString());
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().get(4).verdict(), report.results().toString());
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.contains("ROOT_HORIZONTAL source=client-observed-prev-displacement")),
         report.frames().getLast().trace().toString());
