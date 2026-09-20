@@ -153,6 +153,14 @@ public final class Phase8PredictionRunner {
   private List<InputChronology> inputChronologies = List.of();
   private boolean inputChronologyEnumerationExhaustive = true;
   private InputConstraint carryInInput;
+  /*
+   * Phase 7 reconstructs relative client ticks from the retained timing window.
+   * Once that bounded window truncates, its relative zero moves forward while
+   * explicit Move.clientTick values remain absolute to the connection. Preserve
+   * the discovered origin so held-input events keep their causal absolute tick.
+   */
+  private long clientTickOriginOffset;
+  private boolean clientTickOriginKnown;
 
   private Player initialAnchor;
   private long initialAnchorReceivedNanos = -1L;
@@ -258,6 +266,8 @@ public final class Phase8PredictionRunner {
     inputChronologies = List.of();
     inputChronologyEnumerationExhaustive = true;
     carryInInput = neutralInput;
+    clientTickOriginOffset = 0L;
+    clientTickOriginKnown = false;
     timingHistory.clear();
     timingEpochNanos = -1L;
     timingHistoryTruncated = false;
@@ -518,6 +528,10 @@ public final class Phase8PredictionRunner {
           + " exact=" + tick.exact()
           + " source=" + tick.source()
           + " timingUncertain=" + tick.timingUncertain());
+      if (timingHistoryTruncated) {
+        trace.add("INPUT_TICK_ORIGIN known=" + clientTickOriginKnown
+            + " offset=" + clientTickOriginOffset);
+      }
       trace.add("TICK_RELIABILITY level=" + tickReliability.reliability()
           + " exact=" + tickReliability.exact()
           + " timingUncertain=" + tickReliability.timingUncertain()
@@ -2916,6 +2930,8 @@ public final class Phase8PredictionRunner {
       normalizedBySequence.put(packet.sequence(), packet);
     }
 
+    reconstructClientTickOrigin(normalized);
+
     List<InputEventAlternatives> exactEvents = new ArrayList<>();
 
     for (Packets.RawPacket packet : history) {
@@ -2942,7 +2958,7 @@ public final class Phase8PredictionRunner {
       InputConstraint constraint = InputConstraint.fromClientInput(input);
       if (!Phase7Timing.simulationTickEnumerationComplete(timing)) {
         long earliestClientTick = timing.inputClientTickEnvelope().known()
-            ? Math.max(0L, timing.inputClientTicks().min())
+            ? alignClientTick(Math.max(0L, timing.inputClientTicks().min()))
             : 0L;
         uncertainInputs.add(new UncertainInput(
             packet.sequence(), earliestClientTick));
@@ -2955,7 +2971,8 @@ public final class Phase8PredictionRunner {
        * effect. Phase 7 derives this separately from packet-generation time via
        * the configured input-to-simulation delay.
        */
-      List<Long> candidates = Phase7Timing.possibleSimulationTicks(timing);
+      List<Long> candidates = alignClientTicks(
+          Phase7Timing.possibleSimulationTicks(timing));
       if (candidates.isEmpty()) {
         uncertainInputs.add(new UncertainInput(packet.sequence(), 0L));
         continue;
@@ -3023,6 +3040,88 @@ public final class Phase8PredictionRunner {
 
   private int maximumInputChronologies() {
     return Math.max(1, Math.min(maximumCandidates, 256));
+  }
+
+  /**
+   * The bounded Phase 7 history has a moving relative tick origin. When the
+   * history is truncated, recover the absolute offset from a client movement
+   * carrying an explicit client tick and the number of retained tick-end
+   * boundaries before that movement. Sequence gaps/order ambiguity make this
+   * witness unsafe, so the previous origin is not silently trusted in that case.
+   */
+  private void reconstructClientTickOrigin(
+      List<Packets.NormalizedPacket> normalizedHistory) {
+    if (!timingHistoryTruncated && !clientTickOriginKnown) return;
+
+    long retainedClientBoundaries = 0L;
+    Long discoveredOffset = null;
+    boolean chronologyUncertain = false;
+
+    for (Packets.NormalizedPacket packet : normalizedHistory.stream()
+        .sorted(Comparator.comparingLong(Packets.NormalizedPacket::sequence))
+        .toList()) {
+      if (packet.flags().contains(Packets.PacketFlag.DUPLICATE)) continue;
+      if (packet.flags().contains(Packets.PacketFlag.OUT_OF_ORDER)
+          || packet.flags().contains(Packets.PacketFlag.SEQUENCE_GAP)) {
+        chronologyUncertain = true;
+      }
+
+      if (packet.packet() instanceof Packets.Move move && move.clientTick() != null) {
+        long offset;
+        try {
+          offset = Math.subtractExact(move.clientTick(), retainedClientBoundaries);
+        } catch (ArithmeticException overflow) {
+          chronologyUncertain = true;
+          continue;
+        }
+        if (discoveredOffset == null) {
+          discoveredOffset = offset;
+        } else if (discoveredOffset.longValue() != offset) {
+          chronologyUncertain = true;
+        }
+      }
+
+      if (packet.packet() instanceof Packets.ClientTickEnd) {
+        try {
+          retainedClientBoundaries = Math.addExact(retainedClientBoundaries, 1L);
+        } catch (ArithmeticException overflow) {
+          chronologyUncertain = true;
+        }
+      }
+    }
+
+    if (discoveredOffset != null && !chronologyUncertain) {
+      clientTickOriginOffset = discoveredOffset;
+      clientTickOriginKnown = true;
+    } else if (chronologyUncertain && timingHistoryTruncated) {
+      clientTickOriginKnown = false;
+    }
+  }
+
+  private long alignClientTick(long relativeTick) {
+    if (!clientTickOriginKnown || clientTickOriginOffset == 0L) return relativeTick;
+    try {
+      return Math.addExact(relativeTick, clientTickOriginOffset);
+    } catch (ArithmeticException overflow) {
+      clientTickOriginKnown = false;
+      return relativeTick;
+    }
+  }
+
+  private List<Long> alignClientTicks(List<Long> relativeTicks) {
+    if (relativeTicks.isEmpty() || !clientTickOriginKnown || clientTickOriginOffset == 0L) {
+      return List.copyOf(relativeTicks);
+    }
+    List<Long> aligned = new ArrayList<>(relativeTicks.size());
+    for (long tick : relativeTicks) {
+      try {
+        aligned.add(Math.addExact(tick, clientTickOriginOffset));
+      } catch (ArithmeticException overflow) {
+        clientTickOriginKnown = false;
+        return List.of();
+      }
+    }
+    return List.copyOf(aligned);
   }
 
   private static NavigableMap<Long, List<TimedInput>> copyInputHistory(
