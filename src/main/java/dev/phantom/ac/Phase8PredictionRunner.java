@@ -445,9 +445,6 @@ public final class Phase8PredictionRunner {
             tick, sources, search, false);
         results.add(result);
         uncertain++;
-        if (move.position() != null) {
-          rememberObservedMovement(observedBefore, observedAfter, tick);
-        }
         frames.add(frame(
             sequence, packet, tick, move, observedBefore, observedAfter,
             prediction, prediction, worldOrEmpty(world), sources, trace));
@@ -460,9 +457,6 @@ public final class Phase8PredictionRunner {
 
       ensureRoot(playerId, packet, move, observedBefore, tick, trace);
       refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, world, trace);
-      if (move.position() != null) {
-        rememberObservedMovement(observedBefore, observedAfter, tick);
-      }
 
       boolean stationaryPositionObservation = move.position() != null
           && positionExactlyMatches(observedBefore.position(), observedAfter.position())
@@ -744,6 +738,9 @@ public final class Phase8PredictionRunner {
             trace.add("FRONTIER_COMMITTED matching=" + prediction.size());
           } else {
             trace.add("FRONTIER_RETAINED predicted candidates remain authoritative");
+          }
+          if (move.position() != null) {
+            rememberObservedMovement(observedBefore, observedAfter, tick);
           }
         }
         case IMPOSSIBLE -> {
@@ -1211,12 +1208,6 @@ public final class Phase8PredictionRunner {
       Packets.PlayerContext authority,
       long targetTick,
       WorldSnapshot world) {
-    if (latestContinuation == Continuation.IMPOSSIBLE) {
-      // A contradicted movement may be arbitrarily far from the real trajectory.
-      // Never recycle that observation into a horizontal velocity used by a later
-      // authoritative resynchronization root.
-      return Optional.empty();
-    }
     if (world == null
         || targetTick < 2L
         || previousObservedMovementPosition == null
