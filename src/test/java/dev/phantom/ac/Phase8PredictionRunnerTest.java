@@ -617,4 +617,37 @@ class Phase8PredictionRunnerTest {
   }
 
 
+  @Test
+  void explicitClientTickTimingRangeIsExhaustivelyEvaluated() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+
+    var report = runner.process(
+        "explicit-timing-range",
+        List.of(
+            new RawPacket(1, 10, new PlayerContext(
+                "survival", Simulation.Attributes.DEFAULT, Map.of(),
+                Pose.STANDING, MovementEnvironment.dry(true, false, false),
+                new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
+                false, false, false, List.of())),
+            new RawPacket(2, 60, new Move(
+                new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 0L)),
+            new RawPacket(3, 110, new Move(
+                new Maths.Vec3(20.5, 64.0, .5), 0f, 0f, true, 1L))),
+        floorWorld(), anchor(), 0L);
+
+    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        report.results().getLast().verdict(), report.results().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("TIMING_OFFSETS range=0..1")
+            && line.contains("exhaustive=true")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("TIMING_OFFSET target=0")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("TIMING_OFFSET target=1")),
+        report.frames().getLast().trace().toString());
+  }
+
 }
