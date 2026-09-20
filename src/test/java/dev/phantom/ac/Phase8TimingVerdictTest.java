@@ -207,5 +207,19 @@ class Phase8TimingVerdictTest {
         .anyMatch(line -> line.contains("observed position=")
             && line.contains("y=64.41999998688698")),
         report.frames().getLast().trace().toString());
+
+    var budgetReport = new Phase8PredictionRunner(1, timing).process(
+        "truncated-jump-witness-budget",
+        packets,
+        world,
+        start,
+        0L);
+    assertEquals(
+        Phase8MovementValidation.Verdict.UNCERTAIN,
+        budgetReport.results().getLast().verdict(),
+        budgetReport.results().toString());
+    assertTrue(budgetReport.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("INPUT_BOUNDARY_WITNESS_BUDGET")),
+        budgetReport.frames().getLast().trace().toString());
   }
 }
