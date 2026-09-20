@@ -1490,7 +1490,7 @@ public final class Phase8PredictionRunner {
     double boostZ = 0.0;
     boolean jumped = input.jump()
         && start.onGround()
-        && !start.sleeping()
+        && start.pose() != Pose.SLEEPING
         && environment.fluid() == Fluid.NONE
         && !environment.climbable()
         && !environment.gliding();
