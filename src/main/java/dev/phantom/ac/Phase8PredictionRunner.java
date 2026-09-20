@@ -2586,7 +2586,7 @@ public final class Phase8PredictionRunner {
 
     InputChronology boundaryWitness = currentInputBoundaryWitness(
         chronologies, targetTick, movementSequence, allowCurrentInputBoundaryWitness);
-    if (boundaryWitness != null && chronologies.size() < maximumInputChronologies() + 1) {
+    if (boundaryWitness != null && chronologies.size() < maximumInputChronologies()) {
       List<InputChronology> expanded = new ArrayList<>(chronologies);
       expanded.add(boundaryWitness);
       chronologies = List.copyOf(expanded);
