@@ -17,6 +17,11 @@ public final class RichWorldCollision {
   public record Result(Vec3 displacement,boolean collidedX,boolean collidedY,boolean collidedZ,boolean stepAttempted,boolean stepSucceeded,boolean uncertain,String diagnostic) implements Serializable {}
 
   public static Result resolve(
+      WorldSnapshot world,Aabb start,Vec3 requested,double stepHeight){
+    return resolve(world,start,requested,stepHeight,EntityCollisions.of(List.of()));
+  }
+
+  public static Result resolve(
       WorldSnapshot world,Aabb start,Vec3 requested,double stepHeight,EntityCollisions entities){
     Objects.requireNonNull(world);
     Objects.requireNonNull(start);
@@ -29,7 +34,13 @@ public final class RichWorldCollision {
 
     BlockBox startBox=box(start);
     boolean stepEligible=stepHeight>0.0&&requested.y()<=0.0;
-    BlockBox query=expandTowards(startBox,requested,stepEligible?stepHeight:0.0);
+    BlockBox query=expandTowards(startBox,
+        requested.x(),requested.y(),requested.z());
+    if(stepEligible){
+      query=new BlockBox(
+          query.minX(),query.minY(),query.minZ(),
+          query.maxX(),query.maxY()+stepHeight,query.maxZ());
+    }
     if(world.hasUnknownOrUnsupported(query))
       return new Result(
           Vec3.ZERO,false,false,false,false,false,true,
@@ -41,7 +52,8 @@ public final class RichWorldCollision {
       return new Result(Vec3.ZERO,false,false,false,false,false,true,
           "entity collision history is incomplete");
 
-    WorldQueries.CollisionResult blockResult=dev.phantom.ac.world.WorldQueries.collisions(world,query);
+    dev.phantom.ac.world.WorldQueries.CollisionResult blockResult=
+        dev.phantom.ac.world.WorldQueries.collisions(world,query);
     if(!blockResult.isDefinite())
       return new Result(Vec3.ZERO,false,false,false,false,false,true,
           "rich world snapshot collision query is incomplete coverage="+blockResult.coverage());
