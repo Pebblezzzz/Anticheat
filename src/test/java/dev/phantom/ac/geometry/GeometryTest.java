@@ -247,6 +247,18 @@ class GeometryTest {
     assertEquals(0.0, floor.clip(Axis.Y, player, -1.0), 0.0);
   }
 
+  @Test void clipIgnoresObstaclesBehindTheBoxAlongTheMovementAxis() {
+    VoxelShape floor = Shapes.BLOCK.toWorld(0, 0, 0);
+    BlockBox playerAbove = BlockBox.of(0.2, 1.0, 0.2, 0.8, 2.8, 0.8);
+    // The floor is entirely below the player; upward motion must not be clipped.
+    assertEquals(0.42, floor.clip(Axis.Y, playerAbove, 0.42), 0.0);
+
+    VoxelShape ceiling = Shapes.BLOCK.toWorld(0, 3, 0);
+    BlockBox playerBelow = BlockBox.of(0.2, 0.2, 0.2, 0.8, 2.0, 0.8);
+    // The ceiling is entirely above the player; downward motion must not be clipped.
+    assertEquals(-0.42, ceiling.clip(Axis.Y, playerBelow, -0.42), 0.0);
+  }
+
   @Test void clipReturnsTheRequestedAmountWhenNothingIsInTheWay() {
     VoxelShape block = Shapes.BLOCK.toWorld(10, 0, 0);
     BlockBox player = BlockBox.of(0, 0, 0, 0.6, 1.8, 0.6);
