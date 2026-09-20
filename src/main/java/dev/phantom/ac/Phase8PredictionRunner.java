@@ -737,7 +737,9 @@ public final class Phase8PredictionRunner {
         case POSSIBLE -> {
           possible++;
           latestContinuation = Continuation.ACTIVE;
-          rememberRecentObservedMovement(observedBefore, observedAfter, tick);
+          if (move.position() != null) {
+            rememberRecentObservedMovement(observedBefore, observedAfter, tick);
+          }
           Set<Candidate> matching = matchingCandidates(prediction, observedAfter, move);
           if (!matching.isEmpty()) {
             prediction = Set.copyOf(matching);
@@ -762,7 +764,9 @@ public final class Phase8PredictionRunner {
         case UNCERTAIN -> {
           uncertain++;
           latestContinuation = Continuation.UNCERTAIN;
-          rememberRecentObservedMovement(observedBefore, observedAfter, tick);
+          if (move.position() != null) {
+            rememberRecentObservedMovement(observedBefore, observedAfter, tick);
+          }
           trace.add("FRONTIER_RETAINED reason=UNCERTAIN_OBSERVATION");
         }
       }
