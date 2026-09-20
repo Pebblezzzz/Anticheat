@@ -526,10 +526,22 @@ public final class Phase8PredictionRunner {
       Phase7Timing.EventTiming movementTiming = phase7TimingBySequence.get(sequence);
       boolean explicitTimingRangeExhaustive =
           explicitTimingRangeIsExhaustive(move, movementTiming);
+      boolean phase7ChronologyUnmodeled =
+          phase7TimingHasUnmodeledChronology(movementTiming);
       boolean explicitTimingFullyRepresented =
           explicitTimingRangeExhaustive
-              && !phase7TimingHasUnmodeledChronology(movementTiming)
+              && !phase7ChronologyUnmodeled
               && !timingHistoryTruncated;
+
+      if (move.clientTick() != null && movementTiming != null) {
+        trace.add("TIMING_GATE explicitRangeExhaustive=" + explicitTimingRangeExhaustive
+            + " chronologyUnmodeled=" + phase7ChronologyUnmodeled
+            + " historyTruncated=" + timingHistoryTruncated
+            + " simulationRange=" + movementTiming.simulationClientTicks()
+            + " simulationCandidates=" + movementTiming.possibleSimulationClientTicks());
+        trace.add("PHASE7_WINDOWS " + phase7TimingWindows(movementTiming));
+        trace.add("PHASE7_REASONS " + movementTiming.reasons());
+      }
 
       if (!tick.known()) {
         uncertaintySources.add("client simulation tick has not been established by a client-tick boundary");
@@ -797,6 +809,18 @@ public final class Phase8PredictionRunner {
     if (span < 1L || span > Phase6Reachability.MAX_TIMING_OFFSETS) return false;
     List<Long> candidates = timing.possibleSimulationClientTicks();
     return candidates.size() == span;
+  }
+
+  private static List<String> phase7TimingWindows(Phase7Timing.EventTiming timing) {
+    List<String> windows = new ArrayList<>();
+    for (Phase7Timing.SynchronizationWindow window : timing.windows()) {
+      windows.add(window.kind() + "@server="
+          + window.firstServerTick() + ".." + window.lastServerTick()
+          + " client=" + window.possibleClientTicks()
+          + " reason=" + window.reason()
+          + " seq=" + window.triggerSequence());
+    }
+    return List.copyOf(windows);
   }
 
   private static boolean phase7TimingHasUnmodeledChronology(
