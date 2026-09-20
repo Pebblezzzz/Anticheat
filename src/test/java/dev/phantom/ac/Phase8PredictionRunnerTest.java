@@ -1326,4 +1326,72 @@ class Phase8PredictionRunnerTest {
         report.frames().toString());
   }
 
+
+  @Test
+  void truncatedTimingHistoryWithUnrecoverableOriginCannotProduceImpossible() {
+    Phase7Timing.Config timing = new Phase7Timing.Config(
+        50_000_000L, 50_000_000L, 50_000_000L,
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        250_000_000L, 3, 128);
+
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
+    WorldSnapshot world = floorWorld();
+    Player start = anchor();
+    MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
+    Simulation.AdvancedInput forward = new Simulation.AdvancedInput(1, 0, false, false, false);
+
+    Maths.Vec3 firstPosition = new Vanilla12111RichPhysics().step(
+        new Vanilla12111RichPhysics.Context(
+            0L, start, forward, world, Simulation.Environment.DRY,
+            start.attributes(), Phase5Mechanics.MovementEffects.NONE,
+            Pose.STANDING, environment, false,
+            dev.phantom.ac.world.EntityCollisions.of(List.of())))
+        .state()
+        .position();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(),
+        Pose.STANDING, environment,
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    List<RawPacket> packets = new ArrayList<>();
+    packets.add(new RawPacket(1, 1_000_000L, authority));
+    packets.add(new RawPacket(2, 2_000_000L,
+        new ClientInput(true, false, false, false, false, false, false)));
+    packets.add(new RawPacket(3, 3_000_000L, new ClientTickEnd()));
+    packets.add(new RawPacket(4, 4_000_000L,
+        new Move(firstPosition, 0f, 0f, true, 1L)));
+
+    for (int i = 5; i <= 520; i++) {
+      packets.add(new RawPacket(i, i * 1_000_000L, authority));
+    }
+
+    packets.add(new RawPacket(521, 521_000_000L,
+        new ClientInput(true, false, false, false, false, false, false)));
+    packets.add(new RawPacket(522, 522_000_000L, new ClientTickEnd()));
+    packets.add(new RawPacket(524, 524_000_000L,
+        new Move(
+            new Maths.Vec3(firstPosition.x() + 0.1, firstPosition.y(), firstPosition.z()),
+            0f, 0f, true, 42L)));
+
+    var report = runner.process(
+        "truncated-unrecoverable-origin",
+        packets,
+        world,
+        start,
+        0L);
+
+    assertEquals(Phase8MovementValidation.Verdict.UNCERTAIN,
+        report.results().getLast().verdict(), report.toString());
+    assertTrue(report.results().getLast().evidence().uncertaintySources().stream()
+        .anyMatch(reason -> reason.contains("absolute client-tick origin is not recoverable")),
+        report.results().getLast().evidence().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.equals("INPUT_TICK_ORIGIN known=false offset=0")),
+        report.frames().getLast().trace().toString());
+  }
+
 }
