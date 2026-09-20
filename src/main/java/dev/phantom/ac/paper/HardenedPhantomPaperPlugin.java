@@ -87,6 +87,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private static final long WORLD_TRANSACTION_MIN_INTERVAL_NANOS=2_000_000L;
   private static final long PAPER_MOVE_FAILURE_WINDOW_NANOS=1_000_000_000L;
   private static final int PAPER_MOVE_FAILURE_THRESHOLD=1;
+  private static final long HIGH_VALIDATION_MICROS=250_000L;
 
   private final Map<UUID,Capture> captures=new ConcurrentHashMap<>();
   private enum DebugLevel { OFF, SUMMARY, TRACE; boolean summary(){return this==SUMMARY;} boolean trace(){return this==TRACE;} }
@@ -930,6 +931,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       capture.lastValidationElapsedMicros=(System.nanoTime()-startedNanos)/1_000L;
       capture.lastValidationBatchPackets=raw.size();
       capture.lastValidationBatchMovements=incremental.movementObservations();
+      capture.lastValidationBacklogPackets=capture.pendingValidationPackets(
+          capture.movementRunner.lastProcessedSequence());
+      long elapsedMicros=capture.lastValidationElapsedMicros;
+      long completed=capture.validationCompletedRuns.incrementAndGet();
+      long totalMicros=capture.validationTotalMicros.addAndGet(Math.max(0L,elapsedMicros));
+      capture.averageValidationElapsedMicros=completed == 0 ? elapsedMicros : totalMicros/completed;
+      capture.maxValidationElapsedMicros=Math.max(capture.maxValidationElapsedMicros,elapsedMicros);
+      if(elapsedMicros>=HIGH_VALIDATION_MICROS)capture.validationHighCostRuns.incrementAndGet();
       capture.validationPackets.addAndGet(raw.size());
       capture.validationMovements.addAndGet(incremental.movementObservations());
 
@@ -940,6 +949,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       getServer().getScheduler().runTask(this,()->applyResult(capture,report));
     }catch(RuntimeException failure){
       capture.lastValidationElapsedMicros=(System.nanoTime()-startedNanos)/1_000L;
+      capture.maxValidationElapsedMicros=Math.max(capture.maxValidationElapsedMicros,capture.lastValidationElapsedMicros);
+      if(capture.lastValidationElapsedMicros>=HIGH_VALIDATION_MICROS)capture.validationHighCostRuns.incrementAndGet();
+      capture.lastValidationBacklogPackets=capture.pendingValidationPackets(
+          capture.movementRunner.lastProcessedSequence());
       getLogger().log(java.util.logging.Level.WARNING,
           "[PhantomAC][PHASE8] async validation failed for "+capture.playerId,
           failure);
@@ -1137,13 +1150,15 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
               ||line.startsWith("FRONTIER_")
               ||line.startsWith("ROOT ")
               ||line.startsWith("ROOT_")
-              ||line.startsWith("SIM_INPUT ")
-              ||line.startsWith("SIM_STEP ")
               ||line.startsWith("CANDIDATES ")
               ||line.startsWith("WORLD ")
-              ||line.startsWith("TIMING_"))
+              ||line.startsWith("TIMING_GATE ")
+              ||line.startsWith("PHASE7_WINDOWS ")
+              ||line.startsWith("PHASE7_REASONS ")
+              ||line.startsWith("PREDICT_FORWARD "))
           .toList();
-      if(!highlights.isEmpty())diagnosticTrace=String.join(" | ",highlights);
+      int first=Math.max(0,highlights.size()-12);
+      if(!highlights.isEmpty())diagnosticTrace=String.join(" | ",highlights.subList(first,highlights.size()));
       break;
     }
 
@@ -1182,8 +1197,12 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         +",candidateCount="+capture.movementRunner.candidateCount()
         +",lastProcessedSequence="+capture.movementRunner.lastProcessedSequence()+"}"
         +" validationCost={lastMicros="+capture.lastValidationElapsedMicros
+        +",avgMicros="+capture.averageValidationElapsedMicros
+        +",maxMicros="+capture.maxValidationElapsedMicros
+        +",highCostRuns="+capture.validationHighCostRuns.get()
         +",lastBatchPackets="+capture.lastValidationBatchPackets
         +",lastBatchMovements="+capture.lastValidationBatchMovements
+        +",backlogPackets="+capture.lastValidationBacklogPackets
         +",runs="+capture.validationRuns.get()
         +",packets="+capture.validationPackets.get()
         +",movements="+capture.validationMovements.get()+"}"
@@ -1703,8 +1722,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final AtomicLong validationPackets=new AtomicLong();
     final AtomicLong validationMovements=new AtomicLong();
     volatile long lastValidationElapsedMicros=-1L;
+    volatile long maxValidationElapsedMicros=-1L;
+    volatile long averageValidationElapsedMicros=-1L;
     volatile int lastValidationBatchPackets;
     volatile int lastValidationBatchMovements;
+    volatile int lastValidationBacklogPackets;
+    final AtomicLong validationCompletedRuns=new AtomicLong();
+    final AtomicLong validationTotalMicros=new AtomicLong();
+    final AtomicLong validationHighCostRuns=new AtomicLong();
     int processedResults;
     volatile int minY=-64,maxY=319;
     volatile double lastServerX,lastServerY,lastServerZ;
@@ -1749,6 +1774,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     List<RawPacket> copySince(long sequenceExclusive){
       synchronized(packets){
         return packets.stream().filter(packet->packet.sequence()>sequenceExclusive).toList();
+      }
+    }
+
+    int pendingValidationPackets(long sequenceExclusive){
+      synchronized(packets){
+        int count=0;
+        for(RawPacket packet:packets)if(packet.sequence()>sequenceExclusive)count++;
+        return count;
       }
     }
   }
