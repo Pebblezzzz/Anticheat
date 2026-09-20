@@ -3072,6 +3072,13 @@ public final class Phase8PredictionRunner {
         .sorted(Comparator.comparingInt(Phase7Timing.EventTiming::timelineIndex))
         .toList();
 
+    OptionalLong ordinalOrigin = recoverClientTickOriginFromRetainedOrdinals(normalizedHistory);
+    if (ordinalOrigin.isPresent()) {
+      clientTickOriginOffset = ordinalOrigin.getAsLong();
+      clientTickOriginKnown = true;
+      return;
+    }
+
     /*
      * After bounded-history truncation, a retained explicit movement may be the
      * first client event in the window while its clientTick remains absolute to
@@ -3152,6 +3159,68 @@ public final class Phase8PredictionRunner {
     } else {
       clientTickOriginKnown = false;
     }
+  }
+
+  private OptionalLong recoverClientTickOriginFromRetainedOrdinals(
+      List<Packets.NormalizedPacket> normalizedHistory) {
+    long boundaryOrdinal = 0L;
+    Long discoveredOffset = null;
+
+    for (Packets.NormalizedPacket packet : normalizedHistory.stream()
+        .sorted(Comparator.comparingLong(Packets.NormalizedPacket::sequence))
+        .toList()) {
+      Packets.Packet value = packet.packet();
+      boolean clientChronologyEvent =
+          value instanceof Packets.ClientTickEnd
+              || value instanceof Packets.ClientInput
+              || value instanceof Packets.Move
+              || value instanceof Packets.TeleportConfirm
+              || value instanceof Packets.WorldTransactionAck
+              || value instanceof Packets.FlightToggle;
+      if (!clientChronologyEvent || packet.flags().contains(Packets.PacketFlag.DUPLICATE)) {
+        continue;
+      }
+
+      /*
+       * The ordinal model is valid only when the retained client-originated
+       * chronology itself is clean. Reordering or sequence loss means the retained
+       * boundary count is not a trustworthy tick ordinal.
+       */
+      if (packet.flags().contains(Packets.PacketFlag.SEQUENCE_GAP)
+          || packet.flags().contains(Packets.PacketFlag.OUT_OF_ORDER)) {
+        return OptionalLong.empty();
+      }
+
+      if (value instanceof Packets.ClientTickEnd) {
+        boundaryOrdinal = Math.addExact(boundaryOrdinal, 1L);
+        continue;
+      }
+
+      if (value instanceof Packets.Move move && move.clientTick() != null) {
+        /*
+         * ClientTickTracker assigns the movement its completed CLIENT_TICK_END
+         * ordinal. A move before the first retained boundary is relative tick 0;
+         * a move after N retained boundaries is relative tick N.
+         */
+        long relativeTick = boundaryOrdinal;
+        long offset = Math.subtractExact(move.clientTick(), relativeTick);
+        if (discoveredOffset == null) {
+          discoveredOffset = offset;
+        } else if (discoveredOffset.longValue() != offset) {
+          return OptionalLong.empty();
+        }
+      }
+    }
+
+    /*
+     * Require multiple retained boundaries before using this ordinal shortcut.
+     * Sparse histories are delegated to the existing Phase 7 timing solver, which
+     * remains capable of recovering explicit ticks even with very few boundaries.
+     */
+    if (boundaryOrdinal < 2L || discoveredOffset == null) {
+      return OptionalLong.empty();
+    }
+    return OptionalLong.of(discoveredOffset);
   }
 
   private record RelativeClientBoundary(
