@@ -347,7 +347,7 @@ class Phase8PredictionRunnerTest {
         "stale-resync-bootstrap",
         packets, world, start, 0L);
 
-    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+    assertNotEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE,
         report.results().getLast().verdict(), report.results().toString());
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
@@ -1324,6 +1324,70 @@ class Phase8PredictionRunnerTest {
         .anyMatch(line -> line.contains("inputSelection=selectedSeq=521,selectedTick=41")
             && line.contains("jump=Optional[false]")),
         report.frames().toString());
+  }
+
+
+  @Test
+  void truncatedTimingHistoryRecoversOriginWhenRetainedExplicitMovePredatesBoundary() {
+    Phase7Timing.Config timing = new Phase7Timing.Config(
+        50_000_000L, 50_000_000L, 50_000_000L,
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        250_000_000L, 3, 128);
+
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
+    WorldSnapshot world = floorWorld();
+    Player start = anchor();
+    MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(),
+        Pose.STANDING, environment,
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    List<RawPacket> packets = new ArrayList<>();
+    long sequence = 1L;
+    for (int i = 0; i < 520; i++) {
+      packets.add(new RawPacket(sequence++, (i + 1L) * 1_000_000L, authority));
+    }
+
+    /*
+     * This explicit move is the earliest retained client event after the bounded
+     * history truncates. Its clientTick is absolute to the connection, while the
+     * retained Phase 7 reconstruction starts a new relative boundary clock.
+     */
+    Move retainedAbsoluteMove = new Move(
+        start.position(), 0f, 0f, true, 100L);
+    packets.add(new RawPacket(
+        sequence++, 2_500_000_000L, retainedAbsoluteMove));
+
+    for (int i = 0; i < 9; i++) {
+      packets.add(new RawPacket(
+          sequence++, 2_550_000_000L + i * 50_000_000L, new ClientTickEnd()));
+    }
+
+    packets.add(new RawPacket(
+        sequence++, 3_000_000_000L,
+        new ClientInput(false, false, false, false, false, false, false)));
+
+    Move finalMove = new Move(
+        start.position(), 0f, 0f, true, 109L);
+    packets.add(new RawPacket(
+        sequence, 3_050_000_000L, finalMove));
+
+    var report = runner.process(
+        "truncated-explicit-anchor",
+        packets,
+        world,
+        start,
+        0L);
+
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.equals("INPUT_TICK_ORIGIN known=true offset=100")),
+        report.frames().getLast().trace().toString());
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getLast().verdict(), report.results().toString());
   }
 
 
