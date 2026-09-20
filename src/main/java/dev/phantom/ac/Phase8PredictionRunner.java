@@ -2191,36 +2191,55 @@ public final class Phase8PredictionRunner {
               + " startGround=" + beforeCandidate.context().player().onGround());
         }
 
-        SearchResult result = new Phase6Reachability().search(
-            local.stream()
-                .map(candidate -> candidate.context().withTick(simulationTick))
-                .toList(),
-            inputOptions,
-            ignored -> List.of(new WorldBranch(
-                "packet-world@" + simulationTick,
-                world,
-                true,
-                "latency-compensated client-visible world")),
-            ignored -> List.of(new Phase6Reachability.None()),
-            Phase6Reachability.SearchConfig.defaults(maximumCandidates));
+        Set<Candidate> stepCandidates = new LinkedHashSet<>();
+        LinkedHashSet<String> stepReasons = new LinkedHashSet<>();
+        boolean stepExhaustive = true;
+
+        for (InputConstraint inputOption : inputOptions) {
+          SearchResult branch = new Phase6Reachability().search(
+              local.stream()
+                  .map(candidate -> candidate.context().withTick(simulationTick))
+                  .toList(),
+              List.of(inputOption),
+              ignored -> List.of(new WorldBranch(
+                  "packet-world@" + simulationTick,
+                  world,
+                  true,
+                  "latency-compensated client-visible world")),
+              ignored -> List.of(new Phase6Reachability.None()),
+              Phase6Reachability.SearchConfig.defaults(maximumCandidates));
+
+          trace.add("SIM_INPUT_BRANCH tick=" + simulationTick
+              + " input=" + inputOption
+              + " exhaustive=" + branch.exhaustive()
+              + " verdict=" + branch.verdict()
+              + " candidates=" + branch.candidates().size());
+          stepCandidates.addAll(branch.candidates());
+          stepReasons.addAll(branch.reasons());
+          if (!branch.exhaustive()) stepExhaustive = false;
+        }
 
         simulatedTicks++;
-        if (result.verdict() != Verdict.POSSIBLE
-            || result.candidates().isEmpty()
-            || !result.exhaustive()) {
-          reasons.addAll(result.reasons());
+        if (!stepExhaustive || stepCandidates.isEmpty()) {
+          reasons.addAll(stepReasons);
           reasons.add("prediction step " + simulationTick
               + " was not exhaustively modeled");
           trace.add("SIM_STEP tick=" + simulationTick
               + " exhaustive=false"
-              + " resultVerdict=" + result.verdict()
-              + " reasons=" + result.reasons());
+              + " branchCandidates=" + stepCandidates.size()
+              + " reasons=" + stepReasons);
           exhaustive = false;
           local = Set.of();
           break;
         }
 
-        local = Set.copyOf(result.candidates());
+        if (stepCandidates.size() > maximumCandidates) {
+          return new AdvanceResult(Set.of(), false, simulatedTicks,
+              List.of("prediction candidate budget exceeded across input-timing alternatives"),
+              List.copyOf(trace));
+        }
+
+        local = Set.copyOf(stepCandidates);
         Candidate afterCandidate = local.stream().findFirst().orElse(null);
         if (afterCandidate != null) {
           trace.add("SIM_STEP tick=" + simulationTick
