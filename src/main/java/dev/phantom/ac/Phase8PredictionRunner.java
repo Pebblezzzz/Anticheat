@@ -2616,33 +2616,42 @@ public final class Phase8PredictionRunner {
   private void rebuildCausalInputHistory(
       Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
     inputHistory.clear();
+    uncertainInputs.clear();
+    inputChronologies = List.of();
+    inputChronologyEnumerationExhaustive = true;
 
     List<Packets.RawPacket> history = List.copyOf(timingHistory);
-    List<Packets.NormalizedPacket> normalized = new Packets.Normalizer().normalize(history);
+    List<Packets.NormalizedPacket> normalized =
+        new Packets.Normalizer().normalize(history);
     Map<Long, Packets.NormalizedPacket> normalizedBySequence = new HashMap<>();
     for (Packets.NormalizedPacket packet : normalized) {
       normalizedBySequence.put(packet.sequence(), packet);
     }
+
+    List<InputEventAlternatives> exactEvents = new ArrayList<>();
 
     for (Packets.RawPacket packet : history) {
       if (!(packet.packet() instanceof Packets.ClientInput input)) continue;
 
       Packets.NormalizedPacket canonical = normalizedBySequence.get(packet.sequence());
       if (canonical == null
-          || canonical.flags().contains(Packets.PacketFlag.DUPLICATE)
-          || canonical.flags().contains(Packets.PacketFlag.OUT_OF_ORDER)
+          || canonical.flags().contains(Packets.PacketFlag.DUPLICATE)) {
+        continue;
+      }
+
+      if (canonical.flags().contains(Packets.PacketFlag.OUT_OF_ORDER)
           || canonical.flags().contains(Packets.PacketFlag.SEQUENCE_GAP)) {
+        uncertainInputs.add(new UncertainInput(packet.sequence(), 0L));
         continue;
       }
 
       Phase7Timing.EventTiming timing = phase7TimingBySequence.get(packet.sequence());
       if (timing == null) {
-        // Phase 7 did not produce a timing frame. Preserve the held-state update
-        // as an unresolved causal input rather than silently dropping it.
         uncertainInputs.add(new UncertainInput(packet.sequence(), 0L));
         continue;
       }
 
+      InputConstraint constraint = InputConstraint.fromClientInput(input);
       if (!Phase7Timing.inputTickEnumerationComplete(timing)) {
         long earliestClientTick = timing.inputClientTickEnvelope().known()
             ? Math.max(0L, timing.inputClientTicks().min())
@@ -2652,16 +2661,83 @@ public final class Phase8PredictionRunner {
         continue;
       }
 
-      InputConstraint constraint = InputConstraint.fromClientInput(input);
-      for (long clientTick : Phase7Timing.possibleInputTicks(timing)) {
-        inputHistory.computeIfAbsent(clientTick, ignored -> new ArrayList<>())
-            .add(new TimedInput(packet.sequence(), clientTick, constraint));
+      List<Long> candidates = Phase7Timing.possibleInputTicks(timing);
+      if (candidates.isEmpty()) {
+        uncertainInputs.add(new UncertainInput(packet.sequence(), 0L));
+        continue;
       }
+
+      exactEvents.add(new InputEventAlternatives(
+          packet.sequence(), constraint, candidates));
     }
 
-    for (List<TimedInput> inputs : inputHistory.values()) {
-      inputs.sort(Comparator.comparingLong(TimedInput::sequence));
+    /*
+     * Candidate ticks in one Phase 7 envelope are alternatives, not simultaneous
+     * events. Build full held-state chronologies so a later simulation tick
+     * cannot combine mutually exclusive assignments from different alternatives.
+     */
+    List<NavigableMap<Long, List<TimedInput>>> chronologies = new ArrayList<>();
+    chronologies.add(new TreeMap<>());
+
+    for (InputEventAlternatives event : exactEvents) {
+      List<NavigableMap<Long, List<TimedInput>>> next = new ArrayList<>();
+
+      for (NavigableMap<Long, List<TimedInput>> chronology : chronologies) {
+        long minimumTick =
+            chronology.isEmpty() ? Long.MIN_VALUE : chronology.lastKey();
+
+        for (long clientTick : event.possibleTicks()) {
+          if (clientTick < minimumTick) continue;
+
+          NavigableMap<Long, List<TimedInput>> branch =
+              copyInputHistory(chronology);
+          branch.computeIfAbsent(clientTick, ignored -> new ArrayList<>())
+              .add(new TimedInput(
+                  event.sequence(), clientTick, event.constraint()));
+          next.add(branch);
+
+          if (next.size() > maximumInputChronologies()) {
+            inputChronologyEnumerationExhaustive = false;
+            break;
+          }
+        }
+
+        if (!inputChronologyEnumerationExhaustive) break;
+      }
+
+      if (next.isEmpty()) {
+        long earliestClientTick = Math.max(
+            0L, event.possibleTicks().getFirst());
+        uncertainInputs.add(new UncertainInput(
+            event.sequence(), earliestClientTick));
+        continue;
+      }
+      chronologies = next;
     }
+
+    inputChronologies = chronologies.stream()
+        .map(InputChronology::new)
+        .toList();
+
+    if (inputChronologies.isEmpty()) {
+      inputChronologies = List.of(new InputChronology(new TreeMap<>()));
+    }
+
+    inputHistory.putAll(copyInputHistory(
+        inputChronologies.getFirst().history()));
+  }
+
+  private int maximumInputChronologies() {
+    return Math.max(1, Math.min(maximumCandidates, 256));
+  }
+
+  private static NavigableMap<Long, List<TimedInput>> copyInputHistory(
+      NavigableMap<Long, List<TimedInput>> source) {
+    NavigableMap<Long, List<TimedInput>> copy = new TreeMap<>();
+    for (var entry : source.entrySet()) {
+      copy.put(entry.getKey(), new ArrayList<>(entry.getValue()));
+    }
+    return copy;
   }
 
   private InputConstraint inputForSimulationTickExact(
