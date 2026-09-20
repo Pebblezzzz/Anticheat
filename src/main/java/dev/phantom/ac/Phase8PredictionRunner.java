@@ -3072,6 +3072,13 @@ public final class Phase8PredictionRunner {
         .sorted(Comparator.comparingInt(Phase7Timing.EventTiming::timelineIndex))
         .toList();
 
+    OptionalLong ordinalOrigin = recoverClientTickOriginFromRetainedOrdinals(normalizedHistory);
+    if (ordinalOrigin.isPresent()) {
+      clientTickOriginOffset = ordinalOrigin.getAsLong();
+      clientTickOriginKnown = true;
+      return;
+    }
+
     OptionalLong anchorSequence = canonicalTimings.stream()
         .filter(timing -> timing.kind() == Phase7Timing.EventKind.CLIENT_TICK_END
             || timing.kind() == Phase7Timing.EventKind.INPUT
@@ -3158,6 +3165,67 @@ public final class Phase8PredictionRunner {
     } else {
       clientTickOriginKnown = false;
     }
+  }
+
+  private OptionalLong recoverClientTickOriginFromRetainedOrdinals(
+      List<Packets.NormalizedPacket> normalizedHistory) {
+    long boundaryOrdinal = 0L;
+    boolean sawClientChronology = false;
+    Long discoveredOffset = null;
+
+    for (Packets.NormalizedPacket packet : normalizedHistory.stream()
+        .sorted(Comparator.comparingLong(Packets.NormalizedPacket::sequence))
+        .toList()) {
+      Packets.Packet value = packet.packet();
+      boolean clientChronologyEvent =
+          value instanceof Packets.ClientTickEnd
+              || value instanceof Packets.ClientInput
+              || value instanceof Packets.Move
+              || value instanceof Packets.TeleportConfirm
+              || value instanceof Packets.WorldTransactionAck
+              || value instanceof Packets.FlightToggle;
+      if (!clientChronologyEvent || packet.flags().contains(Packets.PacketFlag.DUPLICATE)) {
+        continue;
+      }
+
+      /*
+       * The retained packet sequence is a valid client chronology witness unless
+       * the client-originated stream itself contains a gap/reordering marker.
+       * Unrelated server-packet reordering must not destroy this anchor.
+       */
+      if (packet.flags().contains(Packets.PacketFlag.SEQUENCE_GAP)
+          || packet.flags().contains(Packets.PacketFlag.OUT_OF_ORDER)) {
+        return OptionalLong.empty();
+      }
+
+      if (!sawClientChronology
+          && value instanceof Packets.Move move
+          && move.clientTick() != null) {
+        // Phase 7 promotes an explicit first client event to the absolute anchor;
+        // in that case relative and absolute ticks are intentionally identical.
+        return OptionalLong.of(0L);
+      }
+      sawClientChronology = true;
+
+      if (value instanceof Packets.ClientTickEnd) {
+        boundaryOrdinal = Math.addExact(boundaryOrdinal, 1L);
+        continue;
+      }
+
+      if (value instanceof Packets.Move move && move.clientTick() != null) {
+        long offset = Math.subtractExact(move.clientTick(), boundaryOrdinal);
+        if (discoveredOffset == null) {
+          discoveredOffset = offset;
+        } else if (discoveredOffset.longValue() != offset) {
+          // Conflicting explicit movement witnesses are genuinely unrecoverable.
+          return OptionalLong.empty();
+        }
+      }
+    }
+
+    return discoveredOffset == null
+        ? OptionalLong.empty()
+        : OptionalLong.of(discoveredOffset);
   }
 
   private record RelativeClientBoundary(
