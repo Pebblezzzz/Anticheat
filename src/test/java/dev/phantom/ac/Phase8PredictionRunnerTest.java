@@ -51,8 +51,8 @@ class Phase8PredictionRunnerTest {
     assertEquals(1, first.movementObservations());
     assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE,
         first.results().getFirst().verdict());
-    assertTrue(first.candidateFrontierRetained(), first.toString());
-    assertEquals(2, runner.candidateCount());
+    assertFalse(first.candidateFrontierRetained(), first.toString());
+    assertEquals(0, runner.candidateCount());
 
     var second = runner.process(
         "flight",
@@ -65,7 +65,7 @@ class Phase8PredictionRunnerTest {
     assertFalse(second.results().stream().anyMatch(
         result -> result.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE),
         second.toString());
-    assertTrue(second.candidateFrontierRetained(), second.toString());
+    assertFalse(second.candidateFrontierRetained(), second.toString());
   }
 
   @Test
@@ -95,13 +95,17 @@ class Phase8PredictionRunnerTest {
     for (int i = 4; i <= 12; i++) {
       catchUp.add(new RawPacket(i, 30L + i, new ClientTickEnd()));
     }
-    catchUp.add(new RawPacket(13, 200, new Move(
-        new Maths.Vec3(.6, 64, .5), 0f, 0f, true, 10L)));
+    Move staleMovement = new Move(
+        new Maths.Vec3(.6, 64, .5), 0f, 0f, true, 10L);
+    catchUp.add(new RawPacket(
+        13, 200, staleMovement,
+        Packets.CaptureProvenance.fromAdapter(
+            "test-movement", staleMovement, 100L, 10L)));
 
     var second = runner.process(
         "stale-root", catchUp, floorWorld(), anchor(), 0L);
 
-    assertTrue(second.candidateFrontierRetained(), second.toString());
+    assertFalse(second.candidateFrontierRetained(), second.toString());
     assertTrue(second.frames().stream()
         .flatMap(frame -> frame.trace().stream())
         .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
@@ -799,6 +803,8 @@ class Phase8PredictionRunnerTest {
         first.results().toString());
     assertEquals(0, runner.candidateCount(), first.toString());
 
+    Move freshObservedMovement = new Move(
+        authorityState.position(), 0f, 0f, true, 3L);
     var second = runner.process(
         "fresh-witness-after-contradiction",
         List.of(
@@ -806,8 +812,9 @@ class Phase8PredictionRunnerTest {
                 4, 40L, authority,
                 Packets.CaptureProvenance.fromAdapter("test-authority", authority, 3L, 3L)),
             new RawPacket(
-                5, 50L,
-                new Move(authorityState.position(), 0f, 0f, true, 3L))),
+                5, 50L, freshObservedMovement,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-movement", freshObservedMovement, 3L, 3L))),
         floorWorld(),
         anchor(),
         0L);
