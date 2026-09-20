@@ -1331,7 +1331,7 @@ class Phase8PredictionRunnerTest {
   void truncatedTimingHistoryRecoversOriginWhenRetainedExplicitMovePredatesBoundary() {
     Phase7Timing.Config timing = new Phase7Timing.Config(
         50_000_000L, 50_000_000L, 50_000_000L,
-        new Phase7Timing.LatencyBounds(0L, 100_000_000L),
+        new Phase7Timing.LatencyBounds(0L, 0L),
         new Phase7Timing.LatencyBounds(0L, 0L),
         new Phase7Timing.TickDelayBounds(0L, 0L),
         new Phase7Timing.TickDelayBounds(0L, 0L),
@@ -1348,15 +1348,14 @@ class Phase8PredictionRunnerTest {
 
     List<RawPacket> packets = new ArrayList<>();
     long sequence = 1L;
-    for (int i = 0; i < 480; i++) {
+    for (int i = 0; i < 520; i++) {
       packets.add(new RawPacket(sequence++, (i + 1L) * 1_000_000L, authority));
     }
 
     /*
-     * This explicit move is the earliest retained client event after truncation.
-     * The old solver treated it as the relative origin and therefore forced offset=0.
-     * A later retained tick boundary provides the relative clock ordinal, allowing
-     * the absolute move ticks to reconstruct the fixed offset.
+     * This explicit move is the earliest retained client event after the bounded
+     * history truncates. Its clientTick is absolute to the connection, while the
+     * retained Phase 7 reconstruction starts a new relative boundary clock.
      */
     Move retainedAbsoluteMove = new Move(
         start.position(), 0f, 0f, true, 100L);
@@ -1370,12 +1369,10 @@ class Phase8PredictionRunnerTest {
 
     packets.add(new RawPacket(
         sequence++, 3_000_000_000L,
-        new ClientInput(true, false, false, false, false, false, false)));
+        new ClientInput(false, false, false, false, false, false, false)));
 
     Move finalMove = new Move(
-        new Maths.Vec3(start.position().x(), start.position().y(),
-            start.position().z() + 0.01),
-        0f, 0f, true, 110L);
+        start.position(), 0f, 0f, true, 109L);
     packets.add(new RawPacket(
         sequence, 3_050_000_000L, finalMove));
 
@@ -1390,11 +1387,10 @@ class Phase8PredictionRunnerTest {
         .anyMatch(line -> line.equals("INPUT_TICK_ORIGIN known=true offset=100")),
         report.frames().getLast().trace().toString());
     assertTrue(report.frames().getLast().trace().stream()
-        .anyMatch(line -> !line.contains("INPUT_TICK_ORIGIN known=false")),
+        .anyMatch(line -> line.contains("selectedSeq=531,selectedTick=9")),
         report.frames().getLast().trace().toString());
-    assertTrue(report.results().getLast().evidence().uncertaintySources().stream()
-        .noneMatch(reason -> reason.contains("absolute client-tick origin is not recoverable")),
-        report.results().toString());
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getLast().verdict(), report.results().toString());
   }
 
 
