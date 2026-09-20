@@ -1272,7 +1272,7 @@ class Phase8PredictionRunnerTest {
     MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
     Simulation.AdvancedInput forward = new Simulation.AdvancedInput(1, 0, false, false, false);
 
-    Vec3 expected = new Vanilla12111RichPhysics().step(
+    Maths.Vec3 expected = new Vanilla12111RichPhysics().step(
         new Vanilla12111RichPhysics.Context(
             41L,
             start,
