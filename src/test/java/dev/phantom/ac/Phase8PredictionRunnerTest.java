@@ -208,6 +208,87 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void staleResyncBootstrapsObservedMovementBeforeUsingServerVelocity() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+    Player start = new Player(
+        new Maths.Vec3(.5, 64.0, .5),
+        Maths.Vec3.ZERO,
+        98.1202f, 32.717106f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(1), State.Provenance.UNKNOWN, Set.of());
+
+    // Establish a live frontier that is deliberately stale before the next
+    // position-bearing movement arrives.
+    runner.process(
+        "stale-resync-bootstrap",
+        List.of(
+            new RawPacket(1, 10L, new ClientTickEnd()),
+            new RawPacket(2, 20L, new Move(
+                start.position(), start.yaw(), start.pitch(), true, 1L))),
+        world, start, 0L);
+
+    Player realStart = new Player(
+        start.position(),
+        new Maths.Vec3(-.12, 0.0, -.03),
+        start.yaw(), start.pitch(), true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        start.attributes(), Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(9), State.Provenance.UNKNOWN, Set.of());
+    Vanilla12111RichPhysics.StepResult step = new Vanilla12111RichPhysics().step(
+        new Vanilla12111RichPhysics.Context(
+            9L,
+            realStart,
+            new Simulation.AdvancedInput(0, 0, false, false, false),
+            world,
+            Simulation.Environment.DRY,
+            realStart.attributes(),
+            Phase5Mechanics.MovementEffects.NONE,
+            Pose.STANDING,
+            MovementEnvironment.dry(true, false, false),
+            false,
+            dev.phantom.ac.world.EntityCollisions.of(List.of())));
+
+    PlayerContext staleAuthority = new PlayerContext(
+        "survival", start.attributes(), Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        start.position(), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    List<RawPacket> packets = new ArrayList<>();
+    packets.add(new RawPacket(
+        3, 30L, staleAuthority,
+        Packets.CaptureProvenance.fromAdapter(
+            "test-authority", staleAuthority, 100L, 10L)));
+    for (int i = 4; i <= 12; i++) {
+      packets.add(new RawPacket(i, 30L + i, new ClientTickEnd()));
+    }
+    Move observed = new Move(
+        step.state().position(), step.state().yaw(), step.state().pitch(),
+        step.state().onGround(), 10L);
+    packets.add(new RawPacket(
+        13, 200L, observed,
+        Packets.CaptureProvenance.fromAdapter(
+            "test-movement", observed, 100L, 10L)));
+
+    var report = runner.process(
+        "stale-resync-bootstrap",
+        packets, world, start, 0L);
+
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getLast().verdict(), report.results().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("CLIENT_MOVEMENT_BOOTSTRAP")
+            && line.contains("reconstructedStartVelocityVerified=true")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.candidateFrontierRetained(), report.toString());
+  }
+
+  @Test
   void staleAirborneAuthorityResyncPredictsObservedNextTick() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 

@@ -528,13 +528,15 @@ public final class Phase8PredictionRunner {
       boolean predictionWasEmptyBeforeRoot = prediction.isEmpty();
       boolean bootstrapRecoveryRequired =
           physicsFrontierSuppressedUntilPositionMovement;
+      boolean rootRebasedForMovement = false;
 
       if (bootstrapRecoveryRequired) {
         trace.add("FRONTIER_ROOT_SUPPRESSED reason=authoritative-observation-witness"
             + " positionBearing=" + (move.position() != null));
       } else {
         ensureRoot(playerId, packet, move, observedBefore, tick, trace);
-        refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, world, trace);
+        rootRebasedForMovement =
+            refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, world, trace);
       }
 
       /*
@@ -546,7 +548,8 @@ public final class Phase8PredictionRunner {
        * observation. This avoids treating Bukkit's server-side velocity as an
        * atomic client-tick velocity.
        */
-      if (predictionWasEmptyBeforeRoot && move.position() != null) {
+      if ((predictionWasEmptyBeforeRoot || rootRebasedForMovement)
+          && move.position() != null) {
         Optional<Candidate> bootstrap = bootstrapPredictionFromObservedMovement(
             packet, move, observedBefore, observedAfter, tick, world, trace);
         if (bootstrap.isPresent()) {
@@ -1251,21 +1254,21 @@ public final class Phase8PredictionRunner {
     return Math.max(0L, relativeClientTick);
   }
 
-  private void refreshFromCausalAuthorityIfStale(
+  private boolean refreshFromCausalAuthorityIfStale(
       Packets.RawPacket movementPacket,
       Packets.Move move,
       Player observedBefore,
       TickResolution tick,
       WorldSnapshot world,
       List<String> trace) {
-    if (prediction.isEmpty() || !tick.known()) return;
+    if (prediction.isEmpty() || !tick.known()) return false;
     AuthorityAnchor authority = latestCausalAuthority(movementPacket);
-    if (authority == null || authority.clientTick() == null) return;
+    if (authority == null || authority.clientTick() == null) return false;
 
     long authorityTick = authority.clientTick();
     long lag = tick.clientTick() - predictionTick;
-    if (predictionTick < 0L || lag <= PREDICTION_RESYNC_LAG_TICKS) return;
-    if (authorityTick > tick.clientTick()) return;
+    if (predictionTick < 0L || lag <= PREDICTION_RESYNC_LAG_TICKS) return false;
+    if (authorityTick > tick.clientTick()) return false;
 
     long previousPredictionTick = predictionTick;
 
@@ -1301,6 +1304,7 @@ public final class Phase8PredictionRunner {
         + " authoritySequence=" + authority.sequence()
         + " authorityServerTick=" + authority.serverTick()
         + " clientWatermarkUsedForSpatialRoot=false");
+    return true;
   }
 
   private void ensureRoot(
