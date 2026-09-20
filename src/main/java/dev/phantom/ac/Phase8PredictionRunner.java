@@ -963,9 +963,16 @@ public final class Phase8PredictionRunner {
     if (authorityTick > tick.clientTick()) return;
 
     long previousPredictionTick = predictionTick;
-    long rootTick = authorityTick == tick.clientTick()
-        ? Math.max(0L, tick.clientTick() - 1L)
-        : authorityTick;
+
+    /*
+     * The authority sample is a current server-side spatial observation. Its
+     * client-tick watermark is not an atomic timestamp for that position, so it
+     * must never be used to place the spatial sample deep in the past relative
+     * to the movement packet. Align the fresh server sample to the movement's
+     * preceding client boundary and let the explicit movement tick provide the
+     * chronology.
+     */
+    long rootTick = Math.max(0L, tick.clientTick() - 1L);
 
     Player rootPlayer = withClientRotation(
         predictionAnchorFromAuthority(authority.context(), tick.clientTick(), world, trace),
@@ -986,7 +993,8 @@ public final class Phase8PredictionRunner {
         + " authorityClientTick=" + authorityTick
         + " rootTick=" + rootTick
         + " authoritySequence=" + authority.sequence()
-        + " authorityServerTick=" + authority.serverTick());
+        + " authorityServerTick=" + authority.serverTick()
+        + " clientWatermarkUsedForSpatialRoot=false");
   }
 
   private void ensureRoot(
