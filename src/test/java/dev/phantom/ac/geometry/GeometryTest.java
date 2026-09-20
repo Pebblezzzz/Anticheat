@@ -233,11 +233,20 @@ class GeometryTest {
   // Clipping: contact is not collision
   // ------------------------------------------------------------------
 
-  @Test void clipMovesABoxOutOfAnOverlappingCollisionByTheMinimumDistance() {
+  @Test void clipDoesNotReversePositiveMotionForAnAlreadyOverlappingStart() {
     VoxelShape wall = Shapes.BLOCK.toWorld(1, 0, 0);
     BlockBox player = BlockBox.of(0.5, 0, 0.5, 1.1, 1.8, 1.1);
-    // The player is already 0.1 inside the wall, so a +X move of 1 must stop at -0.1.
-    assertEquals(-0.1, wall.clip(Axis.X, player, 1.0), 1.0e-12);
+    // Grim's collideX leaves positive motion unchanged when the start already
+    // overlaps the obstacle on the movement axis.
+    assertEquals(1.0, wall.clip(Axis.X, player, 1.0), 0.0);
+  }
+
+  @Test void clipDoesNotReverseNegativeMotionForAnAlreadyOverlappingStart() {
+    VoxelShape floor = Shapes.BLOCK.toWorld(0, -1, 0);
+    BlockBox player = BlockBox.of(-0.1, -0.5, 0.2, 0.5, 1.3, 0.8);
+    // The start overlaps the floor; a negative move is not turned into a
+    // positive correction.
+    assertEquals(-1.0, floor.clip(Axis.Y, player, -1.0), 0.0);
   }
 
   @Test void clipDoesNotMoveABoxThatMerelyTouchesACollisionFace() {
