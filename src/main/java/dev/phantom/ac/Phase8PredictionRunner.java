@@ -105,6 +105,37 @@ public final class Phase8PredictionRunner {
       long clientTick,
       InputConstraint constraint) {}
 
+  /*
+   * A ClientInput whose Phase 7 input-tick envelope could not be exhaustively
+   * materialized is still a real held-state transition. Keeping its sequence
+   * and earliest possible tick lets Phase 8 enumerate the safe finite input
+   * envelope instead of silently replacing that state with neutral input.
+   */
+  private record UncertainInput(long sequence, long earliestClientTick) {}
+
+  private record InputEventAlternatives(
+      long sequence,
+      InputConstraint constraint,
+      List<Long> possibleTicks) {
+    InputEventAlternatives {
+      if (sequence < 0L) throw new IllegalArgumentException("input sequence must be non-negative");
+      Objects.requireNonNull(constraint);
+      possibleTicks = List.copyOf(possibleTicks);
+    }
+  }
+
+  private record InputChronology(
+      NavigableMap<Long, List<TimedInput>> history) {
+    InputChronology {
+      Objects.requireNonNull(history);
+      NavigableMap<Long, List<TimedInput>> copy = new TreeMap<>();
+      for (var entry : history.entrySet()) {
+        copy.put(entry.getKey(), List.copyOf(entry.getValue()));
+      }
+      history = Collections.unmodifiableNavigableMap(copy);
+    }
+  }
+
   private record MovementInputState(boolean sprinting, boolean sneaking) {}
 
   private static final double POSITION_TOLERANCE = Phase6Reachability.POSITION_MATCH_TOLERANCE;
@@ -118,6 +149,10 @@ public final class Phase8PredictionRunner {
   private long timingEpochNanos = -1L;
   private boolean timingHistoryTruncated;
   private final InputConstraint neutralInput;
+  private final List<UncertainInput> uncertainInputs = new ArrayList<>();
+  private List<InputChronology> inputChronologies = List.of();
+  private boolean inputChronologyEnumerationExhaustive = true;
+  private InputConstraint carryInInput;
 
   private Player initialAnchor;
   private long initialAnchorReceivedNanos = -1L;
@@ -151,6 +186,7 @@ public final class Phase8PredictionRunner {
     this.neutralInput = InputConstraint.fromClientInput(
         new Packets.ClientInput(false, false, false, false, false, false, false));
     this.currentInput = neutralInput;
+    this.carryInInput = neutralInput;
   }
 
   public synchronized long lastProcessedSequence() {
@@ -187,6 +223,10 @@ public final class Phase8PredictionRunner {
     clientState = authoritativeAnchor;
     currentInput = neutralInput;
     inputHistory.clear();
+    uncertainInputs.clear();
+    inputChronologies = List.of();
+    inputChronologyEnumerationExhaustive = true;
+    carryInInput = neutralInput;
     timingHistory.clear();
     timingEpochNanos = -1L;
     timingHistoryTruncated = false;
@@ -271,6 +311,7 @@ public final class Phase8PredictionRunner {
     Phase7Timing.Reconstruction phase7Reconstruction = reconstructPhase7Timing();
     Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence =
         phase7Reconstruction.bySequence();
+    rebuildCausalInputHistory(phase7TimingBySequence);
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     List<PredictionFrame> frames = new ArrayList<>();
     int movementObservations = 0;
@@ -334,10 +375,9 @@ public final class Phase8PredictionRunner {
 
       if (value instanceof Packets.ClientInput input) {
         clientState = State.apply(clientState, normalized);
+        // PLAYER_INPUT is a held-state update. Its causal simulation tick is
+        // reconstructed by Phase 7 rather than guessed from packet arrival.
         currentInput = InputConstraint.fromClientInput(input);
-        long inputTick = hasClientTickBoundary ? relativeClientTick : 0L;
-        inputHistory.computeIfAbsent(inputTick, ignored -> new ArrayList<>())
-            .add(new TimedInput(sequence, inputTick, currentInput));
         if (!prediction.isEmpty()) {
           Set<Candidate> updated = overlayClientInput(prediction, clientState, maximumCandidates);
           if (!updated.isEmpty()) prediction = updated;
@@ -771,7 +811,7 @@ public final class Phase8PredictionRunner {
             prediction,
             earliestSimulationTick,
             latestSimulationTick,
-            inputHistory,
+            inputChronologies,
             world,
             maximumCandidates,
             sequence);
@@ -784,7 +824,7 @@ public final class Phase8PredictionRunner {
             prediction,
             startTick,
             targetTick,
-            inputHistory,
+            inputChronologies,
             world,
             maximumCandidates,
             sequence);
@@ -1101,7 +1141,10 @@ public final class Phase8PredictionRunner {
     if (timingEpochNanos < 0L) timingEpochNanos = packet.receivedNanos();
     timingHistory.addLast(packet);
     while (timingHistory.size() > MAX_TIMING_HISTORY_EVENTS) {
-      timingHistory.removeFirst();
+      Packets.RawPacket evicted = timingHistory.removeFirst();
+      if (evicted.packet() instanceof Packets.ClientInput input) {
+        carryInInput = InputConstraint.fromClientInput(input);
+      }
       timingHistoryTruncated = true;
     }
   }
@@ -2169,7 +2212,7 @@ public final class Phase8PredictionRunner {
       Set<Candidate> start,
       long startTick,
       long targetTick,
-      NavigableMap<Long, List<TimedInput>> inputHistory,
+      List<InputChronology> inputChronologies,
       WorldSnapshot world,
       int maximumCandidates,
       long movementSequence) {
@@ -2186,14 +2229,14 @@ public final class Phase8PredictionRunner {
           List.of("incremental prediction horizon exceeded"), List.of());
     }
     return advancePredictionToTarget(
-        start, targetTick, inputHistory, world, maximumCandidates, movementSequence);
+        start, targetTick, inputChronologies, world, maximumCandidates, movementSequence);
   }
 
   private AdvanceResult advancePredictionAcrossTimingRange(
       Set<Candidate> start,
       long earliestTick,
       long latestTick,
-      NavigableMap<Long, List<TimedInput>> inputHistory,
+      List<InputChronology> inputChronologies,
       WorldSnapshot world,
       int maximumCandidates,
       long movementSequence) {
@@ -2226,7 +2269,7 @@ public final class Phase8PredictionRunner {
 
     for (long target = earliestTick; target <= latestTick; target++) {
       AdvanceResult one = advancePredictionToTarget(
-          start, target, inputHistory, world, maximumCandidates, movementSequence);
+          start, target, inputChronologies, world, maximumCandidates, movementSequence);
       union.addAll(one.candidates());
       reasons.addAll(one.reasons());
       trace.add("TIMING_OFFSET target=" + target
@@ -2253,7 +2296,7 @@ public final class Phase8PredictionRunner {
   private AdvanceResult advancePredictionToTarget(
       Set<Candidate> start,
       long targetTick,
-      NavigableMap<Long, List<TimedInput>> inputHistory,
+      List<InputChronology> inputChronologies,
       WorldSnapshot world,
       int maximumCandidates,
       long movementSequence) {
@@ -2269,132 +2312,146 @@ public final class Phase8PredictionRunner {
     Set<Candidate> union = new LinkedHashSet<>();
     LinkedHashSet<String> reasons = new LinkedHashSet<>();
     List<String> trace = new ArrayList<>();
-    boolean exhaustive = true;
+    boolean exhaustive = inputChronologyEnumerationExhaustive;
     int simulatedTicks = 0;
 
-    for (Candidate initial : start) {
-      long localTick = initial.context().simulationTick();
-      if (localTick > targetTick) {
-        reasons.add("candidate simulation tick " + localTick
-            + " is ahead of timing target " + targetTick);
-        continue;
-      }
+    List<InputChronology> chronologies = inputChronologies.isEmpty()
+        ? List.of(new InputChronology(new TreeMap<>()))
+        : inputChronologies;
 
-      Set<Candidate> local = Set.of(initial);
-      while (localTick < targetTick) {
-        final long simulationTick = localTick;
-        List<InputConstraint> inputOptions =
-            inputPossibilitiesForSimulationTick(inputHistory, simulationTick, movementSequence);
-        Candidate beforeCandidate = local.stream().findFirst().orElse(null);
-        if (beforeCandidate != null) {
-          MovementEnvironment frontierEnvironment = beforeCandidate.context().movementEnvironment();
-          trace.add("SIM_INPUT_OPTIONS tick=" + simulationTick
-              + " keyOptions=" + inputOptions
-              + " physicalSprint=" + frontierEnvironment.sprinting()
-              + " physicalSneak=" + frontierEnvironment.sneaking()
-              + " startPos=" + beforeCandidate.context().player().position()
-              + " startVel=" + beforeCandidate.context().player().velocity()
-              + " startGround=" + beforeCandidate.context().player().onGround());
+    for (InputChronology chronology : chronologies) {
+      for (Candidate initial : start) {
+        long localTick = initial.context().simulationTick();
+        if (localTick > targetTick) {
+          reasons.add("candidate simulation tick " + localTick
+              + " is ahead of timing target " + targetTick);
+          continue;
         }
 
-        Set<Candidate> stepCandidates = new LinkedHashSet<>();
-        LinkedHashSet<String> stepReasons = new LinkedHashSet<>();
-        boolean stepExhaustive = true;
+        Set<Candidate> local = Set.of(initial);
+        while (localTick < targetTick) {
+          final long simulationTick = localTick;
+          List<InputConstraint> inputOptions =
+              inputPossibilitiesForSimulationTick(
+                  chronology.history(), simulationTick, movementSequence);
 
-        for (InputConstraint inputOption : inputOptions) {
-          Map<MovementInputState, List<Context>> startsByMovementState = new LinkedHashMap<>();
-          for (Candidate candidate : local) {
-            MovementEnvironment movementEnvironment = candidate.context().movementEnvironment();
-            MovementInputState movementState = new MovementInputState(
-                movementEnvironment.sprinting(), movementEnvironment.sneaking());
-            startsByMovementState
-                .computeIfAbsent(movementState, ignored -> new ArrayList<>())
-                .add(candidate.context().withTick(simulationTick));
+          Candidate beforeCandidate = local.stream().findFirst().orElse(null);
+          if (beforeCandidate != null) {
+            MovementEnvironment frontierEnvironment =
+                beforeCandidate.context().movementEnvironment();
+            trace.add("SIM_INPUT_OPTIONS tick=" + simulationTick
+                + " keyOptions=" + inputOptions
+                + " physicalSprint=" + frontierEnvironment.sprinting()
+                + " physicalSneak=" + frontierEnvironment.sneaking()
+                + " startPos=" + beforeCandidate.context().player().position()
+                + " startVel=" + beforeCandidate.context().player().velocity()
+                + " startGround=" + beforeCandidate.context().player().onGround()
+                + " chronologyAlternatives=" + chronologies.size());
           }
 
-          for (var movementEntry : startsByMovementState.entrySet()) {
-            MovementInputState movementState = movementEntry.getKey();
-            InputConstraint simulationInput = new InputConstraint(
-                inputOption.forward(),
-                inputOption.strafe(),
-                inputOption.jump(),
-                Optional.of(movementState.sprinting()),
-                Optional.of(movementState.sneaking()));
+          Set<Candidate> stepCandidates = new LinkedHashSet<>();
+          LinkedHashSet<String> stepReasons = new LinkedHashSet<>();
+          boolean stepExhaustive = true;
 
-            SearchResult branch = new Phase6Reachability().search(
-                movementEntry.getValue(),
-                List.of(simulationInput),
-              ignored -> List.of(new WorldBranch(
-                  "packet-world@" + simulationTick,
-                  world,
-                  true,
-                  "latency-compensated client-visible world")),
-              ignored -> List.of(new Phase6Reachability.None()),
-              Phase6Reachability.SearchConfig.defaults(maximumCandidates));
+          for (InputConstraint inputOption : inputOptions) {
+            Map<MovementInputState, List<Context>> startsByMovementState =
+                new LinkedHashMap<>();
+            for (Candidate candidate : local) {
+              MovementEnvironment movementEnvironment =
+                  candidate.context().movementEnvironment();
+              MovementInputState movementState = new MovementInputState(
+                  movementEnvironment.sprinting(), movementEnvironment.sneaking());
+              startsByMovementState
+                  .computeIfAbsent(movementState, ignored -> new ArrayList<>())
+                  .add(candidate.context().withTick(simulationTick));
+            }
 
-            trace.add("SIM_INPUT_BRANCH tick=" + simulationTick
-              + " input=" + simulationInput
-              + " movementSprint=" + movementState.sprinting()
-              + " movementSneak=" + movementState.sneaking()
-              + " exhaustive=" + branch.exhaustive()
-              + " verdict=" + branch.verdict()
-              + " candidates=" + branch.candidates().size());
-          stepCandidates.addAll(branch.candidates());
-          stepReasons.addAll(branch.reasons());
-          if (!branch.exhaustive()) stepExhaustive = false;
+            for (var movementEntry : startsByMovementState.entrySet()) {
+              MovementInputState movementState = movementEntry.getKey();
+              InputConstraint simulationInput = new InputConstraint(
+                  inputOption.forward(),
+                  inputOption.strafe(),
+                  inputOption.jump(),
+                  Optional.of(movementState.sprinting()),
+                  Optional.of(movementState.sneaking()));
+
+              SearchResult branch = new Phase6Reachability().search(
+                  movementEntry.getValue(),
+                  List.of(simulationInput),
+                  ignored -> List.of(new WorldBranch(
+                      "packet-world@" + simulationTick,
+                      world,
+                      true,
+                      "latency-compensated client-visible world")),
+                  ignored -> List.of(new Phase6Reachability.None()),
+                  Phase6Reachability.SearchConfig.defaults(maximumCandidates));
+
+              trace.add("SIM_INPUT_BRANCH tick=" + simulationTick
+                  + " input=" + simulationInput
+                  + " movementSprint=" + movementState.sprinting()
+                  + " movementSneak=" + movementState.sneaking()
+                  + " exhaustive=" + branch.exhaustive()
+                  + " verdict=" + branch.verdict()
+                  + " candidates=" + branch.candidates().size());
+              stepCandidates.addAll(branch.candidates());
+              stepReasons.addAll(branch.reasons());
+
+              boolean branchExhaustive = branch.exhaustive()
+                  || exhaustivelyEnumeratedInputEnvelope(branch, inputOption);
+              if (!branchExhaustive) stepExhaustive = false;
+            }
           }
+
+          simulatedTicks++;
+          if (!stepExhaustive || stepCandidates.isEmpty()) {
+            reasons.addAll(stepReasons);
+            reasons.add("prediction step " + simulationTick
+                + " was not exhaustively modeled");
+            trace.add("SIM_STEP tick=" + simulationTick
+                + " exhaustive=false"
+                + " branchCandidates=" + stepCandidates.size()
+                + " reasons=" + stepReasons);
+            exhaustive = false;
+            local = Set.of();
+            break;
+          }
+
+          if (stepCandidates.size() > maximumCandidates) {
+            return new AdvanceResult(Set.of(), false, simulatedTicks,
+                List.of("prediction candidate budget exceeded across input chronologies"),
+                List.copyOf(trace));
+          }
+
+          local = Set.copyOf(stepCandidates);
+          Candidate afterCandidate = local.stream().findFirst().orElse(null);
+          if (afterCandidate != null) {
+            MovementEnvironment resultEnvironment =
+                afterCandidate.context().movementEnvironment();
+            trace.add("SIM_STEP tick=" + simulationTick
+                + " exhaustive=true"
+                + " resultPos=" + afterCandidate.context().player().position()
+                + " resultVel=" + afterCandidate.context().player().velocity()
+                + " resultGround=" + afterCandidate.context().player().onGround()
+                + " resultPhysicalSprint=" + resultEnvironment.sprinting()
+                + " resultPhysicalSneak=" + resultEnvironment.sneaking());
+          }
+
+          localTick++;
         }
 
-        simulatedTicks++;
-        if (!stepExhaustive || stepCandidates.isEmpty()) {
-          reasons.addAll(stepReasons);
-          reasons.add("prediction step " + simulationTick
-              + " was not exhaustively modeled");
-          trace.add("SIM_STEP tick=" + simulationTick
-              + " exhaustive=false"
-              + " branchCandidates=" + stepCandidates.size()
-              + " reasons=" + stepReasons);
-          exhaustive = false;
-          local = Set.of();
-          break;
-        }
-
-        if (stepCandidates.size() > maximumCandidates) {
+        union.addAll(local);
+        if (union.size() > maximumCandidates) {
           return new AdvanceResult(Set.of(), false, simulatedTicks,
-              List.of("prediction candidate budget exceeded across input-timing alternatives"),
+              List.of("combined prediction candidate budget exceeded across input chronologies"),
               List.copyOf(trace));
         }
-
-        local = Set.copyOf(stepCandidates);
-        Candidate afterCandidate = local.stream().findFirst().orElse(null);
-        if (afterCandidate != null) {
-          MovementEnvironment resultEnvironment = afterCandidate.context().movementEnvironment();
-          trace.add("SIM_STEP tick=" + simulationTick
-              + " exhaustive=true"
-              + " resultPos=" + afterCandidate.context().player().position()
-              + " resultVel=" + afterCandidate.context().player().velocity()
-              + " resultGround=" + afterCandidate.context().player().onGround()
-              + " resultPhysicalSprint=" + resultEnvironment.sprinting()
-              + " resultPhysicalSneak=" + resultEnvironment.sneaking());
-        }
-
-        if (local.size() > maximumCandidates) {
-          return new AdvanceResult(Set.of(), false, simulatedTicks,
-              List.of("prediction candidate budget exceeded"),
-              List.copyOf(trace));
-        }
-        localTick++;
-      }
-
-      union.addAll(local);
-      if (union.size() > maximumCandidates) {
-        return new AdvanceResult(Set.of(), false, simulatedTicks,
-            List.of("combined prediction candidate budget exceeded"),
-            List.copyOf(trace));
       }
     }
 
-    reasons.add("persistent prediction advanced using client input history indexed by simulation tick");
+    reasons.add("persistent prediction advanced across causally assigned held-input chronologies");
+    if (!inputChronologyEnumerationExhaustive) {
+      reasons.add("causal input chronology combinations exceeded the bounded enumeration budget");
+    }
     return new AdvanceResult(
         Set.copyOf(union), exhaustive, simulatedTicks,
         List.copyOf(reasons), List.copyOf(trace));
@@ -2559,35 +2616,210 @@ public final class Phase8PredictionRunner {
       long simulationTick,
       long movementSequence) {
     if (simulationTick < 0L) return List.of(neutralInput);
+    return List.of(inputForSimulationTickExact(history, simulationTick, movementSequence));
+  }
+
+  /**
+   * Rebuild the live input history from the same Phase 7 timing reconstruction
+   * used by the causal offline pipeline. A packet is inserted at every client
+   * tick that Phase 7 exhaustively proves possible; raw packet arrival is never
+   * treated as the simulation tick.
+   */
+  private void rebuildCausalInputHistory(
+      Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
+    inputHistory.clear();
+    uncertainInputs.clear();
+    inputChronologies = List.of();
+    inputChronologyEnumerationExhaustive = true;
+
+    List<Packets.RawPacket> history = List.copyOf(timingHistory);
+    List<Packets.NormalizedPacket> normalized =
+        new Packets.Normalizer().normalize(history);
+    Map<Long, Packets.NormalizedPacket> normalizedBySequence = new HashMap<>();
+    for (Packets.NormalizedPacket packet : normalized) {
+      normalizedBySequence.put(packet.sequence(), packet);
+    }
+
+    List<InputEventAlternatives> exactEvents = new ArrayList<>();
+
+    for (Packets.RawPacket packet : history) {
+      if (!(packet.packet() instanceof Packets.ClientInput input)) continue;
+
+      Packets.NormalizedPacket canonical = normalizedBySequence.get(packet.sequence());
+      if (canonical == null
+          || canonical.flags().contains(Packets.PacketFlag.DUPLICATE)) {
+        continue;
+      }
+
+      if (canonical.flags().contains(Packets.PacketFlag.OUT_OF_ORDER)
+          || canonical.flags().contains(Packets.PacketFlag.SEQUENCE_GAP)) {
+        uncertainInputs.add(new UncertainInput(packet.sequence(), 0L));
+        continue;
+      }
+
+      Phase7Timing.EventTiming timing = phase7TimingBySequence.get(packet.sequence());
+      if (timing == null) {
+        uncertainInputs.add(new UncertainInput(packet.sequence(), 0L));
+        continue;
+      }
+
+      InputConstraint constraint = InputConstraint.fromClientInput(input);
+      if (!Phase7Timing.simulationTickEnumerationComplete(timing)) {
+        long earliestClientTick = timing.inputClientTickEnvelope().known()
+            ? Math.max(0L, timing.inputClientTicks().min())
+            : 0L;
+        uncertainInputs.add(new UncertainInput(
+            packet.sequence(), earliestClientTick));
+        continue;
+      }
+
+      /*
+       * For a held ClientInput state, the relevant timestamp for movement
+       * prediction is the simulation tick on which that state can begin taking
+       * effect. Phase 7 derives this separately from packet-generation time via
+       * the configured input-to-simulation delay.
+       */
+      List<Long> candidates = Phase7Timing.possibleSimulationTicks(timing);
+      if (candidates.isEmpty()) {
+        uncertainInputs.add(new UncertainInput(packet.sequence(), 0L));
+        continue;
+      }
+
+      exactEvents.add(new InputEventAlternatives(
+          packet.sequence(), constraint, candidates));
+    }
 
     /*
-     * Phase 7 explicitly bounds input-to-simulation delay to 0..1 client ticks.
-     * A newly received ClientInput may therefore be the state used by this
-     * simulation tick or the following one. Keep both exact states when they
-     * differ instead of collapsing chronology to one arbitrary choice.
+     * Candidate ticks in one Phase 7 envelope are alternatives, not simultaneous
+     * events. Build full held-state chronologies so a later simulation tick
+     * cannot combine mutually exclusive assignments from different alternatives.
      */
-    LinkedHashSet<InputConstraint> options = new LinkedHashSet<>();
-    options.add(inputForSimulationTickExact(history, simulationTick, movementSequence));
-    if (simulationTick > 0L) {
-      options.add(inputForSimulationTickExact(history, simulationTick - 1L, movementSequence));
+    List<NavigableMap<Long, List<TimedInput>>> chronologies = new ArrayList<>();
+    chronologies.add(new TreeMap<>());
+
+    for (InputEventAlternatives event : exactEvents) {
+      List<NavigableMap<Long, List<TimedInput>>> next = new ArrayList<>();
+
+      for (NavigableMap<Long, List<TimedInput>> chronology : chronologies) {
+        long minimumTick =
+            chronology.isEmpty() ? Long.MIN_VALUE : chronology.lastKey();
+
+        for (long clientTick : event.possibleTicks()) {
+          if (clientTick < minimumTick) continue;
+
+          NavigableMap<Long, List<TimedInput>> branch =
+              copyInputHistory(chronology);
+          branch.computeIfAbsent(clientTick, ignored -> new ArrayList<>())
+              .add(new TimedInput(
+                  event.sequence(), clientTick, event.constraint()));
+          next.add(branch);
+
+          if (next.size() > maximumInputChronologies()) {
+            inputChronologyEnumerationExhaustive = false;
+            break;
+          }
+        }
+
+        if (!inputChronologyEnumerationExhaustive) break;
+      }
+
+      if (next.isEmpty()) {
+        long earliestClientTick = Math.max(
+            0L, event.possibleTicks().getFirst());
+        uncertainInputs.add(new UncertainInput(
+            event.sequence(), earliestClientTick));
+        continue;
+      }
+      chronologies = next;
     }
-    return List.copyOf(options);
+
+    inputChronologies = chronologies.stream()
+        .map(InputChronology::new)
+        .toList();
+
+    if (inputChronologies.isEmpty()) {
+      inputChronologies = List.of(new InputChronology(new TreeMap<>()));
+    }
+
+    inputHistory.putAll(copyInputHistory(
+        inputChronologies.getFirst().history()));
+  }
+
+  private int maximumInputChronologies() {
+    return Math.max(1, Math.min(maximumCandidates, 256));
+  }
+
+  private static NavigableMap<Long, List<TimedInput>> copyInputHistory(
+      NavigableMap<Long, List<TimedInput>> source) {
+    NavigableMap<Long, List<TimedInput>> copy = new TreeMap<>();
+    for (var entry : source.entrySet()) {
+      copy.put(entry.getKey(), new ArrayList<>(entry.getValue()));
+    }
+    return copy;
   }
 
   private InputConstraint inputForSimulationTickExact(
       NavigableMap<Long, List<TimedInput>> history,
       long simulationTick,
       long movementSequence) {
-    if (history.isEmpty() || simulationTick < 0L) return neutralInput;
-    for (var entry : history.headMap(simulationTick, true).descendingMap().entrySet()) {
-      TimedInput selected = null;
-      for (TimedInput input : entry.getValue()) {
-        if (input.sequence() > movementSequence) break;
-        selected = input;
+    if (simulationTick < 0L) return neutralInput;
+
+    TimedInput selected = null;
+    if (!history.isEmpty()) {
+      for (var entry : history.headMap(simulationTick, true).descendingMap().entrySet()) {
+        for (TimedInput input : entry.getValue()) {
+          if (input.sequence() > movementSequence) break;
+          selected = input;
+        }
+        if (selected != null) break;
       }
-      if (selected != null) return selected.constraint();
     }
-    return neutralInput;
+
+    /*
+     * A later input update whose exact tick is not recoverable can already have
+     * replaced the selected held state. Keep that interval unconstrained rather
+     * than silently asserting the previous or neutral input.
+     */
+    for (UncertainInput input : uncertainInputs) {
+      if (input.sequence() > movementSequence) continue;
+      if (simulationTick < input.earliestClientTick()) continue;
+      if (selected == null || input.sequence() > selected.sequence()) {
+        return InputConstraint.any();
+      }
+    }
+
+    // A ClientInput evicted from the bounded timing history remains held until
+    // another input update replaces it. This is the carry-in state of the
+    // retained chronology and is more precise than resetting to neutral input.
+    return selected == null
+        ? (carryInInput == null ? neutralInput : carryInInput)
+        : selected.constraint();
+  }
+
+  private static boolean exhaustivelyEnumeratedInputEnvelope(
+      SearchResult result,
+      InputConstraint input) {
+    if (result.verdict() != Verdict.UNCERTAIN
+        || result.metrics().budgetReached()
+        || result.nonExhaustiveWorldBranches() != 0
+        || result.uncertainTransitions() != 0
+        || result.candidates().isEmpty()
+        || input.enumerate().isEmpty()) {
+      return false;
+    }
+    if (result.reasons().stream().anyMatch(reason ->
+        reason.contains("maximum ")
+            || reason.contains("world hypothesis")
+            || reason.contains("world ")
+            || reason.contains("Phase 5")
+            || reason.contains("physics")
+            || reason.contains("initial state carries explicit uncertainty")
+            || reason.contains("no deterministic candidate survived"))) {
+      return false;
+    }
+    return result.candidates().stream()
+        .allMatch(candidate -> candidate.context().uncertainty().stream()
+            .allMatch(dimension -> dimension == UncertainDimension.INPUT));
   }
 
   private InputConstraint inputForSimulationTick(
