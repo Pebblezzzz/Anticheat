@@ -93,8 +93,8 @@ public final class Vanilla12111RichPhysics {
                                 (int)Math.floor(s.position().z())));
                 double slipperiness=BlockCatalogue12111.slipperiness(support);
                 double movementSpeed=context.attributes().value()*context.effects().speedMultiplier();
-                if(context.input().sprint())movementSpeed*=SPRINTING_SPEED_MULTIPLIER;
-                if(context.input().sneak())movementSpeed*=SNEAKING_SPEED_MULTIPLIER;
+                if(context.movementEnvironment().sprinting())movementSpeed*=SPRINTING_SPEED_MULTIPLIER;
+                if(context.movementEnvironment().sneaking())movementSpeed*=SNEAKING_SPEED_MULTIPLIER;
                 double frictionInfluencedSpeed=movementSpeed*FRICTION_SPEED_FACTOR
                         /(slipperiness*slipperiness*slipperiness);
                 inputAcceleration=inputMagnitude>1.0
@@ -102,7 +102,7 @@ public final class Vanilla12111RichPhysics {
                         :frictionInfluencedSpeed*INPUT_FRICTION;
             }
         }else{
-            double offGroundSpeed=context.input().sprint()?SPRINT_AIR_ACCEL:AIR_ACCEL;
+            double offGroundSpeed=context.movementEnvironment().sprinting()?SPRINT_AIR_ACCEL:AIR_ACCEL;
             inputAcceleration=inputMagnitude>1.0
                     ?offGroundSpeed
                     :offGroundSpeed*INPUT_FRICTION;
@@ -128,7 +128,7 @@ public final class Vanilla12111RichPhysics {
         RichWorldCollision.Result collision=RichWorldCollision.resolve(context.world(),start,velocity,s.onGround()&&!fluid&&!climbing&&!gliding?STEP_HEIGHT:0,context.entityCollisions());if(collision.uncertain())return uncertain(context,collision.diagnostic());Vec3 displacement=collision.displacement();
         boolean supported=false;if(s.onGround()&&velocity.y()<=0&&!fluid&&!climbing&&!gliding){RichWorldCollision.Result probe=RichWorldCollision.resolve(context.world(),start,new Vec3(0,-GROUND_PROBE,0),0,context.entityCollisions());if(probe.uncertain())return uncertain(context,probe.diagnostic());supported=probe.collidedY();}
         boolean grounded=velocity.y()<=0&&(collision.collidedY()||supported);
-        double horizontalFactor;if(context.movementEnvironment().fluid()==Phase5Mechanics.Fluid.WATER)horizontalFactor=context.movementEnvironment().fluidSpeedMultiplier()*(context.input().sprint()?WATER_SPRINT_DRAG:WATER_DRAG);else if(context.movementEnvironment().fluid()==Phase5Mechanics.Fluid.LAVA)horizontalFactor=context.movementEnvironment().fluidSpeedMultiplier()*LAVA_DRAG;else if(climbing)horizontalFactor=s.onGround()?GROUND_FRICTION:AIR_HORIZONTAL_FRICTION;else if(gliding)horizontalFactor=AIR_DRAG;else if(s.onGround()){
+        double horizontalFactor;if(context.movementEnvironment().fluid()==Phase5Mechanics.Fluid.WATER)horizontalFactor=context.movementEnvironment().fluidSpeedMultiplier()*(context.movementEnvironment().sprinting()?WATER_SPRINT_DRAG:WATER_DRAG);else if(context.movementEnvironment().fluid()==Phase5Mechanics.Fluid.LAVA)horizontalFactor=context.movementEnvironment().fluidSpeedMultiplier()*LAVA_DRAG;else if(climbing)horizontalFactor=s.onGround()?GROUND_FRICTION:AIR_HORIZONTAL_FRICTION;else if(gliding)horizontalFactor=AIR_DRAG;else if(s.onGround()){
             boolean horizontalMotion=Math.hypot(velocity.x(),velocity.z())>1.0E-12;
             if(!horizontalMotion){
                 horizontalFactor=1.0;
