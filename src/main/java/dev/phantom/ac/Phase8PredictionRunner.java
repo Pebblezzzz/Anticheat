@@ -840,8 +840,8 @@ public final class Phase8PredictionRunner {
            */
           prediction = Set.of();
           predictionTick = -1L;
-          clearObservedMovementHistory();
           trace.add("FRONTIER_RESET reason=OBSERVATION_CONTRADICTION");
+          trace.add("OBSERVED_MOVEMENT_HISTORY_RETAINED reason=RECOVERY_EVIDENCE");
         }
         case UNCERTAIN -> {
           uncertain++;
@@ -853,8 +853,8 @@ public final class Phase8PredictionRunner {
            */
           prediction = Set.of();
           predictionTick = -1L;
-          clearObservedMovementHistory();
           trace.add("FRONTIER_RESET reason=UNCERTAIN_OBSERVATION");
+          trace.add("OBSERVED_MOVEMENT_HISTORY_RETAINED reason=RECOVERY_EVIDENCE");
         }
       }
 
