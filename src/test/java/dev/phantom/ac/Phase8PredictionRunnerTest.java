@@ -558,6 +558,10 @@ class Phase8PredictionRunnerTest {
         .anyMatch(line -> line.contains("BOOTSTRAP_START simulationTick=3")),
         report.frames().getLast().trace().toString());
     assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("SIM_INPUT_OPTIONS tick=3")
+            && line.contains("selectedSeq=3")),
+        report.frames().toString());
+    assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.contains("CLIENT_MOVEMENT_BOOTSTRAP")
             && line.contains("reconstructedStartVelocityVerified=true")),
         report.frames().getLast().trace().toString());
