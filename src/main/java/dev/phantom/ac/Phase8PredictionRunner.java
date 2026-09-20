@@ -681,16 +681,30 @@ public final class Phase8PredictionRunner {
               tick, uncertaintySources, witnessSearch, true);
           results.add(result);
           possible++;
-          prediction = Set.of(witness);
-          predictionTick = tick.clientTick();
           latestContinuation = Continuation.ACTIVE;
           lastPositionClientTick = tick.clientTick();
           rememberObservedMovement(observedBefore, observedAfter, tick);
+
+          /*
+           * This candidate is an observation witness, not a physics state. Its
+           * position is trustworthy for this packet, but its velocity comes from
+           * a server-side snapshot whose timing is not atomic with the client
+           * movement. Retaining it as the next prediction frontier would combine
+           * an observed client position with a potentially non-corresponding
+           * server velocity and manufacture kinematic drift on the next tick.
+           *
+           * Leave the physics frontier empty. The next position-bearing movement
+           * can rebuild from a fresh causal authority and, when available, the
+           * observed displacement bootstrap will reconstruct a client-boundary
+           * velocity without inventing one from the witness.
+           */
+          prediction = Set.of();
+          predictionTick = -1L;
           trace.add("EVIDENCE POSSIBLE reason=AUTHORITATIVE_ZERO_DELTA_WITNESS"
               + " authoritySequence=" + freshAuthority.sequence()
               + " authorityServerTick=" + freshAuthority.serverTick());
-          trace.add("FRONTIER_REESTABLISHED source=AUTHORITATIVE_ZERO_DELTA_WITNESS"
-              + " tick=" + tick.clientTick());
+          trace.add("FRONTIER_CLEARED source=AUTHORITATIVE_ZERO_DELTA_WITNESS"
+              + " reason=observation-witness-is-not-a-physics-root");
           frames.add(frame(
               sequence, packet, tick, move, observedBefore, observedAfter,
               predictedBefore, prediction, world, List.of(), trace));
