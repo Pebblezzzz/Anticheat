@@ -455,6 +455,8 @@ public final class Phase8PredictionRunner {
           + " causalSequence=" + world.causalSequence()
           + " chunks=" + world.loadedChunks().size());
 
+      ensureRoot(playerId, packet, move, observedBefore, tick, trace);
+      refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, world, trace);
       Set<Candidate> predictedBefore = prediction;
 
       /*
@@ -507,8 +509,6 @@ public final class Phase8PredictionRunner {
         }
       }
 
-      ensureRoot(playerId, packet, move, observedBefore, tick, trace);
-      refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, world, trace);
       if (move.position() != null) {
         rememberObservedMovement(observedBefore, observedAfter, tick);
       }
@@ -2018,12 +2018,12 @@ public final class Phase8PredictionRunner {
       Set<Candidate> local = Set.of(initial);
       while (localTick < targetTick) {
         final long simulationTick = localTick;
-        InputConstraint input = inputForSimulationTick(
-            inputHistory, simulationTick, movementSequence);
+        List<InputConstraint> inputOptions =
+            inputPossibilitiesForSimulationTick(inputHistory, simulationTick, movementSequence);
         Candidate beforeCandidate = local.stream().findFirst().orElse(null);
         if (beforeCandidate != null) {
-          trace.add("SIM_INPUT tick=" + simulationTick
-              + " input=" + input
+          trace.add("SIM_INPUT_OPTIONS tick=" + simulationTick
+              + " inputs=" + inputOptions
               + " startPos=" + beforeCandidate.context().player().position()
               + " startVel=" + beforeCandidate.context().player().velocity()
               + " startGround=" + beforeCandidate.context().player().onGround());
@@ -2033,7 +2033,7 @@ public final class Phase8PredictionRunner {
             local.stream()
                 .map(candidate -> candidate.context().withTick(simulationTick))
                 .toList(),
-            List.of(input),
+            inputOptions,
             ignored -> List.of(new WorldBranch(
                 "packet-world@" + simulationTick,
                 world,
@@ -2244,7 +2244,27 @@ public final class Phase8PredictionRunner {
         "prediction:flight:" + playerId + ":" + packet.sequence());
   }
 
-  private InputConstraint inputForSimulationTick(
+  private List<InputConstraint> inputPossibilitiesForSimulationTick(
+      NavigableMap<Long, List<TimedInput>> history,
+      long simulationTick,
+      long movementSequence) {
+    if (simulationTick < 0L) return List.of(neutralInput);
+
+    /*
+     * Phase 7 explicitly bounds input-to-simulation delay to 0..1 client ticks.
+     * A newly received ClientInput may therefore be the state used by this
+     * simulation tick or the following one. Keep both exact states when they
+     * differ instead of collapsing chronology to one arbitrary choice.
+     */
+    LinkedHashSet<InputConstraint> options = new LinkedHashSet<>();
+    options.add(inputForSimulationTickExact(history, simulationTick, movementSequence));
+    if (simulationTick > 0L) {
+      options.add(inputForSimulationTickExact(history, simulationTick - 1L, movementSequence));
+    }
+    return List.copyOf(options);
+  }
+
+  private InputConstraint inputForSimulationTickExact(
       NavigableMap<Long, List<TimedInput>> history,
       long simulationTick,
       long movementSequence) {
@@ -2258,6 +2278,13 @@ public final class Phase8PredictionRunner {
       if (selected != null) return selected.constraint();
     }
     return neutralInput;
+  }
+
+  private InputConstraint inputForSimulationTick(
+      NavigableMap<Long, List<TimedInput>> history,
+      long simulationTick,
+      long movementSequence) {
+    return inputPossibilitiesForSimulationTick(history, simulationTick, movementSequence).getFirst();
   }
 
   private static SearchResult uncertainSearch(Set<Candidate> candidates, String reason) {
