@@ -945,6 +945,82 @@ class Phase8PredictionRunnerTest {
 
 
   @Test
+  void authoritativeObservationWitnessCannotBecomeNonAtomicPhysicsRoot() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+
+    WorldSnapshot world = floorWorld();
+    double priorY = 69.2491871;
+    double witnessY = 69.25220334025373;
+    double nextY = 69.17675927506424;
+    double nonAtomicWitnessVelocity = 0.08307781780646721;
+    double boundaryVelocity = 0.00301626150904258;
+
+    Player start = new Player(
+        new Maths.Vec3(.5, priorY, .5),
+        Maths.Vec3.ZERO,
+        0f, 0f, false, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(4), State.Provenance.UNKNOWN, Set.of());
+
+    PlayerContext witnessAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        MovementEnvironment.dry(false, false, false),
+        new Maths.Vec3(.5, witnessY, .5),
+        new Maths.Vec3(0.0, nonAtomicWitnessVelocity, 0.0),
+        false, false, false, List.of());
+
+    PlayerContext nextAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        MovementEnvironment.dry(false, false, false),
+        new Maths.Vec3(.5, witnessY, .5),
+        new Maths.Vec3(0.0, boundaryVelocity, 0.0),
+        false, false, false, List.of());
+
+    Move firstMovement = new Move(
+        new Maths.Vec3(.5, witnessY, .5), 0f, 0f, false, 5L);
+    Move secondMovement = new Move(
+        new Maths.Vec3(.5, nextY, .5), 0f, 0f, false, 6L);
+
+    var report = runner.process(
+        "authority-witness-frontier",
+        List.of(
+            new RawPacket(1, 10L, new ClientTickEnd()),
+            new RawPacket(2, 20L, witnessAuthority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-authority", witnessAuthority, 10L, 5L)),
+            new RawPacket(3, 30L, firstMovement,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-movement", firstMovement, 10L, 5L)),
+            new RawPacket(4, 40L, nextAuthority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-authority", nextAuthority, 11L, 6L)),
+            new RawPacket(5, 50L, secondMovement,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-movement", secondMovement, 11L, 6L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(2, report.movementObservations(), report.toString());
+    assertEquals(2, report.results().size(), report.results().toString());
+    assertTrue(report.results().stream().allMatch(
+        result -> result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE),
+        report.results().toString());
+
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("FRONTIER_CLEARED")
+            && line.contains("observation-witness-is-not-a-physics-root")),
+        report.frames().getFirst().trace().toString());
+
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("CLIENT_MOVEMENT_BOOTSTRAP")
+            && line.contains("reconstructedStartVelocityVerified=true")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.candidateFrontierRetained(), report.toString());
+  }
+
+  @Test
   void inputGeneratedBeforeTickEndIsAppliedToThatEarlierSimulationTick() {
     Phase7Timing.Config timing = new Phase7Timing.Config(
         50_000_000L,
