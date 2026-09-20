@@ -3207,10 +3207,10 @@ public final class Phase8PredictionRunner {
         minimum = Math.max(minimum, boundary.boundaryIndex());
         constrained = true;
         if (boundary.boundaryIndex() == boundaries.getLast().boundaryIndex()) {
-          long deltaMax = safeRelativeAdd(
+          long boundaryDeltaMax = safeRelativeAdd(
               eventGeneration.maxNanos(), -generation.minNanos());
           long elapsedTicks = Math.floorDiv(
-              Math.max(0L, deltaMax), phase7TimingConfig.clientTickMinNanos());
+              Math.max(0L, boundaryDeltaMax), phase7TimingConfig.clientTickMinNanos());
           maximum = Math.min(
               maximum,
               safeRelativeAdd(boundary.boundaryIndex(), elapsedTicks));
