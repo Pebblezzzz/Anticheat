@@ -717,8 +717,7 @@ class Phase8PredictionRunnerTest {
     double positionDelta = sprint.state().position().z() - noSprint.state().position().z();
     double movementSpeed = state.attributes().value();
     double expectedPositionDelta = Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST
-        + movementSpeed * (Vanilla12111RichPhysics.SPRINTING_SPEED_MULTIPLIER - 1.0)
-            * Vanilla12111RichPhysics.INPUT_FRICTION;
+        + movementSpeed * (Vanilla12111RichPhysics.SPRINTING_SPEED_MULTIPLIER - 1.0);
     double velocityDelta = sprint.state().velocity().z() - noSprint.state().velocity().z();
     assertEquals(
         expectedPositionDelta * Vanilla12111RichPhysics.GROUND_FRICTION,
