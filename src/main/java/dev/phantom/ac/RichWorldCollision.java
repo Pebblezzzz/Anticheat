@@ -108,7 +108,7 @@ public final class RichWorldCollision {
             "step candidate crosses unknown or unsupported world coverage problems="
                 +coverageProblems(world,stepQuery));
 
-      WorldQueries.CollisionResult stepBlockResult=
+      dev.phantom.ac.world.WorldQueries.CollisionResult stepBlockResult=
           dev.phantom.ac.world.WorldQueries.collisions(world,stepQuery);
       EntityCollisions.EntityCollisionResult stepEntityResult=entities.boxesIn(stepQuery);
       if(!stepBlockResult.isDefinite()||!stepEntityResult.isDefinite())
