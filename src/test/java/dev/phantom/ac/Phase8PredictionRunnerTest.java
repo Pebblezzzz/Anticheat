@@ -31,6 +31,54 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void playerInputSprintKeyDoesNotImplyActualMovementSprint() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    var world = floorWorld();
+    var movementEnvironment = MovementEnvironment.dry(true, false, false);
+    var effects = Phase5Mechanics.MovementEffects.NONE;
+    var attrs = new Simulation.Attributes(0.1);
+    var input = new Simulation.AdvancedInput(1, 0, false, false, false);
+
+    Player start = new Player(
+        new Maths.Vec3(.5, 64, .5), Maths.Vec3.ZERO,
+        0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.of(input), attrs,
+        Pose.STANDING, State.Environment.DRY, State.TickRange.exact(0),
+        State.Provenance.UNKNOWN, Set.of());
+
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    var first = physics.step(new Vanilla12111RichPhysics.Context(
+        0, start, input, world, Simulation.Environment.DRY, attrs,
+        effects, Pose.STANDING, movementEnvironment, false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+    var second = physics.step(new Vanilla12111RichPhysics.Context(
+        1, first, input, world, Simulation.Environment.DRY, attrs,
+        effects, Pose.STANDING, movementEnvironment, false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", attrs, Map.of(), Pose.STANDING, movementEnvironment,
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    var report = runner.process(
+        "sprint-key-vs-state",
+        List.of(
+            new RawPacket(1, 10, authority),
+            new RawPacket(2, 20, new ClientInput(
+                true, false, false, false, false, false, true)),
+            new RawPacket(3, 30, new ClientTickEnd()),
+            new RawPacket(4, 40, new Move(first.position(), 0f, 0f, true, 1L)),
+            new RawPacket(5, 50, new ClientTickEnd()),
+            new RawPacket(6, 60, new Move(second.position(), 0f, 0f, true, 2L))),
+        world, start, 0L);
+
+    assertEquals(2, report.movementObservations(), report.toString());
+    assertTrue(report.results().stream().allMatch(
+        result -> result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE),
+        report.toString());
+  }
+
+  @Test
   void impossibleObservationDoesNotOverwritePredictionFrontier() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     Player anchor = anchor();
