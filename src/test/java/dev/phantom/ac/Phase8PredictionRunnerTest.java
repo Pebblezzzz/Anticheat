@@ -153,7 +153,7 @@ class Phase8PredictionRunnerTest {
     var second = runner.process(
         "stale-root", catchUp, floorWorld(), anchor(), 0L);
 
-    assertFalse(second.candidateFrontierRetained(), second.toString());
+    assertTrue(second.candidateFrontierRetained(), second.toString());
     assertTrue(second.frames().stream()
         .flatMap(frame -> frame.trace().stream())
         .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
@@ -490,7 +490,7 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
-  void staleResyncUsesInputFromTheSimulatedTickNotTheLatestInput() {
+  void staleResyncBootstrapsObservedMovementAtTheSimulationTick() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
     double movementSpeed = 0.1;
@@ -513,7 +513,7 @@ class Phase8PredictionRunnerTest {
         new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 1L)));
 
     // Advance to tick 4, then change input. The stale resync for the tick-4
-    // movement must simulate tick 3 with the earlier forward+sprint input.
+    // movement must bootstrap the observed movement from its tick-3 boundary.
     packets.add(new RawPacket(5, 50, new ClientTickEnd()));
     packets.add(new RawPacket(6, 60, new ClientTickEnd()));
     packets.add(new RawPacket(7, 70, new ClientTickEnd()));
@@ -540,10 +540,13 @@ class Phase8PredictionRunnerTest {
         .flatMap(frame -> frame.trace().stream())
         .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
         report.frames().toString());
-    assertTrue(report.frames().stream()
-        .flatMap(frame -> frame.trace().stream())
-        .anyMatch(line -> line.contains("FRONTIER_COMMITTED")),
-        report.frames().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("BOOTSTRAP_START simulationTick=3")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("CLIENT_MOVEMENT_BOOTSTRAP")
+            && line.contains("reconstructedStartVelocityVerified=true")),
+        report.frames().getLast().trace().toString());
   }
 
   @Test
