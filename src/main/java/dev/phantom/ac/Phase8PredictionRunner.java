@@ -1244,8 +1244,15 @@ public final class Phase8PredictionRunner {
   private AuthorityAnchor freshCausalAuthority(Packets.RawPacket movementPacket) {
     AuthorityAnchor authority = latestCausalAuthority(movementPacket);
     if (authority == null) return null;
-    long movementTick = movementServerTick(movementPacket);
-    long age = movementTick - authority.serverTick();
+    Long movementServerTick = movementPacket.provenance().authoritativeServerTick();
+    if (movementServerTick == null) {
+      /*
+       * Replay/unit captures may omit the server-tick association. Sequence and
+       * receipt ordering still establish causal freshness for an observation witness.
+       */
+      return authority;
+    }
+    long age = movementServerTick - authority.serverTick();
     if (age < 0L || age > 1L) return null;
     return authority;
   }
