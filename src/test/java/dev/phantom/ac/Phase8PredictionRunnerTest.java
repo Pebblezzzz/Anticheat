@@ -79,6 +79,20 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void authorityOverlayDoesNotEraseClientPhysicalSprintState() {
+    MovementEnvironment client = MovementEnvironment.dry(true, true, false);
+    MovementEnvironment authority = MovementEnvironment.dry(true, false, false);
+
+    MovementEnvironment merged =
+        Phase8PredictionRunner.preserveClientLocomotionState(client, authority, true);
+
+    assertTrue(merged.sprinting(), merged.toString());
+    assertFalse(merged.sneaking(), merged.toString());
+    assertEquals(authority.fluid(), merged.fluid());
+    assertEquals(authority.gravityMultiplier(), merged.gravityMultiplier());
+  }
+
+  @Test
   void impossibleObservationDoesNotPoisonNextFreshAuthoritativeObservation() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     Player anchor = anchor();
