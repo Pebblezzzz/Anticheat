@@ -297,9 +297,10 @@ class Phase8PredictionRunnerTest {
         new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
         false, false, false, List.of());
 
-    // Tick 2 is a jump launched from a known stone floor. The jump transition
-    // is simulated without requiring support friction data from the empty
-    // packet-world snapshot.
+    // The tick-2 movement is intentionally processed against an empty causal
+    // packet-world snapshot, so that earlier observation must remain UNCERTAIN.
+    // The stale-resync movement at tick 3 is the regression target: by then
+    // floorWorld() is causally available and its timing envelope is exhaustive.
     double jumpX = .5
         + new Simulation.Attributes(0.1).value()
             * Vanilla12111RichPhysics.FRICTION_SPEED_FACTOR
@@ -354,9 +355,14 @@ class Phase8PredictionRunnerTest {
         .anyMatch(line -> line.contains("TIMING_OFFSETS range=2..3")
             && line.contains("exhaustive=true")),
         report.frames().getLast().trace().toString());
-    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+    assertEquals(Phase8MovementValidation.Verdict.UNCERTAIN,
         report.results().get(2).verdict(), report.results().toString());
-    assertTrue(report.results().get(2).evidence().uncertaintySources().isEmpty(),
+    assertTrue(report.results().get(2).evidence().uncertaintySources().stream()
+        .anyMatch(reason -> reason.contains("starting collision volume is not fully known")),
+        report.results().toString());
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().get(3).verdict(), report.results().toString());
+    assertTrue(report.results().get(3).evidence().uncertaintySources().isEmpty(),
         report.results().toString());
   }
 
