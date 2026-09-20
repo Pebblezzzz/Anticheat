@@ -1299,7 +1299,7 @@ public final class Phase8PredictionRunner {
     if (predictionTick != Math.max(0L, tick.clientTick() - 1L)) return false;
 
     Candidate candidate = prediction.iterator().next();
-    String source = candidate.provenance().source();
+    String source = candidate.provenance().input();
     if (!"AUTHORITATIVE_ANCHOR".equals(source)
         && !"CAUSAL_AUTHORITY_RESYNC".equals(source)) {
       return false;
