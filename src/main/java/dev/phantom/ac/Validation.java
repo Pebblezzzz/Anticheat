@@ -302,7 +302,7 @@ public final class Validation {
   }
 
   private static AdvancedInput toAdvancedInput(ClientInput input) {
-    return new AdvancedInput(axis(input.forward(), input.backward()), axis(input.right(), input.left()),
+    return new AdvancedInput(axis(input.forward(), input.backward()), axis(input.left(), input.right()),
         input.jump(), input.sprint(), input.sneak());
   }
 
