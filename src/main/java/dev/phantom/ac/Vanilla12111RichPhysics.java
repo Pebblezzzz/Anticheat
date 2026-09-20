@@ -73,7 +73,7 @@ public final class Vanilla12111RichPhysics {
         if(fluid){
             inputAcceleration=AIR_ACCEL;
         }else if(gliding||climbing){
-            inputAcceleration=inputMagnitude>1.0?AIR_ACCEL:AIR_ACCEL*INPUT_FRICTION;
+            inputAcceleration=AIR_ACCEL;
         }else if(s.onGround()){
             if(inputMagnitude==0.0){
                 // Jump-only and stationary ground ticks have no horizontal friction
