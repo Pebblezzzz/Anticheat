@@ -237,9 +237,9 @@ public final class Phase8MovementValidation {
       Map<String, State> updated = new LinkedHashMap<>(players); updated.put(key, next);
       Optional<Alert> alert = Optional.empty();
       if (config.alertsEnabled() && evidence.verdict() == Verdict.IMPOSSIBLE
-          && next.supportingImpossible() >= config.minimumImpossibleObservations()
+          && next.consecutiveImpossible() >= config.minimumImpossibleObservations()
           && (next.lastAlertTick() < 0 || evidence.serverTick() - next.lastAlertTick() >= config.alertDebounceTicks())) {
-        double confidence = Math.min(1.0, (double) next.supportingImpossible() / config.minimumImpossibleObservations());
+        double confidence = Math.min(1.0, (double) next.consecutiveImpossible() / config.minimumImpossibleObservations());
         alert = Optional.of(new Alert(evidence.playerId(), evidence.serverTick(), evidence.firstInconsistentTick().orElse(evidence.serverTick()),
             evidence.rule(), evidence.eliminationReason(), confidence, next.supportingImpossible(), evidence.replayReference()));
         updated.put(key, next.alerted(evidence.serverTick()));
