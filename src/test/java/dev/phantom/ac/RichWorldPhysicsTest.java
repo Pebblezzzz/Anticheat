@@ -96,6 +96,44 @@ class RichWorldPhysicsTest {
     }
 
     @Test
+    void grimStyleStepUpUsesTheActualVoxelStepHeight() {
+        WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+            .loadChunk(0, 0)
+            .setBlock(0, 0, 0, stone())
+            .setBlock(1, 1, 0, BlockCatalogue12111.decode(
+                "minecraft:oak_slab", Map.of("type", "bottom")))
+            .build();
+
+        Maths.Aabb player = new Maths.Aabb(0.2, 1.0, 0.2, 0.8, 2.8, 0.8);
+        RichWorldCollision.Result result = RichWorldCollision.resolve(
+            world, player, new Maths.Vec3(0.8, -0.0784, 0.0), 0.6);
+
+        assertFalse(result.uncertain(), result.diagnostic());
+        assertTrue(result.stepAttempted(), result.diagnostic());
+        assertTrue(result.stepSucceeded(), result.diagnostic());
+        assertEquals(0.8, result.displacement().x(), 1.0e-12, result.diagnostic());
+        assertEquals(0.5, result.displacement().y(), 1.0e-12, result.diagnostic());
+    }
+
+    @Test
+    void grimStyleDownwardMovementFallsNormallyInsteadOfUsingStepUp() {
+        WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+            .loadChunk(0, 0)
+            .setBlock(0, 0, 0, stone())
+            .build();
+
+        Maths.Aabb player = new Maths.Aabb(0.2, 2.0, 0.2, 0.8, 3.8, 0.8);
+        RichWorldCollision.Result result = RichWorldCollision.resolve(
+            world, player, new Maths.Vec3(0.8, -1.2, 0.0), 0.6);
+
+        assertFalse(result.uncertain(), result.diagnostic());
+        assertFalse(result.stepAttempted(), result.diagnostic());
+        assertFalse(result.stepSucceeded(), result.diagnostic());
+        assertEquals(0.8, result.displacement().x(), 1.0e-12, result.diagnostic());
+        assertEquals(-1.0, result.displacement().y(), 1.0e-12, result.diagnostic());
+    }
+
+    @Test
     void exactSnapshotCollisionRefusesAnUnloadedSweep() {
         WorldSnapshot world=WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0,0).setBlock(0,64,0,stone()).build();
         Maths.Aabb player=new Maths.Aabb(15.7,65,0.2,16.3,66.8,0.8);
