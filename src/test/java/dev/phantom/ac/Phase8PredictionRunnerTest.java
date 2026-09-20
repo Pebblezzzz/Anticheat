@@ -943,4 +943,68 @@ class Phase8PredictionRunnerTest {
     assertTrue(second.candidateFrontierRetained(), second.toString());
   }
 
+
+  @Test
+  void inputGeneratedBeforeTickEndIsAppliedToThatEarlierSimulationTick() {
+    Phase7Timing.Config timing = new Phase7Timing.Config(
+        50_000_000L,
+        50_000_000L,
+        50_000_000L,
+        new Phase7Timing.LatencyBounds(50_000_000L, 50_000_000L),
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 1L),
+        new Phase7Timing.TickDelayBounds(0L, 1L),
+        250_000_000L,
+        3,
+        128);
+
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
+    WorldSnapshot world = floorWorld();
+    Player start = anchor();
+    var input = new Simulation.AdvancedInput(1, 0, false, false, false);
+    var environment = MovementEnvironment.dry(true, false, false);
+    var expected = new Vanilla12111RichPhysics().step(
+        new Vanilla12111RichPhysics.Context(
+            0L,
+            start,
+            input,
+            world,
+            Simulation.Environment.DRY,
+            start.attributes(),
+            Phase5Mechanics.MovementEffects.NONE,
+            Pose.STANDING,
+            environment,
+            false,
+            dev.phantom.ac.world.EntityCollisions.of(List.of())))
+        .state()
+        .position();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(),
+        Pose.STANDING, environment,
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    var report = runner.process(
+        "phase7-input-timing",
+        List.of(
+            new RawPacket(1, 10L, authority),
+            new RawPacket(2, 50_000_000L, new ClientTickEnd()),
+            new RawPacket(3, 120_000_000L, new ClientInput(
+                true, false, false, false, false, false, false)),
+            new RawPacket(4, 130_000_000L, new Move(
+                expected, 0f, 0f, true, 1L)),
+            new RawPacket(5, 150_000_000L, new ClientTickEnd())),
+        world,
+        start,
+        0L);
+
+    assertEquals(1, report.movementObservations(), report.toString());
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(), report.results().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("simulationTick=0")
+            && line.contains("OptionalInt[1]")),
+        report.frames().getFirst().trace().toString());
+  }
+
 }
