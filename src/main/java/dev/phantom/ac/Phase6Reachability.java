@@ -708,7 +708,7 @@ public final class Phase6Reachability {
                   nextSample.isDefinite()
                       && (!nextSample.inFluid() || nextSample.allFluidHeightsKnown());
               MovementEnvironment nextEnvironment = nextEnvironmentKnown
-                  ? movementEnvironmentFor(nextSample, pre, input)
+                  ? movementEnvironmentFor(nextSample, pre)
                   : pre.movementEnvironment();
               Pose nextPose = Phase5Mechanics.nextPose(
                   pre.pose(), nextEnvironment, pre.sleeping());
