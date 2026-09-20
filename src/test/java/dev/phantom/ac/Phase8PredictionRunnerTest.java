@@ -79,6 +79,59 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void bootstrapRetainsSprintCandidateWhenServerMovementStateLagsHeldSprintKey() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    var world = floorWorld();
+    var sprintEnvironment = MovementEnvironment.dry(true, true, false);
+    var authorityEnvironment = MovementEnvironment.dry(true, false, false);
+    var effects = Phase5Mechanics.MovementEffects.NONE;
+    var attrs = new Simulation.Attributes(0.1);
+    var input = new Simulation.AdvancedInput(1, 0, false, true, false);
+
+    Player start = new Player(
+        new Maths.Vec3(.5, 64, .5), Maths.Vec3.ZERO,
+        0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.of(input), attrs,
+        Pose.STANDING, State.Environment.DRY, State.TickRange.exact(0),
+        State.Provenance.UNKNOWN, Set.of());
+
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    var first = physics.step(new Vanilla12111RichPhysics.Context(
+        0, start, input, world, Simulation.Environment.DRY, attrs,
+        effects, Pose.STANDING, sprintEnvironment, false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+    var second = physics.step(new Vanilla12111RichPhysics.Context(
+        1, first, input, world, Simulation.Environment.DRY, attrs,
+        effects, Pose.STANDING, sprintEnvironment, false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", attrs, Map.of(), Pose.STANDING, authorityEnvironment,
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    var report = runner.process(
+        "sprint-state-lag",
+        List.of(
+            new RawPacket(1, 10, authority),
+            new RawPacket(2, 20, new ClientInput(
+                true, false, false, false, false, false, true)),
+            new RawPacket(3, 30, new ClientTickEnd()),
+            new RawPacket(4, 40, new Move(first.position(), 0f, 0f, true, 1L)),
+            new RawPacket(5, 50, new ClientTickEnd()),
+            new RawPacket(6, 60, new Move(second.position(), 0f, 0f, true, 2L))),
+        world, start, 0L);
+
+    assertTrue(report.results().stream().allMatch(
+        result -> result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE),
+        report.toString());
+    assertTrue(report.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
+        .anyMatch(line -> line.startsWith("BOOTSTRAP_LOCOMOTION_OPTIONS")
+            && line.contains("alternatives=[MovementInputState[sprinting=false, sneaking=false], MovementInputState[sprinting=true, sneaking=false]]")),
+        report.frames().toString());
+  }
+
+  @Test
   void authorityOverlayDoesNotEraseClientPhysicalSprintState() {
     MovementEnvironment client = MovementEnvironment.dry(true, true, false);
     MovementEnvironment authority = MovementEnvironment.dry(true, false, false);
