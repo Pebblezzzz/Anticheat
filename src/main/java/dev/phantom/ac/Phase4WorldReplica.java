@@ -586,6 +586,52 @@ public final class Phase4WorldReplica implements Serializable {
       if(Math.abs(chunk.x()-cx)<=radiusChunks&&Math.abs(chunk.z()-cz)<=radiusChunks)selected.add(chunk);
     }
 
+    /*
+     * A sent clientbound world mutation is not yet guaranteed to have been
+     * processed by the client until its transaction barrier is acknowledged.
+     * Keep the last acknowledged world as the deterministic baseline, but mask
+     * only the cells/sections/chunks touched by pending mutations as UNKNOWN.
+     * This prevents a movement that legitimately used a newly received block
+     * update from being declared IMPOSSIBLE against the older acknowledged state.
+     */
+    Set<Chunk> pendingWholeChunks=new HashSet<>();
+    Set<PendingSection> pendingSections=new HashSet<>();
+    Set<Pos> pendingBlocks=new HashSet<>();
+    boolean pendingDimensionChange=false;
+    for(List<Event> batch:pending.values()){
+      for(Event event:batch){
+        if(event instanceof DimensionChange){
+          pendingDimensionChange=true;
+        }else if(event instanceof ChunkLoad load){
+          pendingWholeChunks.add(load.chunk());
+        }else if(event instanceof ChunkUnload unload){
+          pendingWholeChunks.add(unload.chunk());
+        }else if(event instanceof ChunkData data){
+          pendingWholeChunks.add(data.chunk());
+        }else if(event instanceof PackedChunkData packed){
+          if(packed.fullChunk()){
+            pendingWholeChunks.add(packed.chunk());
+          }else{
+            for(PackedSection section:packed.sections().values())
+              pendingSections.add(new PendingSection(packed.chunk(),section.sectionY()));
+          }
+        }else if(event instanceof ChunkSections sections){
+          for(Integer sectionIndex:sections.sections().keySet()){
+            pendingSections.add(new PendingSection(
+                sections.chunk(), sourceSectionY(source, sectionIndex)));
+          }
+        }else if(event instanceof BlockChange change){
+          pendingBlocks.add(change.position());
+        }else if(event instanceof MultiBlockChange changes){
+          pendingBlocks.addAll(changes.states().keySet());
+        }
+      }
+    }
+
+    final Set<Chunk> maskedChunks=Set.copyOf(pendingWholeChunks);
+    final Set<PendingSection> maskedSections=Set.copyOf(pendingSections);
+    final Set<Pos> maskedBlocks=Set.copyOf(pendingBlocks);
+    final boolean maskWholeWorld=pendingDimensionChange;
     final WorldSnapshot.CollisionResolver resolver=this.collisionResolver;
     WorldSnapshot.Backend backend=new WorldSnapshot.Backend(){
       @Override public String version(){return source.version();}
@@ -604,7 +650,14 @@ public final class Phase4WorldReplica implements Serializable {
       @Override public boolean hasChunk(int chunkX,int chunkZ){return selected.contains(new Chunk(chunkX,chunkZ));}
       @Override public Coverage coverageAt(int x,int y,int z){
         Chunk chunk=Chunk.containing(x,z);
-        return selected.contains(chunk)?source.coverageAt(x,y,z):Coverage.UNLOADED;
+        if(!selected.contains(chunk))return Coverage.UNLOADED;
+        if(maskWholeWorld||maskedChunks.contains(chunk)
+            ||maskedSections.contains(new PendingSection(
+                chunk,Math.floorDiv(y,16)))
+            ||maskedBlocks.contains(new Pos(x,y,z))){
+          return Coverage.UNKNOWN;
+        }
+        return source.coverageAt(x,y,z);
       }
       @Override public BlockState blockAtOrNull(int x,int y,int z){
         Chunk chunk=Chunk.containing(x,z);
@@ -619,6 +672,12 @@ public final class Phase4WorldReplica implements Serializable {
     };
     return WorldSnapshot.backed(source.version(),source.minY(),source.maxY(),backend);
   }
+
+  private static int sourceSectionY(WorldSnapshot source,int sectionIndex){
+    return Math.floorDiv(source.minY(),16)+sectionIndex;
+  }
+
+  private record PendingSection(Chunk chunk,int sectionY){}
 
   /** Adapts Phase 1-3 timeline events without consulting the server world. */
   public void accept(Timeline.Event event){
