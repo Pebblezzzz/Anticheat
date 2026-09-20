@@ -431,8 +431,8 @@ class Phase8PredictionRunnerTest {
         State.TickRange.unknown(), State.Provenance.UNKNOWN, Set.of());
 
     Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
-    var first = physics.step(new Vanilla12111RichPhysics.Context(
-        0,
+    var jump = physics.step(new Vanilla12111RichPhysics.Context(
+        1,
         realStart,
         new Simulation.AdvancedInput(1, 0, true, true, false),
         world,
@@ -443,21 +443,7 @@ class Phase8PredictionRunnerTest {
         MovementEnvironment.dry(true, true, false),
         false,
         dev.phantom.ac.world.EntityCollisions.NONE_TRACKED));
-    Player firstObserved = first.state();
-
-    var second = physics.step(new Vanilla12111RichPhysics.Context(
-        1,
-        firstObserved,
-        new Simulation.AdvancedInput(1, 0, false, true, false),
-        world,
-        Simulation.Environment.DRY,
-        firstObserved.attributes(),
-        Phase5Mechanics.MovementEffects.NONE,
-        Pose.STANDING,
-        MovementEnvironment.dry(false, true, false),
-        false,
-        dev.phantom.ac.world.EntityCollisions.NONE_TRACKED));
-    Player secondObserved = second.state();
+    Player observedJump = jump.state();
 
     PlayerContext staleAuthority = new PlayerContext(
         "survival", new Simulation.Attributes(.1), Map.of(),
@@ -468,18 +454,18 @@ class Phase8PredictionRunnerTest {
     List<RawPacket> packets = List.of(
         new RawPacket(1, 10, staleAuthority,
             Packets.CaptureProvenance.fromAdapter("paper-live", staleAuthority, 100L, 0L)),
-        new RawPacket(2, 20, new ClientInput(
+        new RawPacket(2, 20, new ClientTickEnd()),
+        new RawPacket(3, 30, new ClientInput(
             true, false, false, false, true, false, true)),
-        new RawPacket(3, 30, new ClientTickEnd()),
-        new RawPacket(4, 40, new Move(
-            firstObserved.position(), firstObserved.yaw(), firstObserved.pitch(),
-            firstObserved.onGround(), 1L)),
-        new RawPacket(5, 50, new ClientInput(
-            true, false, false, false, false, false, true)),
-        new RawPacket(6, 60, new ClientTickEnd()),
-        new RawPacket(7, 70, new Move(
-            secondObserved.position(), secondObserved.yaw(), secondObserved.pitch(),
-            secondObserved.onGround(), 2L)));
+        new RawPacket(4, 40, new ClientTickEnd()),
+        // Establish the authoritative root at tick 1, then deliver the actual
+        // position movement in the same tick. The bootstrap must replace the
+        // stale server velocity before the movement is simulated.
+        new RawPacket(5, 50, new Move(
+            null, observedJump.yaw(), observedJump.pitch(), true, 2L)),
+        new RawPacket(6, 60, new Move(
+            observedJump.position(), observedJump.yaw(), observedJump.pitch(),
+            observedJump.onGround(), 2L)));
 
     var report = runner.process(
         "stale-server-velocity-sprint-jump",
@@ -495,6 +481,7 @@ class Phase8PredictionRunnerTest {
         report.results().get(1).verdict(),
         report.results().toString());
     assertTrue(report.frames().stream()
+        .filter(frame -> frame.movement().position() != null)
         .flatMap(frame -> frame.trace().stream())
         .anyMatch(line -> line.startsWith("FRONTIER_BOOTSTRAPPED")),
         report.frames().toString());
