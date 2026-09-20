@@ -38,7 +38,12 @@ class Phase6ReachabilityTest {
     ReachableStates reachable = new ReachableStates(new Vanilla12111Physics());
     Player start = Player.initial(Vec3.ZERO);
 
-    Reachability sprint = reachable.nextAdvanced(start, ground(), false,
+    Player sprintStart = new Player(
+        Vec3.ZERO, Vec3.ZERO, 0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false,
+        Optional.empty(), Simulation.Attributes.DEFAULT, Phase5Mechanics.Pose.STANDING,
+        State.Environment.DRY, State.TickRange.unknown(), State.Provenance.UNKNOWN, Set.of());
+    Reachability sprint = reachable.nextAdvanced(sprintStart, ground(), false,
         new AdvancedInput(1, 0, false, true, false));
     Reachability sneak = reachable.nextAdvanced(start, ground(), false,
         new AdvancedInput(1, 0, false, false, true));
