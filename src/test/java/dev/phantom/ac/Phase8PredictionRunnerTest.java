@@ -648,6 +648,15 @@ class Phase8PredictionRunnerTest {
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.contains("TIMING_OFFSET target=1")),
         report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("TIMING_GATE explicitRangeExhaustive=")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("PHASE7_WINDOWS ")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("PHASE7_REASONS ")),
+        report.frames().getLast().trace().toString());
   }
 
 }
