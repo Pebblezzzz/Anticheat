@@ -988,7 +988,7 @@ public final class Phase8PredictionRunner {
             world,
             maximumCandidates,
             sequence,
-            tick.timingUncertain() || timingHistoryTruncated);
+            timingHistoryTruncated && !clientTickOriginKnown);
         trace.add("TIMING_OFFSETS range=" + earliestSimulationTick + ".."
             + latestSimulationTick
             + " candidates=" + movementTiming.possibleSimulationClientTicks()
@@ -1011,7 +1011,7 @@ public final class Phase8PredictionRunner {
       trace.addAll(advance.trace());
       if (advance.trace().stream().anyMatch(line -> line.startsWith("INPUT_BOUNDARY_WITNESS"))) {
         uncertaintySources.add(
-            "latest observed ClientInput state was conservatively allowed at the immediately preceding simulation boundary because packet timing is uncertain");
+            "latest observed ClientInput state was conservatively allowed at the immediately preceding simulation boundary because the truncated timing history lost the absolute client-tick origin");
       }
 
       if (!advance.exhaustive()) {
