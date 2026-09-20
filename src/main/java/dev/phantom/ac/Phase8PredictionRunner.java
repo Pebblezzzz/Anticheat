@@ -161,6 +161,7 @@ public final class Phase8PredictionRunner {
    */
   private long clientTickOriginOffset;
   private boolean clientTickOriginKnown;
+  private long lastClientInputSequence = -1L;
 
   private Player initialAnchor;
   private long initialAnchorReceivedNanos = -1L;
@@ -268,6 +269,7 @@ public final class Phase8PredictionRunner {
     carryInInput = neutralInput;
     clientTickOriginOffset = 0L;
     clientTickOriginKnown = false;
+    lastClientInputSequence = -1L;
     timingHistory.clear();
     timingEpochNanos = -1L;
     timingHistoryTruncated = false;
@@ -424,6 +426,7 @@ public final class Phase8PredictionRunner {
 
       if (value instanceof Packets.ClientInput input) {
         clientState = State.apply(clientState, normalized);
+        lastClientInputSequence = sequence;
         // PLAYER_INPUT is a held-state update. Its causal simulation tick is
         // reconstructed by Phase 7 rather than guessed from packet arrival.
         currentInput = InputConstraint.fromClientInput(input);
@@ -984,7 +987,8 @@ public final class Phase8PredictionRunner {
             inputChronologies,
             world,
             maximumCandidates,
-            sequence);
+            sequence,
+            tick.timingUncertain() || timingHistoryTruncated);
         trace.add("TIMING_OFFSETS range=" + earliestSimulationTick + ".."
             + latestSimulationTick
             + " candidates=" + movementTiming.possibleSimulationClientTicks()
@@ -997,13 +1001,18 @@ public final class Phase8PredictionRunner {
             inputChronologies,
             world,
             maximumCandidates,
-            sequence);
+            sequence,
+            tick.timingUncertain() || timingHistoryTruncated);
       }
       trace.add("PREDICT_FORWARD startTick=" + startTick
           + " targetTick=" + targetTick
           + " steps=" + advance.simulatedTicks()
           + " exhaustive=" + advance.exhaustive());
       trace.addAll(advance.trace());
+      if (advance.trace().stream().anyMatch(line -> line.startsWith("INPUT_BOUNDARY_WITNESS"))) {
+        uncertaintySources.add(
+            "latest observed ClientInput state was conservatively allowed at the immediately preceding simulation boundary because packet timing is uncertain");
+      }
 
       if (!advance.exhaustive()) {
         uncertaintySources.addAll(advance.reasons());
@@ -2466,7 +2475,8 @@ public final class Phase8PredictionRunner {
       List<InputChronology> inputChronologies,
       WorldSnapshot world,
       int maximumCandidates,
-      long movementSequence) {
+      long movementSequence,
+      boolean allowCurrentInputBoundaryWitness) {
     if (start.isEmpty()) {
       return new AdvanceResult(Set.of(), false, 0,
           List.of("prediction frontier is empty"), List.of());
@@ -2480,7 +2490,8 @@ public final class Phase8PredictionRunner {
           List.of("incremental prediction horizon exceeded"), List.of());
     }
     return advancePredictionToTarget(
-        start, targetTick, inputChronologies, world, maximumCandidates, movementSequence);
+        start, targetTick, inputChronologies, world, maximumCandidates,
+        movementSequence, allowCurrentInputBoundaryWitness);
   }
 
   private AdvanceResult advancePredictionAcrossTimingRange(
@@ -2490,7 +2501,8 @@ public final class Phase8PredictionRunner {
       List<InputChronology> inputChronologies,
       WorldSnapshot world,
       int maximumCandidates,
-      long movementSequence) {
+      long movementSequence,
+      boolean allowCurrentInputBoundaryWitness) {
     if (start.isEmpty()) {
       return new AdvanceResult(Set.of(), false, 0,
           List.of("prediction frontier is empty"), List.of());
@@ -2520,7 +2532,8 @@ public final class Phase8PredictionRunner {
 
     for (long target = earliestTick; target <= latestTick; target++) {
       AdvanceResult one = advancePredictionToTarget(
-          start, target, inputChronologies, world, maximumCandidates, movementSequence);
+          start, target, inputChronologies, world, maximumCandidates,
+          movementSequence, allowCurrentInputBoundaryWitness);
       union.addAll(one.candidates());
       reasons.addAll(one.reasons());
       trace.add("TIMING_OFFSET target=" + target
@@ -2550,7 +2563,8 @@ public final class Phase8PredictionRunner {
       List<InputChronology> inputChronologies,
       WorldSnapshot world,
       int maximumCandidates,
-      long movementSequence) {
+      long movementSequence,
+      boolean allowCurrentInputBoundaryWitness) {
     if (start.isEmpty()) {
       return new AdvanceResult(Set.of(), false, 0,
           List.of("prediction frontier is empty"), List.of());
@@ -2569,6 +2583,17 @@ public final class Phase8PredictionRunner {
     List<InputChronology> chronologies = inputChronologies.isEmpty()
         ? List.of(new InputChronology(new TreeMap<>()))
         : inputChronologies;
+
+    InputChronology boundaryWitness = currentInputBoundaryWitness(
+        chronologies, targetTick, movementSequence, allowCurrentInputBoundaryWitness);
+    if (boundaryWitness != null && chronologies.size() < maximumInputChronologies() + 1) {
+      List<InputChronology> expanded = new ArrayList<>(chronologies);
+      expanded.add(boundaryWitness);
+      chronologies = List.copyOf(expanded);
+      trace.add("INPUT_BOUNDARY_WITNESS targetSimulationTick=" + Math.max(0L, targetTick - 1L)
+          + " inputSequence=" + lastClientInputSequence
+          + " input=" + currentInput);
+    }
 
     for (InputChronology chronology : chronologies) {
       for (Candidate initial : start) {
@@ -2712,6 +2737,29 @@ public final class Phase8PredictionRunner {
     return new AdvanceResult(
         Set.copyOf(union), exhaustive, simulatedTicks,
         List.copyOf(reasons), List.copyOf(trace));
+  }
+
+  private InputChronology currentInputBoundaryWitness(
+      List<InputChronology> chronologies,
+      long targetTick,
+      long movementSequence,
+      boolean allowed) {
+    if (!allowed || targetTick <= 0L || lastClientInputSequence < 0L
+        || lastClientInputSequence > movementSequence || currentInput == null) {
+      return null;
+    }
+
+    long simulationTick = targetTick - 1L;
+    for (InputChronology chronology : chronologies) {
+      InputConstraint selected = inputForSimulationTickExact(
+          chronology.history(), simulationTick, movementSequence);
+      if (selected.equals(currentInput)) continue;
+      NavigableMap<Long, List<TimedInput>> branch = copyInputHistory(chronology.history());
+      branch.computeIfAbsent(simulationTick, ignored -> new ArrayList<>())
+          .add(new TimedInput(lastClientInputSequence, simulationTick, currentInput));
+      return new InputChronology(branch);
+    }
+    return null;
   }
 
   private String inputSelectionDebug(
