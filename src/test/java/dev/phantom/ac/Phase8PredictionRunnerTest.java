@@ -1412,6 +1412,7 @@ class Phase8PredictionRunnerTest {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
     WorldSnapshot world = floorWorld();
     Player start = anchor();
+    MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
     PlayerContext authority = new PlayerContext(
         "survival", start.attributes(), Map.of(),
         Pose.STANDING, MovementEnvironment.dry(true, false, false),
