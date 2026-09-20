@@ -350,8 +350,10 @@ class Phase8PredictionRunnerTest {
         0L);
 
     assertEquals(4, report.movementObservations(), report.results().toString());
-    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
-        report.results().getLast().verdict(), report.results().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("TIMING_OFFSETS range=0..1")
+            && line.contains("exhaustive=true")),
+        report.frames().getLast().trace().toString());
     assertFalse(report.results().get(2).evidence().uncertaintySources().isEmpty(),
         report.results().toString());
   }
@@ -657,6 +659,49 @@ class Phase8PredictionRunnerTest {
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.startsWith("PHASE7_REASONS ")),
         report.frames().getLast().trace().toString());
+  }
+
+  @Test
+  void explicitClientTickTimingRangeSurvivesPhase7HistoryTruncation() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    List<RawPacket> packets = new ArrayList<>();
+    packets.add(new RawPacket(
+        1, 0,
+        new PlayerContext(
+            "survival", Simulation.Attributes.DEFAULT, Map.of(),
+            Pose.STANDING, MovementEnvironment.dry(true, false, false),
+            new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
+            false, false, false, List.of())));
+
+    for (int sequence = 2; sequence <= 520; sequence++) {
+      packets.add(new RawPacket(
+          sequence, sequence,
+          new WorldTransactionSend((short) sequence)));
+    }
+
+    packets.add(new RawPacket(
+        521, 1000,
+        new Move(new Maths.Vec3(.6, 64.0, .5), 0f, 0f, true, 1L)));
+
+    var report = runner.process(
+        "explicit-timing-history-truncation",
+        packets,
+        floorWorld(),
+        anchor(),
+        0L);
+
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("TIMING_GATE explicitRangeExhaustive=true")
+            && line.contains("chronologyUnmodeled=false")
+            && line.contains("historyTruncated=true")
+            && line.contains("simulationRange=Range[min=0, max=1]")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("TIMING_OFFSETS range=0..1")
+            && line.contains("exhaustive=true")),
+        report.frames().getLast().trace().toString());
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getLast().verdict(), report.results().toString());
   }
 
 }

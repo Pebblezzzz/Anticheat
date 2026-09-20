@@ -528,10 +528,18 @@ public final class Phase8PredictionRunner {
           explicitTimingRangeIsExhaustive(move, movementTiming);
       boolean phase7ChronologyUnmodeled =
           phase7TimingHasUnmodeledChronology(movementTiming);
+      /*
+       * An explicit movement client tick is direct capture evidence. Once
+       * Phase 7 has exhaustively materialized its bounded simulation offsets
+       * and the current event has no unmodeled chronology, truncation of older
+       * timing history does not remove any alternative for this movement.
+       * Older chronology remains useful for diagnostics/replay, but it must
+       * not turn a fully enumerated current [N-1,N] envelope into a single
+       * guessed timing path.
+       */
       boolean explicitTimingFullyRepresented =
           explicitTimingRangeExhaustive
-              && !phase7ChronologyUnmodeled
-              && !timingHistoryTruncated;
+              && !phase7ChronologyUnmodeled;
 
       if (move.clientTick() != null && movementTiming != null) {
         trace.add("TIMING_GATE explicitRangeExhaustive=" + explicitTimingRangeExhaustive
