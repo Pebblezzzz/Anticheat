@@ -468,15 +468,15 @@ class Phase8PredictionRunnerTest {
     List<RawPacket> packets = List.of(
         new RawPacket(1, 10, staleAuthority,
             Packets.CaptureProvenance.fromAdapter("paper-live", staleAuthority, 100L, 0L)),
-        new RawPacket(2, 20, new ClientTickEnd()),
-        new RawPacket(3, 30, new ClientInput(
+        new RawPacket(2, 20, new ClientInput(
             true, false, false, false, true, false, true)),
+        new RawPacket(3, 30, new ClientTickEnd()),
         new RawPacket(4, 40, new Move(
             firstObserved.position(), firstObserved.yaw(), firstObserved.pitch(),
             firstObserved.onGround(), 1L)),
-        new RawPacket(5, 50, new ClientTickEnd()),
-        new RawPacket(6, 60, new ClientInput(
+        new RawPacket(5, 50, new ClientInput(
             true, false, false, false, false, false, true)),
+        new RawPacket(6, 60, new ClientTickEnd()),
         new RawPacket(7, 70, new Move(
             secondObserved.position(), secondObserved.yaw(), secondObserved.pitch(),
             secondObserved.onGround(), 2L)));
