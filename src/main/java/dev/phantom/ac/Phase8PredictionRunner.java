@@ -271,6 +271,7 @@ public final class Phase8PredictionRunner {
     Phase7Timing.Reconstruction phase7Reconstruction = reconstructPhase7Timing();
     Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence =
         phase7Reconstruction.bySequence();
+    rebuildCausalInputHistory(phase7TimingBySequence);
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     List<PredictionFrame> frames = new ArrayList<>();
     int movementObservations = 0;
@@ -334,10 +335,9 @@ public final class Phase8PredictionRunner {
 
       if (value instanceof Packets.ClientInput input) {
         clientState = State.apply(clientState, normalized);
+        // PLAYER_INPUT is a held-state update. Its causal simulation tick is
+        // reconstructed by Phase 7 rather than guessed from packet arrival.
         currentInput = InputConstraint.fromClientInput(input);
-        long inputTick = hasClientTickBoundary ? relativeClientTick : 0L;
-        inputHistory.computeIfAbsent(inputTick, ignored -> new ArrayList<>())
-            .add(new TimedInput(sequence, inputTick, currentInput));
         if (!prediction.isEmpty()) {
           Set<Candidate> updated = overlayClientInput(prediction, clientState, maximumCandidates);
           if (!updated.isEmpty()) prediction = updated;
@@ -2559,19 +2559,54 @@ public final class Phase8PredictionRunner {
       long simulationTick,
       long movementSequence) {
     if (simulationTick < 0L) return List.of(neutralInput);
+    return List.of(inputForSimulationTickExact(history, simulationTick, movementSequence));
+  }
 
-    /*
-     * Phase 7 explicitly bounds input-to-simulation delay to 0..1 client ticks.
-     * A newly received ClientInput may therefore be the state used by this
-     * simulation tick or the following one. Keep both exact states when they
-     * differ instead of collapsing chronology to one arbitrary choice.
-     */
-    LinkedHashSet<InputConstraint> options = new LinkedHashSet<>();
-    options.add(inputForSimulationTickExact(history, simulationTick, movementSequence));
-    if (simulationTick > 0L) {
-      options.add(inputForSimulationTickExact(history, simulationTick - 1L, movementSequence));
+  /**
+   * Rebuild the live input history from the same Phase 7 timing reconstruction
+   * used by the causal offline pipeline. A packet is inserted at every client
+   * tick that Phase 7 exhaustively proves possible; raw packet arrival is never
+   * treated as the simulation tick.
+   */
+  private void rebuildCausalInputHistory(
+      Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
+    inputHistory.clear();
+
+    List<Packets.RawPacket> history = List.copyOf(timingHistory);
+    List<Packets.NormalizedPacket> normalized = new Packets.Normalizer().normalize(history);
+    Map<Long, Packets.NormalizedPacket> normalizedBySequence = new HashMap<>();
+    for (Packets.NormalizedPacket packet : normalized) {
+      normalizedBySequence.put(packet.sequence(), packet);
     }
-    return List.copyOf(options);
+
+    for (Packets.RawPacket packet : history) {
+      if (!(packet.packet() instanceof Packets.ClientInput input)) continue;
+
+      Packets.NormalizedPacket canonical = normalizedBySequence.get(packet.sequence());
+      if (canonical == null
+          || canonical.flags().contains(Packets.PacketFlag.DUPLICATE)
+          || canonical.flags().contains(Packets.PacketFlag.OUT_OF_ORDER)
+          || canonical.flags().contains(Packets.PacketFlag.SEQUENCE_GAP)) {
+        continue;
+      }
+
+      Phase7Timing.EventTiming timing = phase7TimingBySequence.get(packet.sequence());
+      if (timing == null || !Phase7Timing.inputTickEnumerationComplete(timing)) {
+        // Do not manufacture a precise input tick when Phase 7 could not
+        // exhaustively enumerate the input chronology.
+        continue;
+      }
+
+      InputConstraint constraint = InputConstraint.fromClientInput(input);
+      for (long clientTick : Phase7Timing.possibleInputTicks(timing)) {
+        inputHistory.computeIfAbsent(clientTick, ignored -> new ArrayList<>())
+            .add(new TimedInput(packet.sequence(), clientTick, constraint));
+      }
+    }
+
+    for (List<TimedInput> inputs : inputHistory.values()) {
+      inputs.sort(Comparator.comparingLong(TimedInput::sequence));
+    }
   }
 
   private InputConstraint inputForSimulationTickExact(
