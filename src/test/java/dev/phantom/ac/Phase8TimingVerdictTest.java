@@ -125,7 +125,7 @@ class Phase8TimingVerdictTest {
         50_000_000L,
         new Phase7Timing.LatencyBounds(0L, 0L),
         new Phase7Timing.LatencyBounds(0L, 0L),
-        new Phase7Timing.TickDelayBounds(0L, 1L),
+        new Phase7Timing.TickDelayBounds(1L, 1L),
         new Phase7Timing.TickDelayBounds(0L, 1L),
         250_000_000L,
         3,
@@ -135,19 +135,22 @@ class Phase8TimingVerdictTest {
     WorldSnapshot world = floorWorld();
     Player start = anchor();
 
-    Vanilla12111RichPhysics.StepResult jump = new Vanilla12111RichPhysics().step(
-        new Vanilla12111RichPhysics.Context(
-            1L,
-            start,
-            new Simulation.AdvancedInput(0, 0, true, false, false),
-            world,
-            Simulation.Environment.DRY,
-            start.attributes(),
-            MovementEffects.NONE,
-            Pose.STANDING,
-            MovementEnvironment.dry(true, false, false),
-            false,
-            EntityCollisions.of(List.of())));
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    Simulation.AdvancedInput neutral = new Simulation.AdvancedInput(0, 0, false, false, false);
+    Simulation.AdvancedInput jumpInput = new Simulation.AdvancedInput(0, 0, true, false, false);
+
+    Player tick1 = physics.step(new Vanilla12111RichPhysics.Context(
+        0L, start, neutral, world, Simulation.Environment.DRY, start.attributes(),
+        MovementEffects.NONE, Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        false, EntityCollisions.of(List.of()))).state();
+    Player tick2 = physics.step(new Vanilla12111RichPhysics.Context(
+        1L, tick1, neutral, world, Simulation.Environment.DRY, start.attributes(),
+        MovementEffects.NONE, Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        false, EntityCollisions.of(List.of()))).state();
+    Player jumpAtTick3 = physics.step(new Vanilla12111RichPhysics.Context(
+        2L, tick2, jumpInput, world, Simulation.Environment.DRY, start.attributes(),
+        MovementEffects.NONE, Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        false, EntityCollisions.of(List.of()))).state();
 
     List<Packets.RawPacket> packets = new ArrayList<>();
     for (int i = 1; i <= 512; i++) {
@@ -166,15 +169,21 @@ class Phase8TimingVerdictTest {
         516,
         516,
         new Packets.ClientInput(false, false, false, false, true, false, false)));
+    /*
+     * This explicit tick is deliberately generated before the retained second
+     * CLIENT_TICK_END in capture time. Phase 7 therefore cannot recover one
+     * absolute tick origin from the truncated window, even though the packet
+     * itself has an explicit client tick.
+     */
     packets.add(new Packets.RawPacket(
         517,
-        517,
+        514,
         new Packets.Move(
-            jump.state().position(),
-            jump.state().yaw(),
-            jump.state().pitch(),
-            jump.state().onGround(),
-            2L)));
+            jumpAtTick3.position(),
+            jumpAtTick3.yaw(),
+            jumpAtTick3.pitch(),
+            jumpAtTick3.onGround(),
+            3L)));
 
     var report = runner.process(
         "truncated-jump-witness",
@@ -188,6 +197,9 @@ class Phase8TimingVerdictTest {
         Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getLast().verdict(),
         report.results().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("INPUT_TICK_ORIGIN known=false")),
+        report.frames().getLast().trace().toString());
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.startsWith("INPUT_BOUNDARY_WITNESS")),
         report.frames().getLast().trace().toString());
