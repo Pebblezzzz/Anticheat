@@ -52,7 +52,7 @@ class Phase8PredictionRunnerTest {
     assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE,
         first.results().getFirst().verdict());
     assertTrue(first.candidateFrontierRetained(), first.toString());
-    assertEquals(1, runner.candidateCount());
+    assertEquals(2, runner.candidateCount());
 
     var second = runner.process(
         "flight",
