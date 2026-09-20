@@ -1238,6 +1238,19 @@ public final class Phase8PredictionRunner {
       Player observedAfter,
       TickResolution tick) {
     if (!tick.known()) return;
+
+    /*
+     * Keep the last two distinct client-tick endpoints. A client can emit
+     * multiple position packets inside one client tick; treating those packets
+     * as separate tick endpoints destroys the adjacent-tick displacement used
+     * to reconstruct the client-side boundary velocity during stale resync.
+     */
+    if (lastObservedMovementClientTick == tick.clientTick()) {
+      lastObservedMovementPosition = observedAfter.position();
+      lastObservedMovementPriorGround = observedBefore.onGround();
+      return;
+    }
+
     previousObservedMovementPosition = lastObservedMovementPosition;
     previousObservedMovementClientTick = lastObservedMovementClientTick;
     lastObservedMovementPosition = observedAfter.position();
