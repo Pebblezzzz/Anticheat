@@ -3079,31 +3079,44 @@ public final class Phase8PredictionRunner {
       return;
     }
 
-    /*
-     * After bounded-history truncation, a retained explicit movement may be the
-     * first client event in the window while its clientTick remains absolute to
-     * the connection. Treating that movement as the relative-clock anchor would
-     * incorrectly force origin offset=0. Prefer the first retained CLIENT_TICK_END
-     * instead: Phase 7 defines its ordinal as the relative clock, while explicit
-     * movement ticks provide the absolute witness.
-     */
-    Optional<Phase7Timing.EventTiming> boundaryAnchor = canonicalTimings.stream()
-        .filter(timing -> timing.kind() == Phase7Timing.EventKind.CLIENT_TICK_END)
-        .findFirst();
+    OptionalLong ordinalOrigin = recoverClientTickOriginFromRetainedOrdinals(normalizedHistory);
+    if (ordinalOrigin.isPresent()) {
+      clientTickOriginOffset = ordinalOrigin.getAsLong();
+      clientTickOriginKnown = true;
+      return;
+    }
 
-    if (boundaryAnchor.isEmpty()) {
-      /*
-       * With no retained client-tick boundary there is no safe way to relate an
-       * absolute movement clientTick back to the truncated relative clock. Keep
-       * the chronology conservative rather than inventing an offset.
-       */
+    OptionalLong anchorSequence = canonicalTimings.stream()
+        .filter(timing -> timing.kind() == Phase7Timing.EventKind.CLIENT_TICK_END
+            || timing.kind() == Phase7Timing.EventKind.INPUT
+            || timing.kind() == Phase7Timing.EventKind.MOVEMENT
+            || timing.kind() == Phase7Timing.EventKind.TELEPORT_ACK
+            || timing.kind() == Phase7Timing.EventKind.FLIGHT_TOGGLE)
+        .mapToLong(Phase7Timing.EventTiming::sequence)
+        .findFirst();
+    if (anchorSequence.isEmpty()) {
       clientTickOriginKnown = false;
       return;
     }
 
-    Phase7Timing.EventTiming anchorTiming = boundaryAnchor.get();
-    long anchorSeq = anchorTiming.sequence();
-    Phase7Timing.Range anchorTick = Phase7Timing.Range.exact(1L);
+    long anchorSeq = anchorSequence.getAsLong();
+    Phase7Timing.EventTiming anchorTiming = phase7TimingBySequence.get(anchorSeq);
+    if (anchorTiming == null) {
+      clientTickOriginKnown = false;
+      return;
+    }
+
+    Phase7Timing.Range anchorTick;
+    if (anchorTiming.kind() == Phase7Timing.EventKind.CLIENT_TICK_END) {
+      anchorTick = Phase7Timing.Range.exact(1L);
+    } else if (anchorTiming.explicitClientTick().isPresent()) {
+      anchorTick = Phase7Timing.Range.exact(anchorTiming.explicitClientTick().getAsLong());
+      clientTickOriginOffset = 0L;
+      clientTickOriginKnown = true;
+      return;
+    } else {
+      anchorTick = Phase7Timing.Range.exact(0L);
+    }
 
     List<RelativeClientBoundary> boundaries = new ArrayList<>();
     long boundaryOrdinal = 0L;
