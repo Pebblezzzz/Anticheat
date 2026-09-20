@@ -1261,7 +1261,7 @@ public final class Phase8PredictionRunner {
     return dx * dx + dy * dy + dz * dz;
   }
 
-  private static Candidate authoritativeObservationWitness(
+  private Candidate authoritativeObservationWitness(
       AuthorityAnchor authority,
       Player observed,
       long simulationTick,
