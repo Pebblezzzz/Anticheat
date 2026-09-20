@@ -759,6 +759,10 @@ public final class Phase8PredictionRunner {
       }
 
       List<String> uncertaintySources = new ArrayList<>();
+      if (compensatedWorld != null && !compensatedWorld.causallyBounded()) {
+        uncertaintySources.add(
+            "latency-compensated world snapshot has no causal boundary at or before this movement");
+      }
       Phase7Timing.EventTiming movementTiming = phase7TimingBySequence.get(sequence);
       boolean explicitTimingRangeExhaustive =
           explicitTimingRangeIsExhaustive(move, movementTiming);
