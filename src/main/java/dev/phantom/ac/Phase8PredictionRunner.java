@@ -795,7 +795,29 @@ public final class Phase8PredictionRunner {
 
       prediction = advance.candidates();
       predictionTick = targetTick;
-      SearchResult search = new SearchResult(
+
+      Optional<Candidate> inertialRecovery = Optional.empty();
+      if (matchingCandidates(prediction, observedAfter, move).isEmpty()) {
+        inertialRecovery = recoverObservedInertialContinuation(
+            movementPacket, move, observedBefore, observedAfter, tick, world, trace);
+        if (inertialRecovery.isPresent()) {
+          prediction = Set.of(inertialRecovery.orElseThrow());
+          predictionTick = targetTick;
+          trace.add("EVIDENCE POSSIBLE reason=CLIENT_OBSERVED_INERTIAL_CONTINUATION");
+        }
+      }
+
+      SearchResult search = inertialRecovery.isPresent()
+          ? new SearchResult(
+              Verdict.POSSIBLE,
+              prediction,
+              1,
+              1,
+              0, 0, 0, 0,
+              List.of(
+                  "observed displacement is a canonical ground-friction continuation of the preceding client movement",
+                  "canonical Phase 5 replay reproduced the observed movement with neutral input"))
+          : new SearchResult(
           Verdict.POSSIBLE,
           prediction,
           advance.simulatedTicks(),
@@ -1318,6 +1340,134 @@ public final class Phase8PredictionRunner {
     }
     return positionsMatch(candidate.context().player().position(), observedBefore.position())
         && candidate.context().player().onGround() == observedBefore.onGround();
+  }
+
+  private Optional<Candidate> recoverObservedInertialContinuation(
+      Packets.RawPacket movementPacket,
+      Packets.Move move,
+      Player observedBefore,
+      Player observedAfter,
+      TickResolution tick,
+      WorldSnapshot world,
+      List<String> trace) {
+    if (!tick.known() || !tick.exact() || move.position() == null
+        || tick.clientTick() < 2L
+        || previousObservedMovementPosition == null
+        || lastObservedMovementPosition == null
+        || previousObservedMovementClientTick != tick.clientTick() - 2L
+        || lastObservedMovementClientTick != tick.clientTick() - 1L) {
+      return Optional.empty();
+    }
+
+    if (!positionMatches(lastObservedMovementPosition, observedBefore.position())
+        || !lastObservedMovementPriorGround
+        || !observedBefore.onGround()
+        || !observedAfter.onGround()
+        || (move.onGround() != null && !move.onGround())) {
+      return Optional.empty();
+    }
+
+    AuthorityAnchor authority = freshCausalAuthority(movementPacket);
+    if (authority == null
+        || !positionsMatch(authority.context().serverPosition(), observedBefore.position())
+        || authority.context().movementEnvironment().onGround() != observedBefore.onGround()) {
+      return Optional.empty();
+    }
+
+    MovementEnvironment environment = authority.context().movementEnvironment();
+    if (environment.fluid() != Fluid.NONE
+        || environment.climbable()
+        || environment.gliding()) {
+      return Optional.empty();
+    }
+
+    int supportX = (int) Math.floor(previousObservedMovementPosition.x());
+    int supportY = (int) Math.floor(previousObservedMovementPosition.y() - 1.0E-4);
+    int supportZ = (int) Math.floor(previousObservedMovementPosition.z());
+    if (world.coverageAt(supportX, supportY, supportZ)
+        != dev.phantom.ac.world.Coverage.KNOWN) {
+      return Optional.empty();
+    }
+    var support = world.requireBlockAt(supportX, supportY, supportZ);
+    if (support == null || support.isUnsupported()) return Optional.empty();
+
+    double horizontalFactor =
+        dev.phantom.ac.world.v12111.BlockCatalogue12111.slipperiness(support)
+            * Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION;
+
+    double previousDx = lastObservedMovementPosition.x() - previousObservedMovementPosition.x();
+    double previousDz = lastObservedMovementPosition.z() - previousObservedMovementPosition.z();
+    double currentDx = observedAfter.position().x() - observedBefore.position().x();
+    double currentDz = observedAfter.position().z() - observedBefore.position().z();
+    double currentDy = observedAfter.position().y() - observedBefore.position().y();
+
+    if (Math.abs(currentDy) > POSITION_TOLERANCE) return Optional.empty();
+
+    double expectedDx = previousDx * horizontalFactor;
+    double expectedDz = previousDz * horizontalFactor;
+    double continuationError = Math.hypot(currentDx - expectedDx, currentDz - expectedDz);
+    if (!Double.isFinite(continuationError) || continuationError > 1.0E-3) {
+      return Optional.empty();
+    }
+
+    Vec3 startVelocity = new Vec3(currentDx, 0.0, currentDz);
+    if (Math.hypot(startVelocity.x(), startVelocity.z()) > 1.25) return Optional.empty();
+
+    Player authorityState = playerFromAuthority(authority.context());
+    Simulation.AdvancedInput neutral = new Simulation.AdvancedInput(0, 0, false, false, false);
+    Player reconstructedStart = new Player(
+        observedBefore.position(),
+        startVelocity,
+        move.yaw() == null ? observedBefore.yaw() : move.yaw(),
+        move.pitch() == null ? observedBefore.pitch() : move.pitch(),
+        observedBefore.onGround(),
+        authorityState.gamemode(),
+        authorityState.effects(),
+        authorityState.awaitingTeleport(),
+        false,
+        Optional.of(neutral),
+        authorityState.attributes(),
+        authorityState.pose(),
+        authorityState.environment(),
+        observedBefore.clientTickRange(),
+        authorityState.provenance(),
+        authorityState.uncertaintyReasons());
+
+    Vanilla12111RichPhysics.Context context = new Vanilla12111RichPhysics.Context(
+        tick.clientTick() - 1L,
+        reconstructedStart,
+        neutral,
+        world,
+        simulationEnvironmentFor(environment),
+        reconstructedStart.attributes(),
+        movementEffects(reconstructedStart),
+        reconstructedStart.pose(),
+        environment,
+        reconstructedStart.pose() == Pose.SLEEPING,
+        EntityCollisions.of(authority.context().entityBoxes()));
+    Vanilla12111RichPhysics.StepResult step =
+        new Vanilla12111RichPhysics().step(context);
+
+    if (step.state().uncertain()
+        || step.collided()
+        || !positionsMatch(step.state().position(), observedAfter.position())
+        || step.state().onGround() != observedAfter.onGround()) {
+      return Optional.empty();
+    }
+
+    trace.add("INERTIAL_RECOVERY previousDelta="
+        + new Vec3(previousDx, 0.0, previousDz)
+        + " expectedCurrentDelta=" + new Vec3(expectedDx, 0.0, expectedDz)
+        + " observedCurrentDelta=" + new Vec3(currentDx, currentDy, currentDz)
+        + " friction=" + horizontalFactor
+        + " inputHistoryExplanation=neutral-continuation");
+
+    return Optional.of(candidateFromPlayer(
+        step.state(),
+        tick.clientTick(),
+        "CLIENT_OBSERVED_INERTIAL_CONTINUATION",
+        authority.sequence(),
+        EntityCollisions.of(authority.context().entityBoxes())));
   }
 
   private Optional<Candidate> bootstrapPredictionFromObservedMovement(
