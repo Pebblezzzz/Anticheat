@@ -14,6 +14,7 @@ import dev.phantom.ac.Phase6Reachability.WorldBranch;
 import dev.phantom.ac.State.Player;
 import dev.phantom.ac.world.EntityCollisions;
 import dev.phantom.ac.world.WorldSnapshot;
+import dev.phantom.ac.world.WorldQueries;
 
 import java.util.*;
 import java.util.function.LongFunction;
@@ -464,7 +465,7 @@ public final class Phase8PredictionRunner {
           + " causalSequence=" + world.causalSequence()
           + " chunks=" + world.loadedChunks().size());
 
-      ensureRoot(playerId, packet, move, observedBefore, tick, trace);
+      ensureRoot(playerId, packet, move, observedBefore, tick, world, trace);
       refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, world, trace);
 
       boolean stationaryPositionObservation = move.position() != null
@@ -1105,6 +1106,7 @@ public final class Phase8PredictionRunner {
       Packets.Move move,
       Player observedBefore,
       TickResolution tick,
+      WorldSnapshot world,
       List<String> trace) {
     if (!prediction.isEmpty()) return;
     long targetTick = tick.clientTick();
@@ -1113,7 +1115,7 @@ public final class Phase8PredictionRunner {
     long rootTick;
 
     if (authority != null) {
-      rootPlayer = predictionAnchorFromAuthority(authority.context(), targetTick, null, trace);
+      rootPlayer = predictionAnchorFromAuthority(authority.context(), targetTick, world, trace);
       /*
        * Same-server-tick PlayerContext is a server-side sample, not an atomic
        * pre-movement timestamp. Treat it as a prior state for target-1 rather
@@ -1170,10 +1172,9 @@ public final class Phase8PredictionRunner {
       List<String> trace) {
     Player authority = playerFromAuthority(context);
     /*
-     * The live authoritative velocity is captured from the server-side movement
-     * phase. Phase 5 candidates are state boundaries after the prior client movement
-     * tick, so normal dry-air vertical velocity must be advanced through the vanilla
-     * gravity/drag transition before it becomes the candidate boundary velocity.
+     * The live authoritative velocity is only a fallback seed. A fresh client
+     * observation is a stronger boundary for horizontal momentum, because Bukkit's
+     * entity velocity is not itself the client's last movement displacement.
      */
     double horizontalX = authority.velocity().x();
     double horizontalZ = authority.velocity().z();
@@ -1198,7 +1199,8 @@ public final class Phase8PredictionRunner {
           + " clientInference=unavailable");
     }
     double verticalVelocity = authority.velocity().y();
-    MovementEnvironment movementEnvironment = context.movementEnvironment();
+    MovementEnvironment movementEnvironment = authorityMovementEnvironment(
+        context, authority, world, trace);
     if (!authority.onGround()
         && movementEnvironment.fluid() == Fluid.NONE
         && !movementEnvironment.climbable()
@@ -1261,17 +1263,25 @@ public final class Phase8PredictionRunner {
       Packets.PlayerContext authority,
       long targetTick,
       WorldSnapshot world) {
-    if (world == null
-        || targetTick < 2L
-        || previousRecentMovementPosition == null
-        || lastRecentMovementPosition == null
-        || previousRecentMovementClientTick < 0L
-        || lastRecentMovementClientTick < 0L
-        || previousRecentMovementClientTick + 1L != lastRecentMovementClientTick
-        || targetTick <= lastRecentMovementClientTick
-        || targetTick - lastRecentMovementClientTick > 2L) {
-      return Optional.empty();
-    }
+    if (world == null || targetTick < 2L) return Optional.empty();
+
+    Optional<ObservationHistory> trusted = observationHistory(
+        previousObservedMovementPosition,
+        previousObservedMovementClientTick,
+        lastObservedMovementPosition,
+        lastObservedMovementClientTick,
+        lastObservedMovementPriorGround,
+        targetTick);
+    Optional<ObservationHistory> recent = observationHistory(
+        previousRecentMovementPosition,
+        previousRecentMovementClientTick,
+        lastRecentMovementPosition,
+        lastRecentMovementClientTick,
+        lastRecentMovementPriorGround,
+        targetTick);
+
+    ObservationHistory history = trusted.orElseGet(() -> recent.orElse(null));
+    if (history == null) return Optional.empty();
 
     MovementEnvironment environment = authority.movementEnvironment();
     if (environment.fluid() != Fluid.NONE
@@ -1280,17 +1290,17 @@ public final class Phase8PredictionRunner {
       return Optional.empty();
     }
 
-    double dx = lastRecentMovementPosition.x() - previousRecentMovementPosition.x();
-    double dz = lastRecentMovementPosition.z() - previousRecentMovementPosition.z();
+    double dx = history.lastPosition().x() - history.previousPosition().x();
+    double dz = history.lastPosition().z() - history.previousPosition().z();
     if (Math.hypot(dx, dz) <= 1.0E-12) return Optional.empty();
 
     double horizontalFactor;
-    if (lastRecentMovementPriorGround) {
+    if (history.priorGround()) {
       // Ground friction for the prior movement was determined from the block
       // beneath the pre-movement position, not beneath the post-jump position.
-      int supportX = (int) Math.floor(previousRecentMovementPosition.x());
-      int supportY = (int) Math.floor(previousRecentMovementPosition.y() - 1.0E-4);
-      int supportZ = (int) Math.floor(previousRecentMovementPosition.z());
+      int supportX = (int) Math.floor(history.previousPosition().x());
+      int supportY = (int) Math.floor(history.previousPosition().y() - 1.0E-4);
+      int supportZ = (int) Math.floor(history.previousPosition().z());
       if (world.coverageAt(supportX, supportY, supportZ) != dev.phantom.ac.world.Coverage.KNOWN) {
         return Optional.empty();
       }
@@ -1304,6 +1314,69 @@ public final class Phase8PredictionRunner {
     }
 
     return Optional.of(new Vec3(dx * horizontalFactor, 0.0, dz * horizontalFactor));
+  }
+
+  private record ObservationHistory(
+      Vec3 previousPosition,
+      Vec3 lastPosition,
+      long previousTick,
+      long lastTick,
+      boolean priorGround) {}
+
+  private static Optional<ObservationHistory> observationHistory(
+      Vec3 previousPosition,
+      long previousTick,
+      Vec3 lastPosition,
+      long lastTick,
+      boolean priorGround,
+      long targetTick) {
+    if (previousPosition == null || lastPosition == null
+        || previousTick < 0L || lastTick < 0L
+        || previousTick + 1L != lastTick
+        || targetTick <= lastTick
+        || targetTick - lastTick > 2L) {
+      return Optional.empty();
+    }
+    return Optional.of(new ObservationHistory(
+        previousPosition, lastPosition, previousTick, lastTick, priorGround));
+  }
+
+  private static MovementEnvironment authorityMovementEnvironment(
+      Packets.PlayerContext context,
+      Player authority,
+      WorldSnapshot world,
+      List<String> trace) {
+    MovementEnvironment fallback = context.movementEnvironment();
+    if (world == null) return fallback;
+
+    Maths.Aabb box = Maths.Aabb.playerAt(authority.position(), authority.pose());
+    WorldQueries.EnvironmentSample sample = WorldQueries.environment(
+        world,
+        new dev.phantom.ac.geometry.BlockBox(
+            box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()));
+    if (!sample.isDefinite() || (sample.inFluid() && !sample.allFluidHeightsKnown())) {
+      trace.add("ROOT_ENVIRONMENT source=authoritative-context reason=causal-world-environment-not-definite");
+      return fallback;
+    }
+
+    boolean sprint = fallback.sprinting();
+    boolean sneak = fallback.sneaking();
+    boolean swimming = fallback.swimmingInput();
+    boolean gliding = fallback.gliding();
+    MovementEnvironment resolved;
+    if (sample.water()) {
+      resolved = MovementEnvironment.vanillaWater(authority.onGround(), sprint, sneak, swimming);
+    } else if (sample.lava()) {
+      resolved = MovementEnvironment.vanillaLava(authority.onGround(), sprint, sneak);
+    } else if (sample.climbable()) {
+      resolved = MovementEnvironment.vanillaClimbable(authority.onGround(), sprint, sneak);
+    } else {
+      resolved = new MovementEnvironment(
+          Fluid.NONE, false, false, authority.onGround(), sprint, sneak,
+          false, gliding, 1.0, 1.0, 1.0);
+    }
+    trace.add("ROOT_ENVIRONMENT source=causal-packet-world environment=" + resolved);
+    return resolved;
   }
 
   private static Player playerFromAuthority(Packets.PlayerContext context) {

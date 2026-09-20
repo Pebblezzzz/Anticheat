@@ -64,6 +64,17 @@ Phantom now keeps the client's movement claims separate from the server-authorit
 Live validation also distinguishes position-bearing movement packets from rotation-only/heartbeat packets. Rotation-only packets no longer advance the ground-contradiction streak, while sustained airborne hover can produce an authoritative flight-state contradiction without requiring a ClientInput packet first. Paper's authoritative PlayerFailMoveEvent path is surfaced as its own evidence source.
 
 This follows the same broad architectural lesson visible in Grim's current player model: client claims, authoritative movement state, flying capability/status, prediction state, and compensated world state are tracked as separate concepts rather than collapsing them into one boolean. Grim also uses tick-boundary and packet-order information as independent movement evidence. This is an architectural comparison, not a claim of feature parity.
+## Phase 8 false-flag hardening
+The live predictor already retains a persistent candidate state containing position, client-side velocity, input, ground state, pose, effects, attributes, environment, and collision context. The hardening pass keeps that state model rather than introducing a second parallel physics state.
+
+The live rebase path now prefers recent trusted movement history when reconstructing horizontal boundary velocity and resolves the movement environment from the causal packet-world snapshot when that snapshot is complete. This keeps server-side Bukkit velocity and environment samples as fallbacks instead of silently treating them as the exact client boundary.
+
+Phase 6 now treats movement surfaces whose 1.21.11 mechanics are not yet represented by the pinned ticker (for example slime, honey, cobweb, powder snow, sweet berry bush, soul-sand, and bubble columns) as explicit UNCERTAIN evidence instead of pretending they are ordinary dry movement. That is intentionally conservative: these states need first-class mechanics plus vanilla trace parity before they can participate in an IMPOSSIBLE proof.
+
+Targeted diagnostics now expose rolling validation latency and backlog metrics, while summary traces keep only the causal/recovery/timing information needed to investigate a contradiction. Phase 8 alert accumulation still retains historical evidence, but operator alerts now require the configured number of consecutive IMPOSSIBLE observations; a POSSIBLE or UNCERTAIN observation breaks the active alert streak without deleting historical evidence.
+
+These changes are clean-room implementations informed by vanilla 1.21.11 traces, replay regressions, and Grim's published architectural ideas. No Grim source code or GPL implementation was copied into Phantom.
+
 ## Validation still missing
 Phantom still lacks equivalent validation in several areas:
 
