@@ -418,6 +418,89 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void staleServerVelocityDoesNotFalseFlagSprintJumpBootstrap() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+
+    WorldSnapshot world = floorWorld();
+    Player realStart = new Player(
+        new Maths.Vec3(.5, 64.0, .5),
+        new Maths.Vec3(.25, 0.0, 0.0),
+        270f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        new Simulation.Attributes(.1), Pose.STANDING, State.Environment.DRY,
+        State.TickRange.unknown(), State.Provenance.UNKNOWN, Set.of());
+
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    var first = physics.step(new Vanilla12111RichPhysics.Context(
+        0,
+        realStart,
+        new Simulation.AdvancedInput(1, 0, true, true, false),
+        world,
+        Simulation.Environment.DRY,
+        realStart.attributes(),
+        Phase5Mechanics.MovementEffects.NONE,
+        Pose.STANDING,
+        MovementEnvironment.dry(true, true, false),
+        false,
+        dev.phantom.ac.world.EntityCollisions.NONE_TRACKED));
+    Player firstObserved = first.state();
+
+    var second = physics.step(new Vanilla12111RichPhysics.Context(
+        1,
+        firstObserved,
+        new Simulation.AdvancedInput(1, 0, false, true, false),
+        world,
+        Simulation.Environment.DRY,
+        firstObserved.attributes(),
+        Phase5Mechanics.MovementEffects.NONE,
+        Pose.STANDING,
+        MovementEnvironment.dry(false, true, false),
+        false,
+        dev.phantom.ac.world.EntityCollisions.NONE_TRACKED));
+    Player secondObserved = second.state();
+
+    PlayerContext staleAuthority = new PlayerContext(
+        "survival", new Simulation.Attributes(.1), Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, true, false),
+        realStart.position(), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 10, staleAuthority,
+            Packets.CaptureProvenance.fromAdapter("paper-live", staleAuthority, 100L, 0L)),
+        new RawPacket(2, 20, new ClientTickEnd()),
+        new RawPacket(3, 30, new ClientInput(
+            true, false, false, false, true, false, true)),
+        new RawPacket(4, 40, new Move(
+            firstObserved.position(), firstObserved.yaw(), firstObserved.pitch(),
+            firstObserved.onGround(), 1L)),
+        new RawPacket(5, 50, new ClientTickEnd()),
+        new RawPacket(6, 60, new ClientInput(
+            true, false, false, false, false, false, true)),
+        new RawPacket(7, 70, new Move(
+            secondObserved.position(), secondObserved.yaw(), secondObserved.pitch(),
+            secondObserved.onGround(), 2L)));
+
+    var report = runner.process(
+        "stale-server-velocity-sprint-jump",
+        packets, world, anchor(), 0L);
+
+    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().get(0).verdict(),
+        report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().get(1).verdict(),
+        report.results().toString());
+    assertTrue(report.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
+        .anyMatch(line -> line.startsWith("FRONTIER_BOOTSTRAPPED")),
+        report.frames().toString());
+  }
+
+  @Test
   void sprintJumpAddsVanillaHorizontalImpulse() {
     Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
 
