@@ -1044,6 +1044,13 @@ public final class Phase8PredictionRunner {
         && frontierObservedDistance > LOCAL_AUTHORITY_DRIFT_THRESHOLD;
   }
 
+  private static double distance(Vec3 first, Vec3 second) {
+    double dx = first.x() - second.x();
+    double dy = first.y() - second.y();
+    double dz = first.z() - second.z();
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+
   private double nearestFrontierDistanceTo(Vec3 position) {
     return prediction.stream()
         .mapToDouble(candidate -> distance(candidate.context().player().position(), position))
