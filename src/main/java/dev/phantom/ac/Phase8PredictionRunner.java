@@ -455,6 +455,53 @@ public final class Phase8PredictionRunner {
           + " causalSequence=" + world.causalSequence()
           + " chunks=" + world.loadedChunks().size());
 
+      /*
+       * Grim keeps a client-side movement velocity separate from the server's
+       * instantaneous velocity. Mirror that principle at bootstrap: if the
+       * prediction frontier is empty but a fresh authority sample matches the
+       * observed pre-movement state, reconstruct the hidden start velocity from
+       * the actual movement observation and prove that reconstruction through
+       * the canonical Phase 5 step. This avoids treating Bukkit's server-side
+       * velocity as an atomic client-tick velocity.
+       */
+      if (prediction.isEmpty() && move.position() != null) {
+        Optional<Candidate> bootstrap = bootstrapPredictionFromObservedMovement(
+            packet, move, observedBefore, observedAfter, tick, world, trace);
+        if (bootstrap.isPresent()) {
+          prediction = Set.of(bootstrap.orElseThrow());
+          predictionTick = tick.clientTick();
+          latestContinuation = Continuation.ACTIVE;
+          lastPositionClientTick = tick.clientTick();
+
+          Candidate candidate = bootstrap.orElseThrow();
+          SearchResult bootstrapSearch = new SearchResult(
+              Verdict.POSSIBLE,
+              Set.of(candidate),
+              1,
+              1,
+              0, 0, 0, 0,
+              List.of(
+                  "client movement bootstrap reconstructed the hidden start velocity from the observed tick",
+                  "canonical Phase 5 replay reproduced the observed movement exactly"));
+          List<String> bootstrapUncertainty = List.of(
+              "client-side starting velocity was reconstructed from observed movement because the server velocity is not an atomic client-tick state");
+          Phase8MovementValidation.Result result = validate(
+              playerId, packet, move, observedBefore, observedAfter, world,
+              tick, bootstrapUncertainty, bootstrapSearch, false);
+          results.add(result);
+          possible++;
+          rememberObservedMovement(observedBefore, observedAfter, tick);
+          trace.add("EVIDENCE POSSIBLE reason=CLIENT_MOVEMENT_BOOTSTRAP"
+              + " reconstructedStartVelocity=" + candidate.provenance());
+          trace.add("FRONTIER_BOOTSTRAPPED source=CLIENT_MOVEMENT_OBSERVATION"
+              + " tick=" + tick.clientTick());
+          frames.add(frame(
+              sequence, packet, tick, move, observedBefore, observedAfter,
+              predictedBefore, prediction, world, bootstrapUncertainty, trace));
+          continue;
+        }
+      }
+
       ensureRoot(playerId, packet, move, observedBefore, tick, trace);
       refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, world, trace);
       if (move.position() != null) {
@@ -1239,6 +1286,242 @@ public final class Phase8PredictionRunner {
     }
 
     return Optional.of(new Vec3(dx * horizontalFactor, 0.0, dz * horizontalFactor));
+  }
+
+  private Optional<Candidate> bootstrapPredictionFromObservedMovement(
+      Packets.RawPacket movementPacket,
+      Packets.Move move,
+      Player observedBefore,
+      Player observedAfter,
+      TickResolution tick,
+      WorldSnapshot world,
+      List<String> trace) {
+    if (!tick.known() || move.position() == null || tick.clientTick() <= 0L) {
+      return Optional.empty();
+    }
+
+    AuthorityAnchor authority = freshCausalAuthority(movementPacket);
+    if (authority == null) return Optional.empty();
+
+    if (!positionsMatch(authority.context().serverPosition(), observedBefore.position())
+        || authority.context().movementEnvironment().onGround() != observedBefore.onGround()
+        || (move.onGround() != null && move.onGround() != observedAfter.onGround())) {
+      return Optional.empty();
+    }
+
+    long simulationTick = tick.clientTick() - 1L;
+    InputConstraint input = inputForSimulationTick(
+        inputHistory, simulationTick, movementPacket.sequence());
+    Optional<Simulation.AdvancedInput> advancedInput =
+        inputConstraintToAdvancedInput(input);
+    if (advancedInput.isEmpty()) return Optional.empty();
+
+    Player authorityState = playerFromAuthority(authority.context());
+    float yaw = move.yaw() == null ? observedBefore.yaw() : move.yaw();
+    float pitch = move.pitch() == null ? observedBefore.pitch() : move.pitch();
+    Player startTemplate = new Player(
+        observedBefore.position(),
+        authorityState.velocity(),
+        yaw,
+        pitch,
+        observedBefore.onGround(),
+        authorityState.gamemode(),
+        authorityState.effects(),
+        authorityState.awaitingTeleport(),
+        false,
+        Optional.of(advancedInput.orElseThrow()),
+        authorityState.attributes(),
+        authorityState.pose(),
+        observedBefore.environment(),
+        observedBefore.clientTickRange(),
+        authorityState.provenance(),
+        authorityState.uncertaintyReasons());
+
+    MovementEnvironment environment = movementEnvironmentOf(startTemplate);
+    Vec3 observedDelta = new Vec3(
+        observedAfter.position().x() - observedBefore.position().x(),
+        observedAfter.position().y() - observedBefore.position().y(),
+        observedAfter.position().z() - observedBefore.position().z());
+
+    Optional<Vec3> startVelocity = reconstructCollisionFreeStartVelocity(
+        startTemplate, advancedInput.orElseThrow(), observedDelta, world);
+    if (startVelocity.isEmpty()) return Optional.empty();
+
+    double horizontalSpeed = Math.hypot(
+        startVelocity.orElseThrow().x(), startVelocity.orElseThrow().z());
+    if (!Double.isFinite(horizontalSpeed) || horizontalSpeed > 1.25
+        || Math.abs(startVelocity.orElseThrow().y()) > 4.0) {
+      trace.add("BOOTSTRAP_REJECTED reason=starting velocity outside conservative bound"
+          + " velocity=" + startVelocity.orElseThrow());
+      return Optional.empty();
+    }
+
+    Player reconstructedStart = new Player(
+        startTemplate.position(),
+        startVelocity.orElseThrow(),
+        startTemplate.yaw(),
+        startTemplate.pitch(),
+        startTemplate.onGround(),
+        startTemplate.gamemode(),
+        startTemplate.effects(),
+        startTemplate.awaitingTeleport(),
+        false,
+        startTemplate.input(),
+        startTemplate.attributes(),
+        startTemplate.pose(),
+        startTemplate.environment(),
+        startTemplate.clientTickRange(),
+        startTemplate.provenance(),
+        startTemplate.uncertaintyReasons());
+
+    Vanilla12111RichPhysics.Context context = new Vanilla12111RichPhysics.Context(
+        simulationTick,
+        reconstructedStart,
+        advancedInput.orElseThrow(),
+        world,
+        simulationEnvironmentFor(environment),
+        reconstructedStart.attributes(),
+        movementEffects(reconstructedStart),
+        reconstructedStart.pose(),
+        environment,
+        reconstructedStart.pose() == Pose.SLEEPING,
+        EntityCollisions.of(authority.context().entityBoxes()));
+    Vanilla12111RichPhysics.StepResult step =
+        new Vanilla12111RichPhysics().step(context);
+
+    if (step.state().uncertain()
+        || !positionsMatch(step.state().position(), observedAfter.position())
+        || step.state().onGround() != observedAfter.onGround()) {
+      trace.add("BOOTSTRAP_REJECTED reason=canonical physics replay did not reproduce observation"
+          + " reconstructed=" + step.state().position()
+          + " observed=" + observedAfter.position()
+          + " reconstructedGround=" + step.state().onGround()
+          + " observedGround=" + observedAfter.onGround());
+      return Optional.empty();
+    }
+
+    Player after = new Player(
+        step.state().position(),
+        step.state().velocity(),
+        observedAfter.yaw(),
+        observedAfter.pitch(),
+        step.state().onGround(),
+        step.state().gamemode(),
+        step.state().effects(),
+        step.state().awaitingTeleport(),
+        false,
+        step.state().input(),
+        step.state().attributes(),
+        step.state().pose(),
+        step.state().environment(),
+        observedAfter.clientTickRange(),
+        step.state().provenance(),
+        step.state().uncertaintyReasons());
+
+    Candidate candidate = candidateFromPlayer(
+        after,
+        tick.clientTick(),
+        "CLIENT_MOVEMENT_BOOTSTRAP",
+        authority.sequence(),
+        EntityCollisions.of(authority.context().entityBoxes()));
+    trace.add("BOOTSTRAP_START simulationTick=" + simulationTick
+        + " observedDelta=" + observedDelta
+        + " reconstructedStartVelocity=" + startVelocity.orElseThrow()
+        + " authoritativeVelocity=" + authority.context().serverVelocity());
+    return Optional.of(candidate);
+  }
+
+  private Optional<Vec3> reconstructCollisionFreeStartVelocity(
+      Player start,
+      Simulation.AdvancedInput input,
+      Vec3 observedDelta,
+      WorldSnapshot world) {
+    MovementEnvironment environment = movementEnvironmentOf(start);
+    if (environment.fluid() != Fluid.NONE
+        || environment.climbable()
+        || environment.gliding()) {
+      return Optional.empty();
+    }
+
+    double inputMagnitude = Math.hypot(input.forward(), input.strafe());
+    double inputScale = inputMagnitude > 1.0 ? 1.0 / Math.sqrt(2.0) : 1.0;
+    double inputAcceleration;
+
+    if (start.onGround()) {
+      if (inputMagnitude == 0.0) {
+        inputAcceleration = 0.0;
+      } else {
+        int x = (int) Math.floor(start.position().x());
+        int y = (int) Math.floor(start.position().y() - 1.0E-4);
+        int z = (int) Math.floor(start.position().z());
+        if (world.coverageAt(x, y, z) != dev.phantom.ac.world.Coverage.KNOWN) {
+          return Optional.empty();
+        }
+        var support = world.requireBlockAt(x, y, z);
+        if (support == null || support.isUnsupported()) return Optional.empty();
+        double movementSpeed = start.attributes().value() * movementEffects(start).speedMultiplier();
+        if (input.sprint()) movementSpeed *= Vanilla12111RichPhysics.SPRINTING_SPEED_MULTIPLIER;
+        if (input.sneak()) movementSpeed *= 0.3;
+        double frictionInfluencedSpeed = movementSpeed
+            * Vanilla12111RichPhysics.FRICTION_SPEED_FACTOR
+            / Math.pow(dev.phantom.ac.world.v12111.BlockCatalogue12111.slipperiness(support), 3.0);
+        inputAcceleration = inputMagnitude > 1.0
+            ? frictionInfluencedSpeed
+            : frictionInfluencedSpeed * Vanilla12111RichPhysics.INPUT_FRICTION;
+      }
+    } else {
+      double offGroundSpeed = input.sprint()
+          ? Vanilla12111RichPhysics.SPRINT_AIR_ACCEL
+          : Vanilla12111RichPhysics.AIR_ACCEL;
+      inputAcceleration = inputMagnitude > 1.0
+          ? offGroundSpeed
+          : offGroundSpeed * Vanilla12111RichPhysics.INPUT_FRICTION;
+    }
+
+    double yaw = Math.toRadians(start.yaw());
+    double accelerationX = inputScale * (
+        input.strafe() * inputAcceleration * Math.cos(yaw)
+            - input.forward() * inputAcceleration * Math.sin(yaw));
+    double accelerationZ = inputScale * (
+        input.forward() * inputAcceleration * Math.cos(yaw)
+            + input.strafe() * inputAcceleration * Math.sin(yaw));
+
+    double boostX = 0.0;
+    double boostZ = 0.0;
+    boolean jumped = input.jump()
+        && start.onGround()
+        && !start.sleeping()
+        && environment.fluid() == Fluid.NONE
+        && !environment.climbable()
+        && !environment.gliding();
+    if (jumped && input.sprint()) {
+      boostX = -Math.sin(yaw) * Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST;
+      boostZ = Math.cos(yaw) * Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST;
+    }
+
+    return Optional.of(new Vec3(
+        observedDelta.x() - accelerationX - boostX,
+        jumped
+            ? observedDelta.y() - Vanilla12111RichPhysics.JUMP - movementEffects(start).jumpVelocityAdd()
+            : observedDelta.y(),
+        observedDelta.z() - accelerationZ - boostZ));
+  }
+
+  private static Optional<Simulation.AdvancedInput> inputConstraintToAdvancedInput(
+      InputConstraint constraint) {
+    if (constraint.forward().isEmpty()
+        || constraint.strafe().isEmpty()
+        || constraint.jump().isEmpty()
+        || constraint.sprint().isEmpty()
+        || constraint.sneak().isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.of(new Simulation.AdvancedInput(
+        constraint.forward().getAsInt(),
+        constraint.strafe().getAsInt(),
+        constraint.jump().get(),
+        constraint.sprint().get(),
+        constraint.sneak().get()));
   }
 
   private AuthorityAnchor freshCausalAuthority(Packets.RawPacket movementPacket) {
