@@ -64,12 +64,13 @@ class Phase8PredictionRunnerTest {
         "sprint-key-vs-state",
         List.of(
             new RawPacket(1, 10, authority),
-            new RawPacket(2, 20, new ClientInput(
+            new RawPacket(2, 20, new ClientTickEnd()),
+            new RawPacket(3, 30, new ClientInput(
                 true, false, false, false, false, false, true)),
-            new RawPacket(3, 30, new ClientTickEnd()),
-            new RawPacket(4, 40, new Move(first.position(), 0f, 0f, true, 1L)),
-            new RawPacket(5, 50, new ClientTickEnd()),
-            new RawPacket(6, 60, new Move(second.position(), 0f, 0f, true, 2L))),
+            new RawPacket(4, 40, new ClientTickEnd()),
+            new RawPacket(5, 50, new Move(first.position(), 0f, 0f, true, 2L)),
+            new RawPacket(6, 60, new ClientTickEnd()),
+            new RawPacket(7, 70, new Move(second.position(), 0f, 0f, true, 3L))),
         world, start, 0L);
 
     assertEquals(2, report.movementObservations(), report.toString());
@@ -97,11 +98,11 @@ class Phase8PredictionRunnerTest {
 
     Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
     var first = physics.step(new Vanilla12111RichPhysics.Context(
-        0, start, input, world, Simulation.Environment.DRY, attrs,
+        1, start, input, world, Simulation.Environment.DRY, attrs,
         effects, Pose.STANDING, sprintEnvironment, false,
         dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
     var second = physics.step(new Vanilla12111RichPhysics.Context(
-        1, first, input, world, Simulation.Environment.DRY, attrs,
+        2, first, input, world, Simulation.Environment.DRY, attrs,
         effects, Pose.STANDING, sprintEnvironment, false,
         dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
 
