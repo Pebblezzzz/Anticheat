@@ -659,4 +659,57 @@ class Phase8PredictionRunnerTest {
         report.frames().getLast().trace().toString());
   }
 
+  @Test
+  void explicitClientTickRemainsExhaustiveAfterTimingHistoryTruncation() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    Player authorityState = anchor();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        authorityState.position(), authorityState.velocity(),
+        false, false, false, List.of());
+
+    List<RawPacket> packets = new ArrayList<>();
+    packets.add(new RawPacket(
+        1, 10L, authority,
+        Packets.CaptureProvenance.fromAdapter("test-authority", authority, 0L, 0L)));
+
+    // Establish a live prediction frontier at the start of the long-lived session.
+    packets.add(new RawPacket(
+        2, 20L, new Move(authorityState.position(), 0f, 0f, true, 1L)));
+
+    // Force the runner's bounded 512-event timing history to truncate while keeping
+    // a fresh causal authority immediately before the eventual movement observation.
+    long sequence = 3L;
+    for (long clientTick = 2L; clientTick <= 516L; clientTick++) {
+      packets.add(new RawPacket(
+          sequence++, 20L + clientTick, authority,
+          Packets.CaptureProvenance.fromAdapter(
+              "test-authority", authority, clientTick, clientTick)));
+    }
+
+    // One tick of legitimate movement cannot reach this position.
+    packets.add(new RawPacket(
+        sequence, 10_000L,
+        new Move(new Maths.Vec3(20.5, 64.0, 0.5), 0f, 0f, true, 516L)));
+
+    var report = runner.process(
+        "explicit-timing-after-truncation",
+        packets,
+        floorWorld(),
+        anchor(),
+        0L);
+
+    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        report.results().getLast().verdict(),
+        report.results().toString());
+    assertTrue(
+        report.results().getLast().evidence().uncertaintySources().stream()
+            .noneMatch(reason -> reason.contains("timing envelope retains chronology uncertainty")),
+        report.results().toString());
+  }
+
 }
