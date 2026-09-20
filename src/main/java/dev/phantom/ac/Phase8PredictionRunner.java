@@ -108,6 +108,9 @@ public final class Phase8PredictionRunner {
   private static final double POSITION_TOLERANCE = Phase6Reachability.POSITION_MATCH_TOLERANCE;
   private static final long MAX_INCREMENTAL_HORIZON = Phase6Reachability.MAX_HORIZON_TICKS;
   private static final long PREDICTION_RESYNC_LAG_TICKS = 2L;
+  private static final long FRESH_LOCAL_AUTHORITY_MAX_SERVER_TICK_AGE = 1L;
+  private static final double LOCAL_AUTHORITY_DRIFT_THRESHOLD = 2.0;
+  private static final double OBSERVED_AUTHORITY_ALIGNMENT_THRESHOLD = 2.0;
   private static final int MAX_TIMING_HISTORY_EVENTS = 512;
 
   private final int maximumCandidates;
@@ -965,7 +968,10 @@ public final class Phase8PredictionRunner {
 
     long authorityTick = authority.clientTick();
     long lag = tick.clientTick() - predictionTick;
-    if (predictionTick < 0L || lag <= PREDICTION_RESYNC_LAG_TICKS) return;
+    boolean lagged = predictionTick >= 0L && lag > PREDICTION_RESYNC_LAG_TICKS;
+    boolean spatialDrift = shouldRefreshForLocalAuthorityDrift(
+        movementPacket, move, observedBefore, tick, authority);
+    if (!lagged && !spatialDrift) return;
     if (authorityTick > tick.clientTick()) return;
 
     long previousPredictionTick = predictionTick;
@@ -981,18 +987,75 @@ public final class Phase8PredictionRunner {
     prediction = Set.of(candidateFromPlayer(
         rootPlayer,
         rootTick,
-        "CAUSAL_AUTHORITY_RESYNC",
+        spatialDrift && !lagged ? "LOCAL_AUTHORITY_DRIFT_RESYNC" : "CAUSAL_AUTHORITY_RESYNC",
         authority.sequence(),
         EntityCollisions.of(authority.context().entityBoxes())));
     predictionTick = rootTick;
     latestContinuation = Continuation.ACTIVE;
 
-    trace.add("ROOT_REFRESH reason=PREDICTION_LAG"
+    trace.add((spatialDrift && !lagged
+        ? "ROOT_REFRESH reason=LOCAL_AUTHORITY_DRIFT"
+        : "ROOT_REFRESH reason=PREDICTION_LAG")
         + " predictionTickBefore=" + previousPredictionTick
         + " authorityClientTick=" + authorityTick
         + " rootTick=" + rootTick
         + " authoritySequence=" + authority.sequence()
         + " authorityServerTick=" + authority.serverTick());
+    if (spatialDrift) {
+      trace.add("ROOT_REFRESH_DRIFT authorityToObservedBefore="
+          + formatDistance(distance(authority.context().serverPosition(), observedBefore.position()))
+          + " nearestFrontierToAuthority="
+          + formatDistance(nearestFrontierDistanceTo(authority.context().serverPosition())));
+    }
+  }
+
+  private boolean shouldRefreshForLocalAuthorityDrift(
+      Packets.RawPacket movementPacket,
+      Packets.Move move,
+      Player observedBefore,
+      TickResolution tick,
+      AuthorityAnchor authority) {
+    /*
+     * This path is intentionally narrower than the ordinary lag resync. A live
+     * Paper PlayerContext is a server-side sample, so it is safe as a new physics
+     * root only when it is strictly from the preceding server tick and is close
+     * to the observed client state. A frontier that is merely a little different
+     * must not be silently replaced by server authority.
+     */
+    if (move.clientTick() == null
+        || !movementPacket.provenance().sourceId().startsWith("paper-client-tick")) {
+      return false;
+    }
+    Long movementServerTick = movementPacket.provenance().authoritativeServerTick();
+    if (movementServerTick == null || authority.serverTick() >= movementServerTick) return false;
+    long serverTickAge = movementServerTick - authority.serverTick();
+    if (serverTickAge < 0L || serverTickAge > FRESH_LOCAL_AUTHORITY_MAX_SERVER_TICK_AGE) return false;
+    if (authority.clientTick() > tick.clientTick()) return false;
+
+    double authorityDistance = distance(
+        authority.context().serverPosition(), observedBefore.position());
+    double frontierDistance = nearestFrontierDistanceTo(authority.context().serverPosition());
+    double frontierObservedDistance = nearestFrontierDistanceTo(observedBefore.position());
+    return Double.isFinite(authorityDistance)
+        && Double.isFinite(frontierDistance)
+        && Double.isFinite(frontierObservedDistance)
+        && authorityDistance <= OBSERVED_AUTHORITY_ALIGNMENT_THRESHOLD
+        && frontierDistance > LOCAL_AUTHORITY_DRIFT_THRESHOLD
+        && frontierObservedDistance > LOCAL_AUTHORITY_DRIFT_THRESHOLD;
+  }
+
+  private double nearestFrontierDistanceTo(Vec3 position) {
+    return prediction.stream()
+        .mapToDouble(candidate -> distance(candidate.context().player().position(), position))
+        .filter(Double::isFinite)
+        .min()
+        .orElse(Double.NaN);
+  }
+
+  private static String formatDistance(double value) {
+    return Double.isFinite(value)
+        ? String.format(Locale.ROOT, "%.6f", value)
+        : "unknown";
   }
 
   private void ensureRoot(
