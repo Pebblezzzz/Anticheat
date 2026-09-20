@@ -670,6 +670,24 @@ public final class Phase6Reachability {
                 continue;
               }
 
+              if (containsUnmodeledMovementSurface(sample)) {
+                uncertain = true;
+                uncertainTransitions++;
+                String reason = "movement surface has vanilla mechanics not yet represented by the 1.21.11 ticker";
+                reasons.add(reason);
+                addElimination(eliminations, new Elimination(
+                    tick, parent.id(), "PHASE5", reason,
+                    input.toString(), branch.id(), path.id(), WorldKnowledge.KNOWN,
+                    List.of("slime=" + sample.slime(),
+                        "honey=" + sample.honey(),
+                        "soulSand=" + sample.soulSand(),
+                        "cobweb=" + sample.cobweb(),
+                        "powderSnow=" + sample.powderSnow(),
+                        "sweetBerryBush=" + sample.sweetBerryBush(),
+                        "bubbleColumn=" + sample.bubbleColumn())));
+                continue;
+              }
+
               MovementEnvironment environment =
                   movementEnvironmentFor(sample, pre, input);
               Simulation.Environment simulationEnvironment = environmentFor(environment);
@@ -1130,6 +1148,22 @@ public final class Phase6Reachability {
     if (coverage.contains(dev.phantom.ac.world.Coverage.UNSUPPORTED)) return WorldKnowledge.UNSUPPORTED;
     if (coverage.contains(dev.phantom.ac.world.Coverage.UNLOADED)) return WorldKnowledge.UNLOADED;
     return WorldKnowledge.UNKNOWN;
+  }
+
+  private static boolean containsUnmodeledMovementSurface(WorldQueries.EnvironmentSample sample) {
+    /*
+     * These blocks can change vanilla movement through bounce, sticky drag,
+     * movement-factor slowdown, web/powder-snow immersion, berry slowdown, or
+     * bubble-column vertical flow. Treat them as UNCERTAIN until the pinned
+     * 1.21.11 ticker has first-class mechanics plus vanilla trace coverage.
+     */
+    return sample.slime()
+        || sample.honey()
+        || sample.soulSand()
+        || sample.cobweb()
+        || sample.powderSnow()
+        || sample.sweetBerryBush()
+        || sample.bubbleColumn();
   }
 
   private static MovementEnvironment movementEnvironmentFor(
