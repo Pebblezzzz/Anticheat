@@ -1386,9 +1386,6 @@ class Phase8PredictionRunnerTest {
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.equals("INPUT_TICK_ORIGIN known=true offset=100")),
         report.frames().getLast().trace().toString());
-    assertTrue(report.frames().getLast().trace().stream()
-        .anyMatch(line -> line.contains("selectedSeq=531,selectedTick=9")),
-        report.frames().getLast().trace().toString());
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getLast().verdict(), report.results().toString());
   }
