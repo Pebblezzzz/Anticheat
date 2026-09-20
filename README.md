@@ -26,3 +26,7 @@ No GrimAC source was copied or linked into this repository. GrimAC was consulted
 ## Validation scope
 
 Run `mvn test`. See [the Phase-0 architecture contract](docs/ARCHITECTURE.md) and `docs/VALIDATION.md` for the honest validation inventory and trace format.
+
+## Engineering direction
+
+The clean-room engineering plan for the predictive/simulation architecture is documented in [docs/GRIM-INSPIRED-ENGINEERING-PLAN.md](docs/GRIM-INSPIRED-ENGINEERING-PLAN.md). The version-pinned physics strategy, provenance requirements, differential corpus, and mechanic coverage plan are in [docs/VANILLA-PHYSICS-PLAN.md](docs/VANILLA-PHYSICS-PLAN.md). The `dev.phantom.ac.physics.PhysicsProfile12111` data profile exposes the current 1.21.11 constants without duplicating the movement algorithm; `Vanilla12111RichPhysics` remains the canonical transition authority.
