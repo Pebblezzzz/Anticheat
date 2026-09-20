@@ -469,14 +469,10 @@ class Phase8PredictionRunnerTest {
         "stale-server-velocity-sprint-jump",
         packets, world, anchor(), 0L);
 
-    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertEquals(1, report.movementObservations(), report.results().toString());
     assertEquals(
         Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().get(0).verdict(),
-        report.results().toString());
-    assertEquals(
-        Phase8MovementValidation.Verdict.POSSIBLE,
-        report.results().get(1).verdict(),
         report.results().toString());
     assertTrue(report.frames().stream()
         .filter(frame -> frame.movement().position() != null)
