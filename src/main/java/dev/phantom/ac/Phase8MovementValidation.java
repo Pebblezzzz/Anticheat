@@ -141,6 +141,11 @@ public final class Phase8MovementValidation {
           OptionalLong.empty(), bestCandidate(reachable.candidates(), observed), reachable.reasons(), uncertainty, replayReference);
       return new Result(Verdict.UNCERTAIN, evidence);
     }
+    /*
+     * POSSIBLE is existential: one complete legitimate candidate is enough to
+     * explain the observation. Timing exhaustiveness is required only before
+     * concluding that no legitimate candidate can explain it.
+     */
     Observation observation = new Observation(observed, observedFields);
     Phase6Reachability.Evidence comparison = new Phase6Reachability().compare(reachable, observation);
     if (comparison.verdict() == Phase6Reachability.Verdict.POSSIBLE) {
