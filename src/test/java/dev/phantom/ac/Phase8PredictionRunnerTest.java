@@ -79,7 +79,7 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
-  void impossibleObservationDoesNotOverwritePredictionFrontier() {
+  void impossibleObservationDoesNotPoisonNextFreshAuthoritativeObservation() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     Player anchor = anchor();
 
@@ -940,7 +940,11 @@ class Phase8PredictionRunnerTest {
         second.frames().getFirst().trace().stream()
             .anyMatch(line -> line.contains("AUTHORITATIVE_ZERO_DELTA_WITNESS")),
         second.frames().toString());
-    assertTrue(second.candidateFrontierRetained(), second.toString());
+    assertTrue(second.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("FRONTIER_CLEARED")
+            && line.contains("observation-witness-is-not-a-physics-root")),
+        second.frames().getFirst().trace().toString());
+    assertFalse(second.candidateFrontierRetained(), second.toString());
   }
 
 
@@ -948,15 +952,15 @@ class Phase8PredictionRunnerTest {
   void authoritativeObservationWitnessCannotBecomeNonAtomicPhysicsRoot() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
-    WorldSnapshot world = floorWorld();
-    double priorY = 69.2491871;
+    WorldSnapshot emptyWorld = WorldSnapshot.builder(Contracts.TARGET_VERSION).build();
+    WorldSnapshot knownWorld = floorWorld();
     double witnessY = 69.25220334025373;
     double nextY = 69.17675927506424;
     double nonAtomicWitnessVelocity = 0.08307781780646721;
     double boundaryVelocity = 0.00301626150904258;
 
     Player start = new Player(
-        new Maths.Vec3(.5, priorY, .5),
+        new Maths.Vec3(.5, witnessY, .5),
         Maths.Vec3.ZERO,
         0f, 0f, false, "survival", Map.of(),
         OptionalInt.empty(), false, Optional.empty(),
@@ -982,7 +986,7 @@ class Phase8PredictionRunnerTest {
     Move secondMovement = new Move(
         new Maths.Vec3(.5, nextY, .5), 0f, 0f, false, 6L);
 
-    var report = runner.process(
+    var report = runner.processWithWorldProvider(
         "authority-witness-frontier",
         List.of(
             new RawPacket(1, 10L, new ClientTickEnd()),
@@ -998,7 +1002,7 @@ class Phase8PredictionRunnerTest {
             new RawPacket(5, 50L, secondMovement,
                 Packets.CaptureProvenance.fromAdapter(
                     "test-movement", secondMovement, 11L, 6L))),
-        world,
+        sequence -> sequence <= 3 ? emptyWorld : knownWorld,
         start,
         0L);
 
