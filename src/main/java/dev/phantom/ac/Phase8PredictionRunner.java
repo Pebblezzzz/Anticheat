@@ -449,6 +449,10 @@ public final class Phase8PredictionRunner {
             playerId, packet, move, observedBefore, observedAfter, worldOrEmpty(world),
             tick, sources, search, false);
         results.add(result);
+        if (move.position() != null
+            && result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE) {
+          rememberRecentObservedMovement(observedBefore, observedAfter, tick);
+        }
         uncertain++;
         frames.add(frame(
             sequence, packet, tick, move, observedBefore, observedAfter,
@@ -502,6 +506,10 @@ public final class Phase8PredictionRunner {
             playerId, packet, move, observedBefore, observedAfter, world,
             tick, List.of(), observationSearch, timingExhaustive, observedFields);
         results.add(result);
+        if (move.position() != null
+            && result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE) {
+          rememberRecentObservedMovement(observedBefore, observedAfter, tick);
+        }
         if (result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE) {
           possible++;
           latestContinuation = Continuation.ACTIVE;
@@ -568,6 +576,10 @@ public final class Phase8PredictionRunner {
             playerId, packet, move, observedBefore, observedAfter, world,
             tick, uncertaintySources, search, false);
         results.add(result);
+        if (move.position() != null
+            && result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE) {
+          rememberRecentObservedMovement(observedBefore, observedAfter, tick);
+        }
         uncertain++;
         frames.add(frame(
             sequence, packet, tick, move, observedBefore, observedAfter,
@@ -595,6 +607,10 @@ public final class Phase8PredictionRunner {
             playerId, packet, move, observedBefore, observedAfter, world,
             tick, uncertaintySources, search, false);
         results.add(result);
+        if (move.position() != null
+            && result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE) {
+          rememberRecentObservedMovement(observedBefore, observedAfter, tick);
+        }
         uncertain++;
         frames.add(frame(
             sequence, packet, tick, move, observedBefore, observedAfter,
@@ -617,6 +633,10 @@ public final class Phase8PredictionRunner {
             playerId, packet, move, observedBefore, observedAfter, world,
             tick, uncertaintySources, search, false);
         results.add(result);
+        if (move.position() != null
+            && result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE) {
+          rememberRecentObservedMovement(observedBefore, observedAfter, tick);
+        }
         uncertain++;
         trace.add("FRONTIER_RETAINED reason=SUB_TICK_TRAJECTORY_UNMODELED");
         frames.add(frame(
@@ -651,6 +671,10 @@ public final class Phase8PredictionRunner {
             playerId, packet, move, observedBefore, observedAfter, world,
             tick, uncertaintySources, search, false);
         results.add(result);
+        if (move.position() != null
+            && result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE) {
+          rememberRecentObservedMovement(observedBefore, observedAfter, tick);
+        }
         uncertain++;
         frames.add(frame(
             sequence, packet, tick, move, observedBefore, observedAfter,
@@ -700,6 +724,10 @@ public final class Phase8PredictionRunner {
             playerId, packet, move, observedBefore, observedAfter, world,
             tick, uncertaintySources, search, false);
         results.add(result);
+        if (move.position() != null
+            && result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE) {
+          rememberRecentObservedMovement(observedBefore, observedAfter, tick);
+        }
         uncertain++;
         trace.add("FRONTIER_RETAINED after=" + prediction.size()
             + " tick=" + predictionTick);
@@ -764,9 +792,6 @@ public final class Phase8PredictionRunner {
         case UNCERTAIN -> {
           uncertain++;
           latestContinuation = Continuation.UNCERTAIN;
-          if (move.position() != null) {
-            rememberRecentObservedMovement(observedBefore, observedAfter, tick);
-          }
           trace.add("FRONTIER_RETAINED reason=UNCERTAIN_OBSERVATION");
         }
       }
