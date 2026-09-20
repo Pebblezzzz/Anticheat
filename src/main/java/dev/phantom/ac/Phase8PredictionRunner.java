@@ -455,9 +455,11 @@ public final class Phase8PredictionRunner {
           + " causalSequence=" + world.causalSequence()
           + " chunks=" + world.loadedChunks().size());
 
+      Set<Candidate> predictedBefore = prediction;
+      boolean predictionWasEmptyBeforeRoot = prediction.isEmpty();
+
       ensureRoot(playerId, packet, move, observedBefore, tick, trace);
       refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, world, trace);
-      Set<Candidate> predictedBefore = prediction;
 
       /*
        * Grim keeps a client-side movement velocity separate from the server's
@@ -468,7 +470,7 @@ public final class Phase8PredictionRunner {
        * observation. This avoids treating Bukkit's server-side velocity as an
        * atomic client-tick velocity.
        */
-      if (prediction.isEmpty() && move.position() != null) {
+      if (predictionWasEmptyBeforeRoot && move.position() != null) {
         Optional<Candidate> bootstrap = bootstrapPredictionFromObservedMovement(
             packet, move, observedBefore, observedAfter, tick, world, trace);
         if (bootstrap.isPresent()) {
