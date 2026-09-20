@@ -429,7 +429,15 @@ public final class Phase8PredictionRunner {
           packet, move, phase7TimingBySequence);
       trace.add("CLIENT_TICK " + tick.display()
           + " exact=" + tick.exact()
-          + " source=" + tick.source());
+          + " source=" + tick.source()
+          + " timingUncertain=" + tick.timingUncertain());
+
+      InputConstraint tickInput = tick.known() && tick.clientTick() > 0L
+          ? inputForSimulationTick(inputHistory, tick.clientTick() - 1L, sequence)
+          : currentInput;
+      trace.add("INPUT_STATE currentKeyState=" + currentInput
+          + " simulationKeyState=" + tickInput
+          + " simulationTick=" + (tick.known() ? Math.max(0L, tick.clientTick() - 1L) : -1L));
 
       WorldSnapshot world = worldProvider == null ? null : worldProvider.apply(sequence);
       if (world == null) {
@@ -456,6 +464,17 @@ public final class Phase8PredictionRunner {
       trace.add("WORLD source=latency-compensated-packet-world"
           + " causalSequence=" + world.causalSequence()
           + " chunks=" + world.loadedChunks().size());
+      if (latestAuthority != null) {
+        MovementEnvironment authorityEnvironment = latestAuthority.context().movementEnvironment();
+        trace.add("AUTHORITY_MOVEMENT_STATE sprint=" + authorityEnvironment.sprinting()
+            + " sneak=" + authorityEnvironment.sneaking()
+            + " ground=" + authorityEnvironment.onGround()
+            + " velocity=" + latestAuthority.context().serverVelocity()
+            + " position=" + latestAuthority.context().serverPosition()
+            + " authoritySeq=" + latestAuthority.sequence()
+            + " authorityServerTick=" + latestAuthority.serverTick()
+            + " authorityClientTick=" + latestAuthority.clientTick());
+      }
 
       Set<Candidate> predictedBefore = prediction;
       boolean predictionWasEmptyBeforeRoot = prediction.isEmpty();
@@ -797,6 +816,35 @@ public final class Phase8PredictionRunner {
 
       prediction = advance.candidates();
       predictionTick = targetTick;
+
+      Vec3 observedDelta = new Vec3(
+          observedAfter.position().x() - observedBefore.position().x(),
+          observedAfter.position().y() - observedBefore.position().y(),
+          observedAfter.position().z() - observedBefore.position().z());
+      trace.add("OBSERVATION_DELTA observed=" + observedDelta
+          + " priorPosition=" + observedBefore.position()
+          + " observedPosition=" + observedAfter.position());
+      Candidate closestPrediction = prediction.stream()
+          .min(Comparator.comparingDouble(candidate ->
+              positionDistanceSquared(candidate.context().player().position(),
+                  observedAfter.position())))
+          .orElse(null);
+      if (closestPrediction != null) {
+        Vec3 predictedDelta = new Vec3(
+            closestPrediction.context().player().position().x() - observedBefore.position().x(),
+            closestPrediction.context().player().position().y() - observedBefore.position().y(),
+            closestPrediction.context().player().position().z() - observedBefore.position().z());
+        MovementEnvironment closestEnvironment = closestPrediction.context().movementEnvironment();
+        trace.add("PREDICTION_COMPARE closestId=" + closestPrediction.id()
+            + " predictedDelta=" + predictedDelta
+            + " deltaError=" + new Vec3(
+                predictedDelta.x() - observedDelta.x(),
+                predictedDelta.y() - observedDelta.y(),
+                predictedDelta.z() - observedDelta.z())
+            + " physicalSprint=" + closestEnvironment.sprinting()
+            + " physicalSneak=" + closestEnvironment.sneaking()
+            + " candidateInput=" + closestPrediction.provenance().input());
+      }
 
       Optional<Candidate> inertialRecovery = Optional.empty();
       if (matchingCandidates(prediction, observedAfter, move).isEmpty()) {
@@ -1228,6 +1276,10 @@ public final class Phase8PredictionRunner {
           + " velocity=" + authority.velocity()
           + " clientInference=unavailable");
     }
+    MovementEnvironment authoritativeEnvironment = context.movementEnvironment();
+    trace.add("ROOT_MOVEMENT_STATE sprint=" + authoritativeEnvironment.sprinting()
+        + " sneak=" + authoritativeEnvironment.sneaking()
+        + " ground=" + authoritativeEnvironment.onGround());
     double verticalVelocity = authority.velocity().y();
     MovementEnvironment movementEnvironment = context.movementEnvironment();
     if (!authority.onGround()
@@ -2235,8 +2287,11 @@ public final class Phase8PredictionRunner {
             inputPossibilitiesForSimulationTick(inputHistory, simulationTick, movementSequence);
         Candidate beforeCandidate = local.stream().findFirst().orElse(null);
         if (beforeCandidate != null) {
+          MovementEnvironment frontierEnvironment = beforeCandidate.context().movementEnvironment();
           trace.add("SIM_INPUT_OPTIONS tick=" + simulationTick
-              + " inputs=" + inputOptions
+              + " keyOptions=" + inputOptions
+              + " physicalSprint=" + frontierEnvironment.sprinting()
+              + " physicalSneak=" + frontierEnvironment.sneaking()
               + " startPos=" + beforeCandidate.context().player().position()
               + " startVel=" + beforeCandidate.context().player().velocity()
               + " startGround=" + beforeCandidate.context().player().onGround());
@@ -2313,11 +2368,14 @@ public final class Phase8PredictionRunner {
         local = Set.copyOf(stepCandidates);
         Candidate afterCandidate = local.stream().findFirst().orElse(null);
         if (afterCandidate != null) {
+          MovementEnvironment resultEnvironment = afterCandidate.context().movementEnvironment();
           trace.add("SIM_STEP tick=" + simulationTick
               + " exhaustive=true"
               + " resultPos=" + afterCandidate.context().player().position()
               + " resultVel=" + afterCandidate.context().player().velocity()
-              + " resultGround=" + afterCandidate.context().player().onGround());
+              + " resultGround=" + afterCandidate.context().player().onGround()
+              + " resultPhysicalSprint=" + resultEnvironment.sprinting()
+              + " resultPhysicalSneak=" + resultEnvironment.sneaking());
         }
 
         if (local.size() > maximumCandidates) {
