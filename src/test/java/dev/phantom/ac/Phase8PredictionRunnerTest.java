@@ -453,7 +453,7 @@ class Phase8PredictionRunnerTest {
 
     List<RawPacket> packets = List.of(
         new RawPacket(1, 10, staleAuthority,
-            Packets.CaptureProvenance.fromAdapter("paper-live", staleAuthority, 100L, 0L)),
+            Packets.CaptureProvenance.fromAdapter("paper-live", staleAuthority, 0L, 2L)),
         new RawPacket(2, 20, new ClientTickEnd()),
         new RawPacket(3, 30, new ClientInput(
             true, false, false, false, true, false, true)),
