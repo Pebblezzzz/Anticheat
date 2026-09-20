@@ -1939,17 +1939,13 @@ public final class Phase8PredictionRunner {
         double frictionInfluencedSpeed = movementSpeed
             * Vanilla12111RichPhysics.FRICTION_SPEED_FACTOR
             / Math.pow(dev.phantom.ac.world.v12111.BlockCatalogue12111.slipperiness(support), 3.0);
-        inputAcceleration = inputMagnitude > 1.0
-            ? frictionInfluencedSpeed
-            : frictionInfluencedSpeed * Vanilla12111RichPhysics.INPUT_FRICTION;
+        inputAcceleration = frictionInfluencedSpeed;
       }
     } else {
       double offGroundSpeed = input.sprint()
           ? Vanilla12111RichPhysics.SPRINT_AIR_ACCEL
           : Vanilla12111RichPhysics.AIR_ACCEL;
-      inputAcceleration = inputMagnitude > 1.0
-          ? offGroundSpeed
-          : offGroundSpeed * Vanilla12111RichPhysics.INPUT_FRICTION;
+      inputAcceleration = offGroundSpeed;
     }
 
     double yaw = Math.toRadians(start.yaw());
