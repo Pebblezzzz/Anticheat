@@ -1016,6 +1016,44 @@ public final class Phase8PredictionRunner {
 
       if (!advance.exhaustive()) {
         uncertaintySources.addAll(advance.reasons());
+        prediction = advance.candidates();
+
+        /*
+         * Incomplete enumeration cannot prove an observation impossible, but it
+         * also does not invalidate a candidate that was explicitly simulated.
+         * A matching candidate is therefore a valid existential witness for
+         * POSSIBLE; only the negative conclusion requires an exhaustive search.
+         */
+        Set<Candidate> nonExhaustiveMatches =
+            matchingCandidates(prediction, observedAfter, move);
+        if (!nonExhaustiveMatches.isEmpty()) {
+          SearchResult witnessSearch = new SearchResult(
+              Verdict.POSSIBLE,
+              prediction,
+              advance.simulatedTicks(),
+              prediction.size(),
+              0, 0, 0, 0,
+              List.copyOf(advance.reasons()));
+          Phase8MovementValidation.Result result = validate(
+              playerId, packet, move, observedBefore, observedAfter, world,
+              tick, uncertaintySources, witnessSearch, false);
+          results.add(result);
+          if (result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE) {
+            possible++;
+            latestContinuation = Continuation.ACTIVE;
+            prediction = Set.copyOf(nonExhaustiveMatches);
+            predictionTick = targetTick;
+            lastPositionClientTick = targetTick;
+            trace.add("EVIDENCE POSSIBLE reason=NON_EXHAUSTIVE_MATCHING_WITNESS"
+                + " matchingCandidates=" + nonExhaustiveMatches.size());
+            trace.add("FRONTIER_COMMITTED matching=" + prediction.size());
+            frames.add(frame(
+                sequence, packet, tick, move, observedBefore, observedAfter,
+                predictedBefore, prediction, world, uncertaintySources, trace));
+            continue;
+          }
+        }
+
         latestContinuation = Continuation.UNCERTAIN;
         SearchResult search = uncertainSearch(
             prediction,
