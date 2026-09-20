@@ -2703,7 +2703,11 @@ public final class Phase8PredictionRunner {
 
     reasons.add("persistent prediction advanced across causally assigned held-input chronologies");
     if (!inputChronologyEnumerationExhaustive) {
-      reasons.add("causal input chronology combinations exceeded the bounded enumeration budget");
+      if (timingHistoryTruncated && !clientTickOriginKnown) {
+        reasons.add("absolute client-tick origin is not recoverable from the truncated timing history");
+      } else {
+        reasons.add("causal input chronology combinations exceeded the bounded enumeration budget");
+      }
     }
     return new AdvanceResult(
         Set.copyOf(union), exhaustive, simulatedTicks,
@@ -2931,6 +2935,15 @@ public final class Phase8PredictionRunner {
     }
 
     reconstructClientTickOrigin(normalized);
+    if (timingHistoryTruncated && !clientTickOriginKnown) {
+      /*
+       * Phase 7's bounded timing window has lost its absolute client-tick origin.
+       * The retained relative input chronology is still useful as evidence, but
+       * it is not an exhaustive absolute-tick model. Do not let explicit movement
+       * ticks promote that incomplete held-input history to IMPOSSIBLE.
+       */
+      inputChronologyEnumerationExhaustive = false;
+    }
 
     List<InputEventAlternatives> exactEvents = new ArrayList<>();
 
