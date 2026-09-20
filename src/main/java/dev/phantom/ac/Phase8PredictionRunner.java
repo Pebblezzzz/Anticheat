@@ -1864,7 +1864,10 @@ public final class Phase8PredictionRunner {
     trace.add("BOOTSTRAP_START simulationTick=" + simulationTick
         + " observedDelta=" + observedDelta
         + " reconstructedStartVelocity=" + startVelocity.orElseThrow()
-        + " authoritativeVelocity=" + authority.context().serverVelocity());
+        + " authoritativeVelocity=" + authority.context().serverVelocity()
+        + " input=" + advancedInput
+        + " inputSelection=" + inputSelectionDebug(
+            inputHistory, simulationTick, movementSequence));
     return Optional.of(candidate);
   }
 
