@@ -56,6 +56,38 @@ class Phase6ReachabilityTest {
   }
 
   @Test
+  void sprintKeyInputDoesNotMutatePhysicalMovementState() {
+    Phase6Reachability reachable = new Phase6Reachability();
+    MovementEnvironment movementState =
+        MovementEnvironment.dry(true, false, false);
+    Player start = new Player(
+        Vec3.ZERO, Vec3.ZERO, 0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Phase5Mechanics.Pose.STANDING,
+        State.Environment.DRY, State.TickRange.unknown(),
+        State.Provenance.UNKNOWN, Set.of());
+    Phase6Reachability.Context context = new Phase6Reachability.Context(
+        0L, start, Simulation.Environment.DRY, Simulation.Attributes.DEFAULT,
+        Phase5Mechanics.MovementEffects.NONE, Phase5Mechanics.Pose.STANDING,
+        movementState, false);
+
+    var result = reachable.search(
+        context,
+        List.of(Phase6Reachability.InputConstraint.exact(
+            new AdvancedInput(1, 0, false, true, false))),
+        ignored -> List.of(new Phase6Reachability.WorldBranch(
+            "ground", ground(), true, "known test ground")),
+        ignored -> List.of(new Phase6Reachability.None()),
+        Phase6Reachability.SearchConfig.defaults(16));
+
+    assertEquals(Phase6Reachability.Verdict.POSSIBLE, result.verdict());
+    assertFalse(result.candidates().isEmpty());
+    var candidate = result.candidates().iterator().next();
+    assertFalse(candidate.context().movementEnvironment().sprinting());
+    assertFalse(candidate.context().movementEnvironment().sneaking());
+  }
+
+  @Test
   void basicUnknownTickStillUsesLegacyEighteenStateEnvelope() {
     ReachableStates reachable = new ReachableStates(new Vanilla12111Physics());
     Reachability result = reachable.next(Player.initial(Vec3.ZERO), ground(), false);
