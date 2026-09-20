@@ -279,7 +279,9 @@ class GeometryTest {
     VoxelShape far = Shapes.BLOCK.toWorld(3, 0, 0);
     VoxelShape both = near.union(far);
     BlockBox player = BlockBox.of(0.5, 0, 0.5, 1.1, 1.8, 1.1);
-    assertEquals(-0.1, both.clip(Axis.X, player, 5.0), 1.0e-12);
+    // The near obstacle overlaps the starting box, so Grim's collision rule ignores
+    // that backward correction; the far obstacle is the first forward clip.
+    assertEquals(1.9, both.clip(Axis.X, player, 5.0), 1.0e-12);
     // A box that starts before both obstacles stops at the nearer one, 1 - 0.6.
     assertEquals(0.4, both.clip(Axis.X, BlockBox.of(0, 0, 0.5, 0.6, 1.8, 1.1), 5.0), 1.0e-12);
     // The far obstacle alone still stops the same box at 3 - 0.6.
