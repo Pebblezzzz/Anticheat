@@ -1214,6 +1214,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
     for(Phase8PredictionRunner.PredictionFrame frame:report.frames()){
       if(!e.replayReference().endsWith(":"+frame.sequence()))continue;
+      Set<String> emittedTraceLines=new LinkedHashSet<>();
       for(String line:frame.trace()){
         if(line.startsWith("CLIENT_TICK ")
             || line.startsWith("TICK_RELIABILITY ")
@@ -1227,6 +1228,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             || line.startsWith("FRONTIER_")
             || line.startsWith("EVIDENCE ")
             || line.startsWith("ROOT_")) {
+          if(!emittedTraceLines.add(line))continue;
           getLogger().info("[PhantomAC][PHASE8][FOCUS] player="+playerName
               +" seq="+frame.sequence()+" "+line);
         }
