@@ -114,12 +114,15 @@ class Phase8PredictionRunnerTest {
         List.of(
             new RawPacket(1, 10, authority),
             new RawPacket(2, 20, new ClientTickEnd()),
-            new RawPacket(3, 30, new ClientInput(
-                true, false, false, false, false, false, true)),
+            new RawPacket(3, 30, new ClientTickEnd()),
             new RawPacket(4, 40, new ClientTickEnd()),
-            new RawPacket(5, 50, new Move(first.position(), 0f, 0f, true, 2L)),
-            new RawPacket(6, 60, new ClientTickEnd()),
-            new RawPacket(7, 70, new Move(second.position(), 0f, 0f, true, 3L))),
+            new RawPacket(5, 50, new ClientTickEnd()),
+            new RawPacket(6, 60, new ClientInput(
+                true, false, false, false, false, false, true)),
+            new RawPacket(7, 70, new ClientTickEnd()),
+            new RawPacket(8, 80, new Move(first.position(), 0f, 0f, true, 6L)),
+            new RawPacket(9, 90, new ClientTickEnd()),
+            new RawPacket(10, 100, new Move(second.position(), 0f, 0f, true, 7L))),
         world, start, 0L);
 
     assertTrue(report.results().stream().allMatch(
