@@ -163,6 +163,13 @@ public final class Phase8PredictionRunner {
   private AuthorityAnchor latestAuthority;
   private Set<Candidate> prediction = Set.of();
   private long predictionTick = -1L;
+  /*
+   * An authoritative zero-delta witness proves the current observation but its
+   * server velocity is not a client-tick physics state. Keep the physics
+   * frontier suppressed until the next position-bearing movement can establish
+   * a verified client-boundary velocity.
+   */
+  private boolean physicsFrontierSuppressedUntilPositionMovement;
   private long relativeClientTick = 0L;
   private boolean hasClientTickBoundary;
   private long lastProcessedSequence = -1L;
@@ -233,6 +240,7 @@ public final class Phase8PredictionRunner {
     latestAuthority = null;
     prediction = Set.of();
     predictionTick = -1L;
+    physicsFrontierSuppressedUntilPositionMovement = false;
     relativeClientTick = 0L;
     hasClientTickBoundary = false;
     lastProcessedSequence = sequenceBoundary;
@@ -518,9 +526,16 @@ public final class Phase8PredictionRunner {
 
       Set<Candidate> predictedBefore = prediction;
       boolean predictionWasEmptyBeforeRoot = prediction.isEmpty();
+      boolean bootstrapRecoveryRequired =
+          physicsFrontierSuppressedUntilPositionMovement;
 
-      ensureRoot(playerId, packet, move, observedBefore, tick, trace);
-      refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, world, trace);
+      if (bootstrapRecoveryRequired) {
+        trace.add("FRONTIER_ROOT_SUPPRESSED reason=authoritative-observation-witness"
+            + " positionBearing=" + (move.position() != null));
+      } else {
+        ensureRoot(playerId, packet, move, observedBefore, tick, trace);
+        refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, world, trace);
+      }
 
       /*
        * Grim keeps a client-side movement velocity separate from the server's
@@ -537,6 +552,7 @@ public final class Phase8PredictionRunner {
         if (bootstrap.isPresent()) {
           prediction = Set.of(bootstrap.orElseThrow());
           predictionTick = tick.clientTick();
+          physicsFrontierSuppressedUntilPositionMovement = false;
           latestContinuation = Continuation.ACTIVE;
           lastPositionClientTick = tick.clientTick();
 
@@ -580,6 +596,58 @@ public final class Phase8PredictionRunner {
 
       if (move.position() == null || stationaryPositionObservation) {
         boolean positionlessRotationObservation = move.position() == null;
+
+        if (positionlessRotationObservation
+            && physicsFrontierSuppressedUntilPositionMovement) {
+          /*
+           * A look packet is an observation, not a physics tick. Do not recreate
+           * the suppressed authority root just to validate rotation. When a fresh
+           * causal authority matches the observed position/ground, use a temporary
+           * witness for this observation only; never retain it as the physics
+           * frontier.
+           */
+          AuthorityAnchor authority = freshCausalAuthority(packet);
+          SearchResult observationSearch;
+          boolean observationPossible = authority != null
+              && positionsMatch(authority.context().serverPosition(), observedAfter.position())
+              && authority.context().movementEnvironment().onGround() == observedAfter.onGround();
+          if (observationPossible) {
+            Candidate witness = authoritativeObservationWitness(
+                authority, observedAfter, tick.clientTick(), sequence);
+            observationSearch = new SearchResult(
+                Verdict.POSSIBLE,
+                Set.of(witness),
+                0,
+                1,
+                0, 0, 0, 0,
+                List.of("rotation-only observation matched fresh causal authority; no physics root retained"));
+          } else {
+            observationSearch = uncertainSearch(
+                prediction,
+                "look-only observation arrived while the physics frontier was intentionally suppressed");
+          }
+          Phase8MovementValidation.Result result = validate(
+              playerId, packet, move, observedBefore, observedAfter, world,
+              tick, List.of(), observationSearch, observationPossible,
+              EnumSet.of(Phase6Reachability.ObservedField.ROTATION));
+          results.add(result);
+          if (result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE) {
+            possible++;
+            latestContinuation = Continuation.ACTIVE;
+          } else if (result.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
+            impossible++;
+            latestContinuation = Continuation.IMPOSSIBLE;
+          } else {
+            uncertain++;
+            latestContinuation = Continuation.UNCERTAIN;
+          }
+          trace.add("FRONTIER_SUPPRESSED_LOOK_OBSERVATION result=" + result.verdict()
+              + " retained=" + !prediction.isEmpty());
+          frames.add(frame(
+              sequence, packet, tick, move, observedBefore, observedAfter,
+              predictedBefore, prediction, world, result.evidence().uncertaintySources(), trace));
+          continue;
+        }
         prediction = retargetRotation(prediction, move, maximumCandidates);
         Set<Candidate> rotated = prediction;
         boolean possibleObservation = !rotated.isEmpty();
@@ -700,6 +768,7 @@ public final class Phase8PredictionRunner {
            */
           prediction = Set.of();
           predictionTick = -1L;
+          physicsFrontierSuppressedUntilPositionMovement = true;
           trace.add("EVIDENCE POSSIBLE reason=AUTHORITATIVE_ZERO_DELTA_WITNESS"
               + " authoritySequence=" + freshAuthority.sequence()
               + " authorityServerTick=" + freshAuthority.serverTick());
