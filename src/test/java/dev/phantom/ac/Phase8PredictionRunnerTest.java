@@ -1371,7 +1371,9 @@ class Phase8PredictionRunnerTest {
 
     packets.add(new RawPacket(521, 521_000_000L,
         new ClientInput(true, false, false, false, false, false, false)));
-    packets.add(new RawPacket(522, 522_000_000L, new ClientTickEnd()));
+    packets.add(new RawPacket(522, 522_000_000L,
+        new Move(null, 0f, 0f, null, 100L)));
+    packets.add(new RawPacket(523, 523_000_000L, new ClientTickEnd()));
     packets.add(new RawPacket(524, 524_000_000L,
         new Move(
             new Maths.Vec3(firstPosition.x() + 0.1, firstPosition.y(), firstPosition.z()),
@@ -1393,5 +1395,91 @@ class Phase8PredictionRunnerTest {
         .anyMatch(line -> line.equals("INPUT_TICK_ORIGIN known=false offset=0")),
         report.frames().getLast().trace().toString());
   }
+
+
+  @Test
+  void truncatedTimingHistoryRecoversOriginDespiteUnrelatedOutOfOrderPacket() {
+    Phase7Timing.Config timing = new Phase7Timing.Config(
+        50_000_000L, 50_000_000L, 50_000_000L,
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        250_000_000L,
+        3,
+        128);
+
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
+    WorldSnapshot world = floorWorld();
+    Player start = anchor();
+    MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    List<RawPacket> packets = new ArrayList<>();
+    packets.add(new RawPacket(1L, 1_000_000L, new ClientTickEnd()));
+    packets.add(new RawPacket(2L, 2_000_000L,
+        new Move(start.position(), 0f, 0f, true, 1L)));
+
+    long sequence = 3L;
+    long baseNanos = 10_000_000L;
+    for (int i = 0; i < 510; i++) {
+      long received = baseNanos + i;
+      if (i == 250) received += 2_000L;
+      if (i == 251) received -= 2_000L;
+      packets.add(new RawPacket(sequence++, received, authority));
+    }
+
+    for (int i = 0; i < 10; i++) {
+      packets.add(new RawPacket(
+          sequence++, 30_000_000L + i * 50_000_000L, new ClientTickEnd()));
+    }
+
+    packets.add(new RawPacket(
+        sequence++, 470_000_000L,
+        new ClientInput(true, false, false, false, false, false, false)));
+
+    Player expectedState = start;
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    for (long simulationTick = 0L; simulationTick <= 10L; simulationTick++) {
+      Simulation.AdvancedInput stepInput = simulationTick >= 9L
+          ? new Simulation.AdvancedInput(1, 0, false, false, false)
+          : new Simulation.AdvancedInput(0, 0, false, false, false);
+      expectedState = physics.step(
+          new Vanilla12111RichPhysics.Context(
+              simulationTick,
+              expectedState,
+              stepInput,
+              world,
+              Simulation.Environment.DRY,
+              expectedState.attributes(),
+              Phase5Mechanics.MovementEffects.NONE,
+              Pose.STANDING,
+              environment,
+              false,
+              dev.phantom.ac.world.EntityCollisions.of(List.of())))
+          .state();
+    }
+
+    Move observed = new Move(expectedState.position(), 0f, 0f, true, 11L);
+    packets.add(new RawPacket(sequence, 521_000_000L, observed));
+
+    var report = runner.process(
+        "truncated-origin-out-of-order",
+        packets,
+        world,
+        start,
+        0L);
+
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("INPUT_TICK_ORIGIN known=true")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.results().getLast().verdict()
+            != Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        report.results().toString());
+  }
+
 
 }
