@@ -996,18 +996,22 @@ class Phase8PredictionRunnerTest {
             new RawPacket(3, 30L, firstMovement,
                 Packets.CaptureProvenance.fromAdapter(
                     "test-movement", firstMovement, 10L, 5L)),
-            new RawPacket(4, 40L, nextAuthority,
+            new RawPacket(4, 35L, new Move(
+                null, 15f, 20f, null, 5L),
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-look", new Move(null, 15f, 20f, null, 5L), 10L, 5L)),
+            new RawPacket(5, 40L, nextAuthority,
                 Packets.CaptureProvenance.fromAdapter(
                     "test-authority", nextAuthority, 11L, 6L)),
-            new RawPacket(5, 50L, secondMovement,
+            new RawPacket(6, 50L, secondMovement,
                 Packets.CaptureProvenance.fromAdapter(
                     "test-movement", secondMovement, 11L, 6L))),
         sequence -> sequence <= 3 ? emptyWorld : knownWorld,
         start,
         0L);
 
-    assertEquals(2, report.movementObservations(), report.toString());
-    assertEquals(2, report.results().size(), report.results().toString());
+    assertEquals(3, report.movementObservations(), report.toString());
+    assertEquals(3, report.results().size(), report.results().toString());
     assertTrue(report.results().stream().allMatch(
         result -> result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE),
         report.results().toString());
@@ -1017,6 +1021,10 @@ class Phase8PredictionRunnerTest {
             && line.contains("observation-witness-is-not-a-physics-root")),
         report.frames().getFirst().trace().toString());
 
+    assertTrue(report.frames().get(1).trace().stream()
+        .anyMatch(line -> line.contains("FRONTIER_ROOT_SUPPRESSED")
+            && line.contains("positionBearing=false")),
+        report.frames().get(1).trace().toString());
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.contains("CLIENT_MOVEMENT_BOOTSTRAP")
             && line.contains("reconstructedStartVelocityVerified=true")),
