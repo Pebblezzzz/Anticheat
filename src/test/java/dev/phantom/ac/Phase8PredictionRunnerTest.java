@@ -378,13 +378,13 @@ class Phase8PredictionRunnerTest {
 
     Move initialMove = new Move(new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 0L);
     Move blatantMove = new Move(new Maths.Vec3(.5, 64.0, 8.5), 0f, 0f, true, 1L);
+    double recoveryDisplacement = new Simulation.Attributes(0.1).value()
+        * Vanilla12111RichPhysics.FRICTION_SPEED_FACTOR
+        * Vanilla12111RichPhysics.INPUT_FRICTION;
     Move recoveredMove = new Move(
-        new Maths.Vec3(.5, 64.0, .5 + new Simulation.Attributes(0.1).value()
-            * Vanilla12111RichPhysics.FRICTION_SPEED_FACTOR
-            / Math.pow(0.6, 3.0)
-            * Vanilla12111RichPhysics.INPUT_FRICTION),
+        new Maths.Vec3(.5, 64.0, 8.5 + recoveryDisplacement),
         0f, 0f, true, 2L);
-    Move blatantAfterRecovery = new Move(new Maths.Vec3(.5, 64.0, 6.5), 0f, 0f, true, 3L);
+    Move blatantAfterRecovery = new Move(new Maths.Vec3(.5, 64.0, 14.5), 0f, 0f, true, 3L);
 
     PlayerContext freshAuthority = new PlayerContext(
         "survival", new Simulation.Attributes(0.1), Map.of(),
