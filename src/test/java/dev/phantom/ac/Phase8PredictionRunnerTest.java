@@ -965,14 +965,14 @@ class Phase8PredictionRunnerTest {
 
     PlayerContext witnessAuthority = new PlayerContext(
         "survival", Simulation.Attributes.DEFAULT, Map.of(),
-        MovementEnvironment.dry(false, false, false),
+        Pose.STANDING, MovementEnvironment.dry(false, false, false),
         new Maths.Vec3(.5, witnessY, .5),
         new Maths.Vec3(0.0, nonAtomicWitnessVelocity, 0.0),
         false, false, false, List.of());
 
     PlayerContext nextAuthority = new PlayerContext(
         "survival", Simulation.Attributes.DEFAULT, Map.of(),
-        MovementEnvironment.dry(false, false, false),
+        Pose.STANDING, MovementEnvironment.dry(false, false, false),
         new Maths.Vec3(.5, witnessY, .5),
         new Maths.Vec3(0.0, boundaryVelocity, 0.0),
         false, false, false, List.of());
