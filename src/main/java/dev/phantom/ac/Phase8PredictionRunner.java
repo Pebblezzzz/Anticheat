@@ -2770,9 +2770,9 @@ public final class Phase8PredictionRunner {
     }
 
     /*
-     * If a later packet-order input update may already have taken effect, but
-     * Phase 7 could not tell us its exact client tick, neutral input would be
-     * an unsafe narrowing. Enumerate the complete finite input envelope instead.
+     * A later input update whose exact tick is not recoverable can already have
+     * replaced the selected held state. Keep that interval unconstrained rather
+     * than silently asserting the previous or neutral input.
      */
     for (UncertainInput input : uncertainInputs) {
       if (input.sequence() > movementSequence) continue;
@@ -2782,7 +2782,12 @@ public final class Phase8PredictionRunner {
       }
     }
 
-    return selected == null ? neutralInput : selected.constraint();
+    // A ClientInput evicted from the bounded timing history remains held until
+    // another input update replaces it. This is the carry-in state of the
+    // retained chronology and is more precise than resetting to neutral input.
+    return selected == null
+        ? (carryInInput == null ? neutralInput : carryInInput)
+        : selected.constraint();
   }
 
   private static boolean exhaustivelyEnumeratedInputEnvelope(
