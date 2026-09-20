@@ -404,7 +404,7 @@ class Phase8PredictionRunnerTest {
         packets,
         floorWorld(), anchor(), 0L);
 
-    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertEquals(1, report.movementObservations(), report.results().toString());
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getLast().verdict(), report.results().toString());
     assertTrue(report.frames().stream()
@@ -458,12 +458,10 @@ class Phase8PredictionRunnerTest {
         new RawPacket(3, 30, new ClientInput(
             true, false, false, false, true, false, true)),
         new RawPacket(4, 40, new ClientTickEnd()),
-        // Establish the authoritative root at tick 1, then deliver the actual
-        // position movement in the same tick. The bootstrap must replace the
-        // stale server velocity before the movement is simulated.
+        // Establish the authoritative root and deliver the actual position
+        // movement in the same observed tick. Bootstrap must replace the stale
+        // server velocity before physics is used for the recovered frontier.
         new RawPacket(5, 50, new Move(
-            null, observedJump.yaw(), observedJump.pitch(), true, 2L)),
-        new RawPacket(6, 60, new Move(
             observedJump.position(), observedJump.yaw(), observedJump.pitch(),
             observedJump.onGround(), 2L)));
 
