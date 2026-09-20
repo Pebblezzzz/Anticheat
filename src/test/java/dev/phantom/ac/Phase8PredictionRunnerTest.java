@@ -507,11 +507,12 @@ class Phase8PredictionRunnerTest {
     double jumpX = .5
         - new Simulation.Attributes(0.1).value()
             * Vanilla12111RichPhysics.FRICTION_SPEED_FACTOR
-            / Math.pow(0.6, 3.0);
+            / Math.pow(0.6, 3.0)
+            * Vanilla12111RichPhysics.INPUT_FRICTION;
     double rootHorizontalX =
         (jumpX - .5) * (0.6 * Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION);
     double sprintAirAcceleration =
-        -Vanilla12111RichPhysics.SPRINT_AIR_ACCEL;
+        -Vanilla12111RichPhysics.SPRINT_AIR_ACCEL * Vanilla12111RichPhysics.INPUT_FRICTION;
     double authorityX = jumpX + 0.05;
     double observedX = authorityX + rootHorizontalX + sprintAirAcceleration;
     double authorityY = 64.41999998688698;
@@ -717,7 +718,8 @@ class Phase8PredictionRunnerTest {
     double positionDelta = sprint.state().position().z() - noSprint.state().position().z();
     double movementSpeed = state.attributes().value();
     double expectedPositionDelta = Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST
-        + movementSpeed * (Vanilla12111RichPhysics.SPRINTING_SPEED_MULTIPLIER - 1.0);
+        + movementSpeed * (Vanilla12111RichPhysics.SPRINTING_SPEED_MULTIPLIER - 1.0)
+            * Vanilla12111RichPhysics.INPUT_FRICTION;
     double velocityDelta = sprint.state().velocity().z() - noSprint.state().velocity().z();
     assertEquals(
         expectedPositionDelta * Vanilla12111RichPhysics.GROUND_FRICTION,
