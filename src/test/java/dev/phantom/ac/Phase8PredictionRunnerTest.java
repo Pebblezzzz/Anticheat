@@ -378,9 +378,7 @@ class Phase8PredictionRunnerTest {
 
     Move initialMove = new Move(new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 0L);
     Move blatantMove = new Move(new Maths.Vec3(.5, 64.0, 8.5), 0f, 0f, true, 1L);
-    double recoveryDisplacement = new Simulation.Attributes(0.1).value()
-        * Vanilla12111RichPhysics.FRICTION_SPEED_FACTOR
-        * Vanilla12111RichPhysics.INPUT_FRICTION;
+    double recoveryDisplacement = 0.05;
     Move recoveredMove = new Move(
         new Maths.Vec3(.5, 64.0, 8.5 + recoveryDisplacement),
         0f, 0f, true, 2L);
@@ -389,7 +387,7 @@ class Phase8PredictionRunnerTest {
     PlayerContext freshAuthority = new PlayerContext(
         "survival", new Simulation.Attributes(0.1), Map.of(),
         Pose.STANDING, MovementEnvironment.dry(true, false, false),
-        blatantMove.position(), Maths.Vec3.ZERO,
+        new Maths.Vec3(0.5, 64.0, 8.5), new Maths.Vec3(0.0, 0.0, 0.05),
         false, false, false, List.of());
 
     List<RawPacket> packets = List.of(
@@ -419,6 +417,10 @@ class Phase8PredictionRunnerTest {
         report.results().get(1).verdict(), report.results().toString());
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().get(2).verdict(), report.results().toString());
+    assertTrue(report.frames().get(2).predictedAfter().stream()
+        .anyMatch(candidate -> Math.abs(
+            candidate.context().player().position().z() - (8.5 + recoveryDisplacement)) < 1.0E-9),
+        report.frames().get(2).toString());
     assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE,
         report.results().get(3).verdict(), report.results().toString());
     assertTrue(report.frames().stream()
