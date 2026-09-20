@@ -109,7 +109,7 @@ public final class Phase8PredictionRunner {
   private static final long MAX_INCREMENTAL_HORIZON = Phase6Reachability.MAX_HORIZON_TICKS;
   private static final long PREDICTION_RESYNC_LAG_TICKS = 2L;
   private static final long FRESH_LOCAL_AUTHORITY_MAX_SERVER_TICK_AGE = 1L;
-  private static final double LOCAL_AUTHORITY_DRIFT_THRESHOLD = 2.0;
+  private static final double LOCAL_AUTHORITY_DRIFT_THRESHOLD = 0.125;
   private static final double OBSERVED_AUTHORITY_ALIGNMENT_THRESHOLD = 3.0;
   private static final int MAX_TIMING_HISTORY_EVENTS = 512;
 
@@ -1022,6 +1022,7 @@ public final class Phase8PredictionRunner {
      * to the observed client state. A frontier that is merely a little different
      * must not be silently replaced by server authority.
      */
+    if (latestContinuation != Continuation.IMPOSSIBLE) return false;
     if (move.clientTick() == null
         || !movementPacket.provenance().sourceId().startsWith("paper-client-tick")) {
       return false;
