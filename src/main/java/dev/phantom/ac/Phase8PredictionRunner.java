@@ -530,8 +530,7 @@ public final class Phase8PredictionRunner {
           phase7TimingHasUnmodeledChronology(movementTiming);
       boolean explicitTimingFullyRepresented =
           explicitTimingRangeExhaustive
-              && !phase7ChronologyUnmodeled
-              && !timingHistoryTruncated;
+              && !phase7ChronologyUnmodeled;
 
       if (move.clientTick() != null && movementTiming != null) {
         trace.add("TIMING_GATE explicitRangeExhaustive=" + explicitTimingRangeExhaustive
@@ -859,9 +858,7 @@ public final class Phase8PredictionRunner {
       Packets.Move move,
       Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
     Phase7Timing.EventTiming timing = phase7TimingBySequence.get(packet.sequence());
-    boolean timingUncertain =
-        (timing != null && timing.uncertain())
-            || timingHistoryTruncated;
+    boolean timingUncertain = timing != null && timing.uncertain();
 
     /*
      * The captured client tick is the strongest simulation-clock fact available
@@ -878,6 +875,11 @@ public final class Phase8PredictionRunner {
       String reason = timingUncertain
           ? "Phase 7 timing envelope retains chronology uncertainty for an explicitly captured client tick"
           : "explicit client tick captured from the protocol movement chronology";
+      /*
+       * An explicitly captured client tick is self-contained timing evidence for
+       * this movement. Older timing packets may have been evicted from the bounded
+       * history without making this packet's own simulation tick ambiguous.
+       */
       return new TickResolution(
           tick, true, true, timingUncertain, source, reason);
     }
