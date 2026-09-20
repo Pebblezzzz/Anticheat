@@ -105,6 +105,14 @@ public final class Phase8PredictionRunner {
       long clientTick,
       InputConstraint constraint) {}
 
+  /*
+   * A ClientInput whose Phase 7 input-tick envelope could not be exhaustively
+   * materialized is still a real held-state transition. Keeping its sequence
+   * and earliest possible tick lets Phase 8 enumerate the safe finite input
+   * envelope instead of silently replacing that state with neutral input.
+   */
+  private record UncertainInput(long sequence, long earliestClientTick) {}
+
   private record MovementInputState(boolean sprinting, boolean sneaking) {}
 
   private static final double POSITION_TOLERANCE = Phase6Reachability.POSITION_MATCH_TOLERANCE;
@@ -118,6 +126,7 @@ public final class Phase8PredictionRunner {
   private long timingEpochNanos = -1L;
   private boolean timingHistoryTruncated;
   private final InputConstraint neutralInput;
+  private final List<UncertainInput> uncertainInputs = new ArrayList<>();
 
   private Player initialAnchor;
   private long initialAnchorReceivedNanos = -1L;
@@ -187,6 +196,7 @@ public final class Phase8PredictionRunner {
     clientState = authoritativeAnchor;
     currentInput = neutralInput;
     inputHistory.clear();
+    uncertainInputs.clear();
     timingHistory.clear();
     timingEpochNanos = -1L;
     timingHistoryTruncated = false;
@@ -2341,7 +2351,9 @@ public final class Phase8PredictionRunner {
               + " candidates=" + branch.candidates().size());
           stepCandidates.addAll(branch.candidates());
           stepReasons.addAll(branch.reasons());
-          if (!branch.exhaustive()) stepExhaustive = false;
+          boolean branchExhaustive = branch.exhaustive()
+              || exhaustivelyEnumeratedInputEnvelope(branch, inputOption);
+          if (!branchExhaustive) stepExhaustive = false;
           }
         }
 
@@ -2591,9 +2603,19 @@ public final class Phase8PredictionRunner {
       }
 
       Phase7Timing.EventTiming timing = phase7TimingBySequence.get(packet.sequence());
-      if (timing == null || !Phase7Timing.inputTickEnumerationComplete(timing)) {
-        // Do not manufacture a precise input tick when Phase 7 could not
-        // exhaustively enumerate the input chronology.
+      if (timing == null) {
+        // Phase 7 did not produce a timing frame. Preserve the held-state update
+        // as an unresolved causal input rather than silently dropping it.
+        uncertainInputs.add(new UncertainInput(packet.sequence(), 0L));
+        continue;
+      }
+
+      if (!Phase7Timing.inputTickEnumerationComplete(timing)) {
+        long earliestClientTick = timing.inputClientTickEnvelope().known()
+            ? Math.max(0L, timing.inputClientTicks().min())
+            : 0L;
+        uncertainInputs.add(new UncertainInput(
+            packet.sequence(), earliestClientTick));
         continue;
       }
 
@@ -2613,16 +2635,59 @@ public final class Phase8PredictionRunner {
       NavigableMap<Long, List<TimedInput>> history,
       long simulationTick,
       long movementSequence) {
-    if (history.isEmpty() || simulationTick < 0L) return neutralInput;
-    for (var entry : history.headMap(simulationTick, true).descendingMap().entrySet()) {
-      TimedInput selected = null;
-      for (TimedInput input : entry.getValue()) {
-        if (input.sequence() > movementSequence) break;
-        selected = input;
+    if (simulationTick < 0L) return neutralInput;
+
+    TimedInput selected = null;
+    if (!history.isEmpty()) {
+      for (var entry : history.headMap(simulationTick, true).descendingMap().entrySet()) {
+        for (TimedInput input : entry.getValue()) {
+          if (input.sequence() > movementSequence) break;
+          selected = input;
+        }
+        if (selected != null) break;
       }
-      if (selected != null) return selected.constraint();
     }
-    return neutralInput;
+
+    /*
+     * If a later packet-order input update may already have taken effect, but
+     * Phase 7 could not tell us its exact client tick, neutral input would be
+     * an unsafe narrowing. Enumerate the complete finite input envelope instead.
+     */
+    for (UncertainInput input : uncertainInputs) {
+      if (input.sequence() > movementSequence) continue;
+      if (simulationTick < input.earliestClientTick()) continue;
+      if (selected == null || input.sequence() > selected.sequence()) {
+        return InputConstraint.any();
+      }
+    }
+
+    return selected == null ? neutralInput : selected.constraint();
+  }
+
+  private static boolean exhaustivelyEnumeratedInputEnvelope(
+      SearchResult result,
+      InputConstraint input) {
+    if (result.verdict() != Verdict.UNCERTAIN
+        || result.metrics().budgetReached()
+        || result.nonExhaustiveWorldBranches() != 0
+        || result.uncertainTransitions() != 0
+        || result.candidates().isEmpty()
+        || input.enumerate().isEmpty()) {
+      return false;
+    }
+    if (result.reasons().stream().anyMatch(reason ->
+        reason.contains("maximum ")
+            || reason.contains("world hypothesis")
+            || reason.contains("world ")
+            || reason.contains("Phase 5")
+            || reason.contains("physics")
+            || reason.contains("initial state carries explicit uncertainty")
+            || reason.contains("no deterministic candidate survived"))) {
+      return false;
+    }
+    return result.candidates().stream()
+        .allMatch(candidate -> candidate.context().uncertainty().stream()
+            .allMatch(dimension -> dimension == UncertainDimension.INPUT));
   }
 
   private InputConstraint inputForSimulationTick(
