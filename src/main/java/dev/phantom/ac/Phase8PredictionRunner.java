@@ -1210,6 +1210,12 @@ public final class Phase8PredictionRunner {
       Packets.PlayerContext authority,
       long targetTick,
       WorldSnapshot world) {
+    if (latestContinuation == Continuation.IMPOSSIBLE) {
+      // A contradicted movement may be arbitrarily far from the real trajectory.
+      // Never recycle that observation into a horizontal velocity used by a later
+      // authoritative resynchronization root.
+      return Optional.empty();
+    }
     if (world == null
         || targetTick < 2L
         || previousObservedMovementPosition == null
