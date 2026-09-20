@@ -1321,7 +1321,7 @@ class Phase8PredictionRunnerTest {
         report.frames().toString());
     assertTrue(report.frames().stream()
         .flatMap(frame -> frame.trace().stream())
-        .anyMatch(line -> line.contains("SIM_INPUT_OPTIONS tick=41")
+        .anyMatch(line -> line.contains("inputSelection=selectedSeq=521,selectedTick=41")
             && line.contains("jump=Optional[false]")),
         report.frames().toString());
   }
