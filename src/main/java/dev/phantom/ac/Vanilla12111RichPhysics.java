@@ -36,7 +36,7 @@ public final class Vanilla12111RichPhysics {
             CLIMB_MAX_UP=0.15,
             GLIDE_GRAVITY=0.035,
             GROUND_PROBE=1.0E-4;
-    static final double WATER_DRAG=0.8f,
+    public static final double WATER_DRAG=0.8f,
             WATER_SPRINT_DRAG=0.9f,
             LAVA_DRAG=0.5f;
 
