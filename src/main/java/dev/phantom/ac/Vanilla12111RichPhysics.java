@@ -25,6 +25,7 @@ public final class Vanilla12111RichPhysics {
             WALK_ACCEL=0.98f,
             JUMP=0.42f,
             STEP_HEIGHT=0.6,
+            INPUT_FRICTION=0.98f,
             FRICTION_SPEED_FACTOR=0.21600002f,
             SPRINT_JUMP_HORIZONTAL_BOOST=0.2,
             SPRINTING_SPEED_MULTIPLIER=1.3,
@@ -71,7 +72,7 @@ public final class Vanilla12111RichPhysics {
         double inputScale=inputMagnitude>1.0?1.0/Math.sqrt(2.0):1.0;
         double inputAcceleration;
         if(fluid){
-            inputAcceleration=AIR_ACCEL;
+            inputAcceleration=inputMagnitude>1.0?AIR_ACCEL:AIR_ACCEL*INPUT_FRICTION;
         }else if(gliding||climbing){
             inputAcceleration=AIR_ACCEL;
         }else if(s.onGround()){
@@ -96,11 +97,15 @@ public final class Vanilla12111RichPhysics {
                 if(context.input().sneak())movementSpeed*=SNEAKING_SPEED_MULTIPLIER;
                 double frictionInfluencedSpeed=movementSpeed*FRICTION_SPEED_FACTOR
                         /(slipperiness*slipperiness*slipperiness);
-                inputAcceleration=frictionInfluencedSpeed;
+                inputAcceleration=inputMagnitude>1.0
+                        ?frictionInfluencedSpeed
+                        :frictionInfluencedSpeed*INPUT_FRICTION;
             }
         }else{
             double offGroundSpeed=context.input().sprint()?SPRINT_AIR_ACCEL:AIR_ACCEL;
-            inputAcceleration=offGroundSpeed;
+            inputAcceleration=inputMagnitude>1.0
+                    ?offGroundSpeed
+                    :offGroundSpeed*INPUT_FRICTION;
         }if(gliding)inputAcceleration=AIR_ACCEL;
         // AdvancedInput keeps the project wire/trace convention: strafe +1 is right, -1 is left.
         // Vanilla's movement vector uses the opposite mathematical sideways sign.
