@@ -269,14 +269,6 @@ public final class Phase8PredictionRunner {
     Phase7Timing.Reconstruction phase7Reconstruction = reconstructPhase7Timing();
     Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence =
         phase7Reconstruction.bySequence();
-    /*
-     * Chronology uncertainty must be associated with the affected capture
-     * sequence, not broadcast from unrelated timing events in the same batch.
-     * Phase 7's per-event timing flag remains authoritative below; this batch
-     * flag only covers a concrete Phase 1 sequence gap.
-     */
-    boolean phase7ChronologyUncertain = captureSequenceGap(packets);
-
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     List<PredictionFrame> frames = new ArrayList<>();
     int movementObservations = 0;
@@ -432,7 +424,7 @@ public final class Phase8PredictionRunner {
           + " clientStatePosition=" + observedAfter.position());
 
       TickResolution tick = resolveMovementTick(
-          packet, move, phase7TimingBySequence, phase7ChronologyUncertain);
+          packet, move, phase7TimingBySequence);
       trace.add("CLIENT_TICK " + tick.display()
           + " exact=" + tick.exact()
           + " source=" + tick.source());
@@ -747,24 +739,13 @@ public final class Phase8PredictionRunner {
     }
   }
 
-  private static boolean captureSequenceGap(List<Packets.RawPacket> packets) {
-    long previous = -1L;
-    for (Packets.RawPacket packet : packets) {
-      if (previous >= 0L && packet.sequence() > previous + 1L) return true;
-      previous = packet.sequence();
-    }
-    return false;
-  }
-
   private TickResolution resolveMovementTick(
       Packets.RawPacket packet,
       Packets.Move move,
-      Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence,
-      boolean phase7ChronologyUncertain) {
+      Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
     Phase7Timing.EventTiming timing = phase7TimingBySequence.get(packet.sequence());
     boolean timingUncertain =
         (timing != null && timing.uncertain())
-            || phase7ChronologyUncertain
             || timingHistoryTruncated;
 
     /*
