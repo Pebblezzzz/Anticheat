@@ -11,13 +11,13 @@ class ClientInputDirectionTest {
   void rightInputMapsToPositiveStrafe() {
     var constraint = Phase6Reachability.InputConstraint.fromClientInput(
         new ClientInput(false, false, false, true, false, false, false));
-    assertEquals(-1, constraint.strafe().orElseThrow());
+    assertEquals(1, constraint.strafe().orElseThrow());
   }
 
   @Test
   void leftInputMapsToNegativeStrafe() {
     var constraint = Phase6Reachability.InputConstraint.fromClientInput(
         new ClientInput(false, false, true, false, false, false, false));
-    assertEquals(1, constraint.strafe().orElseThrow());
+    assertEquals(-1, constraint.strafe().orElseThrow());
   }
 }
