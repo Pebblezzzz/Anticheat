@@ -695,7 +695,21 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       capture.maxY=player.getWorld().getMaxHeight();
 
       AttributeInstance movement=player.getAttribute(Attribute.MOVEMENT_SPEED);
-      double movementSpeed=movement==null?0.1:movement.getValue();
+      double rawMovementSpeed=movement==null?0.1:movement.getValue();
+      boolean sprint=player.isSprinting(),sneak=player.isSneaking();
+      /*
+       * Paper's effective attribute value already includes vanilla's sprint
+       * movement-speed modifier while the player is sprinting. Phantom's
+       * canonical physics applies sprinting as a separate 1.3 multiplier, so
+       * feeding the sprint-adjusted Bukkit value into that model double-counts
+       * sprint and produces a systematic horizontal overshoot.
+       *
+       * Normalize back to the pre-sprint effective value while preserving other
+       * attribute modifiers. Sprint remains a separate physical movement state.
+       */
+      double movementSpeed = sprint
+          ? rawMovementSpeed / dev.phantom.ac.Vanilla12111RichPhysics.SPRINTING_SPEED_MULTIPLIER
+          : rawMovementSpeed;
       Map<String,Integer> effects=new LinkedHashMap<>();
       for(PotionEffect effect:player.getActivePotionEffects())
         if(effect.getType().getKey()!=null)
@@ -721,7 +735,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         if(material==Material.LADDER||material==Material.VINE||material==Material.SCAFFOLDING)climb=true;
       }
 
-      boolean sprint=player.isSprinting(),sneak=player.isSneaking();
+      if (debugLevel(capture.playerId).trace() && Math.abs(rawMovementSpeed - movementSpeed) > 1.0E-9) {
+        getLogger().info("[PhantomAC][AUTHORITY_SPEED] player="+capture.playerName
+            +" rawEffective="+rawMovementSpeed
+            +" normalizedPreSprint="+movementSpeed
+            +" sprint="+sprint
+            +" multiplier="+dev.phantom.ac.Vanilla12111RichPhysics.SPRINTING_SPEED_MULTIPLIER);
+      }
+
       Phase5Mechanics.MovementEnvironment env=
           water?Phase5Mechanics.MovementEnvironment.vanillaWater(player.isOnGround(),sprint,sneak,player.isSwimming()):
           lava?Phase5Mechanics.MovementEnvironment.vanillaLava(player.isOnGround(),sprint,sneak):
