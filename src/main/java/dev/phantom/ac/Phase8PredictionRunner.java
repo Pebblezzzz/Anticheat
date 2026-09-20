@@ -2664,7 +2664,7 @@ public final class Phase8PredictionRunner {
       }
 
       InputConstraint constraint = InputConstraint.fromClientInput(input);
-      if (!Phase7Timing.inputTickEnumerationComplete(timing)) {
+      if (!Phase7Timing.simulationTickEnumerationComplete(timing)) {
         long earliestClientTick = timing.inputClientTickEnvelope().known()
             ? Math.max(0L, timing.inputClientTicks().min())
             : 0L;
@@ -2673,7 +2673,13 @@ public final class Phase8PredictionRunner {
         continue;
       }
 
-      List<Long> candidates = Phase7Timing.possibleInputTicks(timing);
+      /*
+       * For a held ClientInput state, the relevant timestamp for movement
+       * prediction is the simulation tick on which that state can begin taking
+       * effect. Phase 7 derives this separately from packet-generation time via
+       * the configured input-to-simulation delay.
+       */
+      List<Long> candidates = Phase7Timing.possibleSimulationTicks(timing);
       if (candidates.isEmpty()) {
         uncertainInputs.add(new UncertainInput(packet.sequence(), 0L));
         continue;
