@@ -188,8 +188,6 @@ public final class RichWorldCollision {
         case Y -> { y=axisResult.y(); current=current.move(0,y,0); }
         case Z -> { z=axisResult.z(); current=current.move(0,0,z); }
       }
-      if(axis==Axis.X&&axisResult.collidedX())
-        collidedX=true;
     }
     return new AxisResult(
         x,y,z,
