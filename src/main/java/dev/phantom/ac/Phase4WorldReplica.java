@@ -576,8 +576,25 @@ public final class Phase4WorldReplica implements Serializable {
    * materializes every block into a Java Map.
    */
   public synchronized WorldSnapshot snapshotAround(double centerX,double centerZ,int radiusChunks){
+    return snapshotAroundSource(getWorldState(),centerX,centerZ,radiusChunks,Long.MAX_VALUE);
+  }
+
+  /**
+   * Returns a causally bounded view for one captured packet sequence while masking
+   * only still-pending world mutations that could have reached the client by that
+   * sequence. This is the live-validation entry point.
+   */
+  public synchronized WorldSnapshot snapshotAroundAtOrBefore(
+      double centerX,double centerZ,int radiusChunks,long sequence){
+    if(sequence<0)throw new IllegalArgumentException("sequence must be non-negative");
+    WorldSnapshot source=snapshotAtOrBefore(sequence);
+    if(source==null) return null;
+    return snapshotAroundSource(source,centerX,centerZ,radiusChunks,sequence);
+  }
+
+  private WorldSnapshot snapshotAroundSource(
+      WorldSnapshot source,double centerX,double centerZ,int radiusChunks,long sequence){
     if(radiusChunks<0)throw new IllegalArgumentException("radiusChunks must be non-negative");
-    WorldSnapshot source=getWorldState();
     int cx=Math.floorDiv((int)Math.floor(centerX),16);
     int cz=Math.floorDiv((int)Math.floor(centerZ),16);
 
@@ -589,10 +606,9 @@ public final class Phase4WorldReplica implements Serializable {
     /*
      * A sent clientbound world mutation is not yet guaranteed to have been
      * processed by the client until its transaction barrier is acknowledged.
-     * Keep the last acknowledged world as the deterministic baseline, but mask
-     * only the cells/sections/chunks touched by pending mutations as UNKNOWN.
-     * This prevents a movement that legitimately used a newly received block
-     * update from being declared IMPOSSIBLE against the older acknowledged state.
+     * Keep the last causally visible world as the deterministic baseline, but
+     * mask only pending mutations whose packet sequence is not later than the
+     * queried movement. Later packets cannot affect that movement.
      */
     Set<Chunk> pendingWholeChunks=new HashSet<>();
     Set<PendingSection> pendingSections=new HashSet<>();
@@ -600,6 +616,7 @@ public final class Phase4WorldReplica implements Serializable {
     boolean pendingDimensionChange=false;
     for(List<Event> batch:pending.values()){
       for(Event event:batch){
+        if(event.order().sequence()>sequence)continue;
         if(event instanceof DimensionChange){
           pendingDimensionChange=true;
         }else if(event instanceof ChunkLoad load){
@@ -618,7 +635,7 @@ public final class Phase4WorldReplica implements Serializable {
         }else if(event instanceof ChunkSections sections){
           for(Integer sectionIndex:sections.sections().keySet()){
             pendingSections.add(new PendingSection(
-                sections.chunk(), sourceSectionY(source, sectionIndex)));
+                sections.chunk(), sourceSectionY(source,sectionIndex)));
           }
         }else if(event instanceof BlockChange change){
           pendingBlocks.add(change.position());
@@ -638,12 +655,15 @@ public final class Phase4WorldReplica implements Serializable {
       @Override public int minY(){return source.minY();}
       @Override public int maxY(){return source.maxY();}
       @Override public Set<Chunk> loadedChunks(){return Set.copyOf(selected);}
-      @Override public long causalSequence(){return source.causalSequence();}
+      @Override public long causalSequence(){
+        return source.causalSequence()<0L ? source.causalSequence()
+            : Math.min(source.causalSequence(),sequence);
+      }
       @Override public Set<Chunk> unknownChunks(){
         Set<Chunk> unknown=new HashSet<>();
         for(Chunk chunk:selected){
           Coverage coverage=source.coverageAt(chunk.x()*16,source.minY(),chunk.z()*16);
-          if(coverage==Coverage.UNKNOWN)unknown.add(chunk);
+          if(coverage==Coverage.UNKNOWN||maskedChunks.contains(chunk))unknown.add(chunk);
         }
         return Set.copyOf(unknown);
       }
