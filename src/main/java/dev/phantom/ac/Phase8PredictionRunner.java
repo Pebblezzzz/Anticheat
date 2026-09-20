@@ -2622,15 +2622,32 @@ public final class Phase8PredictionRunner {
         ? List.of(new InputChronology(new TreeMap<>()))
         : inputChronologies;
 
-    InputChronology boundaryWitness = currentInputBoundaryWitness(
+    List<InputChronology> boundaryWitnesses = currentInputBoundaryWitnesses(
         chronologies, targetTick, movementSequence, allowCurrentInputBoundaryWitness);
-    if (boundaryWitness != null && chronologies.size() < maximumInputChronologies()) {
+    if (!boundaryWitnesses.isEmpty()) {
       List<InputChronology> expanded = new ArrayList<>(chronologies);
-      expanded.add(boundaryWitness);
+      for (InputChronology boundaryWitness : boundaryWitnesses) {
+        if (expanded.size() >= maximumInputChronologies()) break;
+        expanded.add(boundaryWitness);
+      }
+      if (expanded.size() < chronologies.size() + boundaryWitnesses.size()) {
+        exhaustive = false;
+        reasons.add(
+            "latest-input boundary witness enumeration exceeded the bounded chronology budget; remaining legitimate input combinations were not exhaustively modeled");
+        trace.add("INPUT_BOUNDARY_WITNESS_BUDGET omitted="
+            + (chronologies.size() + boundaryWitnesses.size() - expanded.size())
+            + " available=" + Math.max(0, maximumInputChronologies() - chronologies.size()));
+      }
+      int added = expanded.size() - chronologies.size();
+      if (added > 0) {
+        trace.add("INPUT_BOUNDARY_WITNESS targetSimulationTick="
+            + Math.max(0L, targetTick - 1L)
+            + " inputSequence=" + lastClientInputSequence
+            + " input=" + currentInput
+            + " branchesAdded=" + added
+            + " branchesRequired=" + boundaryWitnesses.size());
+      }
       chronologies = List.copyOf(expanded);
-      trace.add("INPUT_BOUNDARY_WITNESS targetSimulationTick=" + Math.max(0L, targetTick - 1L)
-          + " inputSequence=" + lastClientInputSequence
-          + " input=" + currentInput);
     }
 
     for (InputChronology chronology : chronologies) {
@@ -2777,27 +2794,31 @@ public final class Phase8PredictionRunner {
         List.copyOf(reasons), List.copyOf(trace));
   }
 
-  private InputChronology currentInputBoundaryWitness(
+  private List<InputChronology> currentInputBoundaryWitnesses(
       List<InputChronology> chronologies,
       long targetTick,
       long movementSequence,
       boolean allowed) {
     if (!allowed || targetTick <= 0L || lastClientInputSequence < 0L
         || lastClientInputSequence > movementSequence || currentInput == null) {
-      return null;
+      return List.of();
     }
 
     long simulationTick = targetTick - 1L;
+    LinkedHashSet<InputChronology> witnesses = new LinkedHashSet<>();
     for (InputChronology chronology : chronologies) {
       InputConstraint selected = inputForSimulationTickExact(
           chronology.history(), simulationTick, movementSequence);
       if (selected.equals(currentInput)) continue;
-      NavigableMap<Long, List<TimedInput>> branch = copyInputHistory(chronology.history());
+
+      NavigableMap<Long, List<TimedInput>> branch =
+          copyInputHistory(chronology.history());
       branch.computeIfAbsent(simulationTick, ignored -> new ArrayList<>())
-          .add(new TimedInput(lastClientInputSequence, simulationTick, currentInput));
-      return new InputChronology(branch);
+          .add(new TimedInput(
+              lastClientInputSequence, simulationTick, currentInput));
+      witnesses.add(new InputChronology(branch));
     }
-    return null;
+    return List.copyOf(witnesses);
   }
 
   private String inputSelectionDebug(
