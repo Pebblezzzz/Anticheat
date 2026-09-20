@@ -2934,7 +2934,7 @@ public final class Phase8PredictionRunner {
       normalizedBySequence.put(packet.sequence(), packet);
     }
 
-    reconstructClientTickOrigin(normalized);
+    reconstructClientTickOrigin(normalized, phase7TimingBySequence);
     if (timingHistoryTruncated && !clientTickOriginKnown) {
       /*
        * Phase 7's bounded timing window has lost its absolute client-tick origin.
@@ -3057,57 +3057,183 @@ public final class Phase8PredictionRunner {
 
   /**
    * The bounded Phase 7 history has a moving relative tick origin. When the
-   * history is truncated, recover the absolute offset from a client movement
-   * carrying an explicit client tick and the number of retained tick-end
-   * boundaries before that movement. Sequence gaps/order ambiguity make this
-   * witness unsafe, so the previous origin is not silently trusted in that case.
+   * history is truncated, recover the absolute offset from the same relative
+   * clock anchor and timing constraints Phase 7 used, using an explicit movement
+   * tick as the absolute witness. This remains valid even when unrelated retained
+   * packets arrived out of order; the clock anchor is reconstructed from canonical
+   * timing rather than trusting a raw boundary count alone.
    */
   private void reconstructClientTickOrigin(
-      List<Packets.NormalizedPacket> normalizedHistory) {
+      List<Packets.NormalizedPacket> normalizedHistory,
+      Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
     if (!timingHistoryTruncated && !clientTickOriginKnown) return;
 
-    long retainedClientBoundaries = 0L;
-    Long discoveredOffset = null;
-    boolean chronologyUncertain = false;
+    List<Phase7Timing.EventTiming> canonicalTimings = phase7TimingBySequence.values().stream()
+        .sorted(Comparator.comparingInt(Phase7Timing.EventTiming::timelineIndex))
+        .toList();
 
+    OptionalLong anchorSequence = canonicalTimings.stream()
+        .filter(timing -> timing.kind() == Phase7Timing.EventKind.CLIENT_TICK_END
+            || timing.kind() == Phase7Timing.EventKind.INPUT
+            || timing.kind() == Phase7Timing.EventKind.MOVEMENT
+            || timing.kind() == Phase7Timing.EventKind.TELEPORT_ACK
+            || timing.kind() == Phase7Timing.EventKind.FLIGHT_TOGGLE)
+        .mapToLong(Phase7Timing.EventTiming::sequence)
+        .findFirst();
+    if (anchorSequence.isEmpty()) {
+      clientTickOriginKnown = false;
+      return;
+    }
+
+    long anchorSeq = anchorSequence.getAsLong();
+    Phase7Timing.EventTiming anchorTiming = phase7TimingBySequence.get(anchorSeq);
+    if (anchorTiming == null) {
+      clientTickOriginKnown = false;
+      return;
+    }
+
+    Phase7Timing.Range anchorTick;
+    if (anchorTiming.kind() == Phase7Timing.EventKind.CLIENT_TICK_END) {
+      anchorTick = Phase7Timing.Range.exact(1L);
+    } else if (anchorTiming.explicitClientTick().isPresent()) {
+      anchorTick = Phase7Timing.Range.exact(anchorTiming.explicitClientTick().getAsLong());
+      clientTickOriginOffset = 0L;
+      clientTickOriginKnown = true;
+      return;
+    } else {
+      anchorTick = Phase7Timing.Range.exact(0L);
+    }
+
+    List<RelativeClientBoundary> boundaries = new ArrayList<>();
+    long boundaryOrdinal = 0L;
+    for (Phase7Timing.EventTiming timing : canonicalTimings) {
+      if (timing.kind() != Phase7Timing.EventKind.CLIENT_TICK_END) continue;
+      boundaryOrdinal++;
+      boundaries.add(new RelativeClientBoundary(
+          boundaryOrdinal,
+          timing.packetGenerationNanos()));
+    }
+
+    Set<Long> possibleOffsets = null;
     for (Packets.NormalizedPacket packet : normalizedHistory.stream()
         .sorted(Comparator.comparingLong(Packets.NormalizedPacket::sequence))
         .toList()) {
-      if (packet.flags().contains(Packets.PacketFlag.DUPLICATE)) continue;
-      if (packet.flags().contains(Packets.PacketFlag.OUT_OF_ORDER)
-          || packet.flags().contains(Packets.PacketFlag.SEQUENCE_GAP)) {
-        chronologyUncertain = true;
+      if (!(packet.packet() instanceof Packets.Move move)
+          || move.clientTick() == null
+          || packet.flags().contains(Packets.PacketFlag.DUPLICATE)) {
+        continue;
       }
 
-      if (packet.packet() instanceof Packets.Move move && move.clientTick() != null) {
-        long offset;
-        try {
-          offset = Math.subtractExact(move.clientTick(), retainedClientBoundaries);
-        } catch (ArithmeticException overflow) {
-          chronologyUncertain = true;
-          continue;
-        }
-        if (discoveredOffset == null) {
-          discoveredOffset = offset;
-        } else if (discoveredOffset.longValue() != offset) {
-          chronologyUncertain = true;
-        }
+      Phase7Timing.EventTiming timing = phase7TimingBySequence.get(packet.sequence());
+      if (timing == null) continue;
+
+      if (packet.sequence() == anchorSeq) {
+        long offset = move.clientTick() - anchorTick.min();
+        possibleOffsets = intersectOffsets(possibleOffsets, Set.of(offset));
+        continue;
       }
 
-      if (packet.packet() instanceof Packets.ClientTickEnd) {
-        try {
-          retainedClientBoundaries = Math.addExact(retainedClientBoundaries, 1L);
-        } catch (ArithmeticException overflow) {
-          chronologyUncertain = true;
+      Phase7Timing.Range relative = relativeClientTickRange(
+          timing.packetGenerationNanos(),
+          anchorTiming.packetGenerationNanos(),
+          anchorTick,
+          boundaries);
+      long cardinality = relative.cardinality();
+      if (cardinality == Long.MAX_VALUE
+          || cardinality > phase7TimingConfig.maxTimingCandidates()) {
+        continue;
+      }
+
+      LinkedHashSet<Long> offsets = new LinkedHashSet<>();
+      for (long candidate = relative.min(); ; candidate++) {
+        offsets.add(Math.subtractExact(move.clientTick(), candidate));
+        if (candidate == relative.max()) break;
+      }
+      possibleOffsets = intersectOffsets(possibleOffsets, offsets);
+    }
+
+    if (possibleOffsets != null && possibleOffsets.size() == 1) {
+      clientTickOriginOffset = possibleOffsets.iterator().next();
+      clientTickOriginKnown = true;
+    } else {
+      clientTickOriginKnown = false;
+    }
+  }
+
+  private record RelativeClientBoundary(
+      long boundaryIndex,
+      Phase7Timing.TimeRange generationNanos) {}
+
+  private static Set<Long> intersectOffsets(Set<Long> current, Set<Long> next) {
+    if (current == null) return new LinkedHashSet<>(next);
+    LinkedHashSet<Long> intersection = new LinkedHashSet<>(current);
+    intersection.retainAll(next);
+    return intersection;
+  }
+
+  private Phase7Timing.Range relativeClientTickRange(
+      Phase7Timing.TimeRange eventGeneration,
+      Phase7Timing.TimeRange anchorGeneration,
+      Phase7Timing.Range anchorTick,
+      List<RelativeClientBoundary> boundaries) {
+    long deltaMin;
+    long deltaMax;
+    try {
+      deltaMin = Math.subtractExact(
+          eventGeneration.minNanos(), anchorGeneration.maxNanos());
+      deltaMax = Math.subtractExact(
+          eventGeneration.maxNanos(), anchorGeneration.minNanos());
+    } catch (ArithmeticException overflow) {
+      return new Phase7Timing.Range(Long.MAX_VALUE, Long.MAX_VALUE);
+    }
+
+    Phase7Timing.Range wall = new Phase7Timing.Range(
+        safeRelativeAdd(anchorTick.min(),
+            Math.floorDiv(deltaMin, phase7TimingConfig.clientTickMaxNanos())),
+        safeRelativeAdd(anchorTick.max(),
+            Math.floorDiv(deltaMax, phase7TimingConfig.clientTickMinNanos())));
+    long minimum = wall.min();
+    long maximum = wall.max();
+    boolean constrained = false;
+
+    for (RelativeClientBoundary boundary : boundaries) {
+      Phase7Timing.TimeRange generation = boundary.generationNanos();
+      if (eventGeneration.maxNanos() < generation.minNanos()) {
+        maximum = Math.min(
+            maximum,
+            Math.max(0L, boundary.boundaryIndex() - 1L));
+        constrained = true;
+      } else if (eventGeneration.minNanos() > generation.maxNanos()) {
+        minimum = Math.max(minimum, boundary.boundaryIndex());
+        constrained = true;
+        if (boundary.boundaryIndex() == boundaries.getLast().boundaryIndex()) {
+          long deltaMax = safeRelativeAdd(
+              eventGeneration.maxNanos(), -generation.minNanos());
+          long elapsedTicks = Math.floorDiv(
+              Math.max(0L, deltaMax), phase7TimingConfig.clientTickMinNanos());
+          maximum = Math.min(
+              maximum,
+              safeRelativeAdd(boundary.boundaryIndex(), elapsedTicks));
         }
+      } else {
+        minimum = Math.max(
+            minimum,
+            Math.max(0L, boundary.boundaryIndex() - 1L));
+        maximum = Math.min(maximum, boundary.boundaryIndex());
+        constrained = true;
       }
     }
 
-    if (discoveredOffset != null && !chronologyUncertain) {
-      clientTickOriginOffset = discoveredOffset;
-      clientTickOriginKnown = true;
-    } else if (chronologyUncertain && timingHistoryTruncated) {
-      clientTickOriginKnown = false;
+    if (!constrained) return wall;
+    if (minimum > maximum) return new Phase7Timing.Range(minimum, minimum);
+    return new Phase7Timing.Range(minimum, maximum);
+  }
+
+  private static long safeRelativeAdd(long left, long right) {
+    try {
+      return Math.addExact(left, right);
+    } catch (ArithmeticException overflow) {
+      return right >= 0L ? Long.MAX_VALUE : Long.MIN_VALUE;
     }
   }
 
