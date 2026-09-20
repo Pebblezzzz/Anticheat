@@ -89,7 +89,12 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private static final int PAPER_MOVE_FAILURE_THRESHOLD=1;
 
   private final Map<UUID,Capture> captures=new ConcurrentHashMap<>();
-  private enum DebugLevel { OFF, SUMMARY, TRACE; boolean summary(){return this==SUMMARY;} boolean trace(){return this==TRACE;} }
+  private enum DebugLevel {
+    OFF, SUMMARY, FOCUS, TRACE;
+    boolean summary(){return this==SUMMARY;}
+    boolean focus(){return this==FOCUS || this==TRACE;}
+    boolean trace(){return this==TRACE;}
+  }
 
   private final Map<UUID,DebugLevel> debugPlayers=new ConcurrentHashMap<>();
   private org.bukkit.scheduler.BukkitTask stateTask;
@@ -591,13 +596,23 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           sender.sendMessage("Phase 8 summary debug enabled for "+target.getName()
               +" (important verdicts immediately, otherwise at most once per second).");
         }
+        case "focus" -> {
+          debugPlayers.put(target.getUniqueId(),DebugLevel.FOCUS);
+          sender.sendMessage("Phase 8 focused debug enabled for "+target.getName()
+              +" (movement/input/timing decisions only).");
+        }
         case "trace" -> {
           debugPlayers.put(target.getUniqueId(),DebugLevel.TRACE);
-          sender.sendMessage("Phase 8 trace debug enabled for "+target.getName()+" (packet/frame detail).");
+          sender.sendMessage("Phase 8 trace debug enabled for "+target.getName()+" (full packet/frame detail).");
+        }
+        case "dump" -> {
+          Capture capture=captures.get(target.getUniqueId());
+          logFocusedDebug(target.getName(),capture==null?null:capture.lastDebugReport);
+          sender.sendMessage("Phase 8 focused debug dumped to console for "+target.getName());
         }
         case "status" -> sender.sendMessage("Phase 8 debug for "+target.getName()+": "
             +debugPlayers.getOrDefault(target.getUniqueId(),DebugLevel.OFF));
-        default -> sender.sendMessage("Usage: /phantom debug <player> [summary|trace|off|status]");
+        default -> sender.sendMessage("Usage: /phantom debug <player> [summary|focus|trace|dump|off|status]");
       }
       return true;
     }
@@ -617,7 +632,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       return true;
     }
 
-    sender.sendMessage("Usage: /phantom status | /phantom debug <player> [summary|trace|off|status] | /phantom setback <player> [on|off]");
+    sender.sendMessage("Usage: /phantom status | /phantom debug <player> [summary|focus|trace|dump|off|status] | /phantom setback <player> [on|off]");
     return true;
   }
 
@@ -906,6 +921,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           capture.initialStateReceivedNanos);
 
       Phase8PredictionRunner.Report report=incremental;
+      capture.lastDebugReport=incremental;
 
       if(debugLevel(capture.playerId).trace()){
         getLogger().info("[PhantomAC][PHASE8][PREDICT_DONE] player="+playerName
@@ -932,6 +948,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
       if(debugLevel(capture.playerId).summary())
         logValidationSummary(capture,playerName,report,incremental.frames());
+      if(debugLevel(capture.playerId).focus() && !debugLevel(capture.playerId).trace()) {
+        for(Phase8MovementValidation.Result result:report.results()) {
+          if(result.verdict()!=Phase8MovementValidation.Verdict.POSSIBLE) {
+            logFocusedDebug(playerName,report);
+            break;
+          }
+        }
+      }
 
       // The only hop back is the immutable validation report for Bukkit actions.
       getServer().getScheduler().runTask(this,()->applyResult(capture,report));
@@ -1098,11 +1122,17 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
     Phase8MovementValidation.Result latest=report.results().getLast();
     for(Phase8MovementValidation.Result result:report.results()){
-      if(result.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE)latest=result;
+      if(result.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE){
+        latest=result;
+        break;
+      }
     }
     if(latest.verdict()!=Phase8MovementValidation.Verdict.IMPOSSIBLE){
       for(Phase8MovementValidation.Result result:report.results()){
-        if(result.verdict()==Phase8MovementValidation.Verdict.UNCERTAIN)latest=result;
+        if(result.verdict()==Phase8MovementValidation.Verdict.UNCERTAIN){
+          latest=result;
+          break;
+        }
       }
     }
 
@@ -1110,82 +1140,99 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     String reason=e.eliminationReason();
     if(!shouldLogDebugSummary(capture,latest.verdict(),reason))return;
 
-    String closest=e.closestCandidate().map(candidate->
-        "id="+candidate.candidateId()
-        +",tick="+candidate.simulationTick()
-        +",pos="+candidate.position()
-        +",vel="+candidate.velocity()
-        +",ground="+candidate.onGround()
-        +",yaw="+candidate.yaw()
-        +",pitch="+candidate.pitch()
-        +",provenance="+candidate.provenance()).orElse("none");
-
     double dx=e.observedState().position().x()-e.priorState().position().x();
     double dy=e.observedState().position().y()-e.priorState().position().y();
     double dz=e.observedState().position().z()-e.priorState().position().z();
-    String observedDelta=String.format(Locale.ROOT,"(%.6f,%.6f,%.6f)",dx,dy,dz);
+    String delta=String.format(Locale.ROOT,"(%.5f,%.5f,%.5f)",dx,dy,dz);
 
-    String diagnosticTrace="none";
-    for(Phase8PredictionRunner.PredictionFrame frame:frames){
-      if(!e.replayReference().endsWith(":"+frame.sequence()))continue;
-      List<String> highlights=frame.trace().stream()
-          .filter(line->line.startsWith("EVIDENCE ")
-              ||line.startsWith("RECOVERY_")
-              ||line.startsWith("FRONTIER_")
-              ||line.startsWith("ROOT ")
-              ||line.startsWith("ROOT_")
-              ||line.startsWith("SIM_INPUT ")
-              ||line.startsWith("SIM_STEP ")
-              ||line.startsWith("CANDIDATES ")
-              ||line.startsWith("WORLD ")
-              ||line.startsWith("TIMING_"))
-          .toList();
-      if(!highlights.isEmpty())diagnosticTrace=String.join(" | ",highlights);
-      break;
-    }
+    String closest=e.closestCandidate().map(candidate->
+        "tick="+candidate.simulationTick()
+        +",pos="+candidate.position()
+        +",vel="+candidate.velocity()
+        +",ground="+candidate.onGround()).orElse("none");
 
     getLogger().info("[PhantomAC][PHASE8][SUMMARY] player="+playerName
         +" verdict="+latest.verdict()
         +" seq="+capture.movementRunner.lastProcessedSequence()
+        +" tick="+e.serverTick()
+        +" clientTick="+e.clientTickMin()+".."+e.clientTickMax()
+        +" delta="+delta
+        +" candidates="+e.reachableCandidateCount()
+        +"/matches="+e.matchingCandidateCount()
+        +"/eliminated="+e.candidatesEliminated()
+        +" cause="+reason
+        +" closest="+closest
+        +" worldChunks="+capture.clientWorld.visibleChunkCount()
+        +" uncertaintyCount="+e.uncertaintySources().size()
+        +" diagnosticsCount="+e.simulationDiagnostics().size()
+        +" paperRejects="+capture.paperMoveFailureCount
+        +" replay="+e.replayReference());
+  }
+
+  private void logFocusedDebug(String playerName, Phase8PredictionRunner.Report report){
+    if(report==null || report.results().isEmpty()){
+      getLogger().info("[PhantomAC][PHASE8][FOCUS] player="+playerName+" no cached validation report");
+      return;
+    }
+
+    Phase8MovementValidation.Result result=report.results().getLast();
+    for(Phase8MovementValidation.Result candidate:report.results()){
+      if(candidate.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE){
+        result=candidate;
+        break;
+      }
+    }
+    if(result.verdict()!=Phase8MovementValidation.Verdict.IMPOSSIBLE){
+      for(Phase8MovementValidation.Result candidate:report.results()){
+        if(candidate.verdict()==Phase8MovementValidation.Verdict.UNCERTAIN){
+          result=candidate;
+          break;
+        }
+      }
+    }
+
+    Phase8MovementValidation.Evidence e=result.evidence();
+    double dx=e.observedState().position().x()-e.priorState().position().x();
+    double dy=e.observedState().position().y()-e.priorState().position().y();
+    double dz=e.observedState().position().z()-e.priorState().position().z();
+    getLogger().info("[PhantomAC][PHASE8][FOCUS] player="+playerName
+        +" verdict="+result.verdict()
         +" serverTick="+e.serverTick()
         +" clientTick="+e.clientTickMin()+".."+e.clientTickMax()
         +" prior="+e.priorState().position()
         +" observed="+e.observedState().position()
-        +" clientGround="+e.observedState().onGround()
-        +" reachable="+e.reachableCandidateCount()
-        +" matching="+e.matchingCandidateCount()
+        +" observedDelta="+String.format(Locale.ROOT,"(%.6f,%.6f,%.6f)",dx,dy,dz)
+        +" priorVel="+e.priorState().velocity()
+        +" observedVel="+e.observedState().velocity()
+        +" candidates="+e.reachableCandidateCount()
+        +" matches="+e.matchingCandidateCount()
         +" eliminated="+e.candidatesEliminated()
-        +" firstInconsistent="+(e.firstInconsistentTick().isPresent()?e.firstInconsistentTick().getAsLong():"none")
-        +" rule="+e.rule()
-        +" cause="+reason
-        +" world="+e.worldReference()
-        +" closest="+closest
-        +" authorityState={pos="+capture.lastAuthoritativePosition
-        +",vel="+capture.lastAuthoritativeVelocity
-        +",ground="+capture.lastAuthoritativeOnGround
-        +",canFly="+capture.lastAuthoritativeCanFly
-        +",flying="+capture.lastAuthoritativeFlying+"}"
-        +" worldState={visibleChunks="+capture.clientWorld.visibleChunkCount()
-        +",compactEntries="+capture.clientWorld.compactStateEntryCount()
-        +",pendingBarriers="+capture.clientWorld.pendingBarrierCount()
-        +",causalSequence="+capture.clientWorld.causalSequence()+"}"
-        +" paperRejectionsInWindow="+capture.paperMoveFailureCount
-        +" observedDelta="+observedDelta
-        +" priorVelocity="+e.priorState().velocity()
-        +" observedVelocity="+e.observedState().velocity()
-        +" uncertaintySources="+e.uncertaintySources()
-        +" simulationDiagnostics="+e.simulationDiagnostics()
-        +" runner={continuation="+capture.movementRunner.continuation()
-        +",candidateCount="+capture.movementRunner.candidateCount()
-        +",lastProcessedSequence="+capture.movementRunner.lastProcessedSequence()+"}"
-        +" validationCost={lastMicros="+capture.lastValidationElapsedMicros
-        +",lastBatchPackets="+capture.lastValidationBatchPackets
-        +",lastBatchMovements="+capture.lastValidationBatchMovements
-        +",runs="+capture.validationRuns.get()
-        +",packets="+capture.validationPackets.get()
-        +",movements="+capture.validationMovements.get()+"}"
-        +" decisionTrace="+diagnosticTrace
+        +" cause="+e.eliminationReason()
+        +" uncertainty="+e.uncertaintySources()
+        +" diagnostics="+e.simulationDiagnostics()
         +" replay="+e.replayReference());
+
+    for(Phase8PredictionRunner.PredictionFrame frame:report.frames()){
+      if(!e.replayReference().endsWith(":"+frame.sequence()))continue;
+      for(String line:frame.trace()){
+        if(line.startsWith("CLIENT_TICK ")
+            || line.startsWith("TICK_RELIABILITY ")
+            || line.startsWith("INPUT_STATE ")
+            || line.startsWith("SIM_INPUT_OPTIONS ")
+            || line.startsWith("SIM_INPUT_BRANCH ")
+            || line.startsWith("SIM_STEP ")
+            || line.startsWith("TIMING_")
+            || line.startsWith("PHASE7_")
+            || line.startsWith("BOOTSTRAP_")
+            || line.startsWith("FRONTIER_")
+            || line.startsWith("EVIDENCE ")
+            || line.startsWith("ROOT_")) {
+          getLogger().info("[PhantomAC][PHASE8][FOCUS] player="+playerName
+              +" seq="+frame.sequence()+" "+line);
+        }
+      }
+      break;
+    }
   }
 
   private void logClientInputDebug(String playerName,long sequence,Packets.ClientInput input){
@@ -1668,6 +1715,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     volatile Phase8MovementValidation.Verdict lastDebugSummaryVerdict;
     volatile String lastDebugSummaryReason;
     volatile Vec3 lastDebugMovePosition;
+    volatile Phase8PredictionRunner.Report lastDebugReport;
     final List<RawPacket> packets=new ArrayList<>();
     final ClientTickTracker clientTickTracker=new ClientTickTracker();
     final dev.phantom.ac.Phase4WorldReplica clientWorld=new dev.phantom.ac.Phase4WorldReplica(Contracts.TARGET_VERSION);
