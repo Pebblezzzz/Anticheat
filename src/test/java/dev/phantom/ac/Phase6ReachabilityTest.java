@@ -11,6 +11,8 @@ import dev.phantom.ac.Packets.ClientInput;
 import dev.phantom.ac.Simulation.AdvancedInput;
 import dev.phantom.ac.Simulation.Input;
 import dev.phantom.ac.Simulation.Vanilla12111Physics;
+import dev.phantom.ac.Phase5Mechanics.MovementEnvironment;
+import dev.phantom.ac.world.WorldSnapshot;
 import dev.phantom.ac.State.Player;
 import dev.phantom.ac.Validation.*;
 
@@ -23,6 +25,17 @@ class Phase6ReachabilityTest {
       }
     }
     return new World.Snapshot(blocks);
+  }
+
+  private static WorldSnapshot phase6Ground() {
+    WorldSnapshot.Builder builder =
+        WorldSnapshot.builder(Contracts.TARGET_VERSION);
+    for (int x = -1; x <= 1; x++) {
+      for (int z = -1; z <= 1; z++) {
+        builder.loadChunk(x, z);
+      }
+    }
+    return builder.build();
   }
 
   @Test
@@ -76,7 +89,7 @@ class Phase6ReachabilityTest {
         List.of(Phase6Reachability.InputConstraint.exact(
             new AdvancedInput(1, 0, false, true, false))),
         ignored -> List.of(new Phase6Reachability.WorldBranch(
-            "ground", ground(), true, "known test ground")),
+            "ground", phase6Ground(), true, "known test ground")),
         ignored -> List.of(new Phase6Reachability.None()),
         Phase6Reachability.SearchConfig.defaults(16));
 
