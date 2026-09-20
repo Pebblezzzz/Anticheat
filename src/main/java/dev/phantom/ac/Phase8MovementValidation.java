@@ -163,8 +163,18 @@ public final class Phase8MovementValidation {
       return new Result(Verdict.POSSIBLE, evidence);
     }
 
+    if (!timingExhaustivelyModeled) {
+      String reason = timing.uncertain()
+          ? "Phase 7 synchronization is uncertain and its possible offsets were not exhaustively represented"
+          : "the declared timing/input state space was not exhaustively represented";
+      Evidence evidence = evidence(Verdict.UNCERTAIN, playerId, serverTick, prior, observed, world, worldReference, timing,
+          inputAssumptions, reachable.candidates().size(), 0, 0, reason,
+          OptionalLong.empty(), bestCandidate(reachable.candidates(), observed), reachable.reasons(), uncertainty, replayReference);
+      return new Result(Verdict.UNCERTAIN, evidence);
+    }
+
     List<String> diagnostics = new ArrayList<>(comparison.reasons());
-    if (timing.uncertain() && timingExhaustivelyModeled) diagnostics.add("Phase 7 timing uncertainty was exhaustively represented; no timing offset produced a matching candidate");
+    if (timing.uncertain()) diagnostics.add("Phase 7 timing uncertainty was exhaustively represented; no timing offset produced a matching candidate");
     Evidence evidence = evidence(Verdict.IMPOSSIBLE, playerId, serverTick, prior, observed, world, worldReference, timing,
         inputAssumptions, reachable.candidates().size(), 0, reachable.candidates().size(),
         "all exhaustively modeled legitimate candidates disagree with the observed movement state",
