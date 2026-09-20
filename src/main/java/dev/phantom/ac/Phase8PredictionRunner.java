@@ -2528,7 +2528,9 @@ public final class Phase8PredictionRunner {
                 + " startPos=" + beforeCandidate.context().player().position()
                 + " startVel=" + beforeCandidate.context().player().velocity()
                 + " startGround=" + beforeCandidate.context().player().onGround()
-                + " chronologyAlternatives=" + chronologies.size());
+                + " chronologyAlternatives=" + chronologies.size()
+                + " inputSelection=" + inputSelectionDebug(
+                    chronology.history(), simulationTick, movementSequence));
           }
 
           Set<Candidate> stepCandidates = new LinkedHashSet<>();
@@ -2637,6 +2639,39 @@ public final class Phase8PredictionRunner {
     return new AdvanceResult(
         Set.copyOf(union), exhaustive, simulatedTicks,
         List.copyOf(reasons), List.copyOf(trace));
+  }
+
+  private String inputSelectionDebug(
+      NavigableMap<Long, List<TimedInput>> history,
+      long simulationTick,
+      long movementSequence) {
+    String selected = "selected=none";
+    if (!history.isEmpty()) {
+      outer:
+      for (var entry : history.headMap(simulationTick, true).descendingMap().entrySet()) {
+        for (TimedInput input : entry.getValue()) {
+          if (input.sequence() > movementSequence) continue;
+          selected = "selectedSeq=" + input.sequence()
+              + ",selectedTick=" + input.clientTick()
+              + ",selectedInput=" + input.constraint();
+          break outer;
+        }
+      }
+    }
+    if ("selected=none".equals(selected) && carryInInput != null) {
+      selected = "selected=carry-in,selectedInput=" + carryInInput;
+    }
+    StringBuilder uncertain = new StringBuilder();
+    for (UncertainInput input : uncertainInputs) {
+      if (input.sequence() > movementSequence || simulationTick < input.earliestClientTick()) continue;
+      if (uncertain.length() > 0) uncertain.append(';');
+      uncertain.append("seq=").append(input.sequence())
+          .append("@tick>=").append(input.earliestClientTick());
+    }
+    if (uncertain.length() > 0) {
+      selected += ",uncertainReplacements=" + uncertain;
+    }
+    return selected;
   }
 
   private static Set<Candidate> matchingCandidates(
