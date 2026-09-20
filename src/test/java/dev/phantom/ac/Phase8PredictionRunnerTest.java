@@ -113,7 +113,7 @@ class Phase8PredictionRunnerTest {
     assertFalse(second.results().stream().anyMatch(
         result -> result.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE),
         second.toString());
-    assertTrue(second.candidateFrontierRetained(), second.toString());
+    assertFalse(second.candidateFrontierRetained(), second.toString());
   }
 
   @Test
