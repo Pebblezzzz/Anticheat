@@ -138,6 +138,11 @@ public final class Phase8PredictionRunner {
   private long previousObservedMovementClientTick = -1L;
   private long lastObservedMovementClientTick = -1L;
   private boolean lastObservedMovementPriorGround;
+  private Vec3 previousRecentMovementPosition;
+  private Vec3 lastRecentMovementPosition;
+  private long previousRecentMovementClientTick = -1L;
+  private long lastRecentMovementClientTick = -1L;
+  private boolean lastRecentMovementPriorGround;
   private long nextCandidateId;
   private Continuation latestContinuation = Continuation.UNANCHORED;
 
@@ -732,6 +737,7 @@ public final class Phase8PredictionRunner {
         case POSSIBLE -> {
           possible++;
           latestContinuation = Continuation.ACTIVE;
+          rememberRecentObservedMovement(observedBefore, observedAfter, tick);
           Set<Candidate> matching = matchingCandidates(prediction, observedAfter, move);
           if (!matching.isEmpty()) {
             prediction = Set.copyOf(matching);
@@ -756,6 +762,7 @@ public final class Phase8PredictionRunner {
         case UNCERTAIN -> {
           uncertain++;
           latestContinuation = Continuation.UNCERTAIN;
+          rememberRecentObservedMovement(observedBefore, observedAfter, tick);
           trace.add("FRONTIER_RETAINED reason=UNCERTAIN_OBSERVATION");
         }
       }
@@ -1153,9 +1160,9 @@ public final class Phase8PredictionRunner {
           + (lastObservedMovementPosition == null
               ? "unavailable"
               : new Vec3(
-                  context.serverPosition().x() - lastObservedMovementPosition.x(),
-                  context.serverPosition().y() - lastObservedMovementPosition.y(),
-                  context.serverPosition().z() - lastObservedMovementPosition.z())));
+                  context.serverPosition().x() - lastRecentMovementPosition.x(),
+                  context.serverPosition().y() - lastRecentMovementPosition.y(),
+                  context.serverPosition().z() - lastRecentMovementPosition.z())));
     } else {
       trace.add("ROOT_HORIZONTAL source=authoritative-velocity"
           + " velocity=" + authority.velocity()
@@ -1190,6 +1197,23 @@ public final class Phase8PredictionRunner {
     previousObservedMovementClientTick = -1L;
     lastObservedMovementClientTick = -1L;
     lastObservedMovementPriorGround = false;
+    previousRecentMovementPosition = null;
+    lastRecentMovementPosition = null;
+    previousRecentMovementClientTick = -1L;
+    lastRecentMovementClientTick = -1L;
+    lastRecentMovementPriorGround = false;
+  }
+
+  private void rememberRecentObservedMovement(
+      Player observedBefore,
+      Player observedAfter,
+      TickResolution tick) {
+    if (!tick.known()) return;
+    previousRecentMovementPosition = lastRecentMovementPosition;
+    previousRecentMovementClientTick = lastRecentMovementClientTick;
+    lastRecentMovementPosition = observedAfter.position();
+    lastRecentMovementClientTick = tick.clientTick();
+    lastRecentMovementPriorGround = observedBefore.onGround();
   }
 
   private void rememberObservedMovement(
@@ -1210,13 +1234,13 @@ public final class Phase8PredictionRunner {
       WorldSnapshot world) {
     if (world == null
         || targetTick < 2L
-        || previousObservedMovementPosition == null
-        || lastObservedMovementPosition == null
-        || previousObservedMovementClientTick < 0L
-        || lastObservedMovementClientTick < 0L
-        || previousObservedMovementClientTick + 1L != lastObservedMovementClientTick
-        || targetTick <= lastObservedMovementClientTick
-        || targetTick - lastObservedMovementClientTick > 2L) {
+        || previousRecentMovementPosition == null
+        || lastRecentMovementPosition == null
+        || previousRecentMovementClientTick < 0L
+        || lastRecentMovementClientTick < 0L
+        || previousRecentMovementClientTick + 1L != lastRecentMovementClientTick
+        || targetTick <= lastRecentMovementClientTick
+        || targetTick - lastRecentMovementClientTick > 2L) {
       return Optional.empty();
     }
 
@@ -1227,17 +1251,17 @@ public final class Phase8PredictionRunner {
       return Optional.empty();
     }
 
-    double dx = lastObservedMovementPosition.x() - previousObservedMovementPosition.x();
-    double dz = lastObservedMovementPosition.z() - previousObservedMovementPosition.z();
+    double dx = lastRecentMovementPosition.x() - previousRecentMovementPosition.x();
+    double dz = lastRecentMovementPosition.z() - previousRecentMovementPosition.z();
     if (Math.hypot(dx, dz) <= 1.0E-12) return Optional.empty();
 
     double horizontalFactor;
-    if (lastObservedMovementPriorGround) {
+    if (lastRecentMovementPriorGround) {
       // Ground friction for the prior movement was determined from the block
       // beneath the pre-movement position, not beneath the post-jump position.
-      int supportX = (int) Math.floor(previousObservedMovementPosition.x());
-      int supportY = (int) Math.floor(previousObservedMovementPosition.y() - 1.0E-4);
-      int supportZ = (int) Math.floor(previousObservedMovementPosition.z());
+      int supportX = (int) Math.floor(previousRecentMovementPosition.x());
+      int supportY = (int) Math.floor(previousRecentMovementPosition.y() - 1.0E-4);
+      int supportZ = (int) Math.floor(previousRecentMovementPosition.z());
       if (world.coverageAt(supportX, supportY, supportZ) != dev.phantom.ac.world.Coverage.KNOWN) {
         return Optional.empty();
       }
