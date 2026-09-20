@@ -338,6 +338,14 @@ public final class VoxelShape implements Serializable {
     double result = amount;
     for (BlockBox collision : boxes) {
       if (!overlapsOnOtherAxes(axis, box, collision)) continue;
+      /*
+       * A collision only constrains motion when the moving box is before the
+       * obstacle along the requested direction, or is already overlapping it.
+       * A box completely beyond the obstacle must not be pulled backwards when
+       * moving away from that obstacle.
+       */
+      if (amount > 0.0 && minOnAxis(axis, box) >= maxOnAxis(axis, collision)) continue;
+      if (amount < 0.0 && maxOnAxis(axis, box) <= minOnAxis(axis, collision)) continue;
       if (amount > 0.0) {
         // Distance from this box's high face to the collision's low face. It is
         // negative when the two already overlap, which is exactly the correction
