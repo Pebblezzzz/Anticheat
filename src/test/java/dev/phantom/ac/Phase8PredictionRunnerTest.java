@@ -507,7 +507,7 @@ class Phase8PredictionRunnerTest {
         MovementEnvironment.dry(true, true, false), false,
         dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
 
-    Vec3 blatant = new Vec3(8.5, 64.0, 8.5);
+    Maths.Vec3 blatant = new Maths.Vec3(8.5, 64.0, 8.5);
     PlayerContext freshAuthority = new PlayerContext(
         "survival", Simulation.Attributes.DEFAULT, Map.of(),
         Pose.STANDING, MovementEnvironment.dry(true, false, false),
