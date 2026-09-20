@@ -992,7 +992,7 @@ class Phase8PredictionRunnerTest {
             new RawPacket(3, 120_000_000L, new ClientInput(
                 true, false, false, false, false, false, false)),
             new RawPacket(4, 130_000_000L, new Move(
-                expected, 0f, 0f, true, 1L)),
+                expected, 0f, 0f, true, 2L)),
             new RawPacket(5, 150_000_000L, new ClientTickEnd())),
         world,
         start,
@@ -1002,7 +1002,7 @@ class Phase8PredictionRunnerTest {
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getFirst().verdict(), report.results().toString());
     assertTrue(report.frames().getFirst().trace().stream()
-        .anyMatch(line -> line.contains("simulationTick=0")
+        .anyMatch(line -> line.contains("simulationTick=1")
             && line.contains("OptionalInt[1]")),
         report.frames().getFirst().trace().toString());
   }
