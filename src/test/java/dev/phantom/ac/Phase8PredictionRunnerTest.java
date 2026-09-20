@@ -430,6 +430,64 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void freshLocalAuthorityRecoversModestResidualDriftAfterContradiction() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    var world = floorWorld();
+
+    PlayerContext initialAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    PlayerContext freshAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.68, 64.0, .5), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 10, initialAuthority,
+            Packets.CaptureProvenance.fromAdapter("paper-live", initialAuthority, 0L, 0L)),
+        new RawPacket(2, 20, new Move(
+            new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 0L),
+            Packets.CaptureProvenance.fromAdapter(
+                "paper-client-tick-boundary",
+                new Move(new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 0L),
+                0L, 0L)),
+        new RawPacket(3, 30, new Move(
+            new Maths.Vec3(.68, 64.0, .5), 0f, 0f, true, 1L),
+            Packets.CaptureProvenance.fromAdapter(
+                "paper-client-tick-boundary",
+                new Move(new Maths.Vec3(.68, 64.0, .5), 0f, 0f, true, 1L),
+                1L, 1L)),
+        new RawPacket(4, 40, new ClientTickEnd()),
+        new RawPacket(5, 50, freshAuthority,
+            Packets.CaptureProvenance.fromAdapter("paper-live", freshAuthority, 2L, 1L)),
+        new RawPacket(6, 60, new Move(
+            new Maths.Vec3(.68, 64.0, .5), 0f, 0f, true, 2L),
+            Packets.CaptureProvenance.fromAdapter(
+                "paper-client-tick-boundary",
+                new Move(new Maths.Vec3(.68, 64.0, .5), 0f, 0f, true, 2L),
+                3L, 2L)));
+
+    var report = runner.processWithWorldProvider(
+        "small-authority-drift", packets, ignored -> world, anchor(), 0L);
+
+    assertEquals(3, report.movementObservations(), report.results().toString());
+    assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        report.results().get(1).verdict(), report.results().toString());
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().get(2).verdict(), report.results().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=LOCAL_AUTHORITY_DRIFT")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("nearestFrontierToAuthority=")),
+        report.frames().getLast().trace().toString());
+  }
+
+  @Test
   void staleResyncUsesInputFromTheSimulatedTickNotTheLatestInput() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
