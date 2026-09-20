@@ -2565,7 +2565,7 @@ public final class Phase8PredictionRunner {
     assumptions.add("client input is retained as held state until the next ClientInput packet");
     assumptions.add("server position is used only for anchor/correction state, never as the predicted client position");
     assumptions.add("packet world is selected at or before the movement sequence and is therefore latency-compensated");
-    assumptions.add("prediction candidates are retained after POSSIBLE, UNCERTAIN, and IMPOSSIBLE observations");
+    assumptions.add("trusted prediction candidates are retained only while they remain valid physics states; observation witnesses are not reused as physics roots");
     assumptions.addAll(uncertainty);
 
     return Phase8MovementValidation.validate(
@@ -2878,7 +2878,7 @@ public final class Phase8PredictionRunner {
         + " ground=" + observedAfter.onGround());
     mergedTrace.add("FRONTIER candidates=" + predictedAfter.size()
         + " predictionTick=" + predictionTick
-        + " retained=true");
+        + " retained=" + !predictedAfter.isEmpty());
     return new PredictionFrame(
         sequence,
         packet.receivedNanos(),
