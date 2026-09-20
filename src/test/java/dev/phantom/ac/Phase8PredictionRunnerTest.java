@@ -1255,4 +1255,75 @@ class Phase8PredictionRunnerTest {
         report.frames().getFirst().trace().toString());
   }
 
+
+  @Test
+  void truncatedTimingHistoryPreservesAbsoluteClientTickForHeldInput() {
+    Phase7Timing.Config timing = new Phase7Timing.Config(
+        50_000_000L, 50_000_000L, 50_000_000L,
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        250_000_000L, 3, 128);
+
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
+    WorldSnapshot world = floorWorld();
+    Player start = anchor();
+    MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
+    Simulation.AdvancedInput forward = new Simulation.AdvancedInput(1, 0, false, false, false);
+
+    Maths.Vec3 expected = new Vanilla12111RichPhysics().step(
+        new Vanilla12111RichPhysics.Context(
+            41L,
+            start,
+            forward,
+            world,
+            Simulation.Environment.DRY,
+            start.attributes(),
+            Phase5Mechanics.MovementEffects.NONE,
+            Pose.STANDING,
+            environment,
+            false,
+            dev.phantom.ac.world.EntityCollisions.of(List.of())))
+        .state()
+        .position();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(),
+        Pose.STANDING, environment,
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    List<RawPacket> packets = new ArrayList<>();
+    for (int i = 1; i <= 520; i++) {
+      packets.add(new RawPacket(i, i * 1_000_000L, authority));
+    }
+    packets.add(new RawPacket(521, 521_000_000L,
+        new ClientInput(true, false, false, false, false, false, false)));
+    packets.add(new RawPacket(522, 522_000_000L, new ClientTickEnd()));
+    packets.add(new RawPacket(523, 523_000_000L,
+        new ClientInput(true, false, false, false, true, false, false)));
+    packets.add(new RawPacket(524, 524_000_000L,
+        new Move(expected, 0f, 0f, true, 42L)));
+
+    var report = runner.process(
+        "truncated-input-origin",
+        packets,
+        world,
+        start,
+        0L);
+
+    assertTrue(report.results().stream().allMatch(
+        result -> result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE),
+        report.toString());
+    assertTrue(report.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
+        .anyMatch(line -> line.equals("INPUT_TICK_ORIGIN known=true offset=41")),
+        report.frames().toString());
+    assertTrue(report.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
+        .anyMatch(line -> line.contains("inputSelection=selectedSeq=521,selectedTick=41")
+            && line.contains("jump=Optional[false]")),
+        report.frames().toString());
+  }
+
 }
