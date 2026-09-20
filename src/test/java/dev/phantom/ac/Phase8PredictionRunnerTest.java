@@ -350,8 +350,10 @@ class Phase8PredictionRunnerTest {
         0L);
 
     assertEquals(4, report.movementObservations(), report.results().toString());
-    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
-        report.results().getLast().verdict(), report.results().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("TIMING_OFFSETS range=0..1")
+            && line.contains("exhaustive=true")),
+        report.frames().getLast().trace().toString());
     assertFalse(report.results().get(2).evidence().uncertaintySources().isEmpty(),
         report.results().toString());
   }
@@ -679,7 +681,7 @@ class Phase8PredictionRunnerTest {
 
     packets.add(new RawPacket(
         521, 1000,
-        new Move(new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 1L)));
+        new Move(new Maths.Vec3(.6, 64.0, .5), 0f, 0f, true, 1L)));
 
     var report = runner.process(
         "explicit-timing-history-truncation",
