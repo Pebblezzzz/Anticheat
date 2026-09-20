@@ -2287,6 +2287,7 @@ public final class Phase8PredictionRunner {
           stepCandidates.addAll(branch.candidates());
           stepReasons.addAll(branch.reasons());
           if (!branch.exhaustive()) stepExhaustive = false;
+          }
         }
 
         simulatedTicks++;
