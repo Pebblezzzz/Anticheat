@@ -163,6 +163,10 @@ public final class Phase8PredictionRunner {
   private AuthorityAnchor latestAuthority;
   private Set<Candidate> prediction = Set.of();
   private long predictionTick = -1L;
+  private Phase8ClientModel.ClientPhysicsState clientPhysicsState;
+  private Phase8ClientModel.CompensatedWorld compensatedWorld;
+  private Phase8ClientModel.TickReliabilityState tickReliability =
+      Phase8ClientModel.TickReliabilityState.assess(0L, false, false, true, false, false);
   /*
    * An authoritative zero-delta witness proves the current observation but its
    * server velocity is not a client-tick physics state. Keep the physics
@@ -204,6 +208,22 @@ public final class Phase8PredictionRunner {
     return prediction.size();
   }
 
+  public synchronized Phase8ClientModel.ClientPhysicsState clientPhysicsState() {
+    return clientPhysicsState;
+  }
+
+  public synchronized Phase8ClientModel.CompensatedWorld compensatedWorld() {
+    return compensatedWorld;
+  }
+
+  public synchronized Phase8ClientModel.TickReliabilityState tickReliability() {
+    return tickReliability;
+  }
+
+  public synchronized List<Phase8ClientModel.MovementHypothesis> movementHypotheses() {
+    return Phase8ClientModel.hypotheses(prediction);
+  }
+
   public synchronized Continuation continuation() {
     return latestContinuation;
   }
@@ -228,6 +248,10 @@ public final class Phase8PredictionRunner {
     initialAnchor = authoritativeAnchor;
     initialAnchorReceivedNanos = authoritativeReceivedNanos;
     clientState = authoritativeAnchor;
+    clientPhysicsState = Phase8ClientModel.ClientPhysicsState.initial(authoritativeAnchor);
+    compensatedWorld = null;
+    tickReliability =
+        Phase8ClientModel.TickReliabilityState.assess(0L, false, false, true, false, false);
     currentInput = neutralInput;
     inputHistory.clear();
     uncertainInputs.clear();
@@ -373,6 +397,13 @@ public final class Phase8PredictionRunner {
             packet.provenance().authoritativeClientTick(),
             effectiveAuthority,
             entityCollisionComplete);
+        if (clientPhysicsState != null) {
+          clientPhysicsState = clientPhysicsState.withServerAuthority(
+              clientPhysicsState.clientTick(),
+              effectiveAuthority.serverPosition(),
+              effectiveAuthority.serverVelocity(),
+              packet.provenance().authoritativeServerTick());
+        }
         if (!prediction.isEmpty()) {
           Set<Candidate> updated =
               overlayAuthorityState(prediction, effectiveAuthority, maximumCandidates);
@@ -475,10 +506,24 @@ public final class Phase8PredictionRunner {
 
       TickResolution tick = resolveMovementTick(
           packet, move, phase7TimingBySequence);
+      boolean packetSequenceGap = sequence > previousSequence + 1L && previousSequence >= 0L;
+      tickReliability = Phase8ClientModel.TickReliabilityState.assess(
+          tick.clientTick(),
+          tick.known(),
+          tick.exact(),
+          tick.timingUncertain(),
+          packetSequenceGap,
+          timingHistoryTruncated);
       trace.add("CLIENT_TICK " + tick.display()
           + " exact=" + tick.exact()
           + " source=" + tick.source()
           + " timingUncertain=" + tick.timingUncertain());
+      trace.add("TICK_RELIABILITY level=" + tickReliability.reliability()
+          + " exact=" + tickReliability.exact()
+          + " timingUncertain=" + tickReliability.timingUncertain()
+          + " sequenceGap=" + tickReliability.sequenceGap()
+          + " historyTruncated=" + tickReliability.historyTruncated()
+          + " reasons=" + tickReliability.reasons());
 
       InputConstraint tickInput = tick.known() && tick.clientTick() > 0L
           ? inputForSimulationTick(inputHistory, tick.clientTick() - 1L, sequence)
@@ -488,6 +533,15 @@ public final class Phase8PredictionRunner {
           + " simulationTick=" + (tick.known() ? Math.max(0L, tick.clientTick() - 1L) : -1L));
 
       WorldSnapshot world = worldProvider == null ? null : worldProvider.apply(sequence);
+      if (world != null) {
+        compensatedWorld = Phase8ClientModel.CompensatedWorld.forMovement(
+            world, sequence, "latency-compensated-packet-world");
+        if (!compensatedWorld.causallyBounded()) {
+          trace.add("COMPENSATED_WORLD causalBounded=false"
+              + " causalSequence=" + compensatedWorld.causalSequence()
+              + " movementSequence=" + compensatedWorld.movementSequence());
+        }
+      }
       if (world == null) {
         latestContinuation = Continuation.UNCERTAIN;
         List<String> sources = List.of(
@@ -2636,8 +2690,12 @@ public final class Phase8PredictionRunner {
         List.copyOf(timingReasons));
     List<String> assumptions = new ArrayList<>();
     assumptions.add("client input is retained as held state until the next ClientInput packet");
+    assumptions.add("client physics velocity is tracked separately from instantaneous server velocity");
+    assumptions.add("server position and velocity are authority evidence, not an atomic client-tick physics state");
     assumptions.add("server position is used only for anchor/correction state, never as the predicted client position");
     assumptions.add("packet world is selected at or before the movement sequence and is therefore latency-compensated");
+    assumptions.add("movement hypotheses remain as a bounded set of candidate client states rather than one forced trajectory");
+    assumptions.add("tick reliability is tracked independently from movement physics so timing uncertainty is not mistaken for kinematic impossibility");
     assumptions.add("trusted prediction candidates are retained only while they remain valid physics states; observation witnesses are not reused as physics roots");
     assumptions.addAll(uncertainty);
 
@@ -2945,10 +3003,66 @@ public final class Phase8PredictionRunner {
       List<String> uncertaintySources,
       List<String> trace) {
     List<String> mergedTrace = new ArrayList<>(trace);
+    Vec3 actualMovement = new Vec3(
+        observedAfter.position().x() - observedBefore.position().x(),
+        observedAfter.position().y() - observedBefore.position().y(),
+        observedAfter.position().z() - observedBefore.position().z());
+    Vec3 clientVelocity = clientPhysicsState == null
+        ? observedAfter.velocity()
+        : clientPhysicsState.clientVelocity();
+    if (!predictedAfter.isEmpty()) {
+      clientVelocity = predictedAfter.stream()
+          .min(Comparator.comparingLong(candidate -> candidate.id()))
+          .orElseThrow()
+          .context().player().velocity();
+    }
+    Vec3 serverVelocity = latestAuthority == null
+        ? (clientPhysicsState == null ? observedAfter.velocity() : clientPhysicsState.serverVelocity())
+        : latestAuthority.context().serverVelocity();
+    Long authoritativeServerTick =
+        latestAuthority == null ? null : latestAuthority.serverTick();
+    long modelTick = tick.known() ? tick.clientTick()
+        : (clientPhysicsState == null ? 0L : clientPhysicsState.clientTick());
+    clientPhysicsState = clientPhysicsState == null
+        ? new Phase8ClientModel.ClientPhysicsState(
+            Math.max(0L, modelTick),
+            observedAfter.position(),
+            clientVelocity,
+            serverVelocity,
+            actualMovement,
+            observedAfter.onGround(),
+            authoritativeServerTick,
+            "movement-observation")
+        : clientPhysicsState.observe(
+            modelTick,
+            observedAfter,
+            actualMovement,
+            clientVelocity,
+            serverVelocity,
+            authoritativeServerTick,
+            "movement-observation");
+    List<Phase8ClientModel.MovementHypothesis> hypotheses =
+        Phase8ClientModel.hypotheses(predictedAfter);
     mergedTrace.add("OBSERVED position=" + observedAfter.position()
         + " yaw=" + observedAfter.yaw()
         + " pitch=" + observedAfter.pitch()
         + " ground=" + observedAfter.onGround());
+    mergedTrace.add("CLIENT_PHYSICS_STATE clientVelocity=" + clientPhysicsState.clientVelocity()
+        + " serverVelocity=" + clientPhysicsState.serverVelocity()
+        + " actualMovement=" + clientPhysicsState.actualMovement()
+        + " tick=" + clientPhysicsState.clientTick());
+    mergedTrace.add("HYPOTHESIS_SET count=" + hypotheses.size()
+        + " ids=" + hypotheses.stream()
+            .map(Phase8ClientModel.MovementHypothesis::candidateId)
+            .toList());
+    mergedTrace.add("COMPENSATED_WORLD "
+        + (compensatedWorld == null
+            ? "available=false"
+            : "available=true causalSequence=" + compensatedWorld.causalSequence()
+                + " movementSequence=" + compensatedWorld.movementSequence()
+                + " causallyBounded=" + compensatedWorld.causallyBounded()));
+    mergedTrace.add("TICK_RELIABILITY level=" + tickReliability.reliability()
+        + " reasons=" + tickReliability.reasons());
     mergedTrace.add("FRONTIER candidates=" + predictedAfter.size()
         + " predictionTick=" + predictionTick
         + " retained=" + !predictedAfter.isEmpty());
