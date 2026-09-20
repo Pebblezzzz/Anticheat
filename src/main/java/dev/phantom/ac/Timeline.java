@@ -130,6 +130,6 @@ public final class Timeline {
   public static List<InputSample> projectInputs(Snapshot timeline){List<InputSample> out=new ArrayList<>();Input current=null;for(Event event:timeline.events()){if(event.packet().packet() instanceof ClientInput input)current=toSimulationInput(input);if(event.packet().packet() instanceof Move)out.add(new InputSample(event,Optional.ofNullable(current)));}return List.copyOf(out);}
   public static List<Long> worldChangeTicks(Snapshot timeline){List<Long> ticks=new ArrayList<>();for(Event event:timeline.events())if(event.packet().packet().mutatesWorld())ticks.add(event.serverTick());ticks.sort(java.util.Comparator.naturalOrder());return List.copyOf(ticks);}
   public record InputSample(Event movement,Optional<Input> input){public InputSample{Objects.requireNonNull(movement,"movement");input=Objects.requireNonNull(input,"input");}}
-  private static Input toSimulationInput(ClientInput input){return new Input(axis(input.forward(),input.backward()),axis(input.right(),input.left()),input.jump());}
+  private static Input toSimulationInput(ClientInput input){return new Input(axis(input.forward(),input.backward()),axis(input.left(),input.right()),input.jump());}
   private static int axis(boolean positive,boolean negative){return positive==negative?0:positive?1:-1;}
 }
