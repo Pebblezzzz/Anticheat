@@ -351,7 +351,7 @@ class Phase8PredictionRunnerTest {
 
     assertEquals(4, report.movementObservations(), report.results().toString());
     assertTrue(report.frames().getLast().trace().stream()
-        .anyMatch(line -> line.contains("TIMING_OFFSETS range=0..1")
+        .anyMatch(line -> line.contains("TIMING_OFFSETS range=2..3")
             && line.contains("exhaustive=true")),
         report.frames().getLast().trace().toString());
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
