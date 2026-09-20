@@ -26,3 +26,4 @@ No GrimAC source was copied or linked into this repository. GrimAC was consulted
 ## Validation scope
 
 Run `mvn test`. See [the Phase-0 architecture contract](docs/ARCHITECTURE.md) and `docs/VALIDATION.md` for the honest validation inventory and trace format.
+
