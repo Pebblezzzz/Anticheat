@@ -14,6 +14,7 @@ import dev.phantom.ac.Phase6Reachability.WorldBranch;
 import dev.phantom.ac.State.Player;
 import dev.phantom.ac.world.EntityCollisions;
 import dev.phantom.ac.world.WorldSnapshot;
+import dev.phantom.ac.world.WorldQueries;
 
 import java.util.*;
 import java.util.function.LongFunction;
@@ -1198,7 +1199,8 @@ public final class Phase8PredictionRunner {
           + " clientInference=unavailable");
     }
     double verticalVelocity = authority.velocity().y();
-    MovementEnvironment movementEnvironment = context.movementEnvironment();
+    MovementEnvironment movementEnvironment = authorityMovementEnvironment(
+        context, authority, world, trace);
     if (!authority.onGround()
         && movementEnvironment.fluid() == Fluid.NONE
         && !movementEnvironment.climbable()
@@ -1337,6 +1339,44 @@ public final class Phase8PredictionRunner {
     }
     return Optional.of(new ObservationHistory(
         previousPosition, lastPosition, previousTick, lastTick, priorGround));
+  }
+
+  private static MovementEnvironment authorityMovementEnvironment(
+      Packets.PlayerContext context,
+      Player authority,
+      WorldSnapshot world,
+      List<String> trace) {
+    MovementEnvironment fallback = context.movementEnvironment();
+    if (world == null) return fallback;
+
+    Maths.Aabb box = Maths.Aabb.playerAt(authority.position(), authority.pose());
+    WorldQueries.EnvironmentSample sample = WorldQueries.environment(
+        world,
+        new dev.phantom.ac.geometry.BlockBox(
+            box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()));
+    if (!sample.isDefinite() || (sample.inFluid() && !sample.allFluidHeightsKnown())) {
+      trace.add("ROOT_ENVIRONMENT source=authoritative-context reason=causal-world-environment-not-definite");
+      return fallback;
+    }
+
+    boolean sprint = fallback.sprinting();
+    boolean sneak = fallback.sneaking();
+    boolean swimming = fallback.swimmingInput();
+    boolean gliding = fallback.gliding();
+    MovementEnvironment resolved;
+    if (sample.water()) {
+      resolved = MovementEnvironment.vanillaWater(authority.onGround(), sprint, sneak, swimming);
+    } else if (sample.lava()) {
+      resolved = MovementEnvironment.vanillaLava(authority.onGround(), sprint, sneak);
+    } else if (sample.climbable()) {
+      resolved = MovementEnvironment.vanillaClimbable(authority.onGround(), sprint, sneak);
+    } else {
+      resolved = new MovementEnvironment(
+          Fluid.NONE, false, false, authority.onGround(), sprint, sneak,
+          false, gliding, 1.0, 1.0, 1.0);
+    }
+    trace.add("ROOT_ENVIRONMENT source=causal-packet-world environment=" + resolved);
+    return resolved;
   }
 
   private static Player playerFromAuthority(Packets.PlayerContext context) {
