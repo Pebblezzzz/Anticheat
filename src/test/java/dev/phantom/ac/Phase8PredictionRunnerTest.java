@@ -297,9 +297,9 @@ class Phase8PredictionRunnerTest {
         new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
         false, false, false, List.of());
 
-    // Tick 2 is a jump launched from a known stone floor. Its displacement is
-    // intentionally retained as observed evidence because the stale prediction
-    // cannot simulate the incomplete empty world.
+    // Tick 2 is a jump launched from a known stone floor. The jump transition
+    // is simulated without requiring support friction data from the empty
+    // packet-world snapshot.
     double jumpX = .5
         + new Simulation.Attributes(0.1).value()
             * Vanilla12111RichPhysics.FRICTION_SPEED_FACTOR
@@ -354,7 +354,9 @@ class Phase8PredictionRunnerTest {
         .anyMatch(line -> line.contains("TIMING_OFFSETS range=0..1")
             && line.contains("exhaustive=true")),
         report.frames().getLast().trace().toString());
-    assertFalse(report.results().get(2).evidence().uncertaintySources().isEmpty(),
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().get(2).verdict(), report.results().toString());
+    assertTrue(report.results().get(2).evidence().uncertaintySources().isEmpty(),
         report.results().toString());
   }
 
@@ -700,7 +702,7 @@ class Phase8PredictionRunnerTest {
         .anyMatch(line -> line.contains("TIMING_OFFSETS range=0..1")
             && line.contains("exhaustive=true")),
         report.frames().getLast().trace().toString());
-    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+    assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE,
         report.results().getLast().verdict(), report.results().toString());
   }
 
