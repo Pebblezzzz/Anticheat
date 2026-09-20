@@ -1212,8 +1212,11 @@ public final class Phase8PredictionRunner {
         || targetTick < 2L
         || previousObservedMovementPosition == null
         || lastObservedMovementPosition == null
-        || previousObservedMovementClientTick != targetTick - 2L
-        || lastObservedMovementClientTick != targetTick - 1L) {
+        || previousObservedMovementClientTick < 0L
+        || lastObservedMovementClientTick < 0L
+        || previousObservedMovementClientTick + 1L != lastObservedMovementClientTick
+        || targetTick <= lastObservedMovementClientTick
+        || targetTick - lastObservedMovementClientTick > 2L) {
       return Optional.empty();
     }
 
