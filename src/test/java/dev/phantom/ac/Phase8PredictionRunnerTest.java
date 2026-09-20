@@ -767,4 +767,61 @@ class Phase8PredictionRunnerTest {
         report.frames().toString());
   }
 
+  @Test
+  void falseImpossibleDoesNotPoisonNextFreshAuthoritativeObservation() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    Player authorityState = anchor();
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        authorityState.position(), authorityState.velocity(),
+        false, false, false, List.of());
+
+    var first = runner.process(
+        "fresh-witness-after-contradiction",
+        List.of(
+            new RawPacket(
+                1, 10L, authority,
+                Packets.CaptureProvenance.fromAdapter("test-authority", authority, 0L, 0L)),
+            new RawPacket(
+                2, 20L,
+                new Move(authorityState.position(), 0f, 0f, true, 1L)),
+            new RawPacket(
+                3, 30L,
+                new Move(new Maths.Vec3(20.5, 64.0, 0.5), 0f, 0f, true, 2L))),
+        floorWorld(),
+        anchor(),
+        0L);
+
+    assertEquals(
+        Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        first.results().getLast().verdict(),
+        first.results().toString());
+    assertEquals(0, runner.candidateCount(), first.toString());
+
+    var second = runner.process(
+        "fresh-witness-after-contradiction",
+        List.of(
+            new RawPacket(
+                4, 40L, authority,
+                Packets.CaptureProvenance.fromAdapter("test-authority", authority, 3L, 3L)),
+            new RawPacket(
+                5, 50L,
+                new Move(authorityState.position(), 0f, 0f, true, 3L))),
+        floorWorld(),
+        anchor(),
+        0L);
+
+    assertEquals(1, second.movementObservations(), second.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        second.results().getFirst().verdict(),
+        second.results().toString());
+    assertTrue(
+        second.frames().getFirst().trace().stream()
+            .anyMatch(line -> line.contains("AUTHORITATIVE_ZERO_DELTA_WITNESS")),
+        second.frames().toString());
+    assertTrue(second.candidateFrontierRetained(), second.toString());
+  }
+
 }
