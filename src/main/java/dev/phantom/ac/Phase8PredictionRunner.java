@@ -468,10 +468,7 @@ public final class Phase8PredictionRunner {
        * observation. This avoids treating Bukkit's server-side velocity as an
        * atomic client-tick velocity.
        */
-      boolean authoritativeRootNeedsVelocityBootstrap = isAuthoritativeRootFrontier(
-          observedBefore, tick);
-      if ((prediction.isEmpty() || authoritativeRootNeedsVelocityBootstrap)
-          && move.position() != null) {
+      if (prediction.isEmpty() && move.position() != null) {
         Optional<Candidate> bootstrap = bootstrapPredictionFromObservedMovement(
             packet, move, observedBefore, observedAfter, tick, world, trace);
         if (bootstrap.isPresent()) {
