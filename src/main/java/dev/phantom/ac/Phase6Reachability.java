@@ -671,7 +671,7 @@ public final class Phase6Reachability {
               }
 
               MovementEnvironment environment =
-                  movementEnvironmentFor(sample, pre, input);
+                  movementEnvironmentFor(sample, pre);
               Simulation.Environment simulationEnvironment = environmentFor(environment);
 
               Phase5MovementAuthority.SimulationContext physicsContext =
@@ -1134,10 +1134,16 @@ public final class Phase6Reachability {
 
   private static MovementEnvironment movementEnvironmentFor(
       WorldQueries.EnvironmentSample sample,
-      Context context,
-      AdvancedInput input) {
-    boolean sprint = input.sprint();
-    boolean sneak = input.sneak();
+      Context context) {
+    /*
+     * AdvancedInput contains the per-tick movement command that was simulated.
+     * Physical sprint/sneak state is separate client state and must be retained
+     * from the context rather than inferred from a key-state bit. This matters
+     * for live PlayerInput packets: the sprint key may be held while the
+     * character is not actually in the sprinting movement state.
+     */
+    boolean sprint = context.movementEnvironment().sprinting();
+    boolean sneak = context.movementEnvironment().sneaking();
     boolean swimming = context.pose() == Pose.SWIMMING;
     boolean gliding = !sample.inFluid() && !sample.climbable()
         && context.movementEnvironment().gliding();
