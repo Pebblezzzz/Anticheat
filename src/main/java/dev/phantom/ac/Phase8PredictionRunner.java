@@ -2193,7 +2193,7 @@ public final class Phase8PredictionRunner {
     return Set.copyOf(result);
   }
 
-  private static MovementEnvironment preserveClientLocomotionState(
+  static MovementEnvironment preserveClientLocomotionState(
       MovementEnvironment client,
       MovementEnvironment authority,
       boolean onGround) {
