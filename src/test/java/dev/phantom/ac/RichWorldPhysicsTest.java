@@ -62,6 +62,9 @@ class RichWorldPhysicsTest {
     void overlappingStartDoesNotTurnUpwardVelocityIntoLargeDownwardMotion() {
         WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
             .loadChunk(0, 0)
+            .loadChunk(-1, 0)
+            .loadChunk(0, -1)
+            .loadChunk(-1, -1)
             .setBlock(0, 70, 0, stone())
             .build();
         var player = new State.Player(
