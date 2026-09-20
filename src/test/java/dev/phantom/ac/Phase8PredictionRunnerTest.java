@@ -153,7 +153,7 @@ class Phase8PredictionRunnerTest {
     var second = runner.process(
         "stale-root", catchUp, floorWorld(), anchor(), 0L);
 
-    assertFalse(second.candidateFrontierRetained(), second.toString());
+    assertTrue(second.candidateFrontierRetained(), second.toString());
     assertTrue(second.frames().stream()
         .flatMap(frame -> frame.trace().stream())
         .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
@@ -540,10 +540,13 @@ class Phase8PredictionRunnerTest {
         .flatMap(frame -> frame.trace().stream())
         .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
         report.frames().toString());
-    assertTrue(report.frames().stream()
-        .flatMap(frame -> frame.trace().stream())
-        .anyMatch(line -> line.contains("FRONTIER_COMMITTED")),
-        report.frames().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("BOOTSTRAP_START simulationTick=3")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("CLIENT_MOVEMENT_BOOTSTRAP")
+            && line.contains("reconstructedStartVelocityVerified=true")),
+        report.frames().getLast().trace().toString());
   }
 
   @Test
