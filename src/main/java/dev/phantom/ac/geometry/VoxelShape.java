@@ -29,6 +29,7 @@ import dev.phantom.ac.geometry.Directions.Direction;
  */
 public final class VoxelShape implements Serializable {
 
+  private static final double COLLISION_EPSILON = 1.0E-7;
   private static final VoxelShape EMPTY = new VoxelShape(List.of(), false);
 
   private final List<BlockBox> boxes;
@@ -339,13 +340,18 @@ public final class VoxelShape implements Serializable {
     for (BlockBox collision : boxes) {
       if (!overlapsOnOtherAxes(axis, box, collision)) continue;
       if (amount > 0.0) {
-        // Distance from this box's high face to the collision's low face. It is
-        // negative when the two already overlap, which is exactly the correction
-        // vanilla applies to push the moving box back out.
+        /*
+         * Match Grim/vanilla AABB collision semantics: an already-overlapping
+         * moving box is not pushed backwards merely because it moves in the
+         * positive direction. Only a separation/contact distance in the requested
+         * direction can clip the motion.
+         */
         double gap = minOnAxis(axis, collision) - maxOnAxis(axis, box);
+        if (gap < -COLLISION_EPSILON) continue;
         if (gap < result) result = gap;
       } else {
         double gap = maxOnAxis(axis, collision) - minOnAxis(axis, box);
+        if (gap > COLLISION_EPSILON) continue;
         if (gap > result) result = gap;
       }
     }
