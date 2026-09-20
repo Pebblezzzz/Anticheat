@@ -442,7 +442,7 @@ class Phase8PredictionRunnerTest {
         Pose.STANDING,
         MovementEnvironment.dry(true, true, false),
         false,
-        dev.phantom.ac.world.EntityCollisions.NONE_TRACKED));
+        dev.phantom.ac.world.EntityCollisions.of(List.of())));
     Player observedJump = jump.state();
 
     PlayerContext staleAuthority = new PlayerContext(
