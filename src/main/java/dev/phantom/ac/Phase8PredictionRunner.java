@@ -3079,7 +3079,6 @@ public final class Phase8PredictionRunner {
       return;
     }
 
-    OptionalLong ordinalOrigin = recoverClientTickOriginFromRetainedOrdinals(normalizedHistory);
     if (ordinalOrigin.isPresent()) {
       clientTickOriginOffset = ordinalOrigin.getAsLong();
       clientTickOriginKnown = true;
