@@ -79,6 +79,29 @@ import dev.phantom.ac.geometry.BlockBox;
   }
 
   @Test
+  void packedSectionsMatchPacketEventsWholeLongLayout() {
+    BlockState air = BlockState.air();
+    BlockState stone = stoneBlock();
+    BlockState dirt = decode("minecraft:dirt", Map.of());
+    int bits = 5;
+    int valuesPerLong = 64 / bits;
+    int length = (4096 + valuesPerLong - 1) / valuesPerLong;
+    long[] data = new long[length];
+
+    // PacketEvents' BitStorage stores floor(64 / bits) whole entries per long;
+    // an entry never crosses a long boundary.
+    data[0] |= 1L << (11 * bits); // local index 11 = stone
+    data[1] |= 2L;                // local index 12 = dirt
+
+    var section = new dev.phantom.ac.Phase4WorldReplica.PackedSection(
+        0, new BlockState[] {air, stone, dirt}, data, bits, Map.of());
+
+    assertEquals(stone, section.stateAt(11));
+    assertEquals(dirt, section.stateAt(12));
+    assertEquals(air, section.stateAt(13));
+  }
+
+  @Test
   void backedSnapshotCarriesItsCausalVisibilityBoundary() {
     WorldSnapshot.Backend backend = new WorldSnapshot.Backend() {
       @Override public String version() { return Contracts.TARGET_VERSION; }
