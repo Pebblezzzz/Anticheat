@@ -542,6 +542,51 @@ public final class Phase8PredictionRunner {
         trace.add("PHASE7_REASONS " + movementTiming.reasons());
       }
 
+      /*
+       * A fresh server snapshot that exactly matches the client's reported position
+       * is a causal witness, not a physics root. Treat it as POSSIBLE and establish
+       * the observed state as the new trusted frontier. This prevents a stale
+       * prediction candidate from drifting away from a server-accepted movement and
+       * then manufacturing an IMPOSSIBLE result from that drift.
+       */
+      if (move.position() != null) {
+        AuthorityAnchor freshAuthority = freshCausalAuthority(packet);
+        if (freshAuthority != null
+            && positionsMatch(freshAuthority.context().serverPosition(), observedAfter.position())
+            && freshAuthority.context().movementEnvironment().onGround() == observedAfter.onGround()
+            && (move.onGround() == null
+                || move.onGround() == freshAuthority.context().movementEnvironment().onGround())) {
+          Candidate witness = authoritativeObservationWitness(
+              freshAuthority, observedAfter, tick.clientTick(), sequence);
+          SearchResult witnessSearch = new SearchResult(
+              Verdict.POSSIBLE,
+              Set.of(witness),
+              0,
+              1,
+              0, 0, 0, 0,
+              List.of("fresh causal server snapshot matches the observed movement state; no physics replay required"));
+          Phase8MovementValidation.Result result = validate(
+              playerId, packet, move, observedBefore, observedAfter, world,
+              tick, uncertaintySources, witnessSearch, true);
+          results.add(result);
+          possible++;
+          prediction = Set.of(witness);
+          predictionTick = tick.clientTick();
+          latestContinuation = Continuation.ACTIVE;
+          lastPositionClientTick = tick.clientTick();
+          rememberObservedMovement(observedBefore, observedAfter, tick);
+          trace.add("EVIDENCE POSSIBLE reason=AUTHORITATIVE_ZERO_DELTA_WITNESS"
+              + " authoritySequence=" + freshAuthority.sequence()
+              + " authorityServerTick=" + freshAuthority.serverTick());
+          trace.add("FRONTIER_REESTABLISHED source=AUTHORITATIVE_ZERO_DELTA_WITNESS"
+              + " tick=" + tick.clientTick());
+          frames.add(frame(
+              sequence, packet, tick, move, observedBefore, observedAfter,
+              predictedBefore, prediction, world, List.of(), trace));
+          continue;
+        }
+      }
+
       if (!tick.known()) {
         uncertaintySources.add("client simulation tick has not been established by a client-tick boundary");
       }
@@ -738,16 +783,28 @@ public final class Phase8PredictionRunner {
           impossible++;
           latestContinuation = Continuation.IMPOSSIBLE;
           /*
-           * The prediction state is still the legitimate expected trajectory.
-           * Never overwrite it with the contradicted client position and never
-           * clear it merely because an observation failed.
+           * An impossible observation is evidence, not a trusted trajectory.
+           * Retaining the contradicted frontier causes repeated drift and can turn
+           * one model mismatch into a stream of false IMPOSSIBLE observations.
+           * Rebuild from fresh causal authority on the next movement instead.
            */
-          trace.add("FRONTIER_RETAINED reason=OBSERVATION_CONTRADICTION");
+          prediction = Set.of();
+          predictionTick = -1L;
+          clearObservedMovementHistory();
+          trace.add("FRONTIER_RESET reason=OBSERVATION_CONTRADICTION");
         }
         case UNCERTAIN -> {
           uncertain++;
           latestContinuation = Continuation.UNCERTAIN;
-          trace.add("FRONTIER_RETAINED reason=UNCERTAIN_OBSERVATION");
+          /*
+           * An uncertain observation is likewise not a safe baseline. Preserve
+           * evidence, but require the next clean observation to establish a new
+           * causally aligned root instead of carrying the ambiguity forward.
+           */
+          prediction = Set.of();
+          predictionTick = -1L;
+          clearObservedMovementHistory();
+          trace.add("FRONTIER_RESET reason=UNCERTAIN_OBSERVATION");
         }
       }
 
@@ -1182,6 +1239,81 @@ public final class Phase8PredictionRunner {
     }
 
     return Optional.of(new Vec3(dx * horizontalFactor, 0.0, dz * horizontalFactor));
+  }
+
+  private AuthorityAnchor freshCausalAuthority(Packets.RawPacket movementPacket) {
+    AuthorityAnchor authority = latestCausalAuthority(movementPacket);
+    if (authority == null) return null;
+    long movementTick = movementServerTick(movementPacket);
+    long age = movementTick - authority.serverTick();
+    if (age < 0L || age > 1L) return null;
+    return authority;
+  }
+
+  private static boolean positionsMatch(Vec3 left, Vec3 right) {
+    return positionDistanceSquared(left, right) <= POSITION_TOLERANCE * POSITION_TOLERANCE;
+  }
+
+  private static double positionDistanceSquared(Vec3 left, Vec3 right) {
+    double dx = left.x() - right.x();
+    double dy = left.y() - right.y();
+    double dz = left.z() - right.z();
+    return dx * dx + dy * dy + dz * dz;
+  }
+
+  private static Candidate authoritativeObservationWitness(
+      AuthorityAnchor authority,
+      Player observed,
+      long simulationTick,
+      long movementSequence) {
+    Player authoritative = playerFromAuthority(authority.context());
+    Player witnessPlayer = new Player(
+        observed.position(),
+        authoritative.velocity(),
+        observed.yaw(),
+        observed.pitch(),
+        observed.onGround(),
+        authoritative.gamemode(),
+        authoritative.effects(),
+        authoritative.awaitingTeleport(),
+        false,
+        observed.input(),
+        authoritative.attributes(),
+        authoritative.pose(),
+        authoritative.environment(),
+        observed.clientTickRange(),
+        authoritative.provenance(),
+        authoritative.uncertaintyReasons());
+    MovementEnvironment environment = movementEnvironmentOf(witnessPlayer);
+    Context context = new Context(
+        Math.max(0L, simulationTick),
+        witnessPlayer,
+        simulationEnvironmentFor(environment),
+        witnessPlayer.attributes(),
+        movementEffects(witnessPlayer),
+        witnessPlayer.pose(),
+        environment,
+        witnessPlayer.pose() == Pose.SLEEPING,
+        EntityCollisions.of(authority.context().entityBoxes()));
+    return new Candidate(
+        nextWitnessCandidateId(),
+        context,
+        new Phase6Reachability.Provenance(
+            0L,
+            authority.sequence(),
+            Math.max(0L, simulationTick),
+            "AUTHORITATIVE_ZERO_DELTA",
+            "AUTHORITY",
+            "None",
+            List.of(
+                "fresh server snapshot matches the observed client position",
+                "server snapshot is used only as an observation witness, never as a physics replay root"),
+            1,
+            List.of()));
+  }
+
+  private long nextWitnessCandidateId() {
+    return nextCandidateId++;
   }
 
   private static Player playerFromAuthority(Packets.PlayerContext context) {
