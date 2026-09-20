@@ -712,4 +712,53 @@ class Phase8PredictionRunnerTest {
         report.results().toString());
   }
 
+  @Test
+  void freshAuthorityResyncUsesMovementBoundaryNotNonAtomicClientWatermark() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    Player authorityState = anchor();
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        authorityState.position(), authorityState.velocity(),
+        false, false, false, List.of());
+
+    runner.process(
+        "fresh-authority-boundary",
+        List.of(
+            new RawPacket(
+                1, 10L, authority,
+                Packets.CaptureProvenance.fromAdapter("test-authority", authority, 0L, 0L)),
+            new RawPacket(
+                2, 20L, new Move(authorityState.position(), 0f, 0f, true, 1L))),
+        floorWorld(),
+        anchor(),
+        0L);
+
+    var report = runner.process(
+        "fresh-authority-boundary",
+        List.of(
+            new RawPacket(
+                3, 30L, authority,
+                Packets.CaptureProvenance.fromAdapter("test-authority", authority, 100L, 10L)),
+            new RawPacket(
+                4, 40L,
+                new Move(authorityState.position(), 0f, 0f, true, 100L))),
+        floorWorld(),
+        anchor(),
+        0L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(
+        report.frames().stream()
+            .flatMap(frame -> frame.trace().stream())
+            .anyMatch(line -> line.contains("ROOT_REFRESH reason=PREDICTION_LAG")
+                && line.contains("rootTick=99")
+                && line.contains("clientWatermarkUsedForSpatialRoot=false")),
+        report.frames().toString());
+  }
+
 }
