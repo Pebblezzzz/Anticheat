@@ -31,6 +31,38 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void canonicalPhysicsUsesPhysicalSprintStateNotHeldKeyState() {
+    var world = floorWorld();
+    var effects = Phase5Mechanics.MovementEffects.NONE;
+    var attrs = Simulation.Attributes.DEFAULT;
+    Player start = anchor();
+
+    var keySprint = new Simulation.AdvancedInput(1, 0, false, true, false);
+    var keyWalk = new Simulation.AdvancedInput(1, 0, false, false, false);
+    var physicalWalk = MovementEnvironment.dry(true, false, false);
+    var physicalSprint = MovementEnvironment.dry(true, true, false);
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+
+    var mismatchedKey = physics.step(new Vanilla12111RichPhysics.Context(
+        0L, start, keySprint, world, Simulation.Environment.DRY, attrs, effects,
+        Pose.STANDING, physicalWalk, false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+    var matchingWalk = physics.step(new Vanilla12111RichPhysics.Context(
+        0L, start, keyWalk, world, Simulation.Environment.DRY, attrs, effects,
+        Pose.STANDING, physicalWalk, false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+    var matchingSprint = physics.step(new Vanilla12111RichPhysics.Context(
+        0L, start, keySprint, world, Simulation.Environment.DRY, attrs, effects,
+        Pose.STANDING, physicalSprint, false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    assertEquals(matchingWalk.position(), mismatchedKey.position(),
+        "held sprint key must not override the physical sprint state");
+    assertNotEquals(matchingWalk.position(), matchingSprint.position(),
+        "physical sprint state must affect ground acceleration");
+  }
+
+  @Test
   void playerInputSprintKeyDoesNotImplyActualMovementSprint() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     var world = floorWorld();
