@@ -1328,7 +1328,7 @@ class Phase8PredictionRunnerTest {
 
 
   @Test
-  void truncatedTimingHistoryUsesRetainedClientTickOrdinalAsAbsoluteAnchor() {
+  void truncatedTimingHistoryRecoversOriginWhenRetainedExplicitMovePredatesBoundary() {
     Phase7Timing.Config timing = new Phase7Timing.Config(
         50_000_000L, 50_000_000L, 50_000_000L,
         new Phase7Timing.LatencyBounds(0L, 100_000_000L),
@@ -1346,58 +1346,55 @@ class Phase8PredictionRunnerTest {
         Pose.STANDING, environment,
         start.position(), start.velocity(), false, false, false, List.of());
 
-    Simulation.AdvancedInput forward =
-        new Simulation.AdvancedInput(-1, 0, false, false, false);
-    Player expected = start;
-    expected = new Vanilla12111RichPhysics().step(
-        new Vanilla12111RichPhysics.Context(
-            45L,
-            expected,
-            forward,
-            world,
-            Simulation.Environment.DRY,
-            expected.attributes(),
-            Phase5Mechanics.MovementEffects.NONE,
-            Pose.STANDING,
-            environment,
-            false,
-            dev.phantom.ac.world.EntityCollisions.of(List.of())))
-        .state();
-
     List<RawPacket> packets = new ArrayList<>();
     long sequence = 1L;
     for (int i = 0; i < 480; i++) {
       packets.add(new RawPacket(sequence++, (i + 1L) * 1_000_000L, authority));
     }
 
-    // Keep 44 client-tick boundaries before the held input and one more boundary
-    // before the explicit movement. The retained ordinal says input tick 44 and
-    // movement tick 45, while the absolute movement witness says client tick 46.
-    for (int i = 0; i < 44; i++) {
-      long received = 480_000_000L + i * 50_000_000L;
-      packets.add(new RawPacket(sequence++, received, new ClientTickEnd()));
+    /*
+     * This explicit move is the earliest retained client event after truncation.
+     * The old solver treated it as the relative origin and therefore forced offset=0.
+     * A later retained tick boundary provides the relative clock ordinal, allowing
+     * the absolute move ticks to reconstruct the fixed offset.
+     */
+    Move retainedAbsoluteMove = new Move(
+        start.position(), 0f, 0f, true, 100L);
+    packets.add(new RawPacket(
+        sequence++, 2_500_000_000L, retainedAbsoluteMove));
+
+    for (int i = 0; i < 9; i++) {
+      packets.add(new RawPacket(
+          sequence++, 2_550_000_000L + i * 50_000_000L, new ClientTickEnd()));
     }
-    packets.add(new RawPacket(sequence++, 2_730_000_000L,
+
+    packets.add(new RawPacket(
+        sequence++, 3_000_000_000L,
         new ClientInput(true, false, false, false, false, false, false)));
-    packets.add(new RawPacket(sequence++, 2_780_000_000L, new ClientTickEnd()));
-    packets.add(new RawPacket(sequence++, 2_830_000_000L,
-        new Move(expected.position(), expected.yaw(), expected.pitch(), expected.onGround(), 46L)));
+
+    Move finalMove = new Move(
+        new Maths.Vec3(start.position().x(), start.position().y(),
+            start.position().z() + 0.01),
+        0f, 0f, true, 110L);
+    packets.add(new RawPacket(
+        sequence, 3_050_000_000L, finalMove));
 
     var report = runner.process(
-        "truncated-ordinal-anchor",
+        "truncated-explicit-anchor",
         packets,
         world,
         start,
         0L);
 
     assertTrue(report.frames().getLast().trace().stream()
-        .anyMatch(line -> line.equals("INPUT_TICK_ORIGIN known=true offset=1")),
+        .anyMatch(line -> line.equals("INPUT_TICK_ORIGIN known=true offset=100")),
         report.frames().getLast().trace().toString());
     assertTrue(report.frames().getLast().trace().stream()
-        .anyMatch(line -> line.contains("selectedSeq=525,selectedTick=45")),
+        .anyMatch(line -> !line.contains("INPUT_TICK_ORIGIN known=false")),
         report.frames().getLast().trace().toString());
-    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
-        report.results().getLast().verdict(), report.results().toString());
+    assertTrue(report.results().getLast().evidence().uncertaintySources().stream()
+        .noneMatch(reason -> reason.contains("absolute client-tick origin is not recoverable")),
+        report.results().toString());
   }
 
 
