@@ -418,6 +418,72 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void inertialContinuationSurvivesLateInputRelease() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+
+    Player start = new Player(
+        new Maths.Vec3(.5, 64.0, .5),
+        Maths.Vec3.ZERO,
+        0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        new Simulation.Attributes(.1), Pose.STANDING, State.Environment.DRY,
+        State.TickRange.unknown(), State.Provenance.UNKNOWN, Set.of());
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    var first = physics.step(new Vanilla12111RichPhysics.Context(
+        0,
+        start,
+        new Simulation.AdvancedInput(1, 0, false, false, false),
+        world,
+        Simulation.Environment.DRY,
+        start.attributes(),
+        Phase5Mechanics.MovementEffects.NONE,
+        Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of())));
+    var second = physics.step(new Vanilla12111RichPhysics.Context(
+        1,
+        first.state(),
+        new Simulation.AdvancedInput(0, 0, false, false, false),
+        world,
+        Simulation.Environment.DRY,
+        first.state().attributes(),
+        Phase5Mechanics.MovementEffects.NONE,
+        Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of())));
+
+    var report = runner.process(
+        "late-release-inertia",
+        List.of(
+            new RawPacket(1, 10, authority),
+            new RawPacket(2, 20, new Move(start.position(), 0f, 0f, true, 0L)),
+            // Input is captured on the tick-0 side of the boundary and remains
+            // the last known state until the release arrives after tick-2 movement.
+            new RawPacket(3, 30, new ClientInput(true, false, false, false, false, false, false)),
+            new RawPacket(4, 40, new ClientTickEnd()),
+            new RawPacket(5, 50, new Move(first.state().position(), 0f, 0f, true, 1L)),
+            new RawPacket(6, 60, new ClientTickEnd()),
+            new RawPacket(7, 70, new Move(second.state().position(), 0f, 0f, true, 2L)),
+            new RawPacket(8, 80, new ClientInput(false, false, false, false, false, false, false))),
+        world, start, 0L);
+
+    assertEquals(3, report.movementObservations(), report.results().toString());
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getLast().verdict(), report.results().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("CLIENT_OBSERVED_INERTIAL_CONTINUATION")),
+        report.frames().getLast().trace().toString());
+  }
+
+  @Test
   void staleServerVelocityDoesNotFalseFlagSprintJumpBootstrap() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
