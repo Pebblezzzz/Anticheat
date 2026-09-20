@@ -1394,4 +1394,69 @@ class Phase8PredictionRunnerTest {
         report.frames().getLast().trace().toString());
   }
 
+
+  @Test
+  void truncatedTimingHistoryRecoversOriginDespiteUnrelatedOutOfOrderPacket() {
+    Phase7Timing.Config timing = new Phase7Timing.Config(
+        50_000_000L, 50_000_000L, 50_000_000L,
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        250_000_000L,
+        3,
+        128);
+
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
+    WorldSnapshot world = floorWorld();
+    Player start = anchor();
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    List<RawPacket> packets = new ArrayList<>();
+    packets.add(new RawPacket(1L, 1_000_000L, new ClientTickEnd()));
+    packets.add(new RawPacket(2L, 2_000_000L,
+        new Move(start.position(), 0f, 0f, true, 1L)));
+
+    long sequence = 3L;
+    long baseNanos = 10_000_000L;
+    for (int i = 0; i < 510; i++) {
+      long received = baseNanos + i;
+      if (i == 250) received += 2_000L;
+      if (i == 251) received -= 2_000L;
+      packets.add(new RawPacket(sequence++, received, authority));
+    }
+
+    for (int i = 0; i < 10; i++) {
+      packets.add(new RawPacket(
+          sequence++, 30_000_000L + i * 50_000_000L, new ClientTickEnd()));
+    }
+
+    packets.add(new RawPacket(
+        sequence++, 530_000_000L,
+        new ClientInput(true, false, false, false, false, false, false)));
+
+    Move observed = new Move(
+        new Maths.Vec3(start.position().x() + 0.1, start.position().y(), start.position().z()),
+        0f, 0f, true, 11L);
+    packets.add(new RawPacket(sequence, 531_000_000L, observed));
+
+    var report = runner.process(
+        "truncated-origin-out-of-order",
+        packets,
+        world,
+        start,
+        0L);
+
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("INPUT_TICK_ORIGIN known=true")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.results().getLast().verdict()
+            != Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        report.results().toString());
+  }
+
+
 }
