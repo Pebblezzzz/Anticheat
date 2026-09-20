@@ -490,7 +490,7 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
-  void staleResyncUsesInputFromTheSimulatedTickNotTheLatestInput() {
+  void staleResyncBootstrapsObservedMovementAtTheSimulationTick() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
     double movementSpeed = 0.1;
@@ -513,7 +513,7 @@ class Phase8PredictionRunnerTest {
         new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 1L)));
 
     // Advance to tick 4, then change input. The stale resync for the tick-4
-    // movement must simulate tick 3 with the earlier forward+sprint input.
+    // movement must bootstrap the observed movement from its tick-3 boundary.
     packets.add(new RawPacket(5, 50, new ClientTickEnd()));
     packets.add(new RawPacket(6, 60, new ClientTickEnd()));
     packets.add(new RawPacket(7, 70, new ClientTickEnd()));
