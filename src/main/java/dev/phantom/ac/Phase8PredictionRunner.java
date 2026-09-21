@@ -1541,6 +1541,13 @@ public final class Phase8PredictionRunner {
     if (!tick.known()) return;
 
     /*
+     * Track the latest position-bearing client tick independently of verdict.
+     * Uncertainty changes confidence, not chronology: a second position packet
+     * carrying this same tick is still sub-tick movement and must remain unresolved.
+     */
+    lastPositionClientTick = tick.clientTick();
+
+    /*
      * Keep the last two distinct client-tick endpoints. A client can emit
      * multiple position packets inside one client tick; treating those packets
      * as separate tick endpoints destroys the adjacent-tick displacement used
