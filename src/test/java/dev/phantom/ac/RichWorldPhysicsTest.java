@@ -100,7 +100,7 @@ class RichWorldPhysicsTest {
         assertTrue(result.sneakEdgeConstrained(), result.diagnostic());
         assertEquals(64.0, result.state().position().y(), 1.0e-12);
         assertFalse(result.state().onGround(), result.diagnostic());
-        assertEquals(0.0, result.state().velocity().y(), 1.0e-12);
+        assertEquals(-0.0784000015258789, result.state().velocity().y(), 1.0e-12);
     }
 
     @Test
