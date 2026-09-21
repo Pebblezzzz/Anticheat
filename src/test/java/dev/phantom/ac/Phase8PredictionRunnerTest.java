@@ -1216,6 +1216,71 @@ class Phase8PredictionRunnerTest {
 
 
   @Test
+  void uncertainTimingStillAdvancesThePersistentFrontier() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    var first = runner.process(
+        "uncertain-frontier",
+        List.of(
+            new RawPacket(1, 10L, authority),
+            new RawPacket(2, 20L, new Move(
+                new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 1L))),
+        floorWorld(),
+        anchor(),
+        0L);
+
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        first.results().getFirst().verdict(), first.toString());
+
+    List<RawPacket> uncertainPackets = new ArrayList<>();
+    long sequence = 3L;
+    for (int i = 0; i < 513; i++) {
+      uncertainPackets.add(new RawPacket(
+          sequence++,
+          30L + i,
+          new ClientInput(false, false, false, false, false, false, false)));
+    }
+    uncertainPackets.add(new RawPacket(
+        sequence++,
+        10_000L,
+        new Move(new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 2L)));
+    uncertainPackets.add(new RawPacket(
+        sequence,
+        10_050L,
+        new Move(new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 3L)));
+
+    var second = runner.process(
+        "uncertain-frontier",
+        uncertainPackets,
+        floorWorld(),
+        anchor(),
+        0L);
+
+    assertTrue(second.results().stream().allMatch(
+        result -> result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE),
+        second.toString());
+    assertTrue(second.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
+        .anyMatch(line -> line.startsWith("FRONTIER_ADVANCED_UNCERTAIN")
+            && line.contains("tick=2")),
+        second.frames().toString());
+    assertTrue(second.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
+        .anyMatch(line -> line.startsWith("FRONTIER_ADVANCED_UNCERTAIN")
+            && line.contains("tick=3")),
+        second.frames().toString());
+    assertTrue(
+        second.frames().getLast().predictedAfter().stream()
+            .allMatch(candidate -> candidate.context().simulationTick() >= 3L),
+        second.frames().getLast().toString());
+  }
+
+  @Test
   void explicitClientTickTimingRangeIsExhaustivelyEvaluated() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
