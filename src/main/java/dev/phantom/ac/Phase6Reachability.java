@@ -58,7 +58,7 @@ public final class Phase6Reachability {
     }
   }
   public record TeleportConfirmation(int id) implements ExternalTransition{public TeleportConfirmation{if(id<0)throw new IllegalArgumentException("teleport id must be non-negative");}}
-  public enum MovementMode { SURVIVAL_GROUND, SURVIVAL_AIR, FLUID, CLIMBABLE, GLIDING, NON_SURVIVAL, UNKNOWN }
+  public enum MovementMode { SURVIVAL_GROUND, SURVIVAL_AIR, FLUID, CLIMBABLE, GLIDING, VEHICLE, NON_SURVIVAL, UNKNOWN }
   public enum WorldKnowledge { KNOWN, UNKNOWN, UNLOADED, UNSUPPORTED }
 
   public record SearchConfig(
@@ -485,7 +485,23 @@ public final class Phase6Reachability {
           "simulation horizon exceeds the configured Phase 6 envelope");
     }
 
-    List<Context> orderedStarts = new ArrayList<>(starts);
+    List<Context> orderedStarts = new ArrayList<>();
+    for (Context root : starts) {
+      orderedStarts.add(root);
+      for (GrimPredictionSeeds.Seed seed : GrimPredictionSeeds.expand(root)) {
+        orderedStarts.add(new Context(
+            root.simulationTick(),
+            seed.player(),
+            root.environment(),
+            root.attributes(),
+            root.effects(),
+            root.pose(),
+            root.movementEnvironment(),
+            root.sleeping(),
+            root.entityCollisions(),
+            root.uncertainty()));
+      }
+    }
     orderedStarts.sort(Comparator.comparing(Phase6Reachability::contextKey));
 
     TreeMap<String, Candidate> current = new TreeMap<>();
@@ -1113,6 +1129,7 @@ public final class Phase6Reachability {
     if ("creative".equals(player.gamemode()) || "spectator".equals(player.gamemode())) {
       return MovementMode.NON_SURVIVAL;
     }
+    if (context.movementEnvironment().vehicle().active()) return MovementMode.VEHICLE;
     if (context.movementEnvironment().gliding()) return MovementMode.GLIDING;
     if (context.movementEnvironment().fluid() != Phase5Mechanics.Fluid.NONE) return MovementMode.FLUID;
     if (context.movementEnvironment().climbable()) return MovementMode.CLIMBABLE;
@@ -1148,21 +1165,47 @@ public final class Phase6Reachability {
     boolean gliding = !sample.inFluid() && !sample.climbable()
         && context.movementEnvironment().gliding();
     if (sample.water()) {
-      return Phase5Mechanics.MovementEnvironment.vanillaWater(
-          context.player().onGround(), sprint, sneak, swimming);
+      return withVehicle(
+          Phase5Mechanics.MovementEnvironment.vanillaWater(
+              context.player().onGround(), sprint, sneak, swimming),
+          context.movementEnvironment().vehicle());
     }
     if (sample.lava()) {
-      return Phase5Mechanics.MovementEnvironment.vanillaLava(
-          context.player().onGround(), sprint, sneak);
+      return withVehicle(
+          Phase5Mechanics.MovementEnvironment.vanillaLava(
+              context.player().onGround(), sprint, sneak),
+          context.movementEnvironment().vehicle());
     }
     if (sample.climbable()) {
-      return Phase5Mechanics.MovementEnvironment.vanillaClimbable(
-          context.player().onGround(), sprint, sneak);
+      return withVehicle(
+          Phase5Mechanics.MovementEnvironment.vanillaClimbable(
+              context.player().onGround(), sprint, sneak),
+          context.movementEnvironment().vehicle());
     }
-    return new Phase5Mechanics.MovementEnvironment(
-        Phase5Mechanics.Fluid.NONE, false, false,
-        context.player().onGround(), sprint, sneak, false,
-        gliding, 1.0, 1.0, 1.0);
+    return withVehicle(
+        new Phase5Mechanics.MovementEnvironment(
+            Phase5Mechanics.Fluid.NONE, false, false,
+            context.player().onGround(), sprint, sneak, false,
+            gliding, 1.0, 1.0, 1.0),
+        context.movementEnvironment().vehicle());
+  }
+
+  private static MovementEnvironment withVehicle(
+      MovementEnvironment environment,
+      Phase5Mechanics.VehicleState vehicle) {
+    return new MovementEnvironment(
+        environment.fluid(),
+        environment.submerged(),
+        environment.climbable(),
+        environment.onGround(),
+        environment.sprinting(),
+        environment.sneaking(),
+        environment.swimmingInput(),
+        environment.gliding(),
+        environment.fluidSpeedMultiplier(),
+        environment.fluidDrag(),
+        environment.gravityMultiplier(),
+        vehicle);
   }
 
   private static Simulation.Environment environmentFor(MovementEnvironment env) {
