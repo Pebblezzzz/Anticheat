@@ -648,12 +648,53 @@ public final class Phase8PredictionRunner {
               ? tick.withTimingUncertaintyResolved(
                   "Phase 7 bounded simulation timing was exhaustively evaluated for every permitted offset")
               : tick;
+          boolean bootstrapGroundClaimMismatch = bootstrapCandidates.stream()
+              .allMatch(candidate ->
+                  move.onGround() != null
+                      && candidate.context().player().onGround() != move.onGround());
+          if (bootstrapGroundClaimMismatch) {
+            bootstrapUncertainty = new ArrayList<>(bootstrapUncertainty);
+            bootstrapUncertainty.add(
+                "client ground claim differs from the reconstructed physical ground state; bootstrap reachability ignores that client-only claim");
+            bootstrapValidationTick = new TickResolution(
+                tick.clientTick(),
+                tick.known(),
+                tick.exact(),
+                true,
+                tick.source(),
+                "client ground claim differs from the reconstructed physical ground state; movement reachability does not treat this claim mismatch as an IMPOSSIBLE contradiction");
+          }
+
+          Set<Phase6Reachability.ObservedField> bootstrapObservedFields =
+              bootstrapGroundClaimMismatch
+                  ? EnumSet.of(
+                      Phase6Reachability.ObservedField.POSITION,
+                      Phase6Reachability.ObservedField.ROTATION)
+                  : EnumSet.of(
+                      Phase6Reachability.ObservedField.POSITION,
+                      Phase6Reachability.ObservedField.ROTATION,
+                      Phase6Reachability.ObservedField.GROUND);
+
           Phase8MovementValidation.Result result = validate(
               playerId, packet, move, observedBefore, observedAfter, world,
               bootstrapValidationTick, bootstrapUncertainty, bootstrapSearch,
-              bootstrapTimingExhaustive);
+              bootstrapTimingExhaustive && !bootstrapGroundClaimMismatch,
+              bootstrapObservedFields);
           results.add(result);
-          possible++;
+          switch (result.verdict()) {
+            case POSSIBLE -> {
+              possible++;
+              latestContinuation = Continuation.ACTIVE;
+            }
+            case UNCERTAIN -> {
+              uncertain++;
+              latestContinuation = Continuation.UNCERTAIN;
+            }
+            case IMPOSSIBLE -> {
+              impossible++;
+              latestContinuation = Continuation.IMPOSSIBLE;
+            }
+          }
           rememberObservedMovement(observedBefore, observedAfter, tick);
           trace.add("EVIDENCE POSSIBLE reason=CLIENT_MOVEMENT_BOOTSTRAP"
               + " reconstructedStartVelocityVerified=true"
@@ -1657,6 +1698,21 @@ public final class Phase8PredictionRunner {
         && candidate.context().player().onGround() == observedBefore.onGround();
   }
 
+  private Optional<Candidate> physicalCandidateAtObservedPosition(
+      Vec3 position,
+      long maximumSimulationTick) {
+    return prediction.stream()
+        .filter(candidate -> candidate.context().simulationTick() <= maximumSimulationTick)
+        .filter(candidate -> positionMatches(
+            candidate.context().player().position(),
+            position))
+        .min(Comparator
+            .comparingLong((Candidate candidate) ->
+                Math.abs(maximumSimulationTick - candidate.context().simulationTick()))
+            .thenComparingDouble(candidate ->
+                positionDistanceSquared(candidate.context().player().position(), position)));
+  }
+
   private Optional<Candidate> recoverObservedInertialContinuation(
       Packets.RawPacket movementPacket,
       Packets.Move move,
@@ -1674,16 +1730,28 @@ public final class Phase8PredictionRunner {
       return Optional.empty();
     }
 
-    if (!positionMatches(lastObservedMovementPosition, observedBefore.position())
-        || observedBefore.onGround() != observedAfter.onGround()
-        || (move.onGround() != null && move.onGround() != observedAfter.onGround())) {
+    if (!positionMatches(lastObservedMovementPosition, observedBefore.position())) {
       return Optional.empty();
     }
 
+    /*
+     * Move.onGround is a client claim. Use the retained physical prediction
+     * state at this position instead of feeding that claim back into physics.
+     */
+    Optional<Candidate> physicalBeforeCandidate =
+        physicalCandidateAtObservedPosition(observedBefore.position(), tick.clientTick() - 1L);
+    if (physicalBeforeCandidate.isEmpty()) {
+      return Optional.empty();
+    }
+    Candidate physicalBefore = physicalBeforeCandidate.orElseThrow();
+    Player physicalBeforePlayer = physicalBefore.context().player();
+    MovementEnvironment physicalBeforeEnvironment =
+        physicalBefore.context().movementEnvironment();
+    boolean physicalBeforeGround = physicalBeforePlayer.onGround();
+
     AuthorityAnchor authority = freshCausalAuthority(movementPacket);
     if (authority == null
-        || !positionsMatch(authority.context().serverPosition(), observedBefore.position())
-        || authority.context().movementEnvironment().onGround() != observedBefore.onGround()) {
+        || !positionsMatch(authority.context().serverPosition(), observedBefore.position())) {
       return Optional.empty();
     }
 
@@ -1702,8 +1770,7 @@ public final class Phase8PredictionRunner {
     double currentDz = observedAfter.position().z() - observedBefore.position().z();
 
     double horizontalFactor;
-    if (observedBefore.onGround()) {
-      if (!lastObservedMovementPriorGround) return Optional.empty();
+    if (physicalBeforeGround) {
       int supportX = (int) Math.floor(previousObservedMovementPosition.x());
       int supportY = (int) Math.floor(previousObservedMovementPosition.y() - 1.0E-4);
       int supportZ = (int) Math.floor(previousObservedMovementPosition.z());
@@ -1723,7 +1790,7 @@ public final class Phase8PredictionRunner {
     double expectedDx = previousDx * horizontalFactor;
     double expectedDz = previousDz * horizontalFactor;
     double expectedDy;
-    if (observedBefore.onGround()) {
+    if (physicalBeforeGround) {
       if (Math.abs(currentDy) > POSITION_TOLERANCE) return Optional.empty();
       expectedDy = 0.0;
     } else {
@@ -1753,7 +1820,7 @@ public final class Phase8PredictionRunner {
         startVelocity,
         move.yaw() == null ? observedBefore.yaw() : move.yaw(),
         move.pitch() == null ? observedBefore.pitch() : move.pitch(),
-        observedBefore.onGround(),
+        physicalBeforeGround,
         authorityState.gamemode(),
         authorityState.effects(),
         authorityState.awaitingTeleport(),
@@ -1771,11 +1838,22 @@ public final class Phase8PredictionRunner {
         reconstructedStart,
         neutral,
         world,
-        simulationEnvironmentFor(environment),
+        simulationEnvironmentFor(
+            preserveClientLocomotionState(
+                physicalBeforeEnvironment,
+                withVehicle(
+                    authority.context().movementEnvironment(),
+                    authority.context().vehicleState()),
+                physicalBeforeGround)),
         reconstructedStart.attributes(),
         movementEffects(reconstructedStart),
         reconstructedStart.pose(),
-        environment,
+        preserveClientLocomotionState(
+            physicalBeforeEnvironment,
+            withVehicle(
+                authority.context().movementEnvironment(),
+                authority.context().vehicleState()),
+            physicalBeforeGround),
         reconstructedStart.pose() == Pose.SLEEPING,
         EntityCollisions.of(authority.context().entityBoxes()));
     Vanilla12111RichPhysics.StepResult step =
@@ -1783,9 +1861,14 @@ public final class Phase8PredictionRunner {
 
     if (step.state().uncertain()
         || step.collided()
-        || !positionsMatch(step.state().position(), observedAfter.position())
-        || step.state().onGround() != observedAfter.onGround()) {
+        || !positionsMatch(step.state().position(), observedAfter.position())) {
       return Optional.empty();
+    }
+
+    if (move.onGround() != null && move.onGround() != step.state().onGround()) {
+      trace.add("GROUND_CLAIM_SEPARATED recoveryPhysicalGround="
+          + step.state().onGround()
+          + " clientClaim=" + move.onGround());
     }
 
     trace.add("INERTIAL_RECOVERY previousDelta="
@@ -1793,7 +1876,8 @@ public final class Phase8PredictionRunner {
         + " expectedCurrentDelta=" + new Vec3(expectedDx, expectedDy, expectedDz)
         + " observedCurrentDelta=" + new Vec3(currentDx, currentDy, currentDz)
         + " friction=" + horizontalFactor
-        + " priorGround=" + lastObservedMovementPriorGround
+        + " priorPhysicalGround=" + physicalBeforeGround
+        + " clientGroundClaimBefore=" + observedBefore.onGround()
         + " inputHistoryExplanation=neutral-continuation");
 
     return Optional.of(candidateFromPlayer(
@@ -1820,11 +1904,15 @@ public final class Phase8PredictionRunner {
     AuthorityAnchor authority = freshCausalAuthority(movementPacket);
     if (authority == null) return Optional.empty();
 
-    if (!positionsMatch(authority.context().serverPosition(), observedBefore.position())
-        || authority.context().movementEnvironment().onGround() != observedBefore.onGround()
-        || (move.onGround() != null && move.onGround() != observedAfter.onGround())) {
+    if (!positionsMatch(authority.context().serverPosition(), observedBefore.position())) {
       return Optional.empty();
     }
+
+    Optional<Candidate> physicalBeforeCandidate =
+        physicalCandidateAtObservedPosition(observedBefore.position(), tick.clientTick() - 1L);
+    boolean physicalGround = physicalBeforeCandidate
+        .map(candidate -> candidate.context().player().onGround())
+        .orElse(authority.context().movementEnvironment().onGround());
 
     long simulationTick = tick.clientTick() - 1L;
     InputConstraint input = inputForSimulationTick(
@@ -1855,8 +1943,14 @@ public final class Phase8PredictionRunner {
 
     Set<Candidate> candidates = new LinkedHashSet<>();
     for (MovementInputState locomotion : locomotionOptions) {
-      MovementEnvironment environment = withLocomotionState(
-          authorityEnvironment, locomotion.sprinting(), locomotion.sneaking());
+      MovementEnvironment environment = preserveClientLocomotionState(
+          physicalBeforeCandidate
+              .map(candidate -> candidate.context().movementEnvironment())
+              .orElse(authorityEnvironment),
+          withVehicle(authorityEnvironment, authority.context().vehicleState()),
+          physicalGround);
+      environment = withLocomotionState(
+          environment, locomotion.sprinting(), locomotion.sneaking());
       Simulation.AdvancedInput advancedInput = new Simulation.AdvancedInput(
           keyState.forward(),
           keyState.strafe(),
@@ -1869,7 +1963,7 @@ public final class Phase8PredictionRunner {
           authorityState.velocity(),
           yaw,
           pitch,
-          observedBefore.onGround(),
+          physicalGround,
           authorityState.gamemode(),
           authorityState.effects(),
           authorityState.awaitingTeleport(),
@@ -1934,15 +2028,20 @@ public final class Phase8PredictionRunner {
           new Vanilla12111RichPhysics().step(context);
 
       if (step.state().uncertain()
-          || !positionsMatch(step.state().position(), observedAfter.position())
-          || step.state().onGround() != observedAfter.onGround()) {
+          || !positionsMatch(step.state().position(), observedAfter.position())) {
         trace.add("BOOTSTRAP_REJECTED locomotion=" + locomotion
             + " reason=canonical-physics-replay-did-not-reproduce"
             + " reconstructed=" + step.state().position()
             + " observed=" + observedAfter.position()
             + " reconstructedGround=" + step.state().onGround()
-            + " observedGround=" + observedAfter.onGround());
+            + " clientGroundClaim=" + observedAfter.onGround());
         continue;
+      }
+
+      if (move.onGround() != null && move.onGround() != step.state().onGround()) {
+        trace.add("GROUND_CLAIM_SEPARATED bootstrapPhysicalGround="
+            + step.state().onGround()
+            + " clientClaim=" + move.onGround());
       }
 
       Player after = new Player(
