@@ -148,13 +148,13 @@ class GrimParityPhysicsTest {
             0, airborne, sprintForward, world, Simulation.Environment.DRY,
             new Simulation.Attributes(0.1), Phase5Mechanics.MovementEffects.NONE,
             Phase5Mechanics.Pose.STANDING, airEnvironment, false, false,
-            EntityCollisions.NONE_TRACKED, null, true);
+            EntityCollisions.of(List.of()), null, true);
     Vanilla12111RichPhysics.Context pureAirContext =
         new Vanilla12111RichPhysics.Context(
             0, airborne, sprintForward, world, Simulation.Environment.DRY,
             airborne.attributes(), Phase5Mechanics.MovementEffects.NONE,
             Phase5Mechanics.Pose.STANDING, airEnvironment, false, false,
-            EntityCollisions.NONE_TRACKED, null, false);
+            EntityCollisions.of(List.of()), null, false);
 
     var temporal = new Vanilla12111RichPhysics().step(grimTemporalContext);
     var pureAir = new Vanilla12111RichPhysics().step(pureAirContext);
