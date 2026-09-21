@@ -92,8 +92,20 @@ public final class GrimPredictionEngine {
 
       for (var entry : startsByMovementState.entrySet()) {
         MovementInputState state = entry.getKey();
+        /*
+         * Grim's 1.21.2+ end-tick input loop has an important physical-state
+         * rule: while actually sprinting and not swimming it suppresses
+         * backwards/neutral locomotion and evaluates forward movement. The
+         * server-side sprint flag is therefore a movement constraint, not just
+         * another field carried into physics.
+         */
+        int forward = inputOption.forward().orElse(0);
+        if (state.sprinting() && !environment.swimmingInput()) {
+          forward = 1;
+        }
+
         InputConstraint simulationInput = new InputConstraint(
-            inputOption.forward(),
+            java.util.OptionalInt.of(forward),
             inputOption.strafe(),
             inputOption.jump(),
             java.util.Optional.of(state.sprinting()),
