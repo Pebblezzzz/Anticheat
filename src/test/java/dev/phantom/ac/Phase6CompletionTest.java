@@ -121,6 +121,7 @@ class Phase6CompletionTest {
     assertFalse(result.state().uncertain(), result.diagnostic());
     return result.state();
   }
+
   @Test
   void exactInputProducesOnlyAuthenticPhase5States() {
     SearchResult result = exact(start(), List.of(WALK), floorWorld());
