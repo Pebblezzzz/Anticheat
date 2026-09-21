@@ -299,6 +299,13 @@ public final class Vanilla12111RichPhysics {
                     velocity.z());
         }
 
+        SneakEdgeAdjustment sneakEdgeAdjustment =
+                maybeBackOffFromEdge(context, start, velocity);
+        if (sneakEdgeAdjustment.uncertain()) {
+            return uncertain(context, sneakEdgeAdjustment.diagnostic());
+        }
+        velocity = sneakEdgeAdjustment.movement();
+
         RichWorldCollision.Result collision =
                 RichWorldCollision.resolve(
                         context.world(),
@@ -734,6 +741,128 @@ public final class Vanilla12111RichPhysics {
         double y = Math.abs(velocity.y()) < 0.003 ? 0.0 : velocity.y();
         return new Vec3(x, y, z);
     }
+
+    private SneakEdgeAdjustment maybeBackOffFromEdge(
+            Context context,
+            Aabb boundingBox,
+            Vec3 requested) {
+        Player s = context.state();
+        if (!context.input().sneak()
+                || context.flying()
+                || !context.movementEnvironment().sneaking()
+                || !s.onGround()
+                || context.movementEnvironment().fluid() != Phase5Mechanics.Fluid.NONE
+                || context.movementEnvironment().climbable()
+                || context.movementEnvironment().gliding()
+                || (requested.x() == 0.0 && requested.z() == 0.0)) {
+            return new SneakEdgeAdjustment(requested, false, "");
+        }
+
+        double x = requested.x();
+        double z = requested.z();
+
+        SneakEdgeProbe probe = sneakEdgeProbe(context, boundingBox, x, 0.0);
+        while (!probe.uncertain() && probe.empty() && x != 0.0) {
+            double next = reduceSneakEdgeComponent(x);
+            if (next == x) break;
+            x = next;
+            probe = sneakEdgeProbe(context, boundingBox, x, 0.0);
+        }
+        if (probe.uncertain()) {
+            return new SneakEdgeAdjustment(requested, true, probe.diagnostic());
+        }
+        if (probe.empty() && x == 0.0) {
+            // zero is already the safest X component
+            x = 0.0;
+        }
+
+        probe = sneakEdgeProbe(context, boundingBox, 0.0, z);
+        while (!probe.uncertain() && probe.empty() && z != 0.0) {
+            double next = reduceSneakEdgeComponent(z);
+            if (next == z) break;
+            z = next;
+            probe = sneakEdgeProbe(context, boundingBox, 0.0, z);
+        }
+        if (probe.uncertain()) {
+            return new SneakEdgeAdjustment(requested, true, probe.diagnostic());
+        }
+        if (probe.empty() && z == 0.0) {
+            z = 0.0;
+        }
+
+        while (x != 0.0 && z != 0.0) {
+            probe = sneakEdgeProbe(context, boundingBox, x, z);
+            if (probe.uncertain()) {
+                return new SneakEdgeAdjustment(requested, true, probe.diagnostic());
+            }
+            if (!probe.empty()) break;
+
+            double nextX = reduceSneakEdgeComponent(x);
+            double nextZ = reduceSneakEdgeComponent(z);
+            if (nextX == x && nextZ == z) break;
+            x = nextX;
+            z = nextZ;
+        }
+
+        Vec3 adjusted = new Vec3(x, requested.y(), z);
+        return new SneakEdgeAdjustment(adjusted, false,
+                adjusted.equals(requested)
+                        ? ""
+                        : "Grim-style sneak edge backoff applied in 0.05 block increments");
+    }
+
+    private double reduceSneakEdgeComponent(double value) {
+        if (value < 0.05 && value >= -0.05) {
+            return 0.0;
+        }
+        return value > 0.0 ? value - 0.05 : value + 0.05;
+    }
+
+    private SneakEdgeProbe sneakEdgeProbe(
+            Context context,
+            Aabb boundingBox,
+            double x,
+            double z) {
+        double maxStepDown = STEP_HEIGHT;
+        Aabb probeBox = new Aabb(
+                boundingBox.minX() + x,
+                boundingBox.minY() - maxStepDown,
+                boundingBox.minZ() + z,
+                boundingBox.maxX() + x,
+                boundingBox.maxY() - maxStepDown,
+                boundingBox.maxZ() + z);
+        dev.phantom.ac.geometry.BlockBox blockBox =
+                new dev.phantom.ac.geometry.BlockBox(
+                        probeBox.minX(), probeBox.minY(), probeBox.minZ(),
+                        probeBox.maxX(), probeBox.maxY(), probeBox.maxZ());
+
+        var blockCollision = WorldQueries.collisions(context.world(), blockBox);
+        if (!blockCollision.isDefinite()) {
+            return new SneakEdgeProbe(false, true,
+                    "sneak edge backoff world collision probe is incomplete coverage="
+                            + blockCollision.coverage());
+        }
+        if (!blockCollision.isEmpty()) {
+            return new SneakEdgeProbe(false, false, "");
+        }
+
+        var entityCollision = context.entityCollisions().boxesIn(blockBox);
+        if (!entityCollision.isDefinite()) {
+            return new SneakEdgeProbe(false, true,
+                    "sneak edge backoff entity collision probe is incomplete");
+        }
+        return new SneakEdgeProbe(entityCollision.isEmpty(), false, "");
+    }
+
+    private record SneakEdgeAdjustment(
+            Vec3 movement,
+            boolean uncertain,
+            String diagnostic) {}
+
+    private record SneakEdgeProbe(
+            boolean empty,
+            boolean uncertain,
+            String diagnostic) {}
 
     private static BlockState supportBlock(WorldSnapshot world, int x, int y, int z) {
         if (world.coverageAt(x, y, z) != Coverage.KNOWN) return null;
