@@ -128,7 +128,7 @@ public final class Vanilla12111RichPhysics {
 
         if (gliding) {
             Vec3 glideVelocity = GrimElytraPhysics.tick(
-                    s.velocity(),
+                    context.clientVelocity(),
                     s.yaw(),
                     s.pitch(),
                     gravity,
@@ -175,7 +175,7 @@ public final class Vanilla12111RichPhysics {
 
         // KnownInput controls direction; physical locomotion state controls sprint/sneak effects.
         // This mirrors Grim's separation between packet input and the player's physical state.
-        Vec3 velocity = s.velocity();
+        Vec3 velocity = context.clientVelocity();
 
         if (fluid == Phase5Mechanics.Fluid.WATER) {
             velocity = GrimFluidPhysics.applyCurrent(velocity, fluidSample);
@@ -484,7 +484,7 @@ public final class Vanilla12111RichPhysics {
                 GrimVehiclePhysics.tick(
                         vehicle,
                         context.input(),
-                        context.state().velocity(),
+                        context.clientVelocity(),
                         context.movementEnvironment());
 
         double stepHeight = switch (vehicle.type()) {
