@@ -25,12 +25,15 @@ final class Phase8ClientModelTest {
         anchor,
         new Vec3(0.0, 0.0830778, 0.02),
         new Vec3(0.12, 0.0830778, 0.01),
+        new Vec3(0.13, 0.08, 0.011),
         state.serverVelocity(),
         state.serverTick(),
         "test-observation");
 
     assertEquals(new Vec3(0.12, 0.0830778, 0.01), state.clientVelocity());
+    assertEquals(new Vec3(0.13, 0.08, 0.011), state.predictedVelocity());
     assertEquals(new Vec3(0.0, -0.0784, 0.0), state.serverVelocity());
+    assertTrue(state.serverVelocityIsDistinctFromClientVelocity());
     assertEquals(new Vec3(0.0, 0.0830778, 0.02), state.actualMovement());
     assertEquals(44L, state.serverTick());
   }
