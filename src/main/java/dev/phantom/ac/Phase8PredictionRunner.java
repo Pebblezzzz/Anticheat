@@ -1060,8 +1060,22 @@ public final class Phase8PredictionRunner {
             + " candidateInput=" + closestPrediction.provenance().input());
       }
 
+      Set<Candidate> fullMatches = matchingCandidates(prediction, observedAfter, move);
+      Set<Candidate> positionRotationMatches =
+          matchingCandidatesWithoutGround(prediction, observedAfter, move);
+      boolean groundClaimMismatch =
+          fullMatches.isEmpty()
+              && move.onGround() != null
+              && !positionRotationMatches.isEmpty();
+      if (groundClaimMismatch) {
+        trace.add("GROUND_CLAIM_MISMATCH"
+            + " observed=" + observedAfter.onGround()
+            + " predictedCandidates=" + positionRotationMatches.size()
+            + " movementReachability=not-impossible");
+      }
+
       Optional<Candidate> inertialRecovery = Optional.empty();
-      if (matchingCandidates(prediction, observedAfter, move).isEmpty()) {
+      if (fullMatches.isEmpty() && !groundClaimMismatch) {
         inertialRecovery = recoverObservedInertialContinuation(
             packet, move, observedBefore, observedAfter, tick, world, trace);
         if (inertialRecovery.isPresent()) {
@@ -1079,7 +1093,7 @@ public final class Phase8PredictionRunner {
               1,
               0, 0, 0, 0,
               List.of(
-                  "observed displacement is a canonical ground-friction continuation of the preceding client movement",
+                  "observed displacement is a canonical inertial continuation of the preceding client movement",
                   "canonical Phase 5 replay reproduced the observed movement with neutral input"))
           : new SearchResult(
           Verdict.POSSIBLE,
@@ -1093,20 +1107,41 @@ public final class Phase8PredictionRunner {
           advance.exhaustive()
               && (explicitTimingFullyRepresented || tick.exact())
               && !tick.timingUncertain()
-              && uncertaintySources.isEmpty();
+              && uncertaintySources.isEmpty()
+              && !groundClaimMismatch;
       /*
        * Exhaustively enumerating the permitted simulation offsets can eliminate
        * offset ambiguity, but it cannot erase an independent Phase 7 chronology
        * uncertainty. Keep that signal intact so evidence stays honest.
        */
-      TickResolution validationTick =
-          explicitTimingFullyRepresented
-              ? tick.withTimingUncertaintyResolved(
-                  "Phase 7 bounded simulation timing was exhaustively evaluated for every permitted offset")
-              : tick;
+      TickResolution validationTick;
+      if (groundClaimMismatch) {
+        validationTick = new TickResolution(
+            tick.clientTick(),
+            tick.known(),
+            tick.exact(),
+            true,
+            tick.source(),
+            "client ground claim differs from the simulated physical ground state; movement reachability does not treat this claim mismatch as an IMPOSSIBLE contradiction");
+      } else {
+        validationTick =
+            explicitTimingFullyRepresented
+                ? tick.withTimingUncertaintyResolved(
+                    "Phase 7 bounded simulation timing was exhaustively evaluated for every permitted offset")
+                : tick;
+      }
+      Set<Phase6Reachability.ObservedField> validationFields =
+          groundClaimMismatch
+              ? EnumSet.of(
+                  Phase6Reachability.ObservedField.POSITION,
+                  Phase6Reachability.ObservedField.ROTATION)
+              : EnumSet.of(
+                  Phase6Reachability.ObservedField.POSITION,
+                  Phase6Reachability.ObservedField.ROTATION,
+                  Phase6Reachability.ObservedField.GROUND);
       Phase8MovementValidation.Result result = validate(
           playerId, packet, move, observedBefore, observedAfter, world,
-          validationTick, uncertaintySources, search, timingExhaustive);
+          validationTick, uncertaintySources, search, timingExhaustive, validationFields);
 
       results.add(result);
       switch (result.verdict()) {
@@ -1640,10 +1675,8 @@ public final class Phase8PredictionRunner {
     }
 
     if (!positionMatches(lastObservedMovementPosition, observedBefore.position())
-        || !lastObservedMovementPriorGround
-        || !observedBefore.onGround()
-        || !observedAfter.onGround()
-        || (move.onGround() != null && !move.onGround())) {
+        || observedBefore.onGround() != observedAfter.onGround()
+        || (move.onGround() != null && move.onGround() != observedAfter.onGround())) {
       return Optional.empty();
     }
 
@@ -1661,31 +1694,51 @@ public final class Phase8PredictionRunner {
       return Optional.empty();
     }
 
-    int supportX = (int) Math.floor(previousObservedMovementPosition.x());
-    int supportY = (int) Math.floor(previousObservedMovementPosition.y() - 1.0E-4);
-    int supportZ = (int) Math.floor(previousObservedMovementPosition.z());
-    if (world.coverageAt(supportX, supportY, supportZ)
-        != dev.phantom.ac.world.Coverage.KNOWN) {
-      return Optional.empty();
-    }
-    var support = world.requireBlockAt(supportX, supportY, supportZ);
-    if (support == null || support.isUnsupported()) return Optional.empty();
-
-    double horizontalFactor =
-        dev.phantom.ac.world.v12111.BlockCatalogue12111.slipperiness(support)
-            * Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION;
-
     double previousDx = lastObservedMovementPosition.x() - previousObservedMovementPosition.x();
+    double previousDy = lastObservedMovementPosition.y() - previousObservedMovementPosition.y();
     double previousDz = lastObservedMovementPosition.z() - previousObservedMovementPosition.z();
     double currentDx = observedAfter.position().x() - observedBefore.position().x();
-    double currentDz = observedAfter.position().z() - observedBefore.position().z();
     double currentDy = observedAfter.position().y() - observedBefore.position().y();
+    double currentDz = observedAfter.position().z() - observedBefore.position().z();
 
-    if (Math.abs(currentDy) > POSITION_TOLERANCE) return Optional.empty();
+    double horizontalFactor;
+    if (observedBefore.onGround()) {
+      if (!lastObservedMovementPriorGround) return Optional.empty();
+      int supportX = (int) Math.floor(previousObservedMovementPosition.x());
+      int supportY = (int) Math.floor(previousObservedMovementPosition.y() - 1.0E-4);
+      int supportZ = (int) Math.floor(previousObservedMovementPosition.z());
+      if (world.coverageAt(supportX, supportY, supportZ)
+          != dev.phantom.ac.world.Coverage.KNOWN) {
+        return Optional.empty();
+      }
+      var support = world.requireBlockAt(supportX, supportY, supportZ);
+      if (support == null || support.isUnsupported()) return Optional.empty();
+      horizontalFactor =
+          dev.phantom.ac.world.v12111.BlockCatalogue12111.slipperiness(support)
+              * Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION;
+    } else {
+      horizontalFactor = Vanilla12111RichPhysics.AIR_HORIZONTAL_FRICTION;
+    }
 
     double expectedDx = previousDx * horizontalFactor;
     double expectedDz = previousDz * horizontalFactor;
-    double continuationError = Math.hypot(currentDx - expectedDx, currentDz - expectedDz);
+    double expectedDy;
+    if (observedBefore.onGround()) {
+      if (Math.abs(currentDy) > POSITION_TOLERANCE) return Optional.empty();
+      expectedDy = 0.0;
+    } else {
+      MovementEffects effects = movementEffects(observedBefore);
+      double gravity = Vanilla12111RichPhysics.GRAVITY
+          * authority.context().movementEnvironment().gravityMultiplier();
+      expectedDy =
+          (previousDy - gravity * effects.fallGravityMultiplier())
+              * Vanilla12111RichPhysics.AIR_VERTICAL_DRAG;
+    }
+
+    double continuationError = Math.sqrt(
+        Math.pow(currentDx - expectedDx, 2.0)
+            + Math.pow(currentDy - expectedDy, 2.0)
+            + Math.pow(currentDz - expectedDz, 2.0));
     if (!Double.isFinite(continuationError) || continuationError > 1.0E-3) {
       return Optional.empty();
     }
@@ -1736,10 +1789,11 @@ public final class Phase8PredictionRunner {
     }
 
     trace.add("INERTIAL_RECOVERY previousDelta="
-        + new Vec3(previousDx, 0.0, previousDz)
-        + " expectedCurrentDelta=" + new Vec3(expectedDx, 0.0, expectedDz)
+        + new Vec3(previousDx, previousDy, previousDz)
+        + " expectedCurrentDelta=" + new Vec3(expectedDx, expectedDy, expectedDz)
         + " observedCurrentDelta=" + new Vec3(currentDx, currentDy, currentDz)
         + " friction=" + horizontalFactor
+        + " priorGround=" + lastObservedMovementPriorGround
         + " inputHistoryExplanation=neutral-continuation");
 
     return Optional.of(candidateFromPlayer(
@@ -2790,13 +2844,30 @@ public final class Phase8PredictionRunner {
       Set<Candidate> candidates,
       Player observed,
       Packets.Move move) {
+    return matchingCandidatesWithoutGround(candidates, observed, move, true);
+  }
+
+  private static Set<Candidate> matchingCandidatesWithoutGround(
+      Set<Candidate> candidates,
+      Player observed,
+      Packets.Move move) {
+    return matchingCandidatesWithoutGround(candidates, observed, move, false);
+  }
+
+  private static Set<Candidate> matchingCandidatesWithoutGround(
+      Set<Candidate> candidates,
+      Player observed,
+      Packets.Move move,
+      boolean includeGround) {
     Set<Candidate> matching = new LinkedHashSet<>();
     for (Candidate candidate : candidates) {
       Player state = candidate.context().player();
       if (!positionMatches(state.position(), observed.position())) continue;
       if (move.yaw() != null && Float.compare(state.yaw(), observed.yaw()) != 0) continue;
       if (move.pitch() != null && Float.compare(state.pitch(), observed.pitch()) != 0) continue;
-      if (move.onGround() != null && state.onGround() != observed.onGround()) continue;
+      if (includeGround
+          && move.onGround() != null
+          && state.onGround() != observed.onGround()) continue;
       matching.add(candidate);
     }
     return Set.copyOf(matching);
