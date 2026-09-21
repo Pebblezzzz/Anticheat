@@ -470,7 +470,8 @@ public final class Vanilla12111RichPhysics {
                 collision.collidedZ(),
                 (collision.collidedX() || collision.collidedY() || collision.collidedZ()),
                 diagnostic,
-                sneakEdgeConstrained);
+                sneakEdgeConstrained,
+                velocity);
     }
 
     private StepResult vehicleStep(
@@ -547,7 +548,9 @@ public final class Vanilla12111RichPhysics {
                 collision.collidedY(),
                 collision.collidedZ(),
                 (collision.collidedX() || collision.collidedY() || collision.collidedZ()),
-                vehicleResult.diagnostic());
+                vehicleResult.diagnostic(),
+                false,
+                vehicleResult.velocity());
     }
 
     /**
@@ -648,7 +651,9 @@ public final class Vanilla12111RichPhysics {
                 collidedY,
                 collidedZ,
                 entityCollision,
-                diagnostic);
+                diagnostic,
+                false,
+                velocity);
     }
 
     private record PoseResolution(Phase5Mechanics.Pose pose, boolean uncertain, String diagnostic) {}
@@ -1096,10 +1101,12 @@ public final class Vanilla12111RichPhysics {
             boolean collisionZ,
             boolean entityCollision,
             String diagnostic,
-            boolean sneakEdgeConstrained) implements Serializable {
+            boolean sneakEdgeConstrained,
+            Vec3 clientVelocityAfterTick) implements Serializable {
         public StepResult {
             Objects.requireNonNull(state);
             Objects.requireNonNull(diagnostic);
+            Objects.requireNonNull(clientVelocityAfterTick);
         }
 
         public StepResult(
@@ -1114,7 +1121,7 @@ public final class Vanilla12111RichPhysics {
                 boolean entityCollision,
                 String diagnostic) {
             this(simulationTick, state, collided, stepAttempted, stepSucceeded,
-                    collisionX, collisionY, collisionZ, entityCollision, diagnostic, false);
+                    collisionX, collisionY, collisionZ, entityCollision, diagnostic, false, state.velocity());
         }
     }
 }

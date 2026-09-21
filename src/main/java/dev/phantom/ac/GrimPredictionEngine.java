@@ -92,8 +92,25 @@ public final class GrimPredictionEngine {
 
       for (var entry : startsByMovementState.entrySet()) {
         MovementInputState state = entry.getKey();
+        /*
+         * Grim's 1.21.2+ end-tick input loop has an important physical-state
+         * rule: while actually sprinting and not swimming it suppresses
+         * backwards/neutral locomotion and evaluates forward movement. The
+         * server-side sprint flag is therefore a movement constraint, not just
+         * another field carried into physics.
+         */
+        int forward = inputOption.forward().orElse(0);
+        boolean swimming = entry.getValue().stream()
+            .findFirst()
+            .map(Context::movementEnvironment)
+            .map(MovementEnvironment::swimmingInput)
+            .orElse(false);
+        if (state.sprinting() && !swimming) {
+          forward = 1;
+        }
+
         InputConstraint simulationInput = new InputConstraint(
-            inputOption.forward(),
+            java.util.OptionalInt.of(forward),
             inputOption.strafe(),
             inputOption.jump(),
             java.util.Optional.of(state.sprinting()),
@@ -169,6 +186,7 @@ public final class GrimPredictionEngine {
     return new Context(
         context.simulationTick(),
         context.player(),
+        context.clientVelocity(),
         context.environment(),
         context.attributes(),
         context.effects(),

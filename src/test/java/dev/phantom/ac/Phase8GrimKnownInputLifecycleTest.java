@@ -54,40 +54,48 @@ class Phase8GrimKnownInputLifecycleTest {
   }
 
   @Test
-  void latestKnownInputCanOverrideHistoricalFinalTickInputWithoutRewritingHistory() {
+  void latestKnownInputUpdatesHeldStateWhileGrimNormalizesPhysicalSprintDirection() {
     WorldSnapshot world = floorWorld();
     Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
 
     Player start = player(new Maths.Vec3(0.5, 70.0, 0.5), new Maths.Vec3(0.0, 0.0, 0.2), true);
     var physicalSprint = MovementEnvironment.dry(false, true, false);
 
-    Player first = physics.step(new Vanilla12111RichPhysics.Context(
-        0L,
-        start,
-        new Simulation.AdvancedInput(1, 0, false, true, false),
-        world,
-        Simulation.Environment.DRY,
-        start.attributes(),
-        Phase5Mechanics.MovementEffects.NONE,
-        Pose.STANDING,
-        physicalSprint,
-        false,
-        false,
-        EntityCollisions.of(List.of()))).state();
+    GrimMovementTicker ticker = new GrimMovementTicker(physics);
+    GrimMovementTicker.TickResult firstTick = ticker.tick(
+        new Phase5MovementAuthority.SimulationContext(
+            0L,
+            start,
+            new Simulation.AdvancedInput(1, 0, false, true, false),
+            world,
+            Simulation.Environment.DRY,
+            start.attributes(),
+            Phase5Mechanics.MovementEffects.NONE,
+            Pose.STANDING,
+            physicalSprint,
+            false,
+            false,
+            EntityCollisions.of(List.of())));
+    Player first = firstTick.state();
 
-    Player second = physics.step(new Vanilla12111RichPhysics.Context(
-        1L,
-        first,
-        new Simulation.AdvancedInput(0, 0, false, true, false),
-        world,
-        Simulation.Environment.DRY,
-        first.attributes(),
-        Phase5Mechanics.MovementEffects.NONE,
-        Pose.STANDING,
-        physicalSprint,
-        false,
-        false,
-        EntityCollisions.of(List.of()))).state();
+    GrimMovementTicker.TickResult secondTick = ticker.tick(
+        new Phase5MovementAuthority.SimulationContext(
+            1L,
+            first,
+            new Simulation.AdvancedInput(1, 0, false, true, false),
+            world,
+            Simulation.Environment.DRY,
+            first.attributes(),
+            Phase5Mechanics.MovementEffects.NONE,
+            Pose.STANDING,
+            physicalSprint,
+            false,
+            false,
+            EntityCollisions.of(List.of()),
+            null,
+            false,
+            firstTick.clientVelocityAfterTick()));
+    Player second = secondTick.state();
 
     PlayerContext authority = new PlayerContext(
         "survival",
@@ -129,7 +137,7 @@ class Phase8GrimKnownInputLifecycleTest {
         .filter(line -> line.contains("SIM_INPUT_OPTIONS tick=1"))
         .findFirst()
         .orElseThrow();
-    assertTrue(finalInputTrace.contains("forward=OptionalInt[0]"),
+    assertTrue(finalInputTrace.contains("forward=OptionalInt[1]"),
         finalInputTrace);
     assertTrue(
         report.frames().getLast().trace().stream()
