@@ -137,7 +137,7 @@ class GrimParityPhysicsTest {
         .setBlock(0, 65, 0, BlockCatalogue12111.decode("minecraft:stone", Map.of()))
         .build();
 
-    Player airborne = player(new Vec3(0.5, 65.2, 0.5), Vec3.ZERO, false);
+    Player airborne = player(new Vec3(0.5, 66.0, 0.5), new Vec3(0.0, 0.5, 0.0), false);
     Simulation.AdvancedInput sprintForward =
         new Simulation.AdvancedInput(1, 0, false, true, false);
     MovementEnvironment airEnvironment =
