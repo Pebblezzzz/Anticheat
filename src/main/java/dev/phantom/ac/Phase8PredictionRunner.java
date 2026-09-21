@@ -2144,7 +2144,7 @@ public final class Phase8PredictionRunner {
             : frictionInfluencedSpeed * Vanilla12111RichPhysics.INPUT_FRICTION;
       }
     } else {
-      double offGroundSpeed = input.sprint()
+      double offGroundSpeed = environment.sprinting()
           ? Vanilla12111RichPhysics.SPRINT_AIR_ACCEL
           : Vanilla12111RichPhysics.AIR_ACCEL;
       inputAcceleration = inputMagnitude > 1.0
@@ -2170,7 +2170,7 @@ public final class Phase8PredictionRunner {
         && environment.fluid() == Fluid.NONE
         && !environment.climbable()
         && !environment.gliding();
-    if (jumped && input.sprint()) {
+    if (jumped && environment.sprinting()) {
       boostX = -Math.sin(yaw) * Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST;
       boostZ = Math.cos(yaw) * Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST;
     }
