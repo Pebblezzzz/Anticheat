@@ -511,7 +511,7 @@ public final class Phase6Reachability {
             root.movementEnvironment(),
             root.sleeping(),
             root.entityCollisions(),
-            root.uncertainty()));
+            root.uncertainty(), root.actualMovementReference(), root.lastOnGround()));
       }
     }
     orderedStarts.sort(Comparator.comparing(Phase6Reachability::contextKey));
@@ -1252,7 +1252,8 @@ public final class Phase6Reachability {
           s.input(), s.attributes(), t.pose(), s.environment(),
           s.clientTickRange(), s.provenance(), s.uncertaintyReasons());
       return new Context(tick, n, c.environment(), c.attributes(), c.effects(),
-          t.pose(), c.movementEnvironment(), c.sleeping(), c.entityCollisions(), c.uncertainty());
+          t.pose(), c.movementEnvironment(), c.sleeping(), c.entityCollisions(), c.uncertainty(),
+          c.actualMovementReference(), c.lastOnGround());
     }
     if (e instanceof TeleportConfirmation t) {
       boolean ok = s.awaitingTeleport().isPresent()
@@ -1272,7 +1273,8 @@ public final class Phase6Reachability {
           s.clientTickRange(), s.provenance(), s.uncertaintyReasons());
       return new Context(
           tick, n, c.environment(), c.attributes(), c.effects(), c.pose(),
-          c.movementEnvironment(), c.sleeping(), c.entityCollisions(), c.uncertainty());
+          c.movementEnvironment(), c.sleeping(), c.entityCollisions(), c.uncertainty(),
+          c.actualMovementReference(), c.lastOnGround());
     }
     throw new IllegalStateException("unhandled external transition " + e.getClass());
   }
