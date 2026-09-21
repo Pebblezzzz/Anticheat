@@ -59,7 +59,7 @@ class Phase8PersistentSprintRegressionTest {
     Player start = player(new Maths.Vec3(0.5, 70.0, 0.5), new Maths.Vec3(0.0, 0.0, 0.2));
 
     var walkingEnvironment = MovementEnvironment.dry(false, false, false);
-    var firstStep = physics.step(new Vanilla12111RichPhysics.Context(
+    var first = physics.step(new Vanilla12111RichPhysics.Context(
         0L,
         start,
         new Simulation.AdvancedInput(1, 0, false, false, false),
@@ -70,35 +70,16 @@ class Phase8PersistentSprintRegressionTest {
         Pose.STANDING,
         walkingEnvironment,
         false,
-        dev.phantom.ac.world.EntityCollisions.of(List.of())));
-    var first = firstStep.state();
-
-    Player secondStart = new Player(
-        first.position(),
-        firstStep.clientVelocityAfterTick(),
-        first.yaw(),
-        first.pitch(),
-        first.onGround(),
-        first.gamemode(),
-        first.effects(),
-        first.awaitingTeleport(),
-        first.uncertain(),
-        first.input(),
-        first.attributes(),
-        first.pose(),
-        first.environment(),
-        first.clientTickRange(),
-        first.provenance(),
-        first.uncertaintyReasons());
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
 
     var sprintEnvironment = MovementEnvironment.dry(false, true, false);
     var second = physics.step(new Vanilla12111RichPhysics.Context(
         1L,
-        secondStart,
+        first,
         new Simulation.AdvancedInput(1, 0, false, true, false),
         world,
         Simulation.Environment.DRY,
-        secondStart.attributes(),
+        first.attributes(),
         Phase5Mechanics.MovementEffects.NONE,
         Pose.STANDING,
         sprintEnvironment,
