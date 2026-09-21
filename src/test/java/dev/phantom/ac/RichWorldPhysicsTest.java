@@ -95,8 +95,9 @@ class RichWorldPhysicsTest {
         var result = new Vanilla12111RichPhysics().step(context);
 
         assertFalse(result.state().uncertain(), result.diagnostic());
-        assertEquals(1.27586, result.state().position().x(), 1.0e-12,
+        assertEquals(1.32586, result.state().position().x(), 1.0e-12,
             result.diagnostic());
+        assertTrue(result.sneakEdgeConstrained(), result.diagnostic());
         assertEquals(64.0, result.state().position().y(), 1.0e-12);
         assertTrue(result.state().onGround(), result.diagnostic());
         assertEquals(0.0, result.state().velocity().y(), 1.0e-12);
