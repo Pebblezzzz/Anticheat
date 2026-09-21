@@ -225,7 +225,7 @@ class Phase8PredictionRunnerTest {
 
     var airborneEnvironment = MovementEnvironment.dry(false, false, false);
     var second = physics.step(new Vanilla12111RichPhysics.Context(
-        1L, first, new Simulation.AdvancedInput(0, 0, false, false, false),
+        1L, withVelocity(first, firstStep.clientVelocityAfterTick()), new Simulation.AdvancedInput(0, 0, false, false, false),
         world, Simulation.Environment.DRY, first.attributes(),
         Phase5Mechanics.MovementEffects.NONE, Pose.STANDING, airborneEnvironment, false,
         dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
@@ -295,7 +295,7 @@ class Phase8PredictionRunnerTest {
         Phase5Mechanics.MovementEffects.NONE, Pose.STANDING, environment, false,
         dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
     var second = physics.step(new Vanilla12111RichPhysics.Context(
-        1, first, new Simulation.AdvancedInput(0, 0, false, false, false),
+        1, withVelocity(first, firstStep.clientVelocityAfterTick()), new Simulation.AdvancedInput(0, 0, false, false, false),
         world, Simulation.Environment.DRY, start.attributes(),
         Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
         environment, false, dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
@@ -348,12 +348,13 @@ class Phase8PredictionRunnerTest {
         State.Provenance.UNKNOWN, Set.of());
 
     Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
-    var first = physics.step(new Vanilla12111RichPhysics.Context(
+    var firstStep = physics.step(new Vanilla12111RichPhysics.Context(
         0, start, input, world, Simulation.Environment.DRY, attrs,
         effects, Pose.STANDING, movementEnvironment, false,
-        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+        dev.phantom.ac.world.EntityCollisions.of(List.of())));
+    var first = firstStep.state();
     var second = physics.step(new Vanilla12111RichPhysics.Context(
-        1, first, input, world, Simulation.Environment.DRY, attrs,
+        1, withVelocity(first, firstStep.clientVelocityAfterTick()), input, world, Simulation.Environment.DRY, attrs,
         effects, Pose.STANDING, movementEnvironment, false,
         dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
 
@@ -397,12 +398,13 @@ class Phase8PredictionRunnerTest {
         State.Provenance.UNKNOWN, Set.of());
 
     Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
-    var first = physics.step(new Vanilla12111RichPhysics.Context(
+    var firstStep = physics.step(new Vanilla12111RichPhysics.Context(
         1, start, input, world, Simulation.Environment.DRY, attrs,
         effects, Pose.STANDING, sprintEnvironment, false,
-        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+        dev.phantom.ac.world.EntityCollisions.of(List.of())));
+    var first = firstStep.state();
     var second = physics.step(new Vanilla12111RichPhysics.Context(
-        2, first, input, world, Simulation.Environment.DRY, attrs,
+        2, withVelocity(first, firstStep.clientVelocityAfterTick()), input, world, Simulation.Environment.DRY, attrs,
         effects, Pose.STANDING, sprintEnvironment, false,
         dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
 
