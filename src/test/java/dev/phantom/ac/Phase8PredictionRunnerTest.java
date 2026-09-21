@@ -30,6 +30,14 @@ class Phase8PredictionRunnerTest {
         State.Provenance.UNKNOWN, Set.of());
   }
 
+  private static Player withVelocity(Player player, Maths.Vec3 velocity) {
+    return new Player(
+        player.position(), velocity, player.yaw(), player.pitch(), player.onGround(),
+        player.gamemode(), player.effects(), player.awaitingTeleport(), player.uncertain(),
+        player.input(), player.attributes(), player.pose(), player.environment(),
+        player.clientTickRange(), player.provenance(), player.uncertaintyReasons());
+  }
+
   @Test
   void groundedEdgeTransitionFeedsFallingVelocityIntoNextClientTick() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
@@ -208,11 +216,12 @@ class Phase8PredictionRunnerTest {
     var environment = MovementEnvironment.dry(true, false, false);
     var physics = new Vanilla12111RichPhysics();
 
-    var first = physics.step(new Vanilla12111RichPhysics.Context(
+    var firstStep = physics.step(new Vanilla12111RichPhysics.Context(
         0L, start, new Simulation.AdvancedInput(0, 0, false, false, false),
         world, Simulation.Environment.DRY, start.attributes(),
         Phase5Mechanics.MovementEffects.NONE, Pose.STANDING, environment, false,
-        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+        dev.phantom.ac.world.EntityCollisions.of(List.of())));
+    var first = firstStep.state();
 
     var airborneEnvironment = MovementEnvironment.dry(false, false, false);
     var second = physics.step(new Vanilla12111RichPhysics.Context(
@@ -280,7 +289,7 @@ class Phase8PredictionRunnerTest {
 
     Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
     var environment = MovementEnvironment.dry(false, false, false);
-    var first = physics.step(new Vanilla12111RichPhysics.Context(
+    var firstStep = physics.step(new Vanilla12111RichPhysics.Context(
         0, start, new Simulation.AdvancedInput(0, 0, false, false, false),
         world, Simulation.Environment.DRY, start.attributes(),
         Phase5Mechanics.MovementEffects.NONE, Pose.STANDING, environment, false,
