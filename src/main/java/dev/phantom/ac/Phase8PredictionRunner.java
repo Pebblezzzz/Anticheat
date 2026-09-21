@@ -168,6 +168,7 @@ public final class Phase8PredictionRunner {
 
   private Player clientState;
   private InputConstraint currentInput;
+  private long currentInputSequence = -1L;
   private final NavigableMap<Long, List<TimedInput>> inputHistory = new TreeMap<>();
   private AuthorityAnchor latestAuthority;
   private Set<Candidate> prediction = Set.of();
@@ -262,6 +263,7 @@ public final class Phase8PredictionRunner {
     tickReliability =
         Phase8ClientModel.TickReliabilityState.assess(0L, false, false, true, false, false);
     currentInput = neutralInput;
+    currentInputSequence = -1L;
     inputHistory.clear();
     uncertainInputs.clear();
     inputChronologies = List.of();
@@ -428,6 +430,7 @@ public final class Phase8PredictionRunner {
         // PLAYER_INPUT is a held-state update. Its causal simulation tick is
         // reconstructed by Phase 7 rather than guessed from packet arrival.
         currentInput = InputConstraint.fromClientInput(input);
+        currentInputSequence = sequence;
         if (!prediction.isEmpty()) {
           Set<Candidate> updated = overlayClientInput(prediction, clientState, maximumCandidates);
           if (!updated.isEmpty()) prediction = updated;
@@ -2141,7 +2144,7 @@ public final class Phase8PredictionRunner {
             : frictionInfluencedSpeed * Vanilla12111RichPhysics.INPUT_FRICTION;
       }
     } else {
-      double offGroundSpeed = input.sprint()
+      double offGroundSpeed = environment.sprinting()
           ? Vanilla12111RichPhysics.SPRINT_AIR_ACCEL
           : Vanilla12111RichPhysics.AIR_ACCEL;
       inputAcceleration = inputMagnitude > 1.0
@@ -2167,7 +2170,7 @@ public final class Phase8PredictionRunner {
         && environment.fluid() == Fluid.NONE
         && !environment.climbable()
         && !environment.gliding();
-    if (jumped && input.sprint()) {
+    if (jumped && environment.sprinting()) {
       boostX = -Math.sin(yaw) * Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST;
       boostZ = Math.cos(yaw) * Vanilla12111RichPhysics.SPRINT_JUMP_HORIZONTAL_BOOST;
     }
@@ -2903,7 +2906,7 @@ public final class Phase8PredictionRunner {
           final long simulationTick = localTick;
           List<InputConstraint> inputOptions =
               inputPossibilitiesForSimulationTick(
-                  chronology.history(), simulationTick, movementSequence);
+                  chronology.history(), simulationTick, targetTick, movementSequence);
 
           Candidate beforeCandidate = local.stream().findFirst().orElse(null);
           if (beforeCandidate != null) {
@@ -3207,9 +3210,28 @@ public final class Phase8PredictionRunner {
   private List<InputConstraint> inputPossibilitiesForSimulationTick(
       NavigableMap<Long, List<TimedInput>> history,
       long simulationTick,
+      long targetTick,
       long movementSequence) {
     if (simulationTick < 0L) return List.of(neutralInput);
-    return List.of(inputForSimulationTickExact(history, simulationTick, movementSequence));
+
+    LinkedHashSet<InputConstraint> options = new LinkedHashSet<>();
+    options.add(inputForSimulationTickExact(history, simulationTick, movementSequence));
+
+    /*
+     * Grim's PacketPlayerSteer keeps the latest KnownInput as live client state
+     * and the prediction engine consumes that state when the movement packet is
+     * evaluated. A held input packet observed before this movement is therefore
+     * a valid final-tick alternative even when Phase 7 assigned its generation
+     * to a later absolute simulation tick. Do not apply this live overlay to
+     * historical ticks: only the final tick gets the packet-time evidence.
+     */
+    if (simulationTick == targetTick - 1L
+        && currentInputSequence >= 0L
+        && currentInputSequence <= movementSequence) {
+      options.add(currentInput);
+    }
+
+    return List.copyOf(options);
   }
 
   /**
@@ -3714,7 +3736,13 @@ public final class Phase8PredictionRunner {
       NavigableMap<Long, List<TimedInput>> history,
       long simulationTick,
       long movementSequence) {
-    return inputPossibilitiesForSimulationTick(history, simulationTick, movementSequence).getFirst();
+    /*
+     * Bootstrap/reconstruction callers need the historical Phase 7 state only.
+     * The Grim latest-KnownInput overlay belongs exclusively to the live final
+     * prediction tick, where packet order proves that the state was observed
+     * before the movement packet.
+     */
+    return inputForSimulationTickExact(history, simulationTick, movementSequence);
   }
 
   private static SearchResult uncertainSearch(Set<Candidate> candidates, String reason) {
