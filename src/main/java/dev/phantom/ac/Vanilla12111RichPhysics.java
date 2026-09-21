@@ -173,6 +173,8 @@ public final class Vanilla12111RichPhysics {
                     "Grim-style 1.21.11 Elytra movement");
         }
 
+        // KnownInput controls direction; physical locomotion state controls sprint/sneak effects.
+        // This mirrors Grim's separation between packet input and the player's physical state.
         Vec3 velocity = s.velocity();
 
         if (fluid == Phase5Mechanics.Fluid.WATER) {
@@ -211,8 +213,8 @@ public final class Vanilla12111RichPhysics {
                 }
                 double slipperiness = BlockCatalogue12111.slipperiness(support);
                 double movementSpeed = context.attributes().value() * context.effects().speedMultiplier();
-                if (context.input().sprint()) movementSpeed *= SPRINTING_SPEED_MULTIPLIER;
-                if (context.input().sneak()) movementSpeed *= 0.3;
+                if (context.movementEnvironment().sprinting()) movementSpeed *= SPRINTING_SPEED_MULTIPLIER;
+                if (context.movementEnvironment().sneaking()) movementSpeed *= 0.3;
                 double frictionInfluencedSpeed = movementSpeed * FRICTION_SPEED_FACTOR
                         / (slipperiness * slipperiness * slipperiness);
                 inputAcceleration = inputMagnitude > 1.0
@@ -220,7 +222,7 @@ public final class Vanilla12111RichPhysics {
                         : frictionInfluencedSpeed * INPUT_FRICTION;
             }
         } else {
-            double offGroundSpeed = context.input().sprint()
+            double offGroundSpeed = context.movementEnvironment().sprinting()
                     ? SPRINT_AIR_ACCEL
                     : AIR_ACCEL;
             inputAcceleration = inputMagnitude > 1.0
@@ -263,7 +265,7 @@ public final class Vanilla12111RichPhysics {
                 climbY = Math.max(-CLIMB_MAX_DOWN, velocity.y());
             }
 
-            if (context.input().sneak() && climbY < 0.0
+            if (context.movementEnvironment().sneaking() && climbY < 0.0
                     && !isScaffolding(context.world(), s.position())) {
                 climbY = 0.0;
             }
@@ -276,7 +278,7 @@ public final class Vanilla12111RichPhysics {
                     velocity.x(),
                     JUMP + context.effects().jumpVelocityAdd(),
                     velocity.z());
-            if (context.input().sprint()) {
+            if (context.movementEnvironment().sprinting()) {
                 velocity = velocity.add(new Vec3(
                         -Math.sin(radians) * SPRINT_JUMP_HORIZONTAL_BOOST,
                         0.0,
@@ -350,9 +352,9 @@ public final class Vanilla12111RichPhysics {
 
         double horizontalFactor;
         if (fluid == Phase5Mechanics.Fluid.WATER) {
-            horizontalFactor = fluidSample.surfaceSwimming() && context.input().sprint()
+            horizontalFactor = fluidSample.surfaceSwimming() && context.movementEnvironment().sprinting()
                     ? WATER_SPRINT_DRAG
-                    : (context.input().sprint() ? WATER_SPRINT_DRAG : WATER_DRAG);
+                    : (context.movementEnvironment().sprinting() ? WATER_SPRINT_DRAG : WATER_DRAG);
         } else if (fluid == Phase5Mechanics.Fluid.LAVA) {
             horizontalFactor = LAVA_DRAG;
         } else if (climbing) {
@@ -750,7 +752,7 @@ public final class Vanilla12111RichPhysics {
             Aabb boundingBox,
             Vec3 requested) {
         Player s = context.state();
-        if (!context.input().sneak()
+        if (!context.movementEnvironment().sneaking()
                 || context.flying()
                 || !context.movementEnvironment().sneaking()
                 || !s.onGround()

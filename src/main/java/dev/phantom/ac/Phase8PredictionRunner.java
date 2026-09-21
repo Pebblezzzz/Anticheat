@@ -144,6 +144,7 @@ public final class Phase8PredictionRunner {
   private static final int MAX_TIMING_HISTORY_EVENTS = 512;
 
   private final int maximumCandidates;
+  private final GrimPredictionEngine grimPredictionEngine = new GrimPredictionEngine();
   private final Phase7Timing.Config phase7TimingConfig;
   private final ArrayDeque<Packets.RawPacket> timingHistory = new ArrayDeque<>();
   private long timingEpochNanos = -1L;
@@ -938,6 +939,9 @@ public final class Phase8PredictionRunner {
             predictedBefore, prediction, world, uncertaintySources, trace));
         continue;
       }
+
+      prediction = rebasePredictionToObservedBefore(
+          prediction, observedBefore, tick, trace);
 
       Set<Candidate> withEntities =
           overlayEntityCollisions(prediction, entityCollisions(latestAuthority), maximumCandidates);
@@ -2356,6 +2360,105 @@ public final class Phase8PredictionRunner {
     return candidate;
   }
 
+  private static Set<Candidate> rebasePredictionToObservedBefore(
+      Set<Candidate> candidates,
+      Player observedBefore,
+      TickResolution tick,
+      List<String> trace) {
+    if (!tick.known() || tick.clientTick() <= 0L || candidates.isEmpty()) {
+      return candidates;
+    }
+
+    long expectedRootTick = Math.max(0L, tick.clientTick() - 1L);
+    Set<Candidate> rebased = new LinkedHashSet<>();
+    int rebasedCount = 0;
+
+    for (Candidate candidate : candidates) {
+      Context context = candidate.context();
+      if (context.simulationTick() != expectedRootTick
+          || context.player().onGround() != observedBefore.onGround()) {
+        rebased.add(candidate);
+        continue;
+      }
+
+      double distanceSquared =
+          positionDistanceSquared(context.player().position(), observedBefore.position());
+      if (distanceSquared > POSITION_TOLERANCE * POSITION_TOLERANCE) {
+        rebased.add(candidate);
+        continue;
+      }
+
+      if (positionExactlyMatches(context.player().position(), observedBefore.position())) {
+        rebased.add(candidate);
+        continue;
+      }
+
+      Player player = context.player();
+      Player rebasedPlayer = new Player(
+          observedBefore.position(),
+          player.velocity(),
+          player.yaw(),
+          player.pitch(),
+          player.onGround(),
+          player.gamemode(),
+          player.effects(),
+          player.awaitingTeleport(),
+          player.uncertain(),
+          player.input(),
+          player.attributes(),
+          player.pose(),
+          player.environment(),
+          player.clientTickRange(),
+          player.provenance(),
+          player.uncertaintyReasons());
+
+      rebased.add(new Candidate(
+          candidate.id(),
+          new Context(
+              context.simulationTick(),
+              rebasedPlayer,
+              context.environment(),
+              context.attributes(),
+              context.effects(),
+              context.pose(),
+              context.movementEnvironment(),
+              context.sleeping(),
+              context.entityCollisions(),
+              context.uncertainty(),
+              context.actualMovementReference(),
+              context.lastOnGround()),
+          candidate.provenance()));
+      rebasedCount++;
+    }
+
+    if (rebasedCount > 0) {
+      trace.add("FRONTIER_SPATIAL_REBASE count=" + rebasedCount
+          + " expectedRootTick=" + expectedRootTick
+          + " observedPosition=" + observedBefore.position()
+          + " tolerance=" + POSITION_TOLERANCE);
+    }
+    return Set.copyOf(rebased);
+  }
+
+  private static Context withLocomotionState(
+      Context context,
+      boolean sprinting,
+      boolean sneaking) {
+    return new Context(
+        context.simulationTick(),
+        context.player(),
+        context.environment(),
+        context.attributes(),
+        context.effects(),
+        context.pose(),
+        withLocomotionState(context.movementEnvironment(), sprinting, sneaking),
+        context.sleeping(),
+        context.entityCollisions(),
+        context.uncertainty(),
+        context.actualMovementReference(),
+        context.lastOnGround());
+  }
+
   private static MovementEnvironment withLocomotionState(
       MovementEnvironment base,
       boolean sprinting,
@@ -2818,68 +2921,21 @@ public final class Phase8PredictionRunner {
                     chronology.history(), simulationTick, movementSequence));
           }
 
-          Set<Candidate> stepCandidates = new LinkedHashSet<>();
-          LinkedHashSet<String> stepReasons = new LinkedHashSet<>();
-          boolean stepExhaustive = true;
+          GrimPredictionEngine.TickResult engineResult = grimPredictionEngine.tick(
+              local,
+              inputOptions,
+              world,
+              maximumCandidates,
+              movementSequence,
+              simulationTick,
+              targetTick,
+              actualMovementReference,
+              lastOnGroundForPrediction);
 
-          for (InputConstraint inputOption : inputOptions) {
-            Map<MovementInputState, List<Context>> startsByMovementState =
-                new LinkedHashMap<>();
-            for (Candidate candidate : local) {
-              MovementEnvironment movementEnvironment =
-                  candidate.context().movementEnvironment();
-              MovementInputState movementState = new MovementInputState(
-                  movementEnvironment.sprinting(), movementEnvironment.sneaking());
-              startsByMovementState
-                  .computeIfAbsent(movementState, ignored -> new ArrayList<>())
-                  .add(candidate.context()
-                      .withTick(simulationTick)
-                      .withLastOnGround(lastOnGroundForPrediction));
-            }
-
-            for (var movementEntry : startsByMovementState.entrySet()) {
-              MovementInputState movementState = movementEntry.getKey();
-              List<Context> branchStarts = movementEntry.getValue();
-              if (actualMovementReference != null && simulationTick == targetTick - 1L) {
-                branchStarts = branchStarts.stream()
-                    .map(context -> context.withActualMovementReference(actualMovementReference))
-                    .toList();
-                trace.add("COLLISION_REFERENCE tick=" + simulationTick
-                    + " actualMovement=" + actualMovementReference);
-              }
-              InputConstraint simulationInput = new InputConstraint(
-                  inputOption.forward(),
-                  inputOption.strafe(),
-                  inputOption.jump(),
-                  Optional.of(movementState.sprinting()),
-                  Optional.of(movementState.sneaking()));
-
-              SearchResult branch = new Phase6Reachability().search(
-                  branchStarts,
-                  List.of(simulationInput),
-                  ignored -> List.of(new WorldBranch(
-                      "packet-world@" + simulationTick,
-                      world,
-                      true,
-                      "latency-compensated client-visible world")),
-                  ignored -> List.of(new Phase6Reachability.None()),
-                  Phase6Reachability.SearchConfig.defaults(maximumCandidates));
-
-              trace.add("SIM_INPUT_BRANCH tick=" + simulationTick
-                  + " input=" + simulationInput
-                  + " movementSprint=" + movementState.sprinting()
-                  + " movementSneak=" + movementState.sneaking()
-                  + " exhaustive=" + branch.exhaustive()
-                  + " verdict=" + branch.verdict()
-                  + " candidates=" + branch.candidates().size());
-              stepCandidates.addAll(branch.candidates());
-              stepReasons.addAll(branch.reasons());
-
-              boolean branchExhaustive = branch.exhaustive()
-                  || exhaustivelyEnumeratedInputEnvelope(branch, inputOption);
-              if (!branchExhaustive) stepExhaustive = false;
-            }
-          }
+          trace.addAll(engineResult.trace());
+          LinkedHashSet<String> stepReasons = new LinkedHashSet<>(engineResult.reasons());
+          boolean stepExhaustive = engineResult.exhaustive();
+          Set<Candidate> stepCandidates = engineResult.candidates();
 
           simulatedTicks++;
           if (!stepExhaustive || stepCandidates.isEmpty()) {
