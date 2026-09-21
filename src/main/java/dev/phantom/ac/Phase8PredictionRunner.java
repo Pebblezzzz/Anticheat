@@ -1088,6 +1088,7 @@ public final class Phase8PredictionRunner {
       boolean timingExhaustive =
           advance.exhaustive()
               && (explicitTimingFullyRepresented || tick.exact())
+              && !tick.timingUncertain()
               && uncertaintySources.isEmpty();
       TickResolution validationTick =
           explicitTimingFullyRepresented
