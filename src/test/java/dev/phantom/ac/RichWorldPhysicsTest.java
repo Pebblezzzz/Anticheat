@@ -34,6 +34,84 @@ class RichWorldPhysicsTest {
         assertEquals(0.0, result.state().velocity().y(), 1.0e-12);
     }
     @Test
+    void movingOffAnEdgeClearsGroundForTheNextTick() {
+        WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+            .loadChunk(0, 0)
+            .setBlock(0, 63, 0, stone())
+            .build();
+
+        var player = new State.Player(
+            new Maths.Vec3(0.5, 64.0, 0.5),
+            new Maths.Vec3(0.9, 0.0, 0.0),
+            0.0f, 0.0f, true, "survival", Map.of(),
+            java.util.OptionalInt.empty(), false);
+
+        var context = new Vanilla12111RichPhysics.Context(
+            2645, player,
+            new Simulation.AdvancedInput(0, 0, false, false, false),
+            world,
+            Simulation.Environment.DRY,
+            Simulation.Attributes.DEFAULT,
+            Phase5Mechanics.MovementEffects.NONE,
+            Phase5Mechanics.Pose.STANDING,
+            Phase5Mechanics.MovementEnvironment.dry(true, false, false),
+            false,
+            dev.phantom.ac.world.EntityCollisions.of(java.util.List.of()));
+
+        var result = new Vanilla12111RichPhysics().step(context);
+
+        assertFalse(result.state().uncertain(), result.diagnostic());
+        assertEquals(0.9, result.state().position().x(), 1.0e-12);
+        assertEquals(64.0, result.state().position().y(), 1.0e-12);
+        assertFalse(result.state().onGround(), result.diagnostic());
+        assertEquals(-0.0784, result.state().velocity().y(), 1.0e-12);
+    }
+
+    @Test
+    void edgeTransitionFallsOnTheFollowingTick() {
+        WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+            .loadChunk(0, 0)
+            .setBlock(0, 63, 0, stone())
+            .build();
+
+        var first = new State.Player(
+            new Maths.Vec3(0.5, 64.0, 0.5),
+            new Maths.Vec3(0.9, 0.0, 0.0),
+            0.0f, 0.0f, true, "survival", Map.of(),
+            java.util.OptionalInt.empty(), false);
+
+        var context1 = new Vanilla12111RichPhysics.Context(
+            2645, first,
+            new Simulation.AdvancedInput(0, 0, false, false, false),
+            world,
+            Simulation.Environment.DRY,
+            Simulation.Attributes.DEFAULT,
+            Phase5Mechanics.MovementEffects.NONE,
+            Phase5Mechanics.Pose.STANDING,
+            Phase5Mechanics.MovementEnvironment.dry(true, false, false),
+            false,
+            dev.phantom.ac.world.EntityCollisions.of(java.util.List.of()));
+        var afterFirst = new Vanilla12111RichPhysics().step(context1).state();
+
+        var context2 = new Vanilla12111RichPhysics.Context(
+            2646, afterFirst,
+            new Simulation.AdvancedInput(0, 0, false, false, false),
+            world,
+            Simulation.Environment.DRY,
+            Simulation.Attributes.DEFAULT,
+            Phase5Mechanics.MovementEffects.NONE,
+            Phase5Mechanics.Pose.STANDING,
+            Phase5Mechanics.MovementEnvironment.dry(false, false, false),
+            false,
+            dev.phantom.ac.world.EntityCollisions.of(java.util.List.of()));
+        var afterSecond = new Vanilla12111RichPhysics().step(context2).state();
+
+        assertFalse(afterSecond.uncertain());
+        assertEquals(0.9, afterSecond.position().x(), 1.0e-12);
+        assertEquals(63.9216, afterSecond.position().y(), 1.0e-12);
+    }
+
+    @Test
     void knownAirSupportCellDoesNotBecomePhase5Uncertainty() {
         WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
             .loadChunk(0, 0)
