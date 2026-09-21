@@ -32,8 +32,8 @@ public final class GrimVehiclePhysics {
     double forward = input.forward();
     double strafe = input.strafe();
     double yaw = Math.toRadians(vehicle.yaw());
-    double accel;
-    double drag;
+    double accel = baseSpeed;
+    double drag = 0.91;
 
     switch (vehicle.type()) {
       case PIG -> {
