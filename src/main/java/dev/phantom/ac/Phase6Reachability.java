@@ -709,7 +709,8 @@ public final class Phase6Reachability {
                       pre.pose(), environment, pre.sleeping(),
                       pre.player().pose() == Pose.FALL_FLYING,
                       pre.entityCollisions(),
-                      pre.actualMovementReference());
+                      pre.actualMovementReference(),
+                      pre.lastOnGround());
               simulationSteps++;
               Phase5MovementAuthority.StepResult stepped = movementAuthority.simulate(physicsContext);
               if (stepped.state().uncertain()) {
