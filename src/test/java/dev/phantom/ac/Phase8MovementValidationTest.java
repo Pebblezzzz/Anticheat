@@ -60,7 +60,7 @@ class Phase8MovementValidationTest {
     Player candidateState = Player.initial(new Maths.Vec3(0.0, 65.0, 0.0));
     Player observed = new Player(new Maths.Vec3(0.03, 65.0, 0.03), Maths.Vec3.ZERO, 0.0f, 0.0f, true, "survival", java.util.Map.of(), java.util.OptionalInt.empty(), false);
     Context edgeContext = new Context(
-        20, new Player(candidateState.position(), candidateState.velocity(), candidateState.yaw(), candidateState.pitch(), false, candidateState.gamemode(), candidateState.effects(), candidateState.awaitingTeleport(), false), Simulation.Environment.DRY,
+        20, new Player(candidateState.position(), candidateState.velocity(), candidateState.yaw(), candidateState.pitch(), false, candidateState.gamemode(), candidateState.effects(), candidateState.awaitingTeleport(), false), Simulation.Environment.DRY, Simulation.Attributes.DEFAULT,
         MovementEffects.NONE, Pose.STANDING, MovementEnvironment.dry(true, false, true), false,
         dev.phantom.ac.world.EntityCollisions.of(List.of()),
         Set.of(Phase6Reachability.UncertainDimension.SNEAK_EDGE));
