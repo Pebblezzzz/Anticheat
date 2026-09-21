@@ -68,6 +68,41 @@ class RichWorldPhysicsTest {
     }
 
     @Test
+    void sneakingBacksOffFromAPlatformEdgeInVanillaIncrements() {
+        WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+            .loadChunk(0, 0)
+            .setBlock(0, 63, 0, stone())
+            .build();
+
+        var player = new State.Player(
+            new Maths.Vec3(1.27, 64.0, 0.5),
+            new Maths.Vec3(0.05586, 0.0, 0.0),
+            0.0f, 0.0f, true, "survival", Map.of(),
+            java.util.OptionalInt.empty(), false);
+
+        var context = new Vanilla12111RichPhysics.Context(
+            0, player,
+            new Simulation.AdvancedInput(0, 0, false, false, true),
+            world,
+            Simulation.Environment.DRY,
+            Simulation.Attributes.DEFAULT,
+            Phase5Mechanics.MovementEffects.NONE,
+            Phase5Mechanics.Pose.STANDING,
+            Phase5Mechanics.MovementEnvironment.dry(true, false, true),
+            false,
+            dev.phantom.ac.world.EntityCollisions.of(java.util.List.of()));
+
+        var result = new Vanilla12111RichPhysics().step(context);
+
+        assertFalse(result.state().uncertain(), result.diagnostic());
+        assertEquals(1.27586, result.state().position().x(), 1.0e-12,
+            result.diagnostic());
+        assertEquals(64.0, result.state().position().y(), 1.0e-12);
+        assertTrue(result.state().onGround(), result.diagnostic());
+        assertEquals(0.0, result.state().velocity().y(), 1.0e-12);
+    }
+
+    @Test
     void edgeTransitionFallsOnTheFollowingTick() {
         WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
             .loadChunk(0, 0)
