@@ -87,14 +87,13 @@ class GrimPhysicsArchitectureTest {
   }
 
   @Test
-  void nextTickStartsFromGrimClientVelocityNotPredictedVelocity() {
+  void movementTickerKeepsClientVelocitySeparateFromNextTickStartVelocity() {
     Player start = player(new Vec3(0.0, 0.0, 0.2));
     var movement = MovementEnvironment.dry(false, false, false);
     Simulation.AdvancedInput idle =
         new Simulation.AdvancedInput(0, 0, false, false, false);
 
-    GrimMovementTicker ticker = new GrimMovementTicker();
-    GrimMovementTicker.TickResult first = ticker.tick(
+    GrimMovementTicker.TickResult result = new GrimMovementTicker().tick(
         new Phase5MovementAuthority.SimulationContext(
             0L,
             start,
@@ -109,33 +108,15 @@ class GrimPhysicsArchitectureTest {
             false,
             EntityCollisions.of(List.of()),
             null,
-            false));
-
-    assertEquals(0.2, first.clientVelocityAfterTick().z(), 1.0e-12);
-    assertEquals(0.182, first.predictedVelocityAfterCollision().z(), 1.0e-8);
-
-    GrimMovementTicker.TickResult second = ticker.tick(
-        new Phase5MovementAuthority.SimulationContext(
-            1L,
-            first.state(),
-            idle,
-            world(),
-            Simulation.Environment.DRY,
-            first.state().attributes(),
-            Phase5Mechanics.MovementEffects.NONE,
-            Pose.STANDING,
-            movement,
             false,
-            false,
-            EntityCollisions.of(List.of()),
-            null,
-            false,
-            first.clientVelocityAfterTick()));
+            new Vec3(0.0, 0.0, 0.9)));
 
-    assertEquals(0.4, second.state().position().z(), 1.0e-12,
-        "the next tick must carry Grim's pre-collision client velocity");
+    assertEquals(new Vec3(0.0, 0.0, 0.9), result.clientVelocityBeforeTick());
+    assertEquals(0.7, result.state().position().z(), 1.0e-12,
+        "physics must start from the post-end-of-tick player velocity, not clientVelocity");
+    assertEquals(0.2, result.clientVelocityAfterTick().z(), 1.0e-12);
+    assertEquals(0.182, result.predictedVelocityAfterCollision().z(), 1.0e-8);
   }
-
   @Test
   void movementTickerPreservesClientVelocityAndObservedMovementAsSeparateInputs() {
     Player start = player(new Vec3(0.0, 0.0, 0.2));
