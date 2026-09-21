@@ -85,6 +85,7 @@ public final class Phase8ClientModel {
         Player observedAfter,
         Vec3 movement,
         Vec3 retainedClientVelocity,
+        Vec3 retainedPredictedVelocity,
         Vec3 retainedServerVelocity,
         Long authoritativeServerTick,
         String reason) {
@@ -92,8 +93,10 @@ public final class Phase8ClientModel {
           Math.max(0L, tick),
           observedAfter.position(),
           Objects.requireNonNull(retainedClientVelocity),
+          Objects.requireNonNull(retainedPredictedVelocity),
           Objects.requireNonNull(retainedServerVelocity),
           Objects.requireNonNull(movement),
+          onGround,
           observedAfter.onGround(),
           authoritativeServerTick,
           Objects.requireNonNull(reason));
