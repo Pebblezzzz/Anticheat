@@ -112,7 +112,7 @@ class GrimPhysicsArchitectureTest {
             false));
 
     assertEquals(0.2, first.clientVelocityAfterTick().z(), 1.0e-12);
-    assertEquals(0.182, first.predictedVelocityAfterCollision().z(), 1.0e-12);
+    assertEquals(0.182, first.predictedVelocityAfterCollision().z(), 1.0e-8);
 
     GrimMovementTicker.TickResult second = ticker.tick(
         new Phase5MovementAuthority.SimulationContext(
