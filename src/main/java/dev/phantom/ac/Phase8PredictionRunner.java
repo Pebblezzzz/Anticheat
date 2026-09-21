@@ -939,6 +939,9 @@ public final class Phase8PredictionRunner {
         continue;
       }
 
+      prediction = rebasePredictionToObservedBefore(
+          prediction, observedBefore, tick, trace);
+
       Set<Candidate> withEntities =
           overlayEntityCollisions(prediction, entityCollisions(latestAuthority), maximumCandidates);
       if (!withEntities.isEmpty()) prediction = withEntities;
@@ -2356,6 +2359,105 @@ public final class Phase8PredictionRunner {
     return candidate;
   }
 
+  private static Set<Candidate> rebasePredictionToObservedBefore(
+      Set<Candidate> candidates,
+      Player observedBefore,
+      TickResolution tick,
+      List<String> trace) {
+    if (!tick.known() || tick.clientTick() <= 0L || candidates.isEmpty()) {
+      return candidates;
+    }
+
+    long expectedRootTick = Math.max(0L, tick.clientTick() - 1L);
+    Set<Candidate> rebased = new LinkedHashSet<>();
+    int rebasedCount = 0;
+
+    for (Candidate candidate : candidates) {
+      Context context = candidate.context();
+      if (context.simulationTick() != expectedRootTick
+          || context.player().onGround() != observedBefore.onGround()) {
+        rebased.add(candidate);
+        continue;
+      }
+
+      double distanceSquared =
+          positionDistanceSquared(context.player().position(), observedBefore.position());
+      if (distanceSquared > POSITION_TOLERANCE * POSITION_TOLERANCE) {
+        rebased.add(candidate);
+        continue;
+      }
+
+      if (positionExactlyMatches(context.player().position(), observedBefore.position())) {
+        rebased.add(candidate);
+        continue;
+      }
+
+      Player player = context.player();
+      Player rebasedPlayer = new Player(
+          observedBefore.position(),
+          player.velocity(),
+          player.yaw(),
+          player.pitch(),
+          player.onGround(),
+          player.gamemode(),
+          player.effects(),
+          player.awaitingTeleport(),
+          player.uncertain(),
+          player.input(),
+          player.attributes(),
+          player.pose(),
+          player.environment(),
+          player.clientTickRange(),
+          player.provenance(),
+          player.uncertaintyReasons());
+
+      rebased.add(new Candidate(
+          candidate.id(),
+          new Context(
+              context.simulationTick(),
+              rebasedPlayer,
+              context.environment(),
+              context.attributes(),
+              context.effects(),
+              context.pose(),
+              context.movementEnvironment(),
+              context.sleeping(),
+              context.entityCollisions(),
+              context.uncertainty(),
+              context.actualMovementReference(),
+              context.lastOnGround()),
+          candidate.provenance()));
+      rebasedCount++;
+    }
+
+    if (rebasedCount > 0) {
+      trace.add("FRONTIER_SPATIAL_REBASE count=" + rebasedCount
+          + " expectedRootTick=" + expectedRootTick
+          + " observedPosition=" + observedBefore.position()
+          + " tolerance=" + POSITION_TOLERANCE);
+    }
+    return Set.copyOf(rebased);
+  }
+
+  private static Context withLocomotionState(
+      Context context,
+      boolean sprinting,
+      boolean sneaking) {
+    return new Context(
+        context.simulationTick(),
+        context.player(),
+        context.environment(),
+        context.attributes(),
+        context.effects(),
+        context.pose(),
+        withLocomotionState(context.movementEnvironment(), sprinting, sneaking),
+        context.sleeping(),
+        context.entityCollisions(),
+        context.uncertainty(),
+        context.actualMovementReference(),
+        context.lastOnGround());
+  }
+
   private static MovementEnvironment withLocomotionState(
       MovementEnvironment base,
       boolean sprinting,
@@ -2826,15 +2928,34 @@ public final class Phase8PredictionRunner {
             Map<MovementInputState, List<Context>> startsByMovementState =
                 new LinkedHashMap<>();
             for (Candidate candidate : local) {
+              Context baseContext = candidate.context()
+                  .withTick(simulationTick)
+                  .withLastOnGround(lastOnGroundForPrediction);
               MovementEnvironment movementEnvironment =
-                  candidate.context().movementEnvironment();
-              MovementInputState movementState = new MovementInputState(
+                  baseContext.movementEnvironment();
+              MovementInputState physicalState = new MovementInputState(
                   movementEnvironment.sprinting(), movementEnvironment.sneaking());
               startsByMovementState
-                  .computeIfAbsent(movementState, ignored -> new ArrayList<>())
-                  .add(candidate.context()
-                      .withTick(simulationTick)
-                      .withLastOnGround(lastOnGroundForPrediction));
+                  .computeIfAbsent(physicalState, ignored -> new ArrayList<>())
+                  .add(baseContext);
+
+              /*
+               * Grim keeps client locomotion state separate from the held input,
+               * but the input packet is still a valid causal alternative when
+               * our persisted physical sprint/sneak state is older than the
+               * newly observed held state. Keep both branches rather than
+               * promoting the key state unconditionally.
+               */
+              if (inputOption.sprint().isPresent() && inputOption.sneak().isPresent()) {
+                MovementInputState keyState = new MovementInputState(
+                    inputOption.sprint().get(), inputOption.sneak().get());
+                if (!keyState.equals(physicalState)) {
+                  startsByMovementState
+                      .computeIfAbsent(keyState, ignored -> new ArrayList<>())
+                      .add(withLocomotionState(
+                          baseContext, keyState.sprinting(), keyState.sneaking()));
+                }
+              }
             }
 
             for (var movementEntry : startsByMovementState.entrySet()) {
