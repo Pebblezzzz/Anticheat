@@ -1,6 +1,5 @@
 package dev.phantom.ac;
 
-import dev.phantom.ac.Maths;
 import dev.phantom.ac.world.EntityCollisions;
 import dev.phantom.ac.world.WorldSnapshot;
 import java.io.Serializable;
@@ -31,7 +30,7 @@ public final class Phase5MovementAuthority {
         context.simulationTick(), context.state(), context.input(), context.world(),
         context.environment(), context.attributes(), context.effects(), context.pose(),
         context.movementEnvironment(), context.sleeping(), context.flying(),
-        context.entityCollisions()));
+        context.entityCollisions(), context.actualMovementReference()));
     return new StepResult(result);
   }
 
@@ -69,8 +68,6 @@ public final class Phase5MovementAuthority {
       if (!VERSION.equals(world.version()) && !Contracts.TARGET_VERSION.equals(world.version()))
         throw new IllegalArgumentException("Phase 5 requires Minecraft " + VERSION + " world data");
     }
-  }
-
     public SimulationContext(
         long simulationTick,
         State.Player state,
@@ -87,6 +84,7 @@ public final class Phase5MovementAuthority {
       this(simulationTick, state, input, world, environment, attributes, effects, pose,
           movementEnvironment, sleeping, flying, entityCollisions, null);
     }
+  }
 
   public record StepResult(Vanilla12111RichPhysics.StepResult delegate) implements Serializable {
     public StepResult {
