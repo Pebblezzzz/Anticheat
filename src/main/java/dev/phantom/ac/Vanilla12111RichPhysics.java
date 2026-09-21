@@ -314,7 +314,8 @@ public final class Vanilla12111RichPhysics {
                         velocity,
                         s.onGround() && fluid == Phase5Mechanics.Fluid.NONE && !climbing
                                 ? STEP_HEIGHT : 0.0,
-                        context.entityCollisions());
+                        context.entityCollisions(),
+                        context.actualMovementReference());
         if (collision.uncertain()) return uncertain(context, collision.diagnostic());
 
         Vec3 displacement = collision.displacement();
@@ -949,7 +950,8 @@ public final class Vanilla12111RichPhysics {
             Phase5Mechanics.MovementEnvironment movementEnvironment,
             boolean sleeping,
             boolean flying,
-            EntityCollisions entityCollisions) implements Serializable {
+            EntityCollisions entityCollisions,
+            Vec3 actualMovementReference) implements Serializable {
 
         public Context(
                 long tick,
@@ -975,7 +977,8 @@ public final class Vanilla12111RichPhysics {
                     movementEnvironment,
                     sleeping,
                     false,
-                    entityCollisions);
+                    entityCollisions,
+                    null);
         }
 
         public Context(
@@ -1001,7 +1004,8 @@ public final class Vanilla12111RichPhysics {
                     movementEnvironment,
                     sleeping,
                     false,
-                    EntityCollisions.NONE_TRACKED);
+                    EntityCollisions.NONE_TRACKED,
+                    null);
         }
 
         public Context {
@@ -1014,6 +1018,12 @@ public final class Vanilla12111RichPhysics {
             Objects.requireNonNull(pose);
             Objects.requireNonNull(movementEnvironment);
             Objects.requireNonNull(entityCollisions);
+            if (actualMovementReference != null
+                    && (!Double.isFinite(actualMovementReference.x())
+                    || !Double.isFinite(actualMovementReference.y())
+                    || !Double.isFinite(actualMovementReference.z()))) {
+                throw new IllegalArgumentException("actualMovementReference must be finite");
+            }
             if (simulationTick < 0) {
                 throw new IllegalArgumentException("simulationTick must be non-negative");
             }
