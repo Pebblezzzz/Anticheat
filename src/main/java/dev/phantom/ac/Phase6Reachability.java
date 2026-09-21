@@ -31,17 +31,18 @@ public final class Phase6Reachability {
     public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,EntityCollisions entityCollisions){this(tick,player,player.velocity(),env,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,Set.of(),null,player.onGround());}
     public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,EntityCollisions entityCollisions,Set<UncertainDimension> uncertainty){this(tick,player,player.velocity(),env,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,uncertainty,null,player.onGround());}
     public Context {if(simulationTick<0)throw new IllegalArgumentException("simulationTick must be non-negative");Objects.requireNonNull(player);Objects.requireNonNull(clientVelocity);Objects.requireNonNull(environment);Objects.requireNonNull(attributes);Objects.requireNonNull(effects);Objects.requireNonNull(pose);Objects.requireNonNull(movementEnvironment);Objects.requireNonNull(entityCollisions);uncertainty=Set.copyOf(uncertainty);}
+    public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,EntityCollisions entityCollisions,Set<UncertainDimension> uncertainty,Maths.Vec3 actualMovementReference,boolean lastOnGround){this(tick,player,player.velocity(),env,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,uncertainty,actualMovementReference,lastOnGround);}
     public Context withTick(long tick){return new Context(tick,player,clientVelocity,environment,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,uncertainty,actualMovementReference,lastOnGround);}
     public Context withClientVelocity(Maths.Vec3 velocity){return new Context(simulationTick,player,velocity,environment,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,uncertainty,actualMovementReference,lastOnGround);}
     public Context withActualMovementReference(Maths.Vec3 reference){
-      return new Context(simulationTick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,
+      return new Context(simulationTick,player,clientVelocity,environment,attributes,effects,pose,movementEnvironment,sleeping,
           entityCollisions,uncertainty,reference,lastOnGround);
     }
     public Context withLastOnGround(boolean value){
-      return new Context(simulationTick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,
+      return new Context(simulationTick,player,clientVelocity,environment,attributes,effects,pose,movementEnvironment,sleeping,
           entityCollisions,uncertainty,actualMovementReference,value);
     }
-    public Context withUncertainty(UncertainDimension... dimensions){EnumSet<UncertainDimension> u=EnumSet.noneOf(UncertainDimension.class);u.addAll(uncertainty);u.addAll(List.of(dimensions));return new Context(simulationTick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,u,actualMovementReference,lastOnGround);}
+    public Context withUncertainty(UncertainDimension... dimensions){EnumSet<UncertainDimension> u=EnumSet.noneOf(UncertainDimension.class);u.addAll(uncertainty);u.addAll(List.of(dimensions));return new Context(simulationTick,player,clientVelocity,environment,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,u,actualMovementReference,lastOnGround);}
   }
 
   public record InputConstraint(OptionalInt forward,OptionalInt strafe,Optional<Boolean> jump,Optional<Boolean> sprint,Optional<Boolean> sneak) implements Serializable {
