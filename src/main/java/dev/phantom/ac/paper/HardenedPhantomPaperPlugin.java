@@ -43,6 +43,7 @@ import dev.phantom.ac.Phase5Mechanics;
 import dev.phantom.ac.Phase7Timing;
 import dev.phantom.ac.Phase8PredictionRunner;
 import dev.phantom.ac.Phase8MovementValidation;
+import dev.phantom.ac.PhantomDebugFormatter;
 import dev.phantom.ac.Phase8EnforcementPolicy;
 import dev.phantom.ac.State;
 import dev.phantom.ac.Timeline;
@@ -1012,22 +1013,37 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       Phase8PredictionRunner.Report report=incremental;
       capture.lastDebugReport=incremental;
 
-      if(debugLevel(capture.playerId).trace()){
-        getLogger().info("[PhantomAC][PHASE8][PREDICT_DONE] player="+playerName
-            +" thread="+Thread.currentThread().getName()
+      DebugLevel debug=debugLevel(capture.playerId);
+      if(debug.trace() || debug.focus()){
+        for(Phase8PredictionRunner.PredictionFrame frame:incremental.frames()){
+          Phase8MovementValidation.Result frameResult=incremental.results().stream()
+              .filter(result -> result.evidence().replayReference().endsWith(":"+frame.sequence()))
+              .findFirst().orElse(null);
+          if(frameResult==null)continue;
+          if(debug.trace()){
+            getLogger().info("[PhantomAC][PHASE8] "
+                +PhantomDebugFormatter.movement(playerName,frame,frameResult));
+            frameResult.evidence().closestCandidate()
+                .ifPresent(candidate->getLogger().info("[PhantomAC][PHASE8] "
+                    +PhantomDebugFormatter.candidateSummary(candidate)));
+          }else if(frameResult.verdict()!=Phase8MovementValidation.Verdict.POSSIBLE){
+            getLogger().warning("[PhantomAC][PHASE8] "
+                +PhantomDebugFormatter.movement(playerName,frame,frameResult));
+          }
+        }
+      }
+      if(debug.summary() || debug.trace()){
+        getLogger().info("[PhantomAC][PHASE8][BATCH] player="+playerName
             +" elapsedMicros="+((System.nanoTime()-startedNanos)/1_000L)
             +" packets="+incremental.packetsProcessed()
             +" movements="+incremental.movementObservations()
+            +" possible="+incremental.possible()
+            +" uncertain="+incremental.uncertain()
+            +" impossible="+incremental.impossible()
             +" clientTick="+incremental.relativeClientTick()
             +" candidates="+capture.movementRunner.candidateCount()
             +" continuation="+incremental.continuation()
             +" frontierRetained="+incremental.candidateFrontierRetained());
-        for(Phase8PredictionRunner.PredictionFrame frame:incremental.frames()){
-          for(String traceLine:frame.trace()){
-            getLogger().info("[PhantomAC][PHASE8][TRACE] player="+playerName
-                +" seq="+frame.sequence()+" "+traceLine);
-          }
-        }
       }
       capture.lastValidationElapsedMicros=(System.nanoTime()-startedNanos)/1_000L;
       capture.lastValidationBatchPackets=raw.size();
