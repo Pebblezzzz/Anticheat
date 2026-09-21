@@ -1217,7 +1217,7 @@ class Phase8PredictionRunnerTest {
 
   @Test
   void uncertainTimingStillAdvancesThePersistentFrontier() {
-    Phase8PredictionRunner runner = new Phase8PredictionRunner(1);
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     Player start = new Player(
         new Maths.Vec3(.5, 64.0, .5),
         new Maths.Vec3(.1, 0.0, 0.0),
@@ -1245,15 +1245,26 @@ class Phase8PredictionRunnerTest {
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
         first.results().getFirst().verdict(), first.toString());
 
+    List<RawPacket> secondPackets = new ArrayList<>();
+    long sequence = 3L;
+    for (int i = 0; i < 12; i++) {
+      secondPackets.add(new RawPacket(
+          sequence++,
+          30L + i * 10L,
+          new ClientInput(false, false, false, false, false, false, false)));
+    }
+    secondPackets.add(new RawPacket(
+        sequence++,
+        200L,
+        new Move(new Maths.Vec3(.6546000015735626, 64.0, .5), 0f, 0f, true, 2L)));
+    secondPackets.add(new RawPacket(
+        sequence,
+        210L,
+        new Move(new Maths.Vec3(.684411603291893, 64.0, .5), 0f, 0f, true, 3L)));
+
     var second = runner.process(
         "uncertain-frontier",
-        List.of(
-            new RawPacket(3, 30L, new ClientInput(
-                false, false, false, false, false, false, false)),
-            new RawPacket(4, 40L, new Move(
-                new Maths.Vec3(.63, 64.0, .5), 0f, 0f, true, 2L)),
-            new RawPacket(5, 50L, new Move(
-                new Maths.Vec3(.639, 64.0, .5), 0f, 0f, true, 3L))),
+        secondPackets,
         floorWorld(),
         start,
         0L);
@@ -1275,6 +1286,12 @@ class Phase8PredictionRunnerTest {
         second.frames().getLast().predictedAfter().stream()
             .allMatch(candidate -> candidate.context().simulationTick() >= 3L),
         second.frames().getLast().toString());
+    assertTrue(
+        second.frames().stream()
+            .flatMap(frame -> frame.trace().stream())
+            .anyMatch(line -> line.contains("PREDICT_FORWARD")
+                && line.contains("exhaustive=false")),
+        second.frames().toString());
   }
 
   @Test
