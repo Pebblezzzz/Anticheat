@@ -37,7 +37,8 @@ public final class GrimMovementTicker {
             context.flying(),
             context.entityCollisions(),
             context.actualMovementReference(),
-            context.lastOnGround()));
+            context.lastOnGround(),
+            context.clientVelocity()));
     return new TickResult(
         result,
         context.clientVelocity(),
