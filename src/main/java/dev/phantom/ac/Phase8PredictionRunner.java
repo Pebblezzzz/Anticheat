@@ -1041,7 +1041,7 @@ public final class Phase8PredictionRunner {
             sequence,
             observedMovementReference,
             observedBefore.onGround());
-        trace.add("TIMING_OFFSETS" range=" + earliestSimulationTick + ".."
+        trace.add("TIMING_OFFSETS range=" + earliestSimulationTick + ".."
             + latestSimulationTick
             + " candidates=" + movementTiming.possibleSimulationClientTicks()
             + " exhaustive=" + advance.exhaustive());
