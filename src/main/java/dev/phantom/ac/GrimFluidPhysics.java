@@ -80,7 +80,7 @@ public final class GrimFluidPhysics {
       if (eyeY >= p.y() && eyeY <= surface) eyeInFluid = true;
 
       if (!vehicle && cellType == Type.WATER) {
-        Vec3 flow = localCurrent(world, p, fluid);
+        Vec3 flow = localCurrent(world, p, fluid.type());
         if (flow == null) currentKnown = false;
         else {
           currentSum = currentSum.add(flow);
