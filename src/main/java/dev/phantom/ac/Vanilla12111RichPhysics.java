@@ -132,7 +132,7 @@ public final class Vanilla12111RichPhysics {
                     s.yaw(),
                     s.pitch(),
                     gravity,
-                    context.effects().slowFalling);
+                    context.effects().slowFalling());
 
             /*
              * Mojang still permits an ordinary ground jump while wearing an Elytra.
@@ -169,7 +169,7 @@ public final class Vanilla12111RichPhysics {
                     collision.collidedX(),
                     collision.collidedY(),
                     collision.collidedZ(),
-                    collision.entityCollision(),
+                    (collision.collidedX() || collision.collidedY() || collision.collidedZ()),
                     "Grim-style 1.21.11 Elytra movement");
         }
 
