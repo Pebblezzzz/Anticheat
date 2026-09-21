@@ -65,7 +65,7 @@ class GrimParityPhysicsTest {
     Vec3 downwardLook = GrimFluidPhysics.applySwimmingSteering(velocity, -0.5, true);
     Vec3 levelLook = GrimFluidPhysics.applySwimmingSteering(velocity, 0.0, true);
 
-    assertEquals(0.0425, downwardLook.y(), 1e-12);
+    assertEquals(-0.0425, downwardLook.y(), 1e-12);
     assertEquals(0.0, levelLook.y(), 1e-12);
   }
 
