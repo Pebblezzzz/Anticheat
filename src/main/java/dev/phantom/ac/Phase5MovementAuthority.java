@@ -83,6 +83,26 @@ public final class Phase5MovementAuthority {
         Phase5Mechanics.MovementEnvironment movementEnvironment,
         boolean sleeping,
         boolean flying,
+        EntityCollisions entityCollisions,
+        Maths.Vec3 actualMovementReference,
+        boolean lastOnGround) {
+      this(simulationTick, state, input, world, environment, attributes, effects, pose,
+          movementEnvironment, sleeping, flying, entityCollisions, actualMovementReference,
+          lastOnGround, state.velocity());
+    }
+
+    public SimulationContext(
+        long simulationTick,
+        State.Player state,
+        Simulation.AdvancedInput input,
+        WorldSnapshot world,
+        Simulation.Environment environment,
+        Simulation.Attributes attributes,
+        Phase5Mechanics.MovementEffects effects,
+        Phase5Mechanics.Pose pose,
+        Phase5Mechanics.MovementEnvironment movementEnvironment,
+        boolean sleeping,
+        boolean flying,
         EntityCollisions entityCollisions) {
       this(simulationTick, state, input, world, environment, attributes, effects, pose,
           movementEnvironment, sleeping, flying, entityCollisions, null, state.onGround(), state.velocity());
