@@ -1015,7 +1015,7 @@ public final class Phase6Reachability {
                 "all prior observations were reachable under their declared Phase 6 envelopes")));
       }
       Candidate witness = result.candidates().stream()
-          .filter(candidate -> matches(candidate.context().player(), observation))
+          .filter(candidate -> matches(candidate, observation))
           .min(Comparator.comparingLong(Candidate::id))
           .orElse(null);
       lastReachable = witness;
@@ -1388,12 +1388,13 @@ public final class Phase6Reachability {
     return Math.sqrt(dx * dx + dy * dy + dz * dz);
   }
 
-  private static boolean matches(Player c, Observation o) {
+  private static boolean matches(Candidate candidate, Observation o) {
+    Player c = candidate.context().player();
     Player expected = o.observed();
     for (ObservedField field : o.known()) {
       switch (field) {
         case POSITION -> {
-          if (!positionMatches(c, c.position(), expected.position())) return false;
+          if (!positionMatches(candidate, c.position(), expected.position())) return false;
         }
         case VELOCITY -> {
           if (!c.velocity().equals(expected.velocity())) return false;
