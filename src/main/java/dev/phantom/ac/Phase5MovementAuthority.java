@@ -1,5 +1,6 @@
 package dev.phantom.ac;
 
+import dev.phantom.ac.Maths;
 import dev.phantom.ac.world.EntityCollisions;
 import dev.phantom.ac.world.WorldSnapshot;
 import java.io.Serializable;
@@ -46,7 +47,8 @@ public final class Phase5MovementAuthority {
       Phase5Mechanics.MovementEnvironment movementEnvironment,
       boolean sleeping,
       boolean flying,
-      EntityCollisions entityCollisions) implements Serializable {
+      EntityCollisions entityCollisions,
+      Maths.Vec3 actualMovementReference) implements Serializable {
     public SimulationContext {
       if (simulationTick < 0) throw new IllegalArgumentException("simulationTick must be non-negative");
       Objects.requireNonNull(state);
@@ -58,10 +60,33 @@ public final class Phase5MovementAuthority {
       Objects.requireNonNull(pose);
       Objects.requireNonNull(movementEnvironment);
       Objects.requireNonNull(entityCollisions);
+      if (actualMovementReference != null
+          && (!Double.isFinite(actualMovementReference.x())
+          || !Double.isFinite(actualMovementReference.y())
+          || !Double.isFinite(actualMovementReference.z()))) {
+        throw new IllegalArgumentException("actualMovementReference must be finite");
+      }
       if (!VERSION.equals(world.version()) && !Contracts.TARGET_VERSION.equals(world.version()))
         throw new IllegalArgumentException("Phase 5 requires Minecraft " + VERSION + " world data");
     }
   }
+
+    public SimulationContext(
+        long simulationTick,
+        State.Player state,
+        Simulation.AdvancedInput input,
+        WorldSnapshot world,
+        Simulation.Environment environment,
+        Simulation.Attributes attributes,
+        Phase5Mechanics.MovementEffects effects,
+        Phase5Mechanics.Pose pose,
+        Phase5Mechanics.MovementEnvironment movementEnvironment,
+        boolean sleeping,
+        boolean flying,
+        EntityCollisions entityCollisions) {
+      this(simulationTick, state, input, world, environment, attributes, effects, pose,
+          movementEnvironment, sleeping, flying, entityCollisions, null);
+    }
 
   public record StepResult(Vanilla12111RichPhysics.StepResult delegate) implements Serializable {
     public StepResult {
