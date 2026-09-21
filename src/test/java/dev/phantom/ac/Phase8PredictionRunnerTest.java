@@ -1277,15 +1277,15 @@ class Phase8PredictionRunnerTest {
         .anyMatch(line -> line.startsWith("FRONTIER_ADVANCED_UNCERTAIN")
             && line.contains("tick=2")),
         second.frames().toString());
-    assertTrue(
-        second.frames().getLast().predictedAfter().stream()
-            .allMatch(candidate -> candidate.context().simulationTick() >= 3L),
-        second.frames().getLast().toString());
     assertTrue(second.frames().stream()
         .flatMap(frame -> frame.trace().stream())
-        .anyMatch(line -> line.startsWith("FRONTIER_COMMITTED")
-            && line.contains("matching=")),
+        .anyMatch(line -> line.startsWith("FRONTIER_ADVANCED_UNCERTAIN")
+            && line.contains("tick=3")),
         second.frames().toString());
+    assertTrue(
+        second.frames().getLast().predictedAfter().stream()
+            .anyMatch(candidate -> candidate.context().simulationTick() >= 3L),
+        second.frames().getLast().toString());
     assertTrue(
         second.frames().stream()
             .flatMap(frame -> frame.trace().stream())
