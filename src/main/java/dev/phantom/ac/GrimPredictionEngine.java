@@ -42,6 +42,7 @@ public final class GrimPredictionEngine {
       int maximumCandidates,
       long movementSequence,
       long simulationTick,
+      long targetTick,
       Vec3 actualMovementReference,
       boolean lastOnGround) {
     if (starts.isEmpty()) {
@@ -83,7 +84,7 @@ public final class GrimPredictionEngine {
             startsByMovementState
                 .computeIfAbsent(requested, ignored -> new ArrayList<>())
                 .add(withLocomotionState(
-                    withActualMovementReference(base, actualMovementReference),
+                    withActualMovementReference(base, actualMovementReference, simulationTick, targetTick),
                     requested.sprinting(), requested.sneaking()));
           }
         }
@@ -145,10 +146,12 @@ public final class GrimPredictionEngine {
 
   private static Context withActualMovementReference(
       Context context,
-      Vec3 actualMovementReference) {
-    return actualMovementReference == null
-        ? context
-        : context.withActualMovementReference(actualMovementReference);
+      Vec3 actualMovementReference,
+      long simulationTick,
+      long targetTick) {
+    return actualMovementReference != null && simulationTick == targetTick - 1L
+        ? context.withActualMovementReference(actualMovementReference)
+        : context;
   }
 
   private static Context withLocomotionState(
