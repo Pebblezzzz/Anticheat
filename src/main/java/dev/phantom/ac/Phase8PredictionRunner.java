@@ -1069,7 +1069,8 @@ public final class Phase8PredictionRunner {
             maximumCandidates,
             sequence,
             observedMovementReference,
-            observedBefore.onGround());
+            observedBefore.onGround(),
+            authoritativeMovementEnvironment);
       }
       trace.add("PREDICT_FORWARD startTick=" + startTick
           + " targetTick=" + targetTick
@@ -2923,7 +2924,8 @@ public final class Phase8PredictionRunner {
       int maximumCandidates,
       long movementSequence,
       Vec3 actualMovementReference,
-      boolean lastOnGroundForPrediction) {
+      boolean lastOnGroundForPrediction,
+      MovementEnvironment authoritativeMovementEnvironment) {
     if (start.isEmpty()) {
       return new AdvanceResult(Set.of(), false, 0,
           List.of("prediction frontier is empty"), List.of());
