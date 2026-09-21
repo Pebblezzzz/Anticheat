@@ -653,6 +653,10 @@ public final class Phase8PredictionRunner {
                   move.onGround() != null
                       && candidate.context().player().onGround() != move.onGround());
           if (bootstrapGroundClaimMismatch) {
+            trace.add("GROUND_CLAIM_MISMATCH"
+                + " observed=" + move.onGround()
+                + " predictedCandidates=" + bootstrapCandidates.size()
+                + " movementReachability=not-impossible");
             bootstrapUncertainty = new ArrayList<>(bootstrapUncertainty);
             bootstrapUncertainty.add(
                 "client ground claim differs from the reconstructed physical ground state; bootstrap reachability ignores that client-only claim");
