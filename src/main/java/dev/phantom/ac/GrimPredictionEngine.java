@@ -100,7 +100,12 @@ public final class GrimPredictionEngine {
          * another field carried into physics.
          */
         int forward = inputOption.forward().orElse(0);
-        if (state.sprinting() && !environment.swimmingInput()) {
+        boolean swimming = entry.getValue().stream()
+            .findFirst()
+            .map(Context::movementEnvironment)
+            .map(MovementEnvironment::swimmingInput)
+            .orElse(false);
+        if (state.sprinting() && !swimming) {
           forward = 1;
         }
 
