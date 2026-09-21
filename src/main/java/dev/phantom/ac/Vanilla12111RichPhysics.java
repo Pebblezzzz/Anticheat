@@ -376,20 +376,13 @@ public final class Vanilla12111RichPhysics {
             } else {
                 nextY = velocity.y() * 0.5 - gravity / 4.0;
             }
+        } else if (grounded) {
+            // Vanilla keeps the small downward gravity velocity after a landing;
+            // this is also the value Grim's normal end-of-tick path retains.
+            nextY = -gravity * AIR_VERTICAL_DRAG * context.effects().fallGravityMultiplier();
         } else {
-            double adjusted = velocity.y();
-            if (!grounded) {
-                adjusted -= gravity * context.effects().fallGravityMultiplier();
-            } else if (supported && s.onGround() && Math.abs(velocity.y()) <= 1.0e-12) {
-                adjusted = 0.0;
-            }
-            nextY = adjusted * AIR_VERTICAL_DRAG;
-        }
-
-        if (fluid == Phase5Mechanics.Fluid.NONE && grounded) {
-            nextY = context.effects().levitation()
-                    ? context.effects().levitationVelocity()
-                    : 0.0;
+            nextY = (velocity.y() - gravity * context.effects().fallGravityMultiplier())
+                    * AIR_VERTICAL_DRAG;
         }
 
         Vec3 nextVelocity = new Vec3(
