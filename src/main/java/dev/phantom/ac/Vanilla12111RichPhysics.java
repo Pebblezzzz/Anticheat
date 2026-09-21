@@ -964,6 +964,35 @@ public final class Vanilla12111RichPhysics {
                 Phase5Mechanics.Pose pose,
                 Phase5Mechanics.MovementEnvironment movementEnvironment,
                 boolean sleeping,
+                boolean flying,
+                EntityCollisions entityCollisions) {
+            this(
+                    tick,
+                    state,
+                    input,
+                    world,
+                    environment,
+                    attributes,
+                    effects,
+                    pose,
+                    movementEnvironment,
+                    sleeping,
+                    flying,
+                    entityCollisions,
+                    null);
+        }
+
+        public Context(
+                long tick,
+                Player state,
+                Simulation.AdvancedInput input,
+                WorldSnapshot world,
+                Simulation.Environment environment,
+                Simulation.Attributes attributes,
+                Phase5Mechanics.MovementEffects effects,
+                Phase5Mechanics.Pose pose,
+                Phase5Mechanics.MovementEnvironment movementEnvironment,
+                boolean sleeping,
                 EntityCollisions entityCollisions) {
             this(
                     tick,
