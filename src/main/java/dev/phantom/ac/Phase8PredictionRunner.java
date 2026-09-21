@@ -2723,6 +2723,7 @@ public final class Phase8PredictionRunner {
     Context context = new Context(
         old.simulationTick(),
         player,
+        old.clientVelocity(),
         simulationEnvironmentFor(environment),
         player.attributes(),
         movementEffects(player),
@@ -2730,7 +2731,9 @@ public final class Phase8PredictionRunner {
         environment,
         player.pose() == Pose.SLEEPING,
         entityCollisions == null ? EntityCollisions.NONE_TRACKED : entityCollisions,
-        old.uncertainty());
+        old.uncertainty(),
+        old.actualMovementReference(),
+        old.lastOnGround());
     return new Candidate(candidate.id(), context, candidate.provenance());
   }
 
