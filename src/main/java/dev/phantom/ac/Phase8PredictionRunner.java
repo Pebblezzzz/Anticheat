@@ -3461,14 +3461,14 @@ public final class Phase8PredictionRunner {
         observedAfter.position().y() - observedBefore.position().y(),
         observedAfter.position().z() - observedBefore.position().z());
     Vec3 clientVelocity = clientPhysicsState == null
-        ? observedAfter.velocity()
+        ? actualMovement
         : clientPhysicsState.clientVelocity();
-    if (!predictedAfter.isEmpty()) {
-      clientVelocity = predictedAfter.stream()
-          .min(Comparator.comparingLong(candidate -> candidate.id()))
-          .orElseThrow()
-          .context().player().velocity();
-    }
+    Vec3 predictedVelocity = predictedAfter.isEmpty()
+        ? (clientPhysicsState == null ? observedAfter.velocity() : clientPhysicsState.predictedVelocity())
+        : predictedAfter.stream()
+            .min(Comparator.comparingLong(candidate -> candidate.id()))
+            .orElseThrow()
+            .context().player().velocity();
     Vec3 serverVelocity = latestAuthority == null
         ? (clientPhysicsState == null ? observedAfter.velocity() : clientPhysicsState.serverVelocity())
         : latestAuthority.context().serverVelocity();
@@ -3491,6 +3491,7 @@ public final class Phase8PredictionRunner {
             observedAfter,
             actualMovement,
             clientVelocity,
+            predictedVelocity,
             serverVelocity,
             authoritativeServerTick,
             "movement-observation");
@@ -3501,8 +3502,11 @@ public final class Phase8PredictionRunner {
         + " pitch=" + observedAfter.pitch()
         + " ground=" + observedAfter.onGround());
     mergedTrace.add("CLIENT_PHYSICS_STATE clientVelocity=" + clientPhysicsState.clientVelocity()
+        + " predictedVelocity=" + clientPhysicsState.predictedVelocity()
         + " serverVelocity=" + clientPhysicsState.serverVelocity()
         + " actualMovement=" + clientPhysicsState.actualMovement()
+        + " lastOnGround=" + clientPhysicsState.lastOnGround()
+        + " onGround=" + clientPhysicsState.onGround()
         + " tick=" + clientPhysicsState.clientTick());
     mergedTrace.add("HYPOTHESIS_SET count=" + hypotheses.size()
         + " ids=" + hypotheses.stream()
