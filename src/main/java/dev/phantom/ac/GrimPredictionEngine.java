@@ -70,7 +70,7 @@ public final class GrimPredictionEngine {
 
         startsByMovementState
             .computeIfAbsent(physical, ignored -> new ArrayList<>())
-            .add(withActualMovementReference(base, actualMovementReference));
+            .add(withActualMovementReference(base, actualMovementReference, simulationTick, targetTick));
 
         /*
          * Grim keeps KnownInput separate from physical sprint/sneak state.
