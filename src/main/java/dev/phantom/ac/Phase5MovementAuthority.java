@@ -14,24 +14,24 @@ import java.util.Objects;
  */
 public final class Phase5MovementAuthority {
   public static final String VERSION = Vanilla12111RichPhysics.VERSION;
-  private final Vanilla12111RichPhysics physics;
+  private final GrimMovementTicker ticker;
 
   public Phase5MovementAuthority() {
-    this(new Vanilla12111RichPhysics());
+    this(new GrimMovementTicker());
   }
 
   public Phase5MovementAuthority(Vanilla12111RichPhysics physics) {
-    this.physics = Objects.requireNonNull(physics, "physics");
+    this(new GrimMovementTicker(physics));
+  }
+
+  public Phase5MovementAuthority(GrimMovementTicker ticker) {
+    this.ticker = Objects.requireNonNull(ticker, "ticker");
   }
 
   public StepResult simulate(SimulationContext context) {
     Objects.requireNonNull(context, "context");
-    Vanilla12111RichPhysics.StepResult result = physics.step(new Vanilla12111RichPhysics.Context(
-        context.simulationTick(), context.state(), context.input(), context.world(),
-        context.environment(), context.attributes(), context.effects(), context.pose(),
-        context.movementEnvironment(), context.sleeping(), context.flying(),
-        context.entityCollisions(), context.actualMovementReference(), context.lastOnGround()));
-    return new StepResult(result);
+    GrimMovementTicker.TickResult result = ticker.tick(context);
+    return new StepResult(result.delegate());
   }
 
   public record SimulationContext(
