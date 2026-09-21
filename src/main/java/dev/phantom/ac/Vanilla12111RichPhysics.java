@@ -311,19 +311,30 @@ public final class Vanilla12111RichPhysics {
 
         Vec3 displacement = collision.displacement();
 
+        /*
+         * Grim determines onGround from the post-movement collision state. A
+         * support block under the start position is not sufficient: moving
+         * horizontally can leave an edge during this tick. Probe beneath the
+         * final bounding box so the next tick correctly becomes airborne when
+         * the player has no support left.
+         *
+         * Keep the probe restricted to states that were already grounded so an
+         * airborne player does not gain a new source of world-coverage uncertainty.
+         */
         boolean supported = false;
         if (s.onGround()
                 && velocity.y() <= 0
                 && fluid == Phase5Mechanics.Fluid.NONE
                 && !climbing) {
-            RichWorldCollision.Result probe = RichWorldCollision.resolve(
+            Aabb end = Aabb.playerAt(s.position().add(displacement), pose);
+            RichWorldCollision.Result supportProbe = RichWorldCollision.resolve(
                     context.world(),
-                    start,
+                    end,
                     new Vec3(0, -GROUND_PROBE, 0),
                     0.0,
                     context.entityCollisions());
-            if (probe.uncertain()) return uncertain(context, probe.diagnostic());
-            supported = probe.collidedY();
+            if (supportProbe.uncertain()) return uncertain(context, supportProbe.diagnostic());
+            supported = supportProbe.collidedY();
         }
 
         boolean grounded = velocity.y() <= 0 && (collision.collidedY() || supported);

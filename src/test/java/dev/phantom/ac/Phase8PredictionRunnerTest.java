@@ -31,6 +31,52 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void groundedEdgeTransitionFeedsFallingVelocityIntoNextClientTick() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+
+    var stone = dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone", Map.of());
+    var edgeWorld = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+        .loadChunk(0, 0)
+        .setBlock(0, 63, 0, stone)
+        .build();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 10, authority,
+            Packets.CaptureProvenance.fromAdapter(
+                "test-authority", authority, 100L, 0L)),
+        new RawPacket(2, 20, new Move(
+            new Maths.Vec3(1.4, 64.0, .5), 0f, 0f, false, 1L)),
+        new RawPacket(3, 30, new Move(
+            new Maths.Vec3(1.8914000141620635, 63.92159999847412, .5),
+            0f, 0f, false, 2L)));
+
+    var report = runner.process(
+        "edge-fall",
+        packets,
+        edgeWorld,
+        anchor(),
+        0L);
+
+    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getLast().verdict(), report.results().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("FRONTIER_COMMITTED")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().predictedAfter().stream()
+        .anyMatch(candidate -> !candidate.context().player().onGround()
+            && Math.abs(candidate.context().player().position().y()
+                - 63.92159999847412) <= 1.0E-9),
+        report.frames().getLast().toString());
+  }
+
+  @Test
   void playerInputSprintKeyDoesNotImplyActualMovementSprint() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     var world = floorWorld();
