@@ -471,7 +471,7 @@ public final class Vanilla12111RichPhysics {
                 (collision.collidedX() || collision.collidedY() || collision.collidedZ()),
                 diagnostic,
                 sneakEdgeConstrained,
-                velocity);
+                nextVelocity);
     }
 
     private StepResult vehicleStep(
@@ -550,7 +550,7 @@ public final class Vanilla12111RichPhysics {
                 (collision.collidedX() || collision.collidedY() || collision.collidedZ()),
                 vehicleResult.diagnostic(),
                 false,
-                vehicleResult.velocity());
+                nextVelocity);
     }
 
     /**
