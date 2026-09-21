@@ -82,7 +82,7 @@ public final class GrimVehiclePhysics {
             vehicle.velocity().x() + inputVector.x(),
             vehicle.velocity().y() + vertical * scaled,
             vehicle.velocity().z() + inputVector.z());
-        return new Result(result.multiply(0.91), "happy-ghast rideable ticker");
+        return new Result(new Vec3(result.x() * 0.91, result.y() * 0.98, result.z() * 0.91), "happy-ghast rideable ticker");
       }
       case OTHER, NONE -> {
         accel = baseSpeed;
@@ -91,7 +91,7 @@ public final class GrimVehiclePhysics {
     }
 
     Vec3 inputVector = rotate(strafe * accel, forward * accel, Math.toDegrees(yaw));
-    Vec3 result = vehicle.velocity().add(inputVector);
+    Vec3 result = new Vec3(vehicle.velocity().x(), vehicle.velocity().y(), vehicle.velocity().z()).add(inputVector);
     if (vehicle.type() == VehicleType.PIG || vehicle.type() == VehicleType.STRIDER
         || vehicle.type() == VehicleType.HORSE || vehicle.type() == VehicleType.CAMEL
         || vehicle.type() == VehicleType.NAUTILUS) {
