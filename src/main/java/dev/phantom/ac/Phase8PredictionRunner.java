@@ -1022,6 +1022,11 @@ public final class Phase8PredictionRunner {
         continue;
       }
 
+      Vec3 observedMovementReference = new Vec3(
+          observedAfter.position().x() - observedBefore.position().x(),
+          observedAfter.position().y() - observedBefore.position().y(),
+          observedAfter.position().z() - observedBefore.position().z());
+
       AdvanceResult advance;
       if (explicitTimingFullyRepresented && movementTiming != null) {
         long earliestSimulationTick = movementTiming.simulationClientTicks().min();
@@ -1033,7 +1038,8 @@ public final class Phase8PredictionRunner {
             inputChronologies,
             world,
             maximumCandidates,
-            sequence);
+            sequence,
+            observedMovementReference);
         trace.add("TIMING_OFFSETS range=" + earliestSimulationTick + ".."
             + latestSimulationTick
             + " candidates=" + movementTiming.possibleSimulationClientTicks()
@@ -1046,7 +1052,8 @@ public final class Phase8PredictionRunner {
             inputChronologies,
             world,
             maximumCandidates,
-            sequence);
+            sequence,
+            observedMovementReference);
       }
       trace.add("PREDICT_FORWARD startTick=" + startTick
           + " targetTick=" + targetTick
@@ -1076,10 +1083,7 @@ public final class Phase8PredictionRunner {
       prediction = advance.candidates();
       predictionTick = targetTick;
 
-      Vec3 observedDelta = new Vec3(
-          observedAfter.position().x() - observedBefore.position().x(),
-          observedAfter.position().y() - observedBefore.position().y(),
-          observedAfter.position().z() - observedBefore.position().z());
+      Vec3 observedDelta = observedMovementReference;
       trace.add("OBSERVATION_DELTA observed=" + observedDelta
           + " priorPosition=" + observedBefore.position()
           + " observedPosition=" + observedAfter.position());
@@ -2662,7 +2666,8 @@ public final class Phase8PredictionRunner {
       List<InputChronology> inputChronologies,
       WorldSnapshot world,
       int maximumCandidates,
-      long movementSequence) {
+      long movementSequence,
+      Vec3 actualMovementReference) {
     if (start.isEmpty()) {
       return new AdvanceResult(Set.of(), false, 0,
           List.of("prediction frontier is empty"), List.of());
@@ -2676,7 +2681,7 @@ public final class Phase8PredictionRunner {
           List.of("incremental prediction horizon exceeded"), List.of());
     }
     return advancePredictionToTarget(
-        start, targetTick, inputChronologies, world, maximumCandidates, movementSequence);
+        start, targetTick, inputChronologies, world, maximumCandidates, movementSequence, actualMovementReference);
   }
 
   private AdvanceResult advancePredictionAcrossTimingRange(
@@ -2686,7 +2691,8 @@ public final class Phase8PredictionRunner {
       List<InputChronology> inputChronologies,
       WorldSnapshot world,
       int maximumCandidates,
-      long movementSequence) {
+      long movementSequence,
+      Vec3 actualMovementReference) {
     if (start.isEmpty()) {
       return new AdvanceResult(Set.of(), false, 0,
           List.of("prediction frontier is empty"), List.of());
@@ -2716,7 +2722,7 @@ public final class Phase8PredictionRunner {
 
     for (long target = earliestTick; target <= latestTick; target++) {
       AdvanceResult one = advancePredictionToTarget(
-          start, target, inputChronologies, world, maximumCandidates, movementSequence);
+          start, target, inputChronologies, world, maximumCandidates, movementSequence, actualMovementReference);
       union.addAll(one.candidates());
       reasons.addAll(one.reasons());
       trace.add("TIMING_OFFSET target=" + target
@@ -2746,7 +2752,8 @@ public final class Phase8PredictionRunner {
       List<InputChronology> inputChronologies,
       WorldSnapshot world,
       int maximumCandidates,
-      long movementSequence) {
+      long movementSequence,
+      Vec3 actualMovementReference) {
     if (start.isEmpty()) {
       return new AdvanceResult(Set.of(), false, 0,
           List.of("prediction frontier is empty"), List.of());
@@ -2817,6 +2824,14 @@ public final class Phase8PredictionRunner {
 
             for (var movementEntry : startsByMovementState.entrySet()) {
               MovementInputState movementState = movementEntry.getKey();
+              List<Context> branchStarts = movementEntry.getValue();
+              if (actualMovementReference != null && simulationTick == targetTick - 1L) {
+                branchStarts = branchStarts.stream()
+                    .map(context -> context.withActualMovementReference(actualMovementReference))
+                    .toList();
+                trace.add("COLLISION_REFERENCE tick=" + simulationTick
+                    + " actualMovement=" + actualMovementReference);
+              }
               InputConstraint simulationInput = new InputConstraint(
                   inputOption.forward(),
                   inputOption.strafe(),
@@ -2825,7 +2840,7 @@ public final class Phase8PredictionRunner {
                   Optional.of(movementState.sneaking()));
 
               SearchResult branch = new Phase6Reachability().search(
-                  movementEntry.getValue(),
+                  branchStarts,
                   List.of(simulationInput),
                   ignored -> List.of(new WorldBranch(
                       "packet-world@" + simulationTick,
