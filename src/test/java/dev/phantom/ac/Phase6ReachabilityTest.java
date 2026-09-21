@@ -101,6 +101,61 @@ class Phase6ReachabilityTest {
   }
 
   @Test
+  void preservedLastOnGroundReachesPhase5PhysicsContext() {
+    Phase6Reachability reachable = new Phase6Reachability();
+
+    var stone = dev.phantom.ac.world.v12111.BlockCatalogue12111.decode(
+        "minecraft:stone", Map.of());
+    WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+        .loadChunk(0, 0)
+        .setBlock(0, 63, 0, stone)
+        .build();
+
+    Player airborne = new Player(
+        new Vec3(0.5, 64.0, 0.5),
+        new Vec3(0.1, 0.0, 0.0),
+        0f, 0f, false, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Phase5Mechanics.Pose.STANDING,
+        State.Environment.DRY, State.TickRange.exact(0),
+        State.Provenance.UNKNOWN, Set.of());
+
+    Phase6Reachability.Context context = new Phase6Reachability.Context(
+        0L,
+        airborne,
+        Simulation.Environment.DRY,
+        Simulation.Attributes.DEFAULT,
+        Phase5Mechanics.MovementEffects.NONE,
+        Phase5Mechanics.Pose.STANDING,
+        MovementEnvironment.dry(false, false, false),
+        false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()),
+        Set.of(),
+        null,
+        true);
+
+    var result = reachable.search(
+        context,
+        List.of(Phase6Reachability.InputConstraint.exact(
+            new AdvancedInput(0, 0, false, false, false))),
+        ignored -> List.of(new Phase6Reachability.WorldBranch(
+            "last-on-ground", world, true, "known test world")),
+        ignored -> List.of(new Phase6Reachability.None()),
+        Phase6Reachability.SearchConfig.defaults(16));
+
+    assertEquals(Phase6Reachability.Verdict.POSSIBLE, result.verdict(),
+        result.toString());
+    var candidate = result.candidates().stream().findFirst().orElseThrow();
+    assertTrue(candidate.context().lastOnGround(),
+        candidate.context().toString());
+    assertTrue(
+        Math.abs(candidate.context().player().velocity().x())
+            < 0.1,
+        () -> "Phase 5 should apply ground friction when lastOnGround is preserved: "
+            + candidate.context().player().velocity());
+  }
+
+  @Test
   void basicUnknownTickStillUsesLegacyEighteenStateEnvelope() {
     ReachableStates reachable = new ReachableStates(new Vanilla12111Physics());
     Reachability result = reachable.next(Player.initial(Vec3.ZERO), ground(), false);
