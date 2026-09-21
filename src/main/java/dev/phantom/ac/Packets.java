@@ -66,6 +66,14 @@ public final class Packets {
                          boolean sleeping, List<dev.phantom.ac.world.EntityCollisions.EntityBox> entityBoxes) {
       this(gamemode,attributes,effects,pose,movementEnvironment,Vec3.ZERO,Vec3.ZERO,false,false,sleeping,entityBoxes,Phase5Mechanics.VehicleState.NONE);
     }
+
+    public PlayerContext(String gamemode, Simulation.Attributes attributes, Map<String,Integer> effects,
+                         Phase5Mechanics.Pose pose, Phase5Mechanics.MovementEnvironment movementEnvironment,
+                         Vec3 serverPosition, Vec3 serverVelocity, boolean canFly, boolean flying,
+                         boolean sleeping, List<dev.phantom.ac.world.EntityCollisions.EntityBox> entityBoxes) {
+      this(gamemode,attributes,effects,pose,movementEnvironment,serverPosition,serverVelocity,
+          canFly,flying,sleeping,entityBoxes,Phase5Mechanics.VehicleState.NONE);
+    }
   }
   public record BlockChange(World.Pos position, World.Block block) implements Packet { public BlockChange { Objects.requireNonNull(position,"position"); Objects.requireNonNull(block,"block"); } }
   public record BlockStateChange(dev.phantom.ac.world.Pos position, dev.phantom.ac.world.BlockState state) implements Packet { public BlockStateChange { Objects.requireNonNull(position,"position"); Objects.requireNonNull(state,"state"); if(state.isUnsupported()) throw new IllegalArgumentException("an unsupported state carries no verified shape and must not be recorded as a known world change"); } }
