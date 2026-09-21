@@ -1070,6 +1070,22 @@ public final class Phase8PredictionRunner {
           + " exhaustive=" + advance.exhaustive());
       trace.addAll(advance.trace());
 
+      /*
+       * Grim keeps its possible-vector frontier moving even when one source of
+       * timing/input chronology is uncertain. An incomplete search means we
+       * cannot prove POSSIBLE/IMPOSSIBLE, but the candidates we did model are
+       * still valid client states and must become the next causal frontier.
+       * Freezing the old root here causes the same movement to be simulated from
+       * an increasingly stale tick on every later packet.
+       */
+      if (!advance.candidates().isEmpty()) {
+        prediction = advance.candidates();
+        predictionTick = prediction.stream()
+            .mapToLong(candidate -> candidate.context().simulationTick())
+            .max()
+            .orElse(targetTick);
+      }
+
       if (!advance.exhaustive()) {
         uncertaintySources.addAll(advance.reasons());
         latestContinuation = Continuation.UNCERTAIN;
@@ -1081,8 +1097,9 @@ public final class Phase8PredictionRunner {
             tick, uncertaintySources, search, false);
         results.add(result);
         uncertain++;
-        trace.add("FRONTIER_RETAINED after=" + prediction.size()
-            + " tick=" + predictionTick);
+        trace.add("FRONTIER_ADVANCED_UNCERTAIN after=" + prediction.size()
+            + " tick=" + predictionTick
+            + " modeledSteps=" + advance.simulatedTicks());
         frames.add(frame(
             sequence, packet, tick, move, observedBefore, observedAfter,
             predictedBefore, prediction, world, uncertaintySources, trace));
