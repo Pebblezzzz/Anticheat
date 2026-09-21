@@ -335,31 +335,47 @@ public final class RichWorldCollision {
   private static double clipBox(
       Axis axis,BlockBox moving,BlockBox obstacle,double amount){
     boolean cross=switch(axis){
-      case X -> moving.maxY()>obstacle.minY()&&moving.minY()<obstacle.maxY()
-          &&moving.maxZ()>obstacle.minZ()&&moving.minZ()<obstacle.maxZ();
-      case Y -> moving.maxX()>obstacle.minX()&&moving.minX()<obstacle.maxX()
-          &&moving.maxZ()>obstacle.minZ()&&moving.minZ()<obstacle.maxZ();
-      case Z -> moving.maxX()>obstacle.minX()&&moving.minX()<obstacle.maxX()
-          &&moving.maxY()>obstacle.minY()&&moving.minY()<obstacle.maxY();
+      case X -> (moving.minY()-obstacle.maxY()) < -COLLISION_EPSILON
+          && (moving.maxY()-obstacle.minY()) > COLLISION_EPSILON
+          && (moving.minZ()-obstacle.maxZ()) < -COLLISION_EPSILON
+          && (moving.maxZ()-obstacle.minZ()) > COLLISION_EPSILON;
+      case Y -> (moving.minX()-obstacle.maxX()) < -COLLISION_EPSILON
+          && (moving.maxX()-obstacle.minX()) > COLLISION_EPSILON
+          && (moving.minZ()-obstacle.maxZ()) < -COLLISION_EPSILON
+          && (moving.maxZ()-obstacle.minZ()) > COLLISION_EPSILON;
+      case Z -> (moving.minX()-obstacle.maxX()) < -COLLISION_EPSILON
+          && (moving.maxX()-obstacle.minX()) > COLLISION_EPSILON
+          && (moving.minY()-obstacle.maxY()) < -COLLISION_EPSILON
+          && (moving.maxY()-obstacle.minY()) > COLLISION_EPSILON;
     };
     if(!cross)return amount;
+
+    // Match Grim's SimpleCollisionBox.collideX/Y/Z semantics. In particular,
+    // a player whose starting box is only a few nanometres inside a wall is
+    // still treated as being in collision instead of being allowed to advance
+    // through the wall. This is the common steady-state wall-pushing case.
     if(axis==Axis.X){
-      if(amount>0.0&&moving.maxX()<=obstacle.minX())
-        return Math.min(amount,obstacle.minX()-moving.maxX());
-      if(amount<0.0&&moving.minX()>=obstacle.maxX())
-        return Math.max(amount,obstacle.maxX()-moving.minX());
+      if(amount>=0.0){
+        double maxMove=obstacle.minX()-moving.maxX();
+        return maxMove < -COLLISION_EPSILON ? amount : Math.min(maxMove,amount);
+      }
+      double maxMove=obstacle.maxX()-moving.minX();
+      return maxMove > COLLISION_EPSILON ? amount : Math.max(maxMove,amount);
     }else if(axis==Axis.Y){
-      if(amount>0.0&&moving.maxY()<=obstacle.minY())
-        return Math.min(amount,obstacle.minY()-moving.maxY());
-      if(amount<0.0&&moving.minY()>=obstacle.maxY())
-        return Math.max(amount,obstacle.maxY()-moving.minY());
-    }else{
-      if(amount>0.0&&moving.maxZ()<=obstacle.minZ())
-        return Math.min(amount,obstacle.minZ()-moving.maxZ());
-      if(amount<0.0&&moving.minZ()>=obstacle.maxZ())
-        return Math.max(amount,obstacle.maxZ()-moving.minZ());
+      if(amount>=0.0){
+        double maxMove=obstacle.minY()-moving.maxY();
+        return maxMove < -COLLISION_EPSILON ? amount : Math.min(maxMove,amount);
+      }
+      double maxMove=obstacle.maxY()-moving.minY();
+      return maxMove > COLLISION_EPSILON ? amount : Math.max(maxMove,amount);
     }
-    return amount;
+
+    if(amount>=0.0){
+      double maxMove=obstacle.minZ()-moving.maxZ();
+      return maxMove < -COLLISION_EPSILON ? amount : Math.min(maxMove,amount);
+    }
+    double maxMove=obstacle.maxZ()-moving.minZ();
+    return maxMove > COLLISION_EPSILON ? amount : Math.max(maxMove,amount);
   }
 
   private static double clipAabb(Axis axis,BlockBox moving,BlockBox obstacle,double amount){
