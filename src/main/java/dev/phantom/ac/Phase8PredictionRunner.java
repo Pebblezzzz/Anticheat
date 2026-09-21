@@ -1034,6 +1034,12 @@ public final class Phase8PredictionRunner {
           observedAfter.position().y() - observedBefore.position().y(),
           observedAfter.position().z() - observedBefore.position().z());
 
+      AuthorityAnchor freshPredictionAuthority = freshCausalAuthority(packet);
+      MovementEnvironment authoritativeMovementEnvironment =
+          freshPredictionAuthority == null
+              ? null
+              : freshPredictionAuthority.context().movementEnvironment();
+
       AdvanceResult advance;
       if (explicitTimingFullyRepresented && movementTiming != null) {
         long earliestSimulationTick = movementTiming.simulationClientTicks().min();
@@ -1047,7 +1053,8 @@ public final class Phase8PredictionRunner {
             maximumCandidates,
             sequence,
             observedMovementReference,
-            observedBefore.onGround());
+            observedBefore.onGround(),
+            authoritativeMovementEnvironment);
         trace.add("TIMING_OFFSETS range=" + earliestSimulationTick + ".."
             + latestSimulationTick
             + " candidates=" + movementTiming.possibleSimulationClientTicks()
@@ -2823,7 +2830,8 @@ public final class Phase8PredictionRunner {
       int maximumCandidates,
       long movementSequence,
       Vec3 actualMovementReference,
-      boolean lastOnGroundForPrediction) {
+      boolean lastOnGroundForPrediction,
+      MovementEnvironment authoritativeMovementEnvironment) {
     if (start.isEmpty()) {
       return new AdvanceResult(Set.of(), false, 0,
           List.of("prediction frontier is empty"), List.of());
@@ -2838,7 +2846,7 @@ public final class Phase8PredictionRunner {
     }
     return advancePredictionToTarget(
         start, targetTick, inputChronologies, world, maximumCandidates, movementSequence,
-        actualMovementReference, lastOnGroundForPrediction);
+        actualMovementReference, lastOnGroundForPrediction, authoritativeMovementEnvironment);
   }
 
   private AdvanceResult advancePredictionAcrossTimingRange(
@@ -2850,7 +2858,8 @@ public final class Phase8PredictionRunner {
       int maximumCandidates,
       long movementSequence,
       Vec3 actualMovementReference,
-      boolean lastOnGroundForPrediction) {
+      boolean lastOnGroundForPrediction,
+      MovementEnvironment authoritativeMovementEnvironment) {
     if (start.isEmpty()) {
       return new AdvanceResult(Set.of(), false, 0,
           List.of("prediction frontier is empty"), List.of());
@@ -2881,7 +2890,8 @@ public final class Phase8PredictionRunner {
     for (long target = earliestTick; target <= latestTick; target++) {
       AdvanceResult one = advancePredictionToTarget(
           start, target, inputChronologies, world, maximumCandidates, movementSequence,
-          actualMovementReference, lastOnGroundForPrediction);
+          actualMovementReference, lastOnGroundForPrediction,
+          authoritativeMovementEnvironment);
       union.addAll(one.candidates());
       reasons.addAll(one.reasons());
       trace.add("TIMING_OFFSET target=" + target
@@ -2974,7 +2984,8 @@ public final class Phase8PredictionRunner {
               simulationTick,
               targetTick,
               actualMovementReference,
-              lastOnGroundForPrediction);
+              lastOnGroundForPrediction,
+              authoritativeMovementEnvironment);
 
           trace.addAll(engineResult.trace());
           LinkedHashSet<String> stepReasons = new LinkedHashSet<>(engineResult.reasons());
