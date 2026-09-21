@@ -495,7 +495,7 @@ class Phase6CompletionTest {
       Player expected = scenario.context().player();
       Context expectedContext = scenario.context();
       for (AdvancedInput input : scenario.inputs()) {
-        Vanilla12111RichPhysics.StepResult expectedStep = runPhase5(
+        expected = runPhase5(
             new Context(
                 expectedContext.simulationTick(),
                 expected,
@@ -505,26 +505,18 @@ class Phase6CompletionTest {
                 expected.pose(),
                 expectedContext.movementEnvironment(),
                 expectedContext.sleeping(),
-                expectedContext.entityCollisions(),
-                Set.of(),
-                expectedContext.actualMovementReference(),
-                expectedContext.lastOnGround()),
+                expectedContext.entityCollisions()),
             input, scenario.world());
-        expected = expectedStep.state();
         expectedContext = new Context(
             expectedContext.simulationTick() + 1,
             expected,
-            expectedStep.clientVelocityAfterTick(),
             expectedContext.environment(),
             expectedContext.attributes(),
             expectedContext.effects(),
             expected.pose(),
             expectedContext.movementEnvironment(),
             expectedContext.sleeping(),
-            expectedContext.entityCollisions(),
-            Set.of(),
-            expectedContext.actualMovementReference(),
-            expectedContext.lastOnGround());
+            expectedContext.entityCollisions());
       }
       Player actual = result.candidates().stream()
           .min(Comparator.comparingLong(Candidate::id))
