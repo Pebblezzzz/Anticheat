@@ -45,6 +45,22 @@ public final class GrimPredictionEngine {
       long targetTick,
       Vec3 actualMovementReference,
       boolean lastOnGround) {
+    return tick(
+        starts, inputOptions, world, maximumCandidates, movementSequence,
+        simulationTick, targetTick, actualMovementReference, lastOnGround, null);
+  }
+
+  public TickResult tick(
+      Set<Candidate> starts,
+      List<InputConstraint> inputOptions,
+      WorldSnapshot world,
+      int maximumCandidates,
+      long movementSequence,
+      long simulationTick,
+      long targetTick,
+      Vec3 actualMovementReference,
+      boolean lastOnGround,
+      MovementEnvironment authoritativeMovementEnvironment) {
     if (starts.isEmpty()) {
       return new TickResult(
           Set.of(), false,
@@ -77,6 +93,27 @@ public final class GrimPredictionEngine {
          * Exact held input is therefore a legitimate newer state alternative,
          * but it must not erase the retained physical branch.
          */
+        /*
+         * Grim keeps the physical locomotion flag independently from KnownInput.
+         * A fresh authoritative movement snapshot can therefore disagree with the
+         * retained frontier while both remain causally possible at the final tick.
+         * Carry that authority state as a final-tick alternative only; historical
+         * simulation ticks must remain driven by their retained chronology.
+         */
+        if (authoritativeMovementEnvironment != null
+            && simulationTick == targetTick - 1L) {
+          MovementInputState authoritative = new MovementInputState(
+              authoritativeMovementEnvironment.sprinting(),
+              authoritativeMovementEnvironment.sneaking());
+          if (!authoritative.equals(physical)) {
+            startsByMovementState
+                .computeIfAbsent(authoritative, ignored -> new ArrayList<>())
+                .add(withLocomotionState(
+                    withActualMovementReference(base, actualMovementReference, simulationTick, targetTick),
+                    authoritative.sprinting(), authoritative.sneaking()));
+          }
+        }
+
         if (inputOption.sprint().isPresent() && inputOption.sneak().isPresent()) {
           MovementInputState requested = new MovementInputState(
               inputOption.sprint().get(), inputOption.sneak().get());
@@ -128,6 +165,10 @@ public final class GrimPredictionEngine {
             Phase6Reachability.SearchConfig.defaults(maximumCandidates));
 
         trace.add("GRIM_ENGINE_TICK tick=" + simulationTick
+            + " authoritySprint=" + (authoritativeMovementEnvironment == null ? "unknown"
+                : Boolean.toString(authoritativeMovementEnvironment.sprinting()))
+            + " authoritySneak=" + (authoritativeMovementEnvironment == null ? "unknown"
+                : Boolean.toString(authoritativeMovementEnvironment.sneaking()))
             + " physicalSprint=" + state.sprinting()
             + " physicalSneak=" + state.sneaking()
             + " movementSprint=" + state.sprinting()
