@@ -38,12 +38,12 @@ public final class GrimFluidPhysics {
     Objects.requireNonNull(box);
 
     BlockBox region = new BlockBox(
-        Math.floor(box.minX()) - 1,
-        Math.floor(box.minY()) - 1,
-        Math.floor(box.minZ()) - 1,
-        Math.floor(box.maxX()) + 1,
-        Math.floor(box.maxY()) + 1,
-        Math.floor(box.maxZ()) + 1);
+        Math.floor(box.minX()),
+        Math.floor(box.minY()),
+        Math.floor(box.minZ()),
+        Math.floor(box.maxX()),
+        Math.floor(box.maxY()),
+        Math.floor(box.maxZ()));
 
     double maxHeight = 0.0;
     Type type = Type.NONE;
