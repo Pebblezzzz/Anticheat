@@ -86,10 +86,18 @@ class Phase8PredictionRunnerTest {
         .setBlock(0, 63, 0, stone)
         .build();
 
+    Player start = new Player(
+        new Maths.Vec3(.5, 64.0, .5),
+        new Maths.Vec3(.9, 0.0, 0.0),
+        0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
+
     PlayerContext authority = new PlayerContext(
         "survival", Simulation.Attributes.DEFAULT, Map.of(),
         Pose.STANDING, MovementEnvironment.dry(true, false, false),
-        new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
+        start.position(), start.velocity(),
         false, false, false, List.of());
 
     var report = runner.process(
@@ -99,7 +107,7 @@ class Phase8PredictionRunnerTest {
             new RawPacket(2, 20, new Move(
                 new Maths.Vec3(1.4, 64.0, .5), 0f, 0f, true, 1L))),
         edgeWorld,
-        anchor(),
+        start,
         0L);
 
     assertEquals(1, report.movementObservations(), report.results().toString());
@@ -161,9 +169,11 @@ class Phase8PredictionRunnerTest {
     assertTrue(report.results().getLast().verdict()
             != Phase8MovementValidation.Verdict.IMPOSSIBLE,
         report.results().toString());
-    assertTrue(report.frames().getLast().trace().stream()
-        .anyMatch(line -> line.contains("INERTIAL_RECOVERY")),
-        report.frames().toString());
+    assertTrue(report.frames().getLast().predictedAfter().stream()
+        .anyMatch(candidate -> Math.abs(
+            candidate.context().player().position().y() - second.position().y()) <= 1.0E-9
+            && Math.abs(candidate.context().player().position().z() - second.position().z()) <= 1.0E-9),
+        report.frames().getLast().toString());
   }
 
   @Test
