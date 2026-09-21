@@ -705,10 +705,9 @@ public final class Phase6Reachability {
                   movementEnvironmentFor(sample, pre);
               Simulation.Environment simulationEnvironment = environmentFor(environment);
 
-              State.Player physicsState = withVelocity(pre.player(), pre.clientVelocity());
               Phase5MovementAuthority.SimulationContext physicsContext =
                   new Phase5MovementAuthority.SimulationContext(
-                      tick, physicsState, input, branch.world(),
+                      tick, pre.player(), input, branch.world(),
                       simulationEnvironment, pre.attributes(), pre.effects(),
                       pre.pose(), environment, pre.sleeping(),
                       pre.player().pose() == Pose.FALL_FLYING,
