@@ -1217,11 +1217,19 @@ class Phase8PredictionRunnerTest {
 
   @Test
   void uncertainTimingStillAdvancesThePersistentFrontier() {
-    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(1);
+    Player start = new Player(
+        new Maths.Vec3(.5, 64.0, .5),
+        new Maths.Vec3(.1, 0.0, 0.0),
+        0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
+
     PlayerContext authority = new PlayerContext(
-        "survival", Simulation.Attributes.DEFAULT, Map.of(),
-        Pose.STANDING, MovementEnvironment.dry(true, false, false),
-        new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
+        "survival", start.attributes(), Map.of(), Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        start.position(), start.velocity(),
         false, false, false, List.of());
 
     var first = runner.process(
@@ -1229,36 +1237,25 @@ class Phase8PredictionRunnerTest {
         List.of(
             new RawPacket(1, 10L, authority),
             new RawPacket(2, 20L, new Move(
-                new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 1L))),
+                new Maths.Vec3(.6, 64.0, .5), 0f, 0f, true, 1L))),
         floorWorld(),
-        anchor(),
+        start,
         0L);
 
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
         first.results().getFirst().verdict(), first.toString());
 
-    List<RawPacket> uncertainPackets = new ArrayList<>();
-    long sequence = 3L;
-    for (int i = 0; i < 513; i++) {
-      uncertainPackets.add(new RawPacket(
-          sequence++,
-          30L + i,
-          new ClientInput(false, false, false, false, false, false, false)));
-    }
-    uncertainPackets.add(new RawPacket(
-        sequence++,
-        10_000L,
-        new Move(new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 2L)));
-    uncertainPackets.add(new RawPacket(
-        sequence,
-        10_050L,
-        new Move(new Maths.Vec3(.5, 64.0, .5), 0f, 0f, true, 3L)));
-
     var second = runner.process(
         "uncertain-frontier",
-        uncertainPackets,
+        List.of(
+            new RawPacket(3, 30L, new ClientInput(
+                false, false, false, false, false, false, false)),
+            new RawPacket(4, 40L, new Move(
+                new Maths.Vec3(.63, 64.0, .5), 0f, 0f, true, 2L)),
+            new RawPacket(5, 50L, new Move(
+                new Maths.Vec3(.639, 64.0, .5), 0f, 0f, true, 3L))),
         floorWorld(),
-        anchor(),
+        start,
         0L);
 
     assertTrue(second.results().stream().allMatch(
