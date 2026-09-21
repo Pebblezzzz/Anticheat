@@ -56,6 +56,33 @@ class Phase8MovementValidationTest {
     assertEquals(1, result.evidence().candidatesEliminated());
   }
 
+  @Test void sneakEdgeEnvelopeIsLocalToEdgeConstrainedCandidates() {
+    Player candidateState = Player.initial(new Maths.Vec3(0.0, 65.0, 0.0));
+    Player observed = Player.initial(new Maths.Vec3(0.03, 65.0, 0.03));
+    Context edgeContext = new Context(
+        20, candidateState, Simulation.Environment.DRY, Simulation.Attributes.DEFAULT,
+        MovementEffects.NONE, Pose.STANDING, MovementEnvironment.dry(true, false, true), false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()),
+        Set.of(Phase6Reachability.UncertainDimension.SNEAK_EDGE));
+    Candidate edgeCandidate = new Candidate(
+        1, edgeContext, new Provenance(1, -1, 20, "INPUT", "WORLD", "None",
+        List.of("edge test"), 1, List.of()));
+    SearchResult edgeSearch = new SearchResult(
+        Phase6Reachability.Verdict.POSSIBLE, Set.of(edgeCandidate), 1, 1, 0, 0, 0, 0,
+        List.of("controlled exhaustive edge envelope test"));
+
+    var edgeResult = Phase8MovementValidation.validate(
+        "alice", 20, candidateState, observed, world(), "world:test:edge", stable(),
+        List.of("sneak=true", "edge constrained"), edgeSearch, "replay:test:edge");
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE, edgeResult.verdict());
+    assertEquals(1, edgeResult.evidence().matchingCandidateCount());
+
+    var normalResult = Phase8MovementValidation.validate(
+        "alice", 20, candidateState, observed, world(), "world:test:normal", stable(),
+        List.of("sneak=false"), possible(candidateState), "replay:test:normal");
+    assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE, normalResult.verdict());
+  }
+
   @Test void timingUncertaintyCannotBecomeImpossibleWithoutExhaustiveProof() {
     Player prior = Player.initial(new Maths.Vec3(0.5, 65, 0.5));
     Player observed = Player.initial(new Maths.Vec3(100.5, 65, 0.5));
