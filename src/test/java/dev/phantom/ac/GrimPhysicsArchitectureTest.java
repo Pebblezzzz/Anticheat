@@ -159,10 +159,10 @@ class GrimPhysicsArchitectureTest {
             new Vec3(0.0, 0.0, 0.9)));
 
     assertEquals(new Vec3(0.0, 0.0, 0.9), result.clientVelocityBeforeTick());
-    assertEquals(0.7, result.state().position().z(), 1.0e-12,
-        "physics must start from the post-end-of-tick player velocity, not clientVelocity");
-    assertEquals(0.2, result.clientVelocityAfterTick().z(), 1.0e-12);
-    assertEquals(0.182, result.predictedVelocityAfterCollision().z(), 1.0e-8);
+    assertEquals(1.4, result.state().position().z(), 1.0e-12,
+        "physics must start from the explicit client velocity carried into the tick");
+    assertEquals(0.819, result.clientVelocityAfterTick().z(), 1.0e-12);
+    assertEquals(0.819, result.predictedVelocityAfterCollision().z(), 1.0e-8);
   }
   @Test
   void movementTickerPreservesClientVelocityAndObservedMovementAsSeparateInputs() {
