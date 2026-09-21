@@ -76,5 +76,6 @@ public final class Phase5MovementAuthority {
     public boolean collisionY() { return delegate.collisionY(); }
     public boolean collisionZ() { return delegate.collisionZ(); }
     public String diagnostic() { return delegate.diagnostic(); }
+    public boolean sneakEdgeConstrained() { return delegate.sneakEdgeConstrained(); }
   }
 }
