@@ -190,7 +190,7 @@ public final class Vanilla12111RichPhysics {
                     : AIR_ACCEL * INPUT_FRICTION;
         } else if (climbing) {
             inputAcceleration = AIR_ACCEL;
-        } else if (s.onGround()) {
+        } else if (context.lastOnGround()) {
             if (inputMagnitude == 0.0) {
                 inputAcceleration = 0.0;
             } else {
@@ -356,8 +356,8 @@ public final class Vanilla12111RichPhysics {
         } else if (fluid == Phase5Mechanics.Fluid.LAVA) {
             horizontalFactor = LAVA_DRAG;
         } else if (climbing) {
-            horizontalFactor = s.onGround() ? GROUND_FRICTION : AIR_HORIZONTAL_FRICTION;
-        } else if (s.onGround()) {
+            horizontalFactor = context.lastOnGround() ? GROUND_FRICTION : AIR_HORIZONTAL_FRICTION;
+        } else if (context.lastOnGround()) {
             if (Math.hypot(velocity.x(), velocity.z()) <= 1.0e-12) {
                 horizontalFactor = 1.0;
             } else {
@@ -951,7 +951,8 @@ public final class Vanilla12111RichPhysics {
             boolean sleeping,
             boolean flying,
             EntityCollisions entityCollisions,
-            Vec3 actualMovementReference) implements Serializable {
+            Vec3 actualMovementReference,
+            boolean lastOnGround) implements Serializable {
 
         public Context(
                 long tick,
@@ -979,7 +980,8 @@ public final class Vanilla12111RichPhysics {
                     sleeping,
                     flying,
                     entityCollisions,
-                    null);
+                    null,
+                    state.onGround());
         }
 
         public Context(
@@ -1007,7 +1009,8 @@ public final class Vanilla12111RichPhysics {
                     sleeping,
                     false,
                     entityCollisions,
-                    null);
+                    null,
+                    state.onGround());
         }
 
         public Context(
@@ -1034,7 +1037,28 @@ public final class Vanilla12111RichPhysics {
                     sleeping,
                     false,
                     EntityCollisions.NONE_TRACKED,
-                    null);
+                    null,
+                    state.onGround());
+        }
+
+        public Context(
+                long tick,
+                Player state,
+                Simulation.AdvancedInput input,
+                WorldSnapshot world,
+                Simulation.Environment environment,
+                Simulation.Attributes attributes,
+                Phase5Mechanics.MovementEffects effects,
+                Phase5Mechanics.Pose pose,
+                Phase5Mechanics.MovementEnvironment movementEnvironment,
+                boolean sleeping,
+                boolean flying,
+                EntityCollisions entityCollisions,
+                Vec3 actualMovementReference) {
+            this(
+                    tick, state, input, world, environment, attributes, effects, pose,
+                    movementEnvironment, sleeping, flying, entityCollisions,
+                    actualMovementReference, state.onGround());
         }
 
         public Context {
