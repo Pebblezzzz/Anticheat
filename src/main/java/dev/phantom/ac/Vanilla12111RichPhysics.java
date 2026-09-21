@@ -786,7 +786,7 @@ public final class Vanilla12111RichPhysics {
             probe = sneakEdgeProbe(context, boundingBox, 0.0, z);
         }
         if (probe.uncertain()) {
-            return new SneakEdgeAdjustment(requested, true, probe.diagnostic());
+            return new SneakEdgeAdjustment(requested, false, true, probe.diagnostic());
         }
         if (probe.empty() && z == 0.0) {
             z = 0.0;
