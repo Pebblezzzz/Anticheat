@@ -99,7 +99,7 @@ public final class Vanilla12111RichPhysics {
         if (fluidSample.hasFluid()) {
             fluid = fluidSample.type() == GrimFluidPhysics.Type.WATER
                     ? Phase5Mechanics.Fluid.WATER
-                    : GrimFluidPhysics.Type.LAVA;
+                    : Phase5Mechanics.Fluid.LAVA;
         }
 
         /*
