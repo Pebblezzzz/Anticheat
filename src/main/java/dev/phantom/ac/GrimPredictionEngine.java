@@ -169,6 +169,7 @@ public final class GrimPredictionEngine {
     return new Context(
         context.simulationTick(),
         context.player(),
+        context.clientVelocity(),
         context.environment(),
         context.attributes(),
         context.effects(),
