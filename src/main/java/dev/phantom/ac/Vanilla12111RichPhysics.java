@@ -377,9 +377,14 @@ public final class Vanilla12111RichPhysics {
                 nextY = velocity.y() * 0.5 - gravity / 4.0;
             }
         } else if (grounded) {
-            // Vanilla keeps the small downward gravity velocity after a landing;
-            // this is also the value Grim's normal end-of-tick path retains.
-            nextY = -gravity * AIR_VERTICAL_DRAG * context.effects().fallGravityMultiplier();
+            // A player already known to be grounded and stationary keeps zero
+            // vertical velocity; a fresh landing retains the small gravity value.
+            if (s.onGround() && supported && Math.abs(velocity.y()) <= 1.0e-12) {
+                nextY = 0.0;
+            } else {
+                nextY = -gravity * AIR_VERTICAL_DRAG
+                        * context.effects().fallGravityMultiplier();
+            }
         } else {
             nextY = (velocity.y() - gravity * context.effects().fallGravityMultiplier())
                     * AIR_VERTICAL_DRAG;
