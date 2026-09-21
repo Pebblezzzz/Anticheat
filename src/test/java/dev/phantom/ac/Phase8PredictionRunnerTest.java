@@ -890,6 +890,10 @@ class Phase8PredictionRunnerTest {
     assertTrue(report.results().getFirst().evidence().uncertaintySources().stream()
         .anyMatch(reason -> reason.contains("Phase 7 timing envelope")),
         report.results().toString());
+    assertTrue(report.candidateFrontierRetained(), report.toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("FRONTIER_RETAINED reason=UNCERTAIN_OBSERVATION")),
+        report.frames().getFirst().trace().toString());
   }
 
 
