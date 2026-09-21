@@ -644,11 +644,10 @@ public final class Phase8PredictionRunner {
           boolean bootstrapTimingExhaustive =
               explicitTimingRangeIsExhaustive(move, bootstrapTiming)
                   && !phase7TimingHasUnmodeledChronology(bootstrapTiming);
-          TickResolution bootstrapValidationTick =
-              bootstrapTimingExhaustive && !tick.timingUncertain()
-                  ? tick.withTimingUncertaintyResolved(
-                      "Phase 7 bounded simulation timing was exhaustively evaluated for every permitted offset")
-                  : tick;
+          TickResolution bootstrapValidationTick = bootstrapTimingExhaustive
+              ? tick.withTimingUncertaintyResolved(
+                  "Phase 7 bounded simulation timing was exhaustively evaluated for every permitted offset")
+              : tick;
           Phase8MovementValidation.Result result = validate(
               playerId, packet, move, observedBefore, observedAfter, world,
               bootstrapValidationTick, bootstrapUncertainty, bootstrapSearch,
@@ -1101,7 +1100,7 @@ public final class Phase8PredictionRunner {
        * uncertainty. Keep that signal intact so evidence stays honest.
        */
       TickResolution validationTick =
-          explicitTimingFullyRepresented && !tick.timingUncertain()
+          explicitTimingFullyRepresented
               ? tick.withTimingUncertaintyResolved(
                   "Phase 7 bounded simulation timing was exhaustively evaluated for every permitted offset")
               : tick;
