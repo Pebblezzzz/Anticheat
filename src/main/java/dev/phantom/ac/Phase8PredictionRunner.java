@@ -3736,7 +3736,13 @@ public final class Phase8PredictionRunner {
       NavigableMap<Long, List<TimedInput>> history,
       long simulationTick,
       long movementSequence) {
-    return inputPossibilitiesForSimulationTick(history, simulationTick, movementSequence).getFirst();
+    /*
+     * Bootstrap/reconstruction callers need the historical Phase 7 state only.
+     * The Grim latest-KnownInput overlay belongs exclusively to the live final
+     * prediction tick, where packet order proves that the state was observed
+     * before the movement packet.
+     */
+    return inputForSimulationTickExact(history, simulationTick, movementSequence);
   }
 
   private static SearchResult uncertainSearch(Set<Candidate> candidates, String reason) {
