@@ -22,11 +22,10 @@ public final class GrimMovementTicker {
 
   public TickResult tick(Phase5MovementAuthority.SimulationContext context) {
     Objects.requireNonNull(context, "context");
-    State.Player physicsState = withVelocity(context.state(), context.clientVelocity());
     Vanilla12111RichPhysics.StepResult result = physics.step(
         new Vanilla12111RichPhysics.Context(
             context.simulationTick(),
-            physicsState,
+            context.state(),
             context.input(),
             context.world(),
             context.environment(),
