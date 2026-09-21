@@ -1341,7 +1341,8 @@ public final class Phase6Reachability {
             + " expectedPitch=" + expected.pitch());
       }
     }
-    if (observation.known().contains(ObservedField.GROUND) && actual.onGround() != expected.onGround()) {
+    if (observation.known().contains(ObservedField.GROUND) && actual.onGround() != expected.onGround()
+        && !candidate.context().uncertainty().contains(UncertainDimension.SNEAK_EDGE)) {
       dimensions.add(ObservedField.GROUND);
       details.add("ground mismatch actual=" + actual.onGround() + " expected=" + expected.onGround());
     }
@@ -1404,7 +1405,8 @@ public final class Phase6Reachability {
               || Float.compare(c.pitch(), expected.pitch()) != 0) return false;
         }
         case GROUND -> {
-          if (c.onGround() != expected.onGround()) return false;
+          if (c.onGround() != expected.onGround()
+              && !candidate.context().uncertainty().contains(UncertainDimension.SNEAK_EDGE)) return false;
         }
         case GAMEMODE -> {
           if (!c.gamemode().equals(expected.gamemode())) return false;
