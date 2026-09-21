@@ -25,6 +25,12 @@ public final class RichWorldCollision {
 
   public static Result resolve(
       WorldSnapshot world,Aabb start,Vec3 requested,double stepHeight,EntityCollisions entities){
+    return resolve(world, start, requested, stepHeight, entities, null);
+  }
+
+  public static Result resolve(
+      WorldSnapshot world,Aabb start,Vec3 requested,double stepHeight,EntityCollisions entities,
+      Vec3 actualMovementReference){
     Objects.requireNonNull(world);
     Objects.requireNonNull(start);
     Objects.requireNonNull(requested);
@@ -69,13 +75,11 @@ public final class RichWorldCollision {
     // commutative around corners, steps, and partial voxel shapes. Keep all six
     // deterministic permutations so the reachable result does not depend on one
     // arbitrary ordering.
+    // Grim's normal 1.21 movement path evaluates the two relevant Y-first
+    // collision orders and selects the result against the client's actual movement.
     List<List<Axis>> axisOrders=List.of(
         List.of(Axis.Y,Axis.X,Axis.Z),
-        List.of(Axis.Y,Axis.Z,Axis.X),
-        List.of(Axis.X,Axis.Y,Axis.Z),
-        List.of(Axis.X,Axis.Z,Axis.Y),
-        List.of(Axis.Z,Axis.X,Axis.Y),
-        List.of(Axis.Z,Axis.Y,Axis.X));
+        List.of(Axis.Y,Axis.Z,Axis.X));
 
     Vec3 bestResult=null;
     double bestScore=Double.POSITIVE_INFINITY;
@@ -88,7 +92,10 @@ public final class RichWorldCollision {
       AxisResult direct=collideWithMovementEpsilon(
           requested,startBox,blockBoxes,entityBoxes,order);
       Vec3 directVector=new Vec3(direct.x(),direct.y(),direct.z());
-      double directScore=movementScore(directVector,requested,stepHeight);
+      double directScore=movementScore(
+          directVector,
+          actualMovementReference != null ? actualMovementReference : requested,
+          stepHeight);
       if(directScore<bestScore){
         bestScore=directScore;
         bestResult=directVector;
@@ -156,7 +163,10 @@ public final class RichWorldCollision {
             steppedResult.x(),
             steppedResult.y()+verticalOffset,
             steppedResult.z());
-        double steppedScore=movementScore(steppedVector,requested,stepHeight);
+        double steppedScore=movementScore(
+            steppedVector,
+            actualMovementReference != null ? actualMovementReference : requested,
+            stepHeight);
         if(steppedScore<bestScore){
           bestScore=steppedScore;
           bestResult=steppedVector;
@@ -295,11 +305,11 @@ public final class RichWorldCollision {
     return v.x()*v.x()+v.z()*v.z();
   }
 
-  private static double movementScore(Vec3 actual,Vec3 requested,double stepHeight){
-    double desiredY=Math.max(-1.0,Math.min(stepHeight,requested.y()));
-    double dx=actual.x()-requested.x();
+  private static double movementScore(Vec3 actual,Vec3 reference,double stepHeight){
+    double desiredY=Math.max(-1.0,Math.min(stepHeight,reference.y()));
+    double dx=actual.x()-reference.x();
     double dy=actual.y()-desiredY;
-    double dz=actual.z()-requested.z();
+    double dz=actual.z()-reference.z();
     return dx*dx+dy*dy+dz*dz;
   }
 
