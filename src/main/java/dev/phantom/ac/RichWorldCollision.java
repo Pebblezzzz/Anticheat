@@ -65,9 +65,17 @@ public final class RichWorldCollision {
         .toList();
     List<EntityCollisions.EntityBox> entityBoxes=entityResult.boxes();
 
+    // Grim evaluates multiple axis orders because collision resolution is not
+    // commutative around corners, steps, and partial voxel shapes. Keep all six
+    // deterministic permutations so the reachable result does not depend on one
+    // arbitrary ordering.
     List<List<Axis>> axisOrders=List.of(
         List.of(Axis.Y,Axis.X,Axis.Z),
-        List.of(Axis.Y,Axis.Z,Axis.X));
+        List.of(Axis.Y,Axis.Z,Axis.X),
+        List.of(Axis.X,Axis.Y,Axis.Z),
+        List.of(Axis.X,Axis.Z,Axis.Y),
+        List.of(Axis.Z,Axis.X,Axis.Y),
+        List.of(Axis.Z,Axis.Y,Axis.X));
 
     Vec3 bestResult=null;
     double bestScore=Double.POSITIVE_INFINITY;

@@ -2074,7 +2074,8 @@ public final class Phase8PredictionRunner {
         observed.clientTickRange(),
         authoritative.provenance(),
         authoritative.uncertaintyReasons());
-    MovementEnvironment environment = movementEnvironmentOf(witnessPlayer);
+    MovementEnvironment environment = movementEnvironmentOf(
+        witnessPlayer, Phase5Mechanics.VehicleState.NONE);
     Context context = new Context(
         Math.max(0L, simulationTick),
         witnessPlayer,
@@ -2152,7 +2153,9 @@ public final class Phase8PredictionRunner {
       EntityCollisions entityCollisions,
       MovementEnvironment movementEnvironmentOverride) {
     MovementEnvironment environment = movementEnvironmentOverride == null
-        ? movementEnvironmentOf(player)
+        ? movementEnvironmentOf(player, latestAuthority == null
+            ? Phase5Mechanics.VehicleState.NONE
+            : latestAuthority.context().vehicleState())
         : movementEnvironmentOverride;
     Context context = new Context(
         simulationTick,
@@ -2199,19 +2202,43 @@ public final class Phase8PredictionRunner {
         base.gliding(),
         base.fluidSpeedMultiplier(),
         base.fluidDrag(),
-        base.gravityMultiplier());
+        base.gravityMultiplier(),
+        base.vehicle());
   }
 
-  private static MovementEnvironment movementEnvironmentOf(Player player) {
+  private static MovementEnvironment withVehicle(
+      MovementEnvironment environment,
+      Phase5Mechanics.VehicleState vehicle) {
+    return new MovementEnvironment(
+        environment.fluid(),
+        environment.submerged(),
+        environment.climbable(),
+        environment.onGround(),
+        environment.sprinting(),
+        environment.sneaking(),
+        environment.swimmingInput(),
+        environment.gliding(),
+        environment.fluidSpeedMultiplier(),
+        environment.fluidDrag(),
+        environment.gravityMultiplier(),
+        vehicle);
+  }
+
+  private static MovementEnvironment movementEnvironmentOf(
+      Player player,
+      Phase5Mechanics.VehicleState vehicle) {
     return switch (player.environment()) {
-      case WATER -> MovementEnvironment.vanillaWater(
-          player.onGround(), false, false, player.pose() == Pose.SWIMMING);
-      case LAVA -> MovementEnvironment.vanillaLava(
-          player.onGround(), false, false);
-      case CLIMBABLE -> MovementEnvironment.vanillaClimbable(
-          player.onGround(), false, false);
-      case DRY -> MovementEnvironment.dry(player.onGround(), false, false);
-      case UNKNOWN -> MovementEnvironment.dry(player.onGround(), false, false);
+      case WATER -> withVehicle(
+          MovementEnvironment.vanillaWater(
+              player.onGround(), false, false, player.pose() == Pose.SWIMMING), vehicle);
+      case LAVA -> withVehicle(
+          MovementEnvironment.vanillaLava(player.onGround(), false, false), vehicle);
+      case CLIMBABLE -> withVehicle(
+          MovementEnvironment.vanillaClimbable(player.onGround(), false, false), vehicle);
+      case DRY -> withVehicle(
+          MovementEnvironment.dry(player.onGround(), false, false), vehicle);
+      case UNKNOWN -> withVehicle(
+          MovementEnvironment.dry(player.onGround(), false, false), vehicle);
     };
   }
 
@@ -2261,7 +2288,8 @@ public final class Phase8PredictionRunner {
        * an active sprint state. Never erase client physics sprint/sneak state just
        * because an asynchronous server snapshot says otherwise.
        */
-      MovementEnvironment authorityEnvironment = authority.movementEnvironment();
+      MovementEnvironment authorityEnvironment = withVehicle(
+          authority.movementEnvironment(), authority.vehicleState());
       MovementEnvironment clientMovementEnvironment =
           preserveClientLocomotionState(
               candidate.context().movementEnvironment(),
@@ -2291,7 +2319,8 @@ public final class Phase8PredictionRunner {
         authority.gliding(),
         authority.fluidSpeedMultiplier(),
         authority.fluidDrag(),
-        authority.gravityMultiplier());
+        authority.gravityMultiplier(),
+        authority.vehicle());
   }
 
   private static Set<Candidate> overlayClientInput(
