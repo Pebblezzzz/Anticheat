@@ -139,7 +139,7 @@ class GrimParityPhysicsTest {
 
     Player airborne = player(new Vec3(0.5, 66.0, 0.5), new Vec3(0.0, 0.5, 0.0), false);
     Simulation.AdvancedInput sprintForward =
-        new Simulation.AdvancedInput(1, 0, false, true, false);
+        new Simulation.AdvancedInput(0, -1, false, true, false);
     MovementEnvironment airEnvironment =
         MovementEnvironment.dry(false, false, false);
 
