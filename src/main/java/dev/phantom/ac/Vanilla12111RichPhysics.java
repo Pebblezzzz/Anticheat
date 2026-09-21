@@ -959,7 +959,8 @@ public final class Vanilla12111RichPhysics {
             boolean flying,
             EntityCollisions entityCollisions,
             Vec3 actualMovementReference,
-            boolean lastOnGround) implements Serializable {
+            boolean lastOnGround,
+            Vec3 clientVelocity) implements Serializable {
 
         public Context(
                 long tick,
@@ -988,7 +989,8 @@ public final class Vanilla12111RichPhysics {
                     flying,
                     entityCollisions,
                     null,
-                    state.onGround());
+                    state.onGround(),
+                    state.velocity());
         }
 
         public Context(
@@ -1045,7 +1047,8 @@ public final class Vanilla12111RichPhysics {
                     false,
                     EntityCollisions.NONE_TRACKED,
                     null,
-                    state.onGround());
+                    state.onGround(),
+                    state.velocity());
         }
 
         public Context(
@@ -1065,7 +1068,27 @@ public final class Vanilla12111RichPhysics {
             this(
                     tick, state, input, world, environment, attributes, effects, pose,
                     movementEnvironment, sleeping, flying, entityCollisions,
-                    actualMovementReference, state.onGround());
+                    actualMovementReference, state.onGround(), state.velocity());
+        }
+
+        public Context(
+                long tick,
+                Player state,
+                Simulation.AdvancedInput input,
+                WorldSnapshot world,
+                Simulation.Environment environment,
+                Simulation.Attributes attributes,
+                Phase5Mechanics.MovementEffects effects,
+                Phase5Mechanics.Pose pose,
+                Phase5Mechanics.MovementEnvironment movementEnvironment,
+                boolean sleeping,
+                boolean flying,
+                EntityCollisions entityCollisions,
+                Vec3 actualMovementReference,
+                boolean lastOnGround) {
+            this(tick, state, input, world, environment, attributes, effects, pose,
+                    movementEnvironment, sleeping, flying, entityCollisions,
+                    actualMovementReference, lastOnGround, state.velocity());
         }
 
         public Context {
@@ -1078,11 +1101,15 @@ public final class Vanilla12111RichPhysics {
             Objects.requireNonNull(pose);
             Objects.requireNonNull(movementEnvironment);
             Objects.requireNonNull(entityCollisions);
+            Objects.requireNonNull(clientVelocity);
             if (actualMovementReference != null
                     && (!Double.isFinite(actualMovementReference.x())
                     || !Double.isFinite(actualMovementReference.y())
                     || !Double.isFinite(actualMovementReference.z()))) {
                 throw new IllegalArgumentException("actualMovementReference must be finite");
+            }
+            if (!Double.isFinite(clientVelocity.x()) || !Double.isFinite(clientVelocity.y()) || !Double.isFinite(clientVelocity.z())) {
+                throw new IllegalArgumentException("clientVelocity must be finite");
             }
             if (simulationTick < 0) {
                 throw new IllegalArgumentException("simulationTick must be non-negative");
