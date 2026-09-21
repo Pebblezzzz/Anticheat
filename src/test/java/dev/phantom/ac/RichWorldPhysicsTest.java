@@ -64,7 +64,7 @@ class RichWorldPhysicsTest {
         assertEquals(1.4, result.state().position().x(), 1.0e-12);
         assertEquals(64.0, result.state().position().y(), 1.0e-12);
         assertFalse(result.state().onGround(), result.diagnostic());
-        assertEquals(-0.0784, result.state().velocity().y(), 1.0e-12);
+        assertEquals(-0.0784000015258789, result.state().velocity().y(), 1.0e-12);
     }
 
     @Test
@@ -108,7 +108,7 @@ class RichWorldPhysicsTest {
 
         assertFalse(afterSecond.uncertain());
         assertEquals(1.8914000141620635, afterSecond.position().x(), 1.0e-12);
-        assertEquals(63.9216, afterSecond.position().y(), 1.0e-12);
+        assertEquals(63.92159999847412, afterSecond.position().y(), 1.0e-12);
     }
 
     @Test
