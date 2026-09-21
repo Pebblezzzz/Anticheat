@@ -54,7 +54,7 @@ class Phase8GrimKnownInputLifecycleTest {
   }
 
   @Test
-  void latestKnownInputCanOverrideHistoricalFinalTickInputWithoutRewritingHistory() {
+  void latestKnownInputUpdatesHeldStateWhileGrimNormalizesPhysicalSprintDirection() {
     WorldSnapshot world = floorWorld();
     Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
 
@@ -82,7 +82,7 @@ class Phase8GrimKnownInputLifecycleTest {
         new Phase5MovementAuthority.SimulationContext(
             1L,
             first,
-            new Simulation.AdvancedInput(0, 0, false, true, false),
+            new Simulation.AdvancedInput(1, 0, false, true, false),
             world,
             Simulation.Environment.DRY,
             first.attributes(),
@@ -137,7 +137,7 @@ class Phase8GrimKnownInputLifecycleTest {
         .filter(line -> line.contains("SIM_INPUT_OPTIONS tick=1"))
         .findFirst()
         .orElseThrow();
-    assertTrue(finalInputTrace.contains("forward=OptionalInt[0]"),
+    assertTrue(finalInputTrace.contains("forward=OptionalInt[1]"),
         finalInputTrace);
     assertTrue(
         report.frames().getLast().trace().stream()
