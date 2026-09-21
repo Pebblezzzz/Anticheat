@@ -1247,7 +1247,7 @@ class Phase8PredictionRunnerTest {
 
     List<RawPacket> secondPackets = new ArrayList<>();
     long sequence = 3L;
-    for (int i = 0; i < 12; i++) {
+    for (int i = 0; i < 20; i++) {
       secondPackets.add(new RawPacket(
           sequence++,
           30L + i * 10L,
