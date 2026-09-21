@@ -113,6 +113,8 @@ public final class GrimPredictionEngine {
         trace.add("GRIM_ENGINE_TICK tick=" + simulationTick
             + " physicalSprint=" + state.sprinting()
             + " physicalSneak=" + state.sneaking()
+            + " movementSprint=" + state.sprinting()
+            + " movementSneak=" + state.sneaking()
             + " input=" + simulationInput
             + " candidates=" + result.candidates().size()
             + " exhaustive=" + result.exhaustive()
