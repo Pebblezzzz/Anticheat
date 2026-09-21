@@ -214,7 +214,7 @@ public final class Vanilla12111RichPhysics {
                 double slipperiness = BlockCatalogue12111.slipperiness(support);
                 double movementSpeed = context.attributes().value() * context.effects().speedMultiplier();
                 if (context.movementEnvironment().sprinting()) movementSpeed *= SPRINTING_SPEED_MULTIPLIER;
-                if (context.input().sneak()) movementSpeed *= 0.3;
+                if (context.movementEnvironment().sneaking()) movementSpeed *= 0.3;
                 double frictionInfluencedSpeed = movementSpeed * FRICTION_SPEED_FACTOR
                         / (slipperiness * slipperiness * slipperiness);
                 inputAcceleration = inputMagnitude > 1.0
@@ -265,7 +265,7 @@ public final class Vanilla12111RichPhysics {
                 climbY = Math.max(-CLIMB_MAX_DOWN, velocity.y());
             }
 
-            if (context.input().sneak() && climbY < 0.0
+            if (context.movementEnvironment().sneaking() && climbY < 0.0
                     && !isScaffolding(context.world(), s.position())) {
                 climbY = 0.0;
             }
@@ -752,7 +752,7 @@ public final class Vanilla12111RichPhysics {
             Aabb boundingBox,
             Vec3 requested) {
         Player s = context.state();
-        if (!context.input().sneak()
+        if (!context.movementEnvironment().sneaking()
                 || context.flying()
                 || !context.movementEnvironment().sneaking()
                 || !s.onGround()
