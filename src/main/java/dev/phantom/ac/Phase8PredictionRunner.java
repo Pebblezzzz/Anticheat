@@ -2752,7 +2752,8 @@ public final class Phase8PredictionRunner {
       List<InputChronology> inputChronologies,
       WorldSnapshot world,
       int maximumCandidates,
-      long movementSequence) {
+      long movementSequence,
+      Vec3 actualMovementReference) {
     if (start.isEmpty()) {
       return new AdvanceResult(Set.of(), false, 0,
           List.of("prediction frontier is empty"), List.of());
