@@ -48,11 +48,13 @@ public final class Packets {
   public record PlayerContext(String gamemode, Simulation.Attributes attributes, Map<String,Integer> effects,
                               Phase5Mechanics.Pose pose, Phase5Mechanics.MovementEnvironment movementEnvironment,
                               Vec3 serverPosition, Vec3 serverVelocity, boolean canFly, boolean flying,
-                              boolean sleeping, List<dev.phantom.ac.world.EntityCollisions.EntityBox> entityBoxes) implements Packet {
+                              boolean sleeping, List<dev.phantom.ac.world.EntityCollisions.EntityBox> entityBoxes,
+                              Phase5Mechanics.VehicleState vehicleState) implements Packet {
     public PlayerContext {
       if(gamemode==null||gamemode.isBlank()) throw new IllegalArgumentException("gamemode is required");
       Objects.requireNonNull(attributes); effects=Map.copyOf(effects); Objects.requireNonNull(pose);
       Objects.requireNonNull(movementEnvironment); Objects.requireNonNull(serverPosition); Objects.requireNonNull(serverVelocity);
+      Objects.requireNonNull(vehicleState);
       if(!Double.isFinite(serverPosition.x())||!Double.isFinite(serverPosition.y())||!Double.isFinite(serverPosition.z()))
         throw new IllegalArgumentException("serverPosition must be finite");
       if(!Double.isFinite(serverVelocity.x())||!Double.isFinite(serverVelocity.y())||!Double.isFinite(serverVelocity.z()))
@@ -62,7 +64,7 @@ public final class Packets {
     public PlayerContext(String gamemode, Simulation.Attributes attributes, Map<String,Integer> effects,
                          Phase5Mechanics.Pose pose, Phase5Mechanics.MovementEnvironment movementEnvironment,
                          boolean sleeping, List<dev.phantom.ac.world.EntityCollisions.EntityBox> entityBoxes) {
-      this(gamemode,attributes,effects,pose,movementEnvironment,Vec3.ZERO,Vec3.ZERO,false,false,sleeping,entityBoxes);
+      this(gamemode,attributes,effects,pose,movementEnvironment,Vec3.ZERO,Vec3.ZERO,false,false,sleeping,entityBoxes,Phase5Mechanics.VehicleState.NONE);
     }
   }
   public record BlockChange(World.Pos position, World.Block block) implements Packet { public BlockChange { Objects.requireNonNull(position,"position"); Objects.requireNonNull(block,"block"); } }
