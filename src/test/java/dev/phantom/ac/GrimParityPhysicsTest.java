@@ -131,6 +131,45 @@ class GrimParityPhysicsTest {
   }
 
   @Test
+  void normalMovementUsesGrimLastOnGroundForAccelerationAfterLeavingEdge() {
+    WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+        .loadChunk(0, 0)
+        .setBlock(0, 65, 0, BlockCatalogue12111.decode("minecraft:stone_slab", Map.of("type", "bottom")))
+        .build();
+
+    Player airborne = player(new Vec3(0.5, 65.6, 0.5), new Vec3(0.05, 0.1, 0.0), false);
+    Simulation.AdvancedInput sprintForward =
+        new Simulation.AdvancedInput(0, 0, false, true, false);
+    MovementEnvironment airEnvironment =
+        MovementEnvironment.dry(false, false, false);
+
+    Vanilla12111RichPhysics.Context grimTemporalContext =
+        new Vanilla12111RichPhysics.Context(
+            0, airborne, sprintForward, world, Simulation.Environment.DRY,
+            new Simulation.Attributes(0.1), Phase5Mechanics.MovementEffects.NONE,
+            Phase5Mechanics.Pose.STANDING, airEnvironment, false, false,
+            EntityCollisions.of(List.of()), null, true);
+    Vanilla12111RichPhysics.Context pureAirContext =
+        new Vanilla12111RichPhysics.Context(
+            0, airborne, sprintForward, world, Simulation.Environment.DRY,
+            airborne.attributes(), Phase5Mechanics.MovementEffects.NONE,
+            Phase5Mechanics.Pose.STANDING, airEnvironment, false, false,
+            EntityCollisions.of(List.of()), null, false);
+
+    var temporal = new Vanilla12111RichPhysics().step(grimTemporalContext);
+    var pureAir = new Vanilla12111RichPhysics().step(pureAirContext);
+
+    assertFalse(temporal.state().onGround());
+    assertFalse(pureAir.state().onGround());
+    assertTrue(
+        Math.abs(temporal.state().velocity().x())
+            < Math.abs(pureAir.state().velocity().x()),
+        () -> "lastOnGround=true must retain Grim ground friction while current onGround=false"
+            + " temporal=" + temporal.state().velocity()
+            + " air=" + pureAir.state().velocity());
+  }
+
+  @Test
   void collisionHandlesCornerContactWithoutSingleAxisOrderingAssumption() {
     WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
         .loadChunk(0, 0)

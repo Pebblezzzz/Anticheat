@@ -26,17 +26,21 @@ public final class Phase6Reachability {
   public record Context(long simulationTick,Player player,Simulation.Environment environment,Simulation.Attributes attributes,
                         MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,
                         EntityCollisions entityCollisions,Set<UncertainDimension> uncertainty,
-                        Maths.Vec3 actualMovementReference) implements Serializable {
-    public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping){this(tick,player,env,attributes,effects,pose,movementEnvironment,sleeping,EntityCollisions.of(List.of()),Set.of(),null);}
-    public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,EntityCollisions entityCollisions){this(tick,player,env,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,Set.of(),null);}
-    public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,EntityCollisions entityCollisions,Set<UncertainDimension> uncertainty){this(tick,player,env,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,uncertainty,null);}
+                        Maths.Vec3 actualMovementReference, boolean lastOnGround) implements Serializable {
+    public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping){this(tick,player,env,attributes,effects,pose,movementEnvironment,sleeping,EntityCollisions.of(List.of()),Set.of(),null,player.onGround());}
+    public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,EntityCollisions entityCollisions){this(tick,player,env,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,Set.of(),null,player.onGround());}
+    public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,EntityCollisions entityCollisions,Set<UncertainDimension> uncertainty){this(tick,player,env,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,uncertainty,null,player.onGround());}
     public Context {if(simulationTick<0)throw new IllegalArgumentException("simulationTick must be non-negative");Objects.requireNonNull(player);Objects.requireNonNull(environment);Objects.requireNonNull(attributes);Objects.requireNonNull(effects);Objects.requireNonNull(pose);Objects.requireNonNull(movementEnvironment);Objects.requireNonNull(entityCollisions);uncertainty=Set.copyOf(uncertainty);}
-    public Context withTick(long tick){return new Context(tick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,uncertainty,actualMovementReference);}
+    public Context withTick(long tick){return new Context(tick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,uncertainty,actualMovementReference,lastOnGround);}
     public Context withActualMovementReference(Maths.Vec3 reference){
       return new Context(simulationTick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,
-          entityCollisions,uncertainty,reference);
+          entityCollisions,uncertainty,reference,lastOnGround);
     }
-    public Context withUncertainty(UncertainDimension... dimensions){EnumSet<UncertainDimension> u=EnumSet.noneOf(UncertainDimension.class);u.addAll(uncertainty);u.addAll(List.of(dimensions));return new Context(simulationTick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,u,actualMovementReference);}
+    public Context withLastOnGround(boolean value){
+      return new Context(simulationTick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,
+          entityCollisions,uncertainty,actualMovementReference,value);
+    }
+    public Context withUncertainty(UncertainDimension... dimensions){EnumSet<UncertainDimension> u=EnumSet.noneOf(UncertainDimension.class);u.addAll(uncertainty);u.addAll(List.of(dimensions));return new Context(simulationTick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,u,actualMovementReference,lastOnGround);}
   }
 
   public record InputConstraint(OptionalInt forward,OptionalInt strafe,Optional<Boolean> jump,Optional<Boolean> sprint,Optional<Boolean> sneak) implements Serializable {
@@ -763,7 +767,7 @@ public final class Phase6Reachability {
                   tick + 1, stepped.state(), environmentFor(nextEnvironment),
                   pre.attributes(), pre.effects(), nextPose,
                   nextEnvironment, pre.sleeping(), pre.entityCollisions(),
-                  stateUncertainty);
+                  stateUncertainty, pre.actualMovementReference(), pre.lastOnGround());
 
               MovementMode mode = movementModeFor(after);
               Candidate newCandidate = new Candidate(
@@ -1233,7 +1237,8 @@ public final class Phase6Reachability {
       Player n = Phase5Mechanics.applyVelocityImpulse(
           s, new Phase5Mechanics.Vec3Like(v.impulse().x(), v.impulse().y(), v.impulse().z()));
       return new Context(tick, n, c.environment(), c.attributes(), c.effects(),
-          c.pose(), c.movementEnvironment(), c.sleeping(), c.entityCollisions(), c.uncertainty());
+          c.pose(), c.movementEnvironment(), c.sleeping(), c.entityCollisions(), c.uncertainty(),
+          c.actualMovementReference(), c.lastOnGround());
     }
     if (e instanceof TeleportCorrection t) {
       int teleportId = t.awaitingConfirmation() ? t.id() : -1;
@@ -1256,7 +1261,8 @@ public final class Phase6Reachability {
         return new Context(
             tick, n, c.environment(), c.attributes(), c.effects(), c.pose(),
             c.movementEnvironment(), c.sleeping(), c.entityCollisions(),
-            addUncertainty(c.uncertainty(), UncertainDimension.TELEPORT));
+            addUncertainty(c.uncertainty(), UncertainDimension.TELEPORT),
+            c.actualMovementReference(), c.lastOnGround());
       }
       Player n = new Player(
           s.position(), s.velocity(), s.yaw(), s.pitch(), s.onGround(),

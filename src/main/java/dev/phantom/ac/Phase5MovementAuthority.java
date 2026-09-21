@@ -30,7 +30,7 @@ public final class Phase5MovementAuthority {
         context.simulationTick(), context.state(), context.input(), context.world(),
         context.environment(), context.attributes(), context.effects(), context.pose(),
         context.movementEnvironment(), context.sleeping(), context.flying(),
-        context.entityCollisions(), context.actualMovementReference()));
+        context.entityCollisions(), context.actualMovementReference(), context.lastOnGround()));
     return new StepResult(result);
   }
 
@@ -47,7 +47,8 @@ public final class Phase5MovementAuthority {
       boolean sleeping,
       boolean flying,
       EntityCollisions entityCollisions,
-      Maths.Vec3 actualMovementReference) implements Serializable {
+      Maths.Vec3 actualMovementReference,
+      boolean lastOnGround) implements Serializable {
     public SimulationContext {
       if (simulationTick < 0) throw new IllegalArgumentException("simulationTick must be non-negative");
       Objects.requireNonNull(state);
@@ -82,7 +83,26 @@ public final class Phase5MovementAuthority {
         boolean flying,
         EntityCollisions entityCollisions) {
       this(simulationTick, state, input, world, environment, attributes, effects, pose,
-          movementEnvironment, sleeping, flying, entityCollisions, null);
+          movementEnvironment, sleeping, flying, entityCollisions, null, state.onGround());
+    }
+
+    public SimulationContext(
+        long simulationTick,
+        State.Player state,
+        Simulation.AdvancedInput input,
+        WorldSnapshot world,
+        Simulation.Environment environment,
+        Simulation.Attributes attributes,
+        Phase5Mechanics.MovementEffects effects,
+        Phase5Mechanics.Pose pose,
+        Phase5Mechanics.MovementEnvironment movementEnvironment,
+        boolean sleeping,
+        boolean flying,
+        EntityCollisions entityCollisions,
+        Maths.Vec3 actualMovementReference) {
+      this(simulationTick, state, input, world, environment, attributes, effects, pose,
+          movementEnvironment, sleeping, flying, entityCollisions, actualMovementReference,
+          state.onGround());
     }
   }
 

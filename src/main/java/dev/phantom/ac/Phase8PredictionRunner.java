@@ -1039,7 +1039,8 @@ public final class Phase8PredictionRunner {
             world,
             maximumCandidates,
             sequence,
-            observedMovementReference);
+            observedMovementReference,
+            observedBefore.onGround());
         trace.add("TIMING_OFFSETS range=" + earliestSimulationTick + ".."
             + latestSimulationTick
             + " candidates=" + movementTiming.possibleSimulationClientTicks()
@@ -1053,7 +1054,8 @@ public final class Phase8PredictionRunner {
             world,
             maximumCandidates,
             sequence,
-            observedMovementReference);
+            observedMovementReference,
+            observedBefore.onGround());
       }
       trace.add("PREDICT_FORWARD startTick=" + startTick
           + " targetTick=" + targetTick
@@ -1863,7 +1865,10 @@ public final class Phase8PredictionRunner {
                 authority.context().vehicleState()),
             physicalBeforeGround),
         reconstructedStart.pose() == Pose.SLEEPING,
-        EntityCollisions.of(authority.context().entityBoxes()));
+        false,
+        EntityCollisions.of(authority.context().entityBoxes()),
+        null,
+        observedBefore.onGround());
     Vanilla12111RichPhysics.StepResult step =
         new Vanilla12111RichPhysics().step(context);
 
@@ -2031,7 +2036,10 @@ public final class Phase8PredictionRunner {
           reconstructedStart.pose(),
           environment,
           reconstructedStart.pose() == Pose.SLEEPING,
-          EntityCollisions.of(authority.context().entityBoxes()));
+          false,
+        EntityCollisions.of(authority.context().entityBoxes()),
+        null,
+        observedBefore.onGround());
       Vanilla12111RichPhysics.StepResult step =
           new Vanilla12111RichPhysics().step(context);
 
@@ -2667,7 +2675,8 @@ public final class Phase8PredictionRunner {
       WorldSnapshot world,
       int maximumCandidates,
       long movementSequence,
-      Vec3 actualMovementReference) {
+      Vec3 actualMovementReference,
+      boolean lastOnGroundForPrediction) {
     if (start.isEmpty()) {
       return new AdvanceResult(Set.of(), false, 0,
           List.of("prediction frontier is empty"), List.of());
@@ -2681,7 +2690,8 @@ public final class Phase8PredictionRunner {
           List.of("incremental prediction horizon exceeded"), List.of());
     }
     return advancePredictionToTarget(
-        start, targetTick, inputChronologies, world, maximumCandidates, movementSequence, actualMovementReference);
+        start, targetTick, inputChronologies, world, maximumCandidates, movementSequence,
+        actualMovementReference, lastOnGroundForPrediction);
   }
 
   private AdvanceResult advancePredictionAcrossTimingRange(
@@ -2692,7 +2702,8 @@ public final class Phase8PredictionRunner {
       WorldSnapshot world,
       int maximumCandidates,
       long movementSequence,
-      Vec3 actualMovementReference) {
+      Vec3 actualMovementReference,
+      boolean lastOnGroundForPrediction) {
     if (start.isEmpty()) {
       return new AdvanceResult(Set.of(), false, 0,
           List.of("prediction frontier is empty"), List.of());
@@ -2722,7 +2733,8 @@ public final class Phase8PredictionRunner {
 
     for (long target = earliestTick; target <= latestTick; target++) {
       AdvanceResult one = advancePredictionToTarget(
-          start, target, inputChronologies, world, maximumCandidates, movementSequence, actualMovementReference);
+          start, target, inputChronologies, world, maximumCandidates, movementSequence,
+          actualMovementReference, lastOnGroundForPrediction);
       union.addAll(one.candidates());
       reasons.addAll(one.reasons());
       trace.add("TIMING_OFFSET target=" + target
@@ -2753,7 +2765,8 @@ public final class Phase8PredictionRunner {
       WorldSnapshot world,
       int maximumCandidates,
       long movementSequence,
-      Vec3 actualMovementReference) {
+      Vec3 actualMovementReference,
+      boolean lastOnGroundForPrediction) {
     if (start.isEmpty()) {
       return new AdvanceResult(Set.of(), false, 0,
           List.of("prediction frontier is empty"), List.of());
@@ -2819,7 +2832,9 @@ public final class Phase8PredictionRunner {
                   movementEnvironment.sprinting(), movementEnvironment.sneaking());
               startsByMovementState
                   .computeIfAbsent(movementState, ignored -> new ArrayList<>())
-                  .add(candidate.context().withTick(simulationTick));
+                  .add(candidate.context()
+                      .withTick(simulationTick)
+                      .withLastOnGround(lastOnGroundForPrediction));
             }
 
             for (var movementEntry : startsByMovementState.entrySet()) {
