@@ -104,6 +104,35 @@ public final class Phase5Mechanics {
    * "unknown": UNKNOWN is represented by Simulation.Environment.UNKNOWN and must
    * be rejected by the authority before physics is integrated.
    */
+  public enum VehicleType { NONE, BOAT, CHEST_BOAT, MINECART, PIG, STRIDER, HORSE, CAMEL, NAUTILUS, HAPPY_GHAST, OTHER }
+
+  public record VehicleState(
+      VehicleType type,
+      boolean controllingPassenger,
+      Vec3Like velocity,
+      float yaw,
+      float pitch,
+      boolean onGround,
+      double movementSpeed,
+      boolean cold,
+      boolean dashReady) implements Serializable {
+    public static final VehicleState NONE =
+        new VehicleState(VehicleType.NONE, false, new Vec3Like(0, 0, 0), 0f, 0f, false, 0.0, false, false);
+
+    public VehicleState {
+      Objects.requireNonNull(type, "type");
+      Objects.requireNonNull(velocity, "velocity");
+      if (!Float.isFinite(yaw) || !Float.isFinite(pitch))
+        throw new IllegalArgumentException("vehicle rotation must be finite");
+      if (!Double.isFinite(movementSpeed) || movementSpeed < 0.0)
+        throw new IllegalArgumentException("vehicle movement speed must be finite and non-negative");
+    }
+
+    public boolean active() {
+      return type != VehicleType.NONE && controllingPassenger;
+    }
+  }
+
   public record MovementEnvironment(
       Fluid fluid,
       boolean submerged,
@@ -115,14 +144,33 @@ public final class Phase5Mechanics {
       boolean gliding,
       double fluidSpeedMultiplier,
       double fluidDrag,
-      double gravityMultiplier) implements Serializable {
+      double gravityMultiplier,
+      VehicleState vehicle) implements Serializable {
+    public MovementEnvironment(
+        Fluid fluid,
+        boolean submerged,
+        boolean climbable,
+        boolean onGround,
+        boolean sprinting,
+        boolean sneaking,
+        boolean swimmingInput,
+        boolean gliding,
+        double fluidSpeedMultiplier,
+        double fluidDrag,
+        double gravityMultiplier) {
+      this(fluid, submerged, climbable, onGround, sprinting, sneaking, swimmingInput, gliding,
+          fluidSpeedMultiplier, fluidDrag, gravityMultiplier, VehicleState.NONE);
+    }
+
     public MovementEnvironment {
       Objects.requireNonNull(fluid, "fluid");
+      Objects.requireNonNull(vehicle, "vehicle");
       if (!Double.isFinite(fluidSpeedMultiplier) || !Double.isFinite(fluidDrag) || !Double.isFinite(gravityMultiplier))
         throw new IllegalArgumentException("non-finite environment factor");
       if (fluidSpeedMultiplier < 0 || fluidDrag < 0 || gravityMultiplier < 0)
         throw new IllegalArgumentException("negative environment factor");
     }
+
     public static MovementEnvironment dry(boolean onGround, boolean sprinting, boolean sneaking) {
       return new MovementEnvironment(Fluid.NONE, false, false, onGround, sprinting, sneaking, false, false, 1.0, 1.0, 1.0);
     }
