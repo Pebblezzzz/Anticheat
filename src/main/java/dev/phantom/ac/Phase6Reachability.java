@@ -770,11 +770,11 @@ public final class Phase6Reachability {
               }
 
               Context after = new Context(
-                  tick + 1, stepped.state(), environmentFor(nextEnvironment),
+                  tick + 1, stepped.state(), stepped.clientVelocityAfterTick(),
+                  environmentFor(nextEnvironment),
                   pre.attributes(), pre.effects(), nextPose,
                   nextEnvironment, pre.sleeping(), pre.entityCollisions(),
-                  stateUncertainty, stepped.clientVelocityAfterTick(),
-                  pre.actualMovementReference(), pre.lastOnGround());
+                  stateUncertainty, pre.actualMovementReference(), pre.lastOnGround());
 
               MovementMode mode = movementModeFor(after);
               Candidate newCandidate = new Candidate(
@@ -1277,10 +1277,10 @@ public final class Phase6Reachability {
       if (!ok) {
         Player n = s.withUncertainty(State.UncertaintyReason.MISMATCHED_TELEPORT_ACK);
         return new Context(
-            tick, n, c.environment(), c.attributes(), c.effects(), c.pose(),
+            tick, n, c.clientVelocity(), c.environment(), c.attributes(), c.effects(), c.pose(),
             c.movementEnvironment(), c.sleeping(), c.entityCollisions(),
             addUncertainty(c.uncertainty(), UncertainDimension.TELEPORT),
-            c.clientVelocity(), c.actualMovementReference(), c.lastOnGround());
+            c.actualMovementReference(), c.lastOnGround());
       }
       Player n = new Player(
           s.position(), s.velocity(), s.yaw(), s.pitch(), s.onGround(),
