@@ -2829,6 +2829,8 @@ public final class Phase8PredictionRunner {
                 branchStarts = branchStarts.stream()
                     .map(context -> context.withActualMovementReference(actualMovementReference))
                     .toList();
+                trace.add("COLLISION_REFERENCE tick=" + simulationTick
+                    + " actualMovement=" + actualMovementReference);
               }
               InputConstraint simulationInput = new InputConstraint(
                   inputOption.forward(),
