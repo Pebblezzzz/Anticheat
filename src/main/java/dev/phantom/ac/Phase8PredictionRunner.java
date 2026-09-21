@@ -2420,6 +2420,7 @@ public final class Phase8PredictionRunner {
           new Context(
               context.simulationTick(),
               rebasedPlayer,
+              context.clientVelocity(),
               context.environment(),
               context.attributes(),
               context.effects(),
@@ -2450,6 +2451,7 @@ public final class Phase8PredictionRunner {
     return new Context(
         context.simulationTick(),
         context.player(),
+        context.clientVelocity(),
         context.environment(),
         context.attributes(),
         context.effects(),
