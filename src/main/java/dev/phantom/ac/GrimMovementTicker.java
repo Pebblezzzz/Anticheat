@@ -22,10 +22,11 @@ public final class GrimMovementTicker {
 
   public TickResult tick(Phase5MovementAuthority.SimulationContext context) {
     Objects.requireNonNull(context, "context");
+    State.Player physicsState = withVelocity(context.state(), context.clientVelocity());
     Vanilla12111RichPhysics.StepResult result = physics.step(
         new Vanilla12111RichPhysics.Context(
             context.simulationTick(),
-            context.state(),
+            physicsState,
             context.input(),
             context.world(),
             context.environment(),
@@ -40,20 +41,31 @@ public final class GrimMovementTicker {
             context.lastOnGround()));
     return new TickResult(
         result,
-        context.state().velocity(),
+        context.clientVelocity(),
         result.state().velocity(),
+        result.clientVelocityAfterTick(),
         context.actualMovementReference());
+  }
+
+  private static State.Player withVelocity(State.Player player, Maths.Vec3 velocity) {
+    return new State.Player(
+        player.position(), velocity, player.yaw(), player.pitch(), player.onGround(),
+        player.gamemode(), player.effects(), player.awaitingTeleport(), player.uncertain(),
+        player.input(), player.attributes(), player.pose(), player.environment(),
+        player.clientTickRange(), player.provenance(), player.uncertaintyReasons());
   }
 
   public record TickResult(
       Vanilla12111RichPhysics.StepResult delegate,
       Maths.Vec3 clientVelocityBeforeTick,
       Maths.Vec3 predictedVelocityAfterCollision,
+      Maths.Vec3 clientVelocityAfterTick,
       Maths.Vec3 actualMovementReference) {
     public TickResult {
       Objects.requireNonNull(delegate);
       Objects.requireNonNull(clientVelocityBeforeTick);
       Objects.requireNonNull(predictedVelocityAfterCollision);
+      Objects.requireNonNull(clientVelocityAfterTick);
     }
 
     public State.Player state() {
