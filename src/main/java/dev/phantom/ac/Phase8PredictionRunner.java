@@ -1906,7 +1906,8 @@ public final class Phase8PredictionRunner {
         "CLIENT_OBSERVED_INERTIAL_CONTINUATION",
         authority.sequence(),
         EntityCollisions.of(authority.context().entityBoxes()),
-        environment));
+        environment,
+        step.clientVelocityAfterTick()));
   }
 
   private Optional<Set<Candidate>> bootstrapPredictionFromObservedMovement(
@@ -2091,7 +2092,8 @@ public final class Phase8PredictionRunner {
           "CLIENT_MOVEMENT_BOOTSTRAP",
           authority.sequence(),
           EntityCollisions.of(authority.context().entityBoxes()),
-          environment));
+          environment,
+          step.clientVelocityAfterTick()));
       trace.add("BOOTSTRAP_START simulationTick=" + simulationTick
           + " observedDelta=" + observedDelta
           + " reconstructedStartVelocity=" + startVelocity.orElseThrow()
@@ -2328,6 +2330,19 @@ public final class Phase8PredictionRunner {
       long parentSequence,
       EntityCollisions entityCollisions,
       MovementEnvironment movementEnvironmentOverride) {
+    return candidateFromPlayer(
+        player, simulationTick, source, parentSequence, entityCollisions,
+        movementEnvironmentOverride, player.velocity());
+  }
+
+  private Candidate candidateFromPlayer(
+      Player player,
+      long simulationTick,
+      String source,
+      long parentSequence,
+      EntityCollisions entityCollisions,
+      MovementEnvironment movementEnvironmentOverride,
+      Vec3 clientVelocity) {
     MovementEnvironment environment = movementEnvironmentOverride == null
         ? movementEnvironmentOf(player, latestAuthority == null
             ? Phase5Mechanics.VehicleState.NONE
@@ -2336,6 +2351,7 @@ public final class Phase8PredictionRunner {
     Context context = new Context(
         simulationTick,
         player,
+        clientVelocity,
         simulationEnvironmentFor(environment),
         player.attributes(),
         movementEffects(player),
