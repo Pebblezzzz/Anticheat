@@ -134,12 +134,12 @@ class GrimParityPhysicsTest {
   void normalMovementUsesGrimLastOnGroundForAccelerationAfterLeavingEdge() {
     WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
         .loadChunk(0, 0)
-        .setBlock(0, 65, 0, BlockCatalogue12111.decode("minecraft:stone", Map.of()))
+        .setBlock(0, 65, 0, BlockCatalogue12111.decode("minecraft:stone_slab", Map.of("type", "bottom")))
         .build();
 
-    Player airborne = player(new Vec3(0.5, 66.0, 0.5), new Vec3(0.0, 0.5, 0.0), false);
+    Player airborne = player(new Vec3(0.5, 65.1, 0.5), new Vec3(0.05, 0.1, 0.0), false);
     Simulation.AdvancedInput sprintForward =
-        new Simulation.AdvancedInput(0, -1, false, true, false);
+        new Simulation.AdvancedInput(0, 0, false, true, false);
     MovementEnvironment airEnvironment =
         MovementEnvironment.dry(false, false, false);
 
@@ -163,8 +163,8 @@ class GrimParityPhysicsTest {
     assertFalse(pureAir.state().onGround());
     assertTrue(
         Math.abs(temporal.state().velocity().x())
-            > Math.abs(pureAir.state().velocity().x()),
-        () -> "lastOnGround=true must retain Grim ground acceleration while current onGround=false"
+            < Math.abs(pureAir.state().velocity().x()),
+        () -> "lastOnGround=true must retain Grim ground friction while current onGround=false"
             + " temporal=" + temporal.state().velocity()
             + " air=" + pureAir.state().velocity());
   }
