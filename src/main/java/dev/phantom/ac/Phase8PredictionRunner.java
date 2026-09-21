@@ -2982,7 +2982,7 @@ public final class Phase8PredictionRunner {
           Set<Candidate> stepCandidates = engineResult.candidates();
 
           simulatedTicks++;
-          if (!stepExhaustive || stepCandidates.isEmpty()) {
+          if (!stepExhaustive) {
             reasons.addAll(stepReasons);
             reasons.add("prediction step " + simulationTick
                 + " was not exhaustively modeled");
@@ -2991,6 +2991,9 @@ public final class Phase8PredictionRunner {
                 + " branchCandidates=" + stepCandidates.size()
                 + " reasons=" + stepReasons);
             exhaustive = false;
+          }
+
+          if (stepCandidates.isEmpty()) {
             local = Set.of();
             break;
           }
@@ -3001,6 +3004,12 @@ public final class Phase8PredictionRunner {
                 List.copyOf(trace));
           }
 
+          /*
+           * Grim continues its possible-vector frontier after a non-exhaustive
+           * input/timing step. We cannot promote the result to POSSIBLE, but a
+           * non-empty modeled vector is still a valid causal state and must be
+           * carried into the next tick rather than freezing the parent frontier.
+           */
           local = Set.copyOf(stepCandidates);
           Candidate afterCandidate = local.stream().findFirst().orElse(null);
           if (afterCandidate != null) {
