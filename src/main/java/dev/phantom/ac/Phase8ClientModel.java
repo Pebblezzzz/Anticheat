@@ -28,6 +28,7 @@ public final class Phase8ClientModel {
       Vec3 predictedVelocity,
       Vec3 serverVelocity,
       Vec3 actualMovement,
+      Optional<Simulation.AdvancedInput> knownInput,
       boolean lastOnGround,
       boolean onGround,
       Long serverTick,
@@ -38,6 +39,7 @@ public final class Phase8ClientModel {
       Objects.requireNonNull(clientVelocity);
       Objects.requireNonNull(serverVelocity);
       Objects.requireNonNull(actualMovement);
+      knownInput = Objects.requireNonNull(knownInput);
       Objects.requireNonNull(source);
     }
 
@@ -50,6 +52,7 @@ public final class Phase8ClientModel {
           anchor.velocity(),
           anchor.velocity(),
           Vec3.ZERO,
+          anchor.input(),
           anchor.onGround(),
           anchor.onGround(),
           null,
@@ -68,6 +71,7 @@ public final class Phase8ClientModel {
           predictedVelocity,
           Objects.requireNonNull(authoritativeVelocity),
           actualMovement,
+          knownInput,
           lastOnGround,
           onGround,
           authoritativeServerTick,
@@ -96,6 +100,7 @@ public final class Phase8ClientModel {
           Objects.requireNonNull(retainedPredictedVelocity),
           Objects.requireNonNull(retainedServerVelocity),
           Objects.requireNonNull(movement),
+          observedAfter.input(),
           onGround,
           observedAfter.onGround(),
           authoritativeServerTick,
