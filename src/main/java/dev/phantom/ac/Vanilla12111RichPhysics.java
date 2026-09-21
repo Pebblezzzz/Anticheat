@@ -1019,7 +1019,8 @@ public final class Vanilla12111RichPhysics {
                     false,
                     entityCollisions,
                     null,
-                    state.onGround());
+                    state.onGround(),
+                    state.velocity());
         }
 
         public Context(
