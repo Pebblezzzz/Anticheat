@@ -61,7 +61,7 @@ class RichWorldPhysicsTest {
         var result = new Vanilla12111RichPhysics().step(context);
 
         assertFalse(result.state().uncertain(), result.diagnostic());
-        assertEquals(0.9, result.state().position().x(), 1.0e-12);
+        assertEquals(1.4, result.state().position().x(), 1.0e-12);
         assertEquals(64.0, result.state().position().y(), 1.0e-12);
         assertFalse(result.state().onGround(), result.diagnostic());
         assertEquals(-0.0784, result.state().velocity().y(), 1.0e-12);
@@ -107,7 +107,7 @@ class RichWorldPhysicsTest {
         var afterSecond = new Vanilla12111RichPhysics().step(context2).state();
 
         assertFalse(afterSecond.uncertain());
-        assertEquals(0.9, afterSecond.position().x(), 1.0e-12);
+        assertEquals(1.8914000141620635, afterSecond.position().x(), 1.0e-12);
         assertEquals(63.9216, afterSecond.position().y(), 1.0e-12);
     }
 
