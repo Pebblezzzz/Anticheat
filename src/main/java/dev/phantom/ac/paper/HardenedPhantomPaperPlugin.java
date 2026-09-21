@@ -691,6 +691,88 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         &&Math.abs(capture.lastServerZ-position.z())<16.0;
   }
 
+  /**
+   * Observe the currently ridden entity as a compact equivalent of Grim's
+   * vehicle packet-entity state. Unknown vehicle details are left conservative.
+   */
+  private static Phase5Mechanics.VehicleState observeVehicleState(Player player){
+    Entity vehicle=player.getVehicle();
+    if(vehicle==null)return Phase5Mechanics.VehicleState.NONE;
+
+    String typeName=vehicle.getType().name().toLowerCase(Locale.ROOT);
+    Phase5Mechanics.VehicleType type;
+    if(typeName.contains("chest_boat")) type=Phase5Mechanics.VehicleType.CHEST_BOAT;
+    else if(typeName.equals("boat")) type=Phase5Mechanics.VehicleType.BOAT;
+    else if(typeName.contains("minecart")) type=Phase5Mechanics.VehicleType.MINECART;
+    else if(typeName.equals("pig")) type=Phase5Mechanics.VehicleType.PIG;
+    else if(typeName.equals("strider")) type=Phase5Mechanics.VehicleType.STRIDER;
+    else if(typeName.equals("camel")) type=Phase5Mechanics.VehicleType.CAMEL;
+    else if(typeName.equals("horse")||typeName.equals("donkey")||typeName.equals("mule"))
+      type=Phase5Mechanics.VehicleType.HORSE;
+    else if(typeName.contains("nautilus")) type=Phase5Mechanics.VehicleType.NAUTILUS;
+    else if(typeName.contains("happy_ghast")) type=Phase5Mechanics.VehicleType.HAPPY_GHAST;
+    else type=Phase5Mechanics.VehicleType.OTHER;
+
+    boolean controlling=!vehicle.getPassengers().isEmpty()
+        &&vehicle.getPassengers().getFirst().getEntityId()==player.getEntityId();
+    org.bukkit.util.Vector velocity=vehicle.getVelocity();
+    org.bukkit.Location location=vehicle.getLocation();
+
+    double movementSpeed=0.1;
+    if(vehicle instanceof org.bukkit.attribute.Attributable attributable){
+      AttributeInstance speed=attributable.getAttribute(Attribute.MOVEMENT_SPEED);
+      if(speed!=null)movementSpeed=speed.getValue();
+      if(type==Phase5Mechanics.VehicleType.HAPPY_GHAST){
+        try{
+          Attribute flying=Attribute.valueOf("FLYING_SPEED");
+          AttributeInstance flyingSpeed=attributable.getAttribute(flying);
+          if(flyingSpeed!=null)movementSpeed=flyingSpeed.getValue();
+        }catch(IllegalArgumentException ignored){}
+      }
+    }
+
+    boolean cold=false;
+    if(type==Phase5Mechanics.VehicleType.STRIDER){
+      org.bukkit.block.Block below=vehicle.getWorld().getBlockAt(
+          location.getBlockX(),location.getBlockY()-1,location.getBlockZ());
+      String material=below.getType().name();
+      cold=!(material.equals("LAVA")||material.contains("MAGMA")||material.contains("FIRE"));
+    }
+
+    boolean dashReady=type==Phase5Mechanics.VehicleType.CAMEL
+        &&invokeBoolean(vehicle,"isDashing")
+        &&invokeInt(vehicle,"getDashCooldown",-1)<=0;
+
+    return new Phase5Mechanics.VehicleState(
+        type,
+        controlling,
+        new Phase5Mechanics.Vec3Like(velocity.getX(),velocity.getY(),velocity.getZ()),
+        location.getYaw(),
+        location.getPitch(),
+        vehicle.isOnGround(),
+        movementSpeed,
+        cold,
+        dashReady);
+  }
+
+  private static boolean invokeBoolean(Entity entity,String method){
+    try{
+      Object value=entity.getClass().getMethod(method).invoke(entity);
+      return value instanceof Boolean b && b;
+    }catch(ReflectiveOperationException|SecurityException ignored){
+      return false;
+    }
+  }
+
+  private static int invokeInt(Entity entity,String method,int fallback){
+    try{
+      Object value=entity.getClass().getMethod(method).invoke(entity);
+      return value instanceof Number n?n.intValue():fallback;
+    }catch(ReflectiveOperationException|SecurityException ignored){
+      return fallback;
+    }
+  }
+
   private void captureLiveContext(){
     for(Capture capture:captures.values()){
       Player player=getServer().getPlayer(capture.playerId);
@@ -758,11 +840,18 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             +" multiplier="+dev.phantom.ac.Vanilla12111RichPhysics.SPRINTING_SPEED_MULTIPLIER);
       }
 
-      Phase5Mechanics.MovementEnvironment env=
+      Phase5Mechanics.MovementEnvironment baseEnvironment=
           water?Phase5Mechanics.MovementEnvironment.vanillaWater(player.isOnGround(),sprint,sneak,player.isSwimming()):
           lava?Phase5Mechanics.MovementEnvironment.vanillaLava(player.isOnGround(),sprint,sneak):
           climb?Phase5Mechanics.MovementEnvironment.vanillaClimbable(player.isOnGround(),sprint,sneak):
           Phase5Mechanics.MovementEnvironment.dry(player.isOnGround(),sprint,sneak);
+      Phase5Mechanics.VehicleState vehicleState=observeVehicleState(player);
+      Phase5Mechanics.MovementEnvironment env=new Phase5Mechanics.MovementEnvironment(
+          baseEnvironment.fluid(),baseEnvironment.submerged(),baseEnvironment.climbable(),
+          baseEnvironment.onGround(),baseEnvironment.sprinting(),baseEnvironment.sneaking(),
+          baseEnvironment.swimmingInput(),baseEnvironment.gliding(),
+          baseEnvironment.fluidSpeedMultiplier(),baseEnvironment.fluidDrag(),
+          baseEnvironment.gravityMultiplier(),vehicleState);
 
       /*
        * Enumerate the complete Bukkit entity set for the current world and retain
@@ -792,7 +881,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           effects,pose,env,
           new Vec3(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()),
           new Vec3(authoritativeVelocity.getX(),authoritativeVelocity.getY(),authoritativeVelocity.getZ()),
-          player.getAllowFlight(),player.isFlying(),player.isSleeping(),entityBoxes);
+          player.getAllowFlight(),player.isFlying(),player.isSleeping(),entityBoxes,vehicleState);
 
       if(capture.initialState==null){
         long anchorReceivedNanos=System.nanoTime();
