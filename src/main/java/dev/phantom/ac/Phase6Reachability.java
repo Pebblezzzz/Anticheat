@@ -23,15 +23,16 @@ public final class Phase6Reachability {
   public enum Verdict { POSSIBLE, UNCERTAIN, IMPOSSIBLE }
   public enum UncertainDimension { POSITION, ROTATION, VELOCITY, GROUND, INPUT, ENVIRONMENT, ATTRIBUTES, EFFECTS, POSE, TELEPORT, WORLD, TIMING, SNEAK_EDGE }
 
-  public record Context(long simulationTick,Player player,Simulation.Environment environment,Simulation.Attributes attributes,
+  public record Context(long simulationTick,Player player,Maths.Vec3 clientVelocity,Simulation.Environment environment,Simulation.Attributes attributes,
                         MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,
                         EntityCollisions entityCollisions,Set<UncertainDimension> uncertainty,
                         Maths.Vec3 actualMovementReference, boolean lastOnGround) implements Serializable {
-    public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping){this(tick,player,env,attributes,effects,pose,movementEnvironment,sleeping,EntityCollisions.of(List.of()),Set.of(),null,player.onGround());}
-    public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,EntityCollisions entityCollisions){this(tick,player,env,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,Set.of(),null,player.onGround());}
-    public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,EntityCollisions entityCollisions,Set<UncertainDimension> uncertainty){this(tick,player,env,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,uncertainty,null,player.onGround());}
-    public Context {if(simulationTick<0)throw new IllegalArgumentException("simulationTick must be non-negative");Objects.requireNonNull(player);Objects.requireNonNull(environment);Objects.requireNonNull(attributes);Objects.requireNonNull(effects);Objects.requireNonNull(pose);Objects.requireNonNull(movementEnvironment);Objects.requireNonNull(entityCollisions);uncertainty=Set.copyOf(uncertainty);}
-    public Context withTick(long tick){return new Context(tick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,uncertainty,actualMovementReference,lastOnGround);}
+    public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping){this(tick,player,player.velocity(),env,attributes,effects,pose,movementEnvironment,sleeping,EntityCollisions.of(List.of()),Set.of(),null,player.onGround());}
+    public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,EntityCollisions entityCollisions){this(tick,player,player.velocity(),env,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,Set.of(),null,player.onGround());}
+    public Context(long tick,Player player,Simulation.Environment env,Simulation.Attributes attributes,MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,EntityCollisions entityCollisions,Set<UncertainDimension> uncertainty){this(tick,player,player.velocity(),env,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,uncertainty,null,player.onGround());}
+    public Context {if(simulationTick<0)throw new IllegalArgumentException("simulationTick must be non-negative");Objects.requireNonNull(player);Objects.requireNonNull(clientVelocity);Objects.requireNonNull(environment);Objects.requireNonNull(attributes);Objects.requireNonNull(effects);Objects.requireNonNull(pose);Objects.requireNonNull(movementEnvironment);Objects.requireNonNull(entityCollisions);uncertainty=Set.copyOf(uncertainty);}
+    public Context withTick(long tick){return new Context(tick,player,clientVelocity,environment,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,uncertainty,actualMovementReference,lastOnGround);}
+    public Context withClientVelocity(Maths.Vec3 velocity){return new Context(simulationTick,player,velocity,environment,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,uncertainty,actualMovementReference,lastOnGround);}
     public Context withActualMovementReference(Maths.Vec3 reference){
       return new Context(simulationTick,player,environment,attributes,effects,pose,movementEnvironment,sleeping,
           entityCollisions,uncertainty,reference,lastOnGround);
@@ -504,6 +505,7 @@ public final class Phase6Reachability {
         orderedStarts.add(new Context(
             root.simulationTick(),
             seed.player(),
+            root.clientVelocity(),
             root.environment(),
             root.attributes(),
             root.effects(),
@@ -702,15 +704,17 @@ public final class Phase6Reachability {
                   movementEnvironmentFor(sample, pre);
               Simulation.Environment simulationEnvironment = environmentFor(environment);
 
+              State.Player physicsState = withVelocity(pre.player(), pre.clientVelocity());
               Phase5MovementAuthority.SimulationContext physicsContext =
                   new Phase5MovementAuthority.SimulationContext(
-                      tick, pre.player(), input, branch.world(),
+                      tick, physicsState, input, branch.world(),
                       simulationEnvironment, pre.attributes(), pre.effects(),
                       pre.pose(), environment, pre.sleeping(),
                       pre.player().pose() == Pose.FALL_FLYING,
                       pre.entityCollisions(),
                       pre.actualMovementReference(),
-                      pre.lastOnGround());
+                      pre.lastOnGround(),
+                      pre.clientVelocity());
               simulationSteps++;
               Phase5MovementAuthority.StepResult stepped = movementAuthority.simulate(physicsContext);
               if (stepped.state().uncertain()) {
@@ -768,7 +772,8 @@ public final class Phase6Reachability {
                   tick + 1, stepped.state(), environmentFor(nextEnvironment),
                   pre.attributes(), pre.effects(), nextPose,
                   nextEnvironment, pre.sleeping(), pre.entityCollisions(),
-                  stateUncertainty, pre.actualMovementReference(), pre.lastOnGround());
+                  stateUncertainty, stepped.clientVelocityAfterTick(),
+                  pre.actualMovementReference(), pre.lastOnGround());
 
               MovementMode mode = movementModeFor(after);
               Candidate newCandidate = new Candidate(
@@ -1083,6 +1088,15 @@ public final class Phase6Reachability {
     return List.copyOf(result);
   }
 
+
+  private static State.Player withVelocity(State.Player player, Maths.Vec3 velocity) {
+    return new State.Player(
+        player.position(), velocity, player.yaw(), player.pitch(), player.onGround(),
+        player.gamemode(), player.effects(), player.awaitingTeleport(), player.uncertain(),
+        player.input(), player.attributes(), player.pose(), player.environment(),
+        player.clientTickRange(), player.provenance(), player.uncertaintyReasons());
+  }
+
   private static String inputKey(AdvancedInput input) {
     return input.forward() + "," + input.strafe() + "," + input.jump() + ","
         + input.sprint() + "," + input.sneak();
@@ -1094,6 +1108,7 @@ public final class Phase6Reachability {
     b.append(context.simulationTick()).append('|')
         .append(p.position()).append('|')
         .append(p.velocity()).append('|')
+        .append(context.clientVelocity()).append('|')
         .append(Float.floatToIntBits(p.yaw())).append('|')
         .append(Float.floatToIntBits(p.pitch())).append('|')
         .append(p.onGround()).append('|')
@@ -1237,7 +1252,7 @@ public final class Phase6Reachability {
     if (e instanceof VelocityImpulse v) {
       Player n = Phase5Mechanics.applyVelocityImpulse(
           s, new Phase5Mechanics.Vec3Like(v.impulse().x(), v.impulse().y(), v.impulse().z()));
-      return new Context(tick, n, c.environment(), c.attributes(), c.effects(),
+      return new Context(tick, n, n.velocity(), c.environment(), c.attributes(), c.effects(),
           c.pose(), c.movementEnvironment(), c.sleeping(), c.entityCollisions(), c.uncertainty(),
           c.actualMovementReference(), c.lastOnGround());
     }
@@ -1251,7 +1266,7 @@ public final class Phase6Reachability {
           s.gamemode(), s.effects(), pending, s.uncertain(),
           s.input(), s.attributes(), t.pose(), s.environment(),
           s.clientTickRange(), s.provenance(), s.uncertaintyReasons());
-      return new Context(tick, n, c.environment(), c.attributes(), c.effects(),
+      return new Context(tick, n, t.velocity(), c.environment(), c.attributes(), c.effects(),
           t.pose(), c.movementEnvironment(), c.sleeping(), c.entityCollisions(), c.uncertainty(),
           c.actualMovementReference(), c.lastOnGround());
     }
@@ -1264,7 +1279,7 @@ public final class Phase6Reachability {
             tick, n, c.environment(), c.attributes(), c.effects(), c.pose(),
             c.movementEnvironment(), c.sleeping(), c.entityCollisions(),
             addUncertainty(c.uncertainty(), UncertainDimension.TELEPORT),
-            c.actualMovementReference(), c.lastOnGround());
+            c.clientVelocity(), c.actualMovementReference(), c.lastOnGround());
       }
       Player n = new Player(
           s.position(), s.velocity(), s.yaw(), s.pitch(), s.onGround(),
@@ -1272,7 +1287,7 @@ public final class Phase6Reachability {
           s.input(), s.attributes(), s.pose(), s.environment(),
           s.clientTickRange(), s.provenance(), s.uncertaintyReasons());
       return new Context(
-          tick, n, c.environment(), c.attributes(), c.effects(), c.pose(),
+          tick, n, c.clientVelocity(), c.environment(), c.attributes(), c.effects(), c.pose(),
           c.movementEnvironment(), c.sleeping(), c.entityCollisions(), c.uncertainty(),
           c.actualMovementReference(), c.lastOnGround());
     }
