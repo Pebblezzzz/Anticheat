@@ -68,7 +68,7 @@ class RichWorldPhysicsTest {
     }
 
     @Test
-    void sneakingBacksOffFromAPlatformEdgeInVanillaIncrements() {
+    void detectsSneakEdgeConstraintWithoutMutatingMovement() {
         WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
             .loadChunk(0, 0)
             .setBlock(0, 63, 0, stone())
@@ -99,7 +99,7 @@ class RichWorldPhysicsTest {
             result.diagnostic());
         assertTrue(result.sneakEdgeConstrained(), result.diagnostic());
         assertEquals(64.0, result.state().position().y(), 1.0e-12);
-        assertTrue(result.state().onGround(), result.diagnostic());
+        assertFalse(result.state().onGround(), result.diagnostic());
         assertEquals(0.0, result.state().velocity().y(), 1.0e-12);
     }
 
