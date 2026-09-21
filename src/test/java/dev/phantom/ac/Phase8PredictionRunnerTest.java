@@ -77,6 +77,96 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void groundClaimMismatchDoesNotBecomeMovementImpossible() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+
+    var stone = dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone", Map.of());
+    var edgeWorld = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+        .loadChunk(0, 0)
+        .setBlock(0, 63, 0, stone)
+        .build();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    var report = runner.process(
+        "ground-claim",
+        List.of(
+            new RawPacket(1, 10, authority),
+            new RawPacket(2, 20, new Move(
+                new Maths.Vec3(1.4, 64.0, .5), 0f, 0f, true, 1L))),
+        edgeWorld,
+        anchor(),
+        0L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(Phase8MovementValidation.Verdict.UNCERTAIN,
+        report.results().getFirst().verdict(), report.results().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.startsWith("GROUND_CLAIM_MISMATCH")),
+        report.frames().toString());
+    assertTrue(report.candidateFrontierRetained(), report.toString());
+  }
+
+  @Test
+  void airborneNeutralContinuationCanRecoverInputBoundaryFalsePositive() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+
+    Player start = new Player(
+        new Maths.Vec3(.5, 70.0, .5),
+        new Maths.Vec3(0.0, 0.16477328182606651, -0.11550728500250669),
+        0f, 0f, false, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
+
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    var environment = MovementEnvironment.dry(false, false, false);
+    var first = physics.step(new Vanilla12111RichPhysics.Context(
+        0, start, new Simulation.AdvancedInput(0, 0, false, false, false),
+        world, Simulation.Environment.DRY, start.attributes(),
+        Phase5Mechanics.MovementEffects.NONE, Pose.STANDING, environment, false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+    var second = physics.step(new Vanilla12111RichPhysics.Context(
+        1, first, new Simulation.AdvancedInput(0, 0, false, false, false),
+        world, Simulation.Environment.DRY, start.attributes(),
+        Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
+        environment, false, dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(), Pose.STANDING, environment,
+        first.position(), first.velocity(), false, false, false, List.of());
+
+    var report = runner.process(
+        "airborne-boundary",
+        List.of(
+            new RawPacket(1, 10, new PlayerContext(
+                "survival", start.attributes(), Map.of(), Pose.STANDING, environment,
+                start.position(), start.velocity(), false, false, false, List.of())),
+            new RawPacket(2, 20, new ClientTickEnd()),
+            new RawPacket(3, 30, new Move(first.position(), 0f, 0f, false, 1L)),
+            new RawPacket(4, 40, new ClientInput(
+                false, false, false, true, false, false, false)),
+            new RawPacket(5, 50, authority),
+            new RawPacket(6, 60, new Move(second.position(), 0f, 0f, false, 2L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertTrue(report.results().getLast().verdict()
+            != Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        report.results().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("INERTIAL_RECOVERY")),
+        report.frames().toString());
+  }
+
+  @Test
   void playerInputSprintKeyDoesNotImplyActualMovementSprint() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     var world = floorWorld();
