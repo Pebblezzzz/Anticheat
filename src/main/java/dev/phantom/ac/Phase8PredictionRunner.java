@@ -644,10 +644,11 @@ public final class Phase8PredictionRunner {
           boolean bootstrapTimingExhaustive =
               explicitTimingRangeIsExhaustive(move, bootstrapTiming)
                   && !phase7TimingHasUnmodeledChronology(bootstrapTiming);
-          TickResolution bootstrapValidationTick = bootstrapTimingExhaustive
-              ? tick.withTimingUncertaintyResolved(
-                  "Phase 7 bounded simulation timing was exhaustively evaluated for every permitted offset")
-              : tick;
+          TickResolution bootstrapValidationTick =
+              bootstrapTimingExhaustive && !tick.timingUncertain()
+                  ? tick.withTimingUncertaintyResolved(
+                      "Phase 7 bounded simulation timing was exhaustively evaluated for every permitted offset")
+                  : tick;
           Phase8MovementValidation.Result result = validate(
               playerId, packet, move, observedBefore, observedAfter, world,
               bootstrapValidationTick, bootstrapUncertainty, bootstrapSearch,
@@ -1090,8 +1091,13 @@ public final class Phase8PredictionRunner {
               && (explicitTimingFullyRepresented || tick.exact())
               && !tick.timingUncertain()
               && uncertaintySources.isEmpty();
+      /*
+       * Exhaustively enumerating the permitted simulation offsets can eliminate
+       * offset ambiguity, but it cannot erase an independent Phase 7 chronology
+       * uncertainty. Keep that signal intact so evidence stays honest.
+       */
       TickResolution validationTick =
-          explicitTimingFullyRepresented
+          explicitTimingFullyRepresented && !tick.timingUncertain()
               ? tick.withTimingUncertaintyResolved(
                   "Phase 7 bounded simulation timing was exhaustively evaluated for every permitted offset")
               : tick;
@@ -1116,27 +1122,29 @@ public final class Phase8PredictionRunner {
           impossible++;
           latestContinuation = Continuation.IMPOSSIBLE;
           /*
-           * An impossible observation is evidence, not a trusted trajectory.
-           * Retaining the contradicted frontier causes repeated drift and can turn
-           * one model mismatch into a stream of false IMPOSSIBLE observations.
-           * Rebuild from fresh causal authority on the next movement instead.
+           * Keep the modeled prediction frontier as the expected client trajectory.
+           * An observation contradiction is evidence against that trajectory; it is
+           * not permission to replace the physics state with the observed packet.
+           * This mirrors the production prediction model: subsequent packets remain
+           * comparable to the same client-physics history instead of being silently
+           * re-anchored after the first contradiction.
            */
-          prediction = Set.of();
-          predictionTick = -1L;
-          trace.add("FRONTIER_RESET reason=OBSERVATION_CONTRADICTION");
+          trace.add("FRONTIER_RETAINED reason=OBSERVATION_CONTRADICTION"
+              + " candidates=" + prediction.size()
+              + " tick=" + predictionTick);
           trace.add("OBSERVED_MOVEMENT_HISTORY_RETAINED reason=RECOVERY_EVIDENCE");
         }
         case UNCERTAIN -> {
           uncertain++;
           latestContinuation = Continuation.UNCERTAIN;
           /*
-           * An uncertain observation is likewise not a safe baseline. Preserve
-           * evidence, but require the next clean observation to establish a new
-           * causally aligned root instead of carrying the ambiguity forward.
+           * Preserve the last complete physics frontier through timing/world/input
+           * uncertainty. The missing fact changes the confidence of this observation,
+           * not the client trajectory already established by earlier complete ticks.
            */
-          prediction = Set.of();
-          predictionTick = -1L;
-          trace.add("FRONTIER_RESET reason=UNCERTAIN_OBSERVATION");
+          trace.add("FRONTIER_RETAINED reason=UNCERTAIN_OBSERVATION"
+              + " candidates=" + prediction.size()
+              + " tick=" + predictionTick);
           trace.add("OBSERVED_MOVEMENT_HISTORY_RETAINED reason=RECOVERY_EVIDENCE");
         }
       }
