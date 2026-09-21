@@ -193,14 +193,22 @@ public final class RichWorldCollision {
       Vec3 requested,BlockBox start,List<BlockBox> blocks,
       List<EntityCollisions.EntityBox> entities,List<Axis> order){
     Vec3 probe=new Vec3(
-        requested.x()+Math.copySign(COLLISION_EPSILON,requested.x()),
-        requested.y()+Math.copySign(COLLISION_EPSILON,requested.y()),
-        requested.z()+Math.copySign(COLLISION_EPSILON,requested.z()));
+        probeComponent(requested.x()),
+        probeComponent(requested.y()),
+        probeComponent(requested.z()));
     AxisResult result=collideBoundingBox(probe,start,blocks,entities,order);
-    double x=result.collidedX()?result.x():result.x()-Math.copySign(COLLISION_EPSILON,requested.x());
-    double y=result.collidedY()?result.y():result.y()-Math.copySign(COLLISION_EPSILON,requested.y());
-    double z=result.collidedZ()?result.z():result.z()-Math.copySign(COLLISION_EPSILON,requested.z());
+    double x=result.collidedX()?result.x():unprobeComponent(result.x(),requested.x());
+    double y=result.collidedY()?result.y():unprobeComponent(result.y(),requested.y());
+    double z=result.collidedZ()?result.z():unprobeComponent(result.z(),requested.z());
     return new AxisResult(x,y,z,result.collidedX(),result.collidedY(),result.collidedZ());
+  }
+
+  private static double probeComponent(double value){
+    return value==0.0?0.0:value+Math.copySign(COLLISION_EPSILON,value);
+  }
+
+  private static double unprobeComponent(double value,double requested){
+    return requested==0.0?0.0:value-Math.copySign(COLLISION_EPSILON,requested);
   }
 
   private static AxisResult collideBoundingBox(
