@@ -2928,6 +2928,7 @@ public final class Phase8PredictionRunner {
               maximumCandidates,
               movementSequence,
               simulationTick,
+              targetTick,
               actualMovementReference,
               lastOnGroundForPrediction);
 
