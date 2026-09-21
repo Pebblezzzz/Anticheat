@@ -144,6 +144,7 @@ public final class Phase8PredictionRunner {
   private static final int MAX_TIMING_HISTORY_EVENTS = 512;
 
   private final int maximumCandidates;
+  private final GrimPredictionEngine grimPredictionEngine = new GrimPredictionEngine();
   private final Phase7Timing.Config phase7TimingConfig;
   private final ArrayDeque<Packets.RawPacket> timingHistory = new ArrayDeque<>();
   private long timingEpochNanos = -1L;
@@ -2920,87 +2921,20 @@ public final class Phase8PredictionRunner {
                     chronology.history(), simulationTick, movementSequence));
           }
 
-          Set<Candidate> stepCandidates = new LinkedHashSet<>();
-          LinkedHashSet<String> stepReasons = new LinkedHashSet<>();
-          boolean stepExhaustive = true;
+          GrimPredictionEngine.TickResult engineResult = grimPredictionEngine.tick(
+              local,
+              inputOptions,
+              world,
+              maximumCandidates,
+              movementSequence,
+              simulationTick,
+              actualMovementReference,
+              lastOnGroundForPrediction);
 
-          for (InputConstraint inputOption : inputOptions) {
-            Map<MovementInputState, List<Context>> startsByMovementState =
-                new LinkedHashMap<>();
-            for (Candidate candidate : local) {
-              Context baseContext = candidate.context()
-                  .withTick(simulationTick)
-                  .withLastOnGround(lastOnGroundForPrediction);
-              MovementEnvironment movementEnvironment =
-                  baseContext.movementEnvironment();
-              MovementInputState physicalState = new MovementInputState(
-                  movementEnvironment.sprinting(), movementEnvironment.sneaking());
-              startsByMovementState
-                  .computeIfAbsent(physicalState, ignored -> new ArrayList<>())
-                  .add(baseContext);
-
-              /*
-               * Grim keeps client locomotion state separate from the held input,
-               * but the input packet is still a valid causal alternative when
-               * our persisted physical sprint/sneak state is older than the
-               * newly observed held state. Keep both branches rather than
-               * promoting the key state unconditionally.
-               */
-              if (inputOption.sprint().isPresent() && inputOption.sneak().isPresent()) {
-                MovementInputState keyState = new MovementInputState(
-                    inputOption.sprint().get(), inputOption.sneak().get());
-                if (!keyState.equals(physicalState)) {
-                  startsByMovementState
-                      .computeIfAbsent(keyState, ignored -> new ArrayList<>())
-                      .add(withLocomotionState(
-                          baseContext, keyState.sprinting(), keyState.sneaking()));
-                }
-              }
-            }
-
-            for (var movementEntry : startsByMovementState.entrySet()) {
-              MovementInputState movementState = movementEntry.getKey();
-              List<Context> branchStarts = movementEntry.getValue();
-              if (actualMovementReference != null && simulationTick == targetTick - 1L) {
-                branchStarts = branchStarts.stream()
-                    .map(context -> context.withActualMovementReference(actualMovementReference))
-                    .toList();
-                trace.add("COLLISION_REFERENCE tick=" + simulationTick
-                    + " actualMovement=" + actualMovementReference);
-              }
-              InputConstraint simulationInput = new InputConstraint(
-                  inputOption.forward(),
-                  inputOption.strafe(),
-                  inputOption.jump(),
-                  Optional.of(movementState.sprinting()),
-                  Optional.of(movementState.sneaking()));
-
-              SearchResult branch = new Phase6Reachability().search(
-                  branchStarts,
-                  List.of(simulationInput),
-                  ignored -> List.of(new WorldBranch(
-                      "packet-world@" + simulationTick,
-                      world,
-                      true,
-                      "latency-compensated client-visible world")),
-                  ignored -> List.of(new Phase6Reachability.None()),
-                  Phase6Reachability.SearchConfig.defaults(maximumCandidates));
-
-              trace.add("SIM_INPUT_BRANCH tick=" + simulationTick
-                  + " input=" + simulationInput
-                  + " movementSprint=" + movementState.sprinting()
-                  + " movementSneak=" + movementState.sneaking()
-                  + " exhaustive=" + branch.exhaustive()
-                  + " verdict=" + branch.verdict()
-                  + " candidates=" + branch.candidates().size());
-              stepCandidates.addAll(branch.candidates());
-              stepReasons.addAll(branch.reasons());
-
-              boolean branchExhaustive = branch.exhaustive()
-                  || exhaustivelyEnumeratedInputEnvelope(branch, inputOption);
-              if (!branchExhaustive) stepExhaustive = false;
-            }
-          }
+          trace.addAll(engineResult.trace());
+          LinkedHashSet<String> stepReasons = new LinkedHashSet<>(engineResult.reasons());
+          boolean stepExhaustive = engineResult.exhaustive();
+          Set<Candidate> stepCandidates = engineResult.candidates();
 
           simulatedTicks++;
           if (!stepExhaustive || stepCandidates.isEmpty()) {
