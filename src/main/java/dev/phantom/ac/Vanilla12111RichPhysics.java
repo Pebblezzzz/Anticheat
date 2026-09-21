@@ -304,6 +304,7 @@ public final class Vanilla12111RichPhysics {
         if (sneakEdgeAdjustment.uncertain()) {
             return uncertain(context, sneakEdgeAdjustment.diagnostic());
         }
+        boolean sneakEdgeConstrained = sneakEdgeAdjustment.constrained();
         velocity = sneakEdgeAdjustment.movement();
 
         RichWorldCollision.Result collision =
@@ -465,7 +466,8 @@ public final class Vanilla12111RichPhysics {
                 collision.collidedY(),
                 collision.collidedZ(),
                 (collision.collidedX() || collision.collidedY() || collision.collidedZ()),
-                diagnostic);
+                diagnostic,
+                sneakEdgeConstrained);
     }
 
     private StepResult vehicleStep(
@@ -755,7 +757,7 @@ public final class Vanilla12111RichPhysics {
                 || context.movementEnvironment().climbable()
                 || context.movementEnvironment().gliding()
                 || (requested.x() == 0.0 && requested.z() == 0.0)) {
-            return new SneakEdgeAdjustment(requested, false, "");
+            return new SneakEdgeAdjustment(requested, false, false, "");
         }
 
         double x = requested.x();
@@ -769,7 +771,7 @@ public final class Vanilla12111RichPhysics {
             probe = sneakEdgeProbe(context, boundingBox, x, 0.0);
         }
         if (probe.uncertain()) {
-            return new SneakEdgeAdjustment(requested, true, probe.diagnostic());
+            return new SneakEdgeAdjustment(requested, false, true, probe.diagnostic());
         }
         if (probe.empty() && x == 0.0) {
             // zero is already the safest X component
@@ -784,7 +786,7 @@ public final class Vanilla12111RichPhysics {
             probe = sneakEdgeProbe(context, boundingBox, 0.0, z);
         }
         if (probe.uncertain()) {
-            return new SneakEdgeAdjustment(requested, true, probe.diagnostic());
+            return new SneakEdgeAdjustment(requested, false, true, probe.diagnostic());
         }
         if (probe.empty() && z == 0.0) {
             z = 0.0;
@@ -793,7 +795,7 @@ public final class Vanilla12111RichPhysics {
         while (x != 0.0 && z != 0.0) {
             probe = sneakEdgeProbe(context, boundingBox, x, z);
             if (probe.uncertain()) {
-                return new SneakEdgeAdjustment(requested, true, probe.diagnostic());
+                return new SneakEdgeAdjustment(requested, false, true, probe.diagnostic());
             }
             if (!probe.empty()) break;
 
@@ -805,10 +807,12 @@ public final class Vanilla12111RichPhysics {
         }
 
         Vec3 adjusted = new Vec3(x, requested.y(), z);
-        return new SneakEdgeAdjustment(adjusted, false,
-                adjusted.equals(requested)
-                        ? ""
-                        : "Grim-style sneak edge backoff applied in 0.05 block increments");
+        boolean constrained = !adjusted.equals(requested);
+        return new SneakEdgeAdjustment(
+                requested,
+                constrained,
+                false,
+                constrained ? "Grim-style sneak edge constraint detected; preserving full physics vector and exposing bounded position uncertainty" : "");
     }
 
     private double reduceSneakEdgeComponent(double value) {
@@ -856,6 +860,7 @@ public final class Vanilla12111RichPhysics {
 
     private record SneakEdgeAdjustment(
             Vec3 movement,
+            boolean constrained,
             boolean uncertain,
             String diagnostic) {}
 
@@ -1025,10 +1030,26 @@ public final class Vanilla12111RichPhysics {
             boolean collisionY,
             boolean collisionZ,
             boolean entityCollision,
-            String diagnostic) implements Serializable {
+            String diagnostic,
+            boolean sneakEdgeConstrained) implements Serializable {
         public StepResult {
             Objects.requireNonNull(state);
             Objects.requireNonNull(diagnostic);
+        }
+
+        public StepResult(
+                long simulationTick,
+                Player state,
+                boolean collided,
+                boolean stepAttempted,
+                boolean stepSucceeded,
+                boolean collisionX,
+                boolean collisionY,
+                boolean collisionZ,
+                boolean entityCollision,
+                String diagnostic) {
+            this(simulationTick, state, collided, stepAttempted, stepSucceeded,
+                    collisionX, collisionY, collisionZ, entityCollision, diagnostic, false);
         }
     }
 }

@@ -18,8 +18,10 @@ public final class Phase6Reachability {
   public static final int MAX_HORIZON_TICKS=512, MAX_TIMING_OFFSETS=128, MAX_PROVENANCE_PARENTS=8;
   /** Small numerical envelope for client/server position reconstruction. */
   static final double POSITION_MATCH_TOLERANCE = 0.01D;
+  /** Grim-style bounded positional envelope while sneak-edge movement is hidden. */
+  static final double SNEAK_EDGE_POSITION_TOLERANCE = 0.15D;
   public enum Verdict { POSSIBLE, UNCERTAIN, IMPOSSIBLE }
-  public enum UncertainDimension { POSITION, ROTATION, VELOCITY, GROUND, INPUT, ENVIRONMENT, ATTRIBUTES, EFFECTS, POSE, TELEPORT, WORLD, TIMING }
+  public enum UncertainDimension { POSITION, ROTATION, VELOCITY, GROUND, INPUT, ENVIRONMENT, ATTRIBUTES, EFFECTS, POSE, TELEPORT, WORLD, TIMING, SNEAK_EDGE }
 
   public record Context(long simulationTick,Player player,Simulation.Environment environment,Simulation.Attributes attributes,
                         MovementEffects effects,Pose pose,MovementEnvironment movementEnvironment,boolean sleeping,
@@ -731,6 +733,8 @@ public final class Phase6Reachability {
 
               Set<UncertainDimension> stateUncertainty = EnumSet.noneOf(UncertainDimension.class);
               stateUncertainty.addAll(pre.uncertainty());
+              stateUncertainty.remove(UncertainDimension.SNEAK_EDGE);
+              if (stepped.sneakEdgeConstrained()) stateUncertainty.add(UncertainDimension.SNEAK_EDGE);
               if (!branch.exhaustive()) stateUncertainty.add(UncertainDimension.WORLD);
               /*
                * An inexact InputConstraint is an uncertainty envelope over
@@ -1011,7 +1015,7 @@ public final class Phase6Reachability {
                 "all prior observations were reachable under their declared Phase 6 envelopes")));
       }
       Candidate witness = result.candidates().stream()
-          .filter(candidate -> matches(candidate.context().player(), observation))
+          .filter(candidate -> matches(candidate, observation))
           .min(Comparator.comparingLong(Candidate::id))
           .orElse(null);
       lastReachable = witness;
@@ -1313,7 +1317,7 @@ public final class Phase6Reachability {
 
     if (observation.known().contains(ObservedField.POSITION)) {
       positionDistance = distance(actual.position(), expected.position());
-      if (!positionMatches(actual.position(), expected.position())) {
+      if (!positionMatches(candidate, actual.position(), expected.position())) {
         dimensions.add(ObservedField.POSITION);
         details.add("position distance=" + positionDistance);
       }
@@ -1337,7 +1341,8 @@ public final class Phase6Reachability {
             + " expectedPitch=" + expected.pitch());
       }
     }
-    if (observation.known().contains(ObservedField.GROUND) && actual.onGround() != expected.onGround()) {
+    if (observation.known().contains(ObservedField.GROUND) && actual.onGround() != expected.onGround()
+        && !candidate.context().uncertainty().contains(UncertainDimension.SNEAK_EDGE)) {
       dimensions.add(ObservedField.GROUND);
       details.add("ground mismatch actual=" + actual.onGround() + " expected=" + expected.onGround());
     }
@@ -1360,6 +1365,17 @@ public final class Phase6Reachability {
         yawDistance, pitchDistance, details);
   }
 
+  private static boolean positionMatches(Candidate candidate, Maths.Vec3 actual, Maths.Vec3 expected) {
+    if (positionMatches(actual, expected)) return true;
+    if (!candidate.context().uncertainty().contains(UncertainDimension.SNEAK_EDGE)) return false;
+    double dx = Math.abs(actual.x() - expected.x());
+    double dy = Math.abs(actual.y() - expected.y());
+    double dz = Math.abs(actual.z() - expected.z());
+    return dx <= SNEAK_EDGE_POSITION_TOLERANCE
+        && dz <= SNEAK_EDGE_POSITION_TOLERANCE
+        && dy <= POSITION_MATCH_TOLERANCE;
+  }
+
   static boolean positionMatches(Maths.Vec3 a, Maths.Vec3 b) {
     if(a == null || b == null) return a == b;
     double dx=a.x()-b.x(), dy=a.y()-b.y(), dz=a.z()-b.z();
@@ -1373,12 +1389,13 @@ public final class Phase6Reachability {
     return Math.sqrt(dx * dx + dy * dy + dz * dz);
   }
 
-  private static boolean matches(Player c, Observation o) {
+  private static boolean matches(Candidate candidate, Observation o) {
+    Player c = candidate.context().player();
     Player expected = o.observed();
     for (ObservedField field : o.known()) {
       switch (field) {
         case POSITION -> {
-          if (!positionMatches(c.position(), expected.position())) return false;
+          if (!positionMatches(candidate, c.position(), expected.position())) return false;
         }
         case VELOCITY -> {
           if (!c.velocity().equals(expected.velocity())) return false;
@@ -1388,7 +1405,8 @@ public final class Phase6Reachability {
               || Float.compare(c.pitch(), expected.pitch()) != 0) return false;
         }
         case GROUND -> {
-          if (c.onGround() != expected.onGround()) return false;
+          if (c.onGround() != expected.onGround()
+              && !candidate.context().uncertainty().contains(UncertainDimension.SNEAK_EDGE)) return false;
         }
         case GAMEMODE -> {
           if (!c.gamemode().equals(expected.gamemode())) return false;
