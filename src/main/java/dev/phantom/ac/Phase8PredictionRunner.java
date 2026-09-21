@@ -2358,7 +2358,10 @@ public final class Phase8PredictionRunner {
         player.pose(),
         environment,
         player.pose() == Pose.SLEEPING,
-        entityCollisions == null ? EntityCollisions.NONE_TRACKED : entityCollisions);
+        entityCollisions == null ? EntityCollisions.NONE_TRACKED : entityCollisions,
+        Set.of(),
+        null,
+        player.onGround());
     long id = nextCandidateId++;
     long parentId = parentSequence < 0L ? -1L : parentSequence;
     Candidate candidate = new Candidate(
