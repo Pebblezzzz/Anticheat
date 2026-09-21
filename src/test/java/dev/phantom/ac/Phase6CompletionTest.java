@@ -110,29 +110,24 @@ class Phase6CompletionTest {
         tick -> List.of(new Phase6Reachability.None()), 4096);
   }
 
-  private static Vanilla12111RichPhysics.StepResult runPhase5(
-      Context context, AdvancedInput input, WorldSnapshot world) {
+  private static Player runPhase5(Context context, AdvancedInput input, WorldSnapshot world) {
     MovementEnvironment env = context.movementEnvironment();
     Simulation.Environment simEnv = context.environment();
     Vanilla12111RichPhysics.StepResult result =
-        new Phase5MovementAuthority(new Vanilla12111RichPhysics()).simulate(
-            new Phase5MovementAuthority.SimulationContext(
-                context.simulationTick(), context.player(), input, world, simEnv,
-                context.attributes(), context.effects(), context.pose(), env,
-                context.sleeping(), false, context.entityCollisions(),
-                context.actualMovementReference(), context.lastOnGround(),
-                context.clientVelocity()));
+        new Vanilla12111RichPhysics().step(new Vanilla12111RichPhysics.Context(
+            context.simulationTick(), context.player(), input, world, simEnv,
+            context.attributes(), context.effects(), context.pose(), env,
+            context.sleeping(), context.entityCollisions()));
     assertFalse(result.state().uncertain(), result.diagnostic());
-    return result.delegate();
+    return result.state();
   }
-
   @Test
   void exactInputProducesOnlyAuthenticPhase5States() {
     SearchResult result = exact(start(), List.of(WALK), floorWorld());
     assertEquals(Verdict.POSSIBLE, result.verdict());
     assertEquals(1, result.candidates().size());
     Candidate candidate = result.candidates().iterator().next();
-    assertEquals(runPhase5(start(), WALK, floorWorld()).state(), candidate.context().player());
+    assertEquals(runPhase5(start(), WALK, floorWorld()), candidate.context().player());
     assertEquals(MovementMode.SURVIVAL_GROUND, candidate.movementMode());
     assertEquals(1, result.metrics().simulationSteps());
     assertTrue(result.metrics().exhaustive());
