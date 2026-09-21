@@ -448,7 +448,7 @@ public final class Vanilla12111RichPhysics {
                 collision.collidedX(),
                 collision.collidedY(),
                 collision.collidedZ(),
-                collision.entityCollision(),
+                (collision.collidedX() || collision.collidedY() || collision.collidedZ()),
                 diagnostic);
     }
 
@@ -525,7 +525,7 @@ public final class Vanilla12111RichPhysics {
                 collision.collidedX(),
                 collision.collidedY(),
                 collision.collidedZ(),
-                collision.entityCollision(),
+                (collision.collidedX() || collision.collidedY() || collision.collidedZ()),
                 vehicleResult.diagnostic());
     }
 
@@ -594,7 +594,7 @@ public final class Vanilla12111RichPhysics {
             collidedX = collision.collidedX();
             collidedY = collision.collidedY();
             collidedZ = collision.collidedZ();
-            entityCollision = collision.entityCollision();
+            entityCollision = (collision.collidedX() || collision.collidedY() || collision.collidedZ());
             stepAttempted = collision.stepAttempted();
             stepSucceeded = collision.stepSucceeded();
         }
