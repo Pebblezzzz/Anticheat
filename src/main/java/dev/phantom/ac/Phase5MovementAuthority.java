@@ -48,7 +48,8 @@ public final class Phase5MovementAuthority {
       boolean flying,
       EntityCollisions entityCollisions,
       Maths.Vec3 actualMovementReference,
-      boolean lastOnGround) implements Serializable {
+      boolean lastOnGround,
+      Maths.Vec3 clientVelocity) implements Serializable {
     public SimulationContext {
       if (simulationTick < 0) throw new IllegalArgumentException("simulationTick must be non-negative");
       Objects.requireNonNull(state);
@@ -60,6 +61,7 @@ public final class Phase5MovementAuthority {
       Objects.requireNonNull(pose);
       Objects.requireNonNull(movementEnvironment);
       Objects.requireNonNull(entityCollisions);
+      Objects.requireNonNull(clientVelocity);
       if (actualMovementReference != null
           && (!Double.isFinite(actualMovementReference.x())
           || !Double.isFinite(actualMovementReference.y())
@@ -83,7 +85,7 @@ public final class Phase5MovementAuthority {
         boolean flying,
         EntityCollisions entityCollisions) {
       this(simulationTick, state, input, world, environment, attributes, effects, pose,
-          movementEnvironment, sleeping, flying, entityCollisions, null, state.onGround());
+          movementEnvironment, sleeping, flying, entityCollisions, null, state.onGround(), state.velocity());
     }
 
     public SimulationContext(
@@ -102,7 +104,7 @@ public final class Phase5MovementAuthority {
         Maths.Vec3 actualMovementReference) {
       this(simulationTick, state, input, world, environment, attributes, effects, pose,
           movementEnvironment, sleeping, flying, entityCollisions, actualMovementReference,
-          state.onGround());
+          state.onGround(), state.velocity());
     }
   }
 
@@ -120,5 +122,6 @@ public final class Phase5MovementAuthority {
     public boolean collisionZ() { return delegate.collisionZ(); }
     public String diagnostic() { return delegate.diagnostic(); }
     public boolean sneakEdgeConstrained() { return delegate.sneakEdgeConstrained(); }
+    public Maths.Vec3 clientVelocityAfterTick() { return delegate.clientVelocityAfterTick(); }
   }
 }
