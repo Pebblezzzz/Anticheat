@@ -25,8 +25,11 @@ public final class Phase8ClientModel {
       long clientTick,
       Vec3 position,
       Vec3 clientVelocity,
+      Vec3 predictedVelocity,
       Vec3 serverVelocity,
       Vec3 actualMovement,
+      Optional<Simulation.AdvancedInput> knownInput,
+      boolean lastOnGround,
       boolean onGround,
       Long serverTick,
       String source) implements Serializable {
@@ -36,6 +39,7 @@ public final class Phase8ClientModel {
       Objects.requireNonNull(clientVelocity);
       Objects.requireNonNull(serverVelocity);
       Objects.requireNonNull(actualMovement);
+      knownInput = Objects.requireNonNull(knownInput);
       Objects.requireNonNull(source);
     }
 
@@ -46,7 +50,10 @@ public final class Phase8ClientModel {
           anchor.position(),
           anchor.velocity(),
           anchor.velocity(),
+          anchor.velocity(),
           Vec3.ZERO,
+          anchor.input(),
+          anchor.onGround(),
           anchor.onGround(),
           null,
           "initial-authoritative-anchor");
@@ -61,11 +68,20 @@ public final class Phase8ClientModel {
           Math.max(clientTick, tick),
           position,
           clientVelocity,
+          predictedVelocity,
           Objects.requireNonNull(authoritativeVelocity),
           actualMovement,
+          knownInput,
+          lastOnGround,
           onGround,
           authoritativeServerTick,
           "server-authority-overlay");
+    }
+
+
+    /** Client movement velocity and authoritative server velocity are intentionally independent. */
+    public boolean serverVelocityIsDistinctFromClientVelocity() {
+      return !serverVelocity.equals(clientVelocity) || serverTick != null;
     }
 
     public ClientPhysicsState observe(
@@ -73,6 +89,7 @@ public final class Phase8ClientModel {
         Player observedAfter,
         Vec3 movement,
         Vec3 retainedClientVelocity,
+        Vec3 retainedPredictedVelocity,
         Vec3 retainedServerVelocity,
         Long authoritativeServerTick,
         String reason) {
@@ -80,8 +97,11 @@ public final class Phase8ClientModel {
           Math.max(0L, tick),
           observedAfter.position(),
           Objects.requireNonNull(retainedClientVelocity),
+          Objects.requireNonNull(retainedPredictedVelocity),
           Objects.requireNonNull(retainedServerVelocity),
           Objects.requireNonNull(movement),
+          observedAfter.input(),
+          onGround,
           observedAfter.onGround(),
           authoritativeServerTick,
           Objects.requireNonNull(reason));

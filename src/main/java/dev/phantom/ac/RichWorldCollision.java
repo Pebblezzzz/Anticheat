@@ -12,6 +12,8 @@ import static dev.phantom.ac.Maths.*;
 
 /** Deterministic collision resolver over the immutable client-visible world plus tracked entity AABBs. */
 public final class RichWorldCollision {
+  /** Client collision probing epsilon used by the reference movement implementation. */
+  private static final double COLLISION_EPSILON = 1.0E-7;
   private RichWorldCollision() {}
 
   public record Result(Vec3 displacement,boolean collidedX,boolean collidedY,boolean collidedZ,boolean stepAttempted,boolean stepSucceeded,boolean uncertain,String diagnostic) implements Serializable {}
@@ -75,7 +77,7 @@ public final class RichWorldCollision {
     String bestDiagnostic="rich voxel/entity movement";
 
     for(List<Axis> order:axisOrders){
-      AxisResult direct=collideBoundingBox(
+      AxisResult direct=collideWithMovementEpsilon(
           requested,startBox,blockBoxes,entityBoxes,order);
       Vec3 directVector=new Vec3(direct.x(),direct.y(),direct.z());
       double directScore=movementScore(directVector,requested,stepHeight);
@@ -181,6 +183,33 @@ public final class RichWorldCollision {
 
   private record AxisResult(double x,double y,double z,
                             boolean collidedX,boolean collidedY,boolean collidedZ){}
+
+  /*
+   * Probe a tiny signed epsilon past the requested movement, like the client-side
+   * collision path, then remove the epsilon again when that probe did not collide.
+   * This prevents exact face-contact rounding from changing the collision result.
+   */
+  private static AxisResult collideWithMovementEpsilon(
+      Vec3 requested,BlockBox start,List<BlockBox> blocks,
+      List<EntityCollisions.EntityBox> entities,List<Axis> order){
+    Vec3 probe=new Vec3(
+        probeComponent(requested.x()),
+        probeComponent(requested.y()),
+        probeComponent(requested.z()));
+    AxisResult result=collideBoundingBox(probe,start,blocks,entities,order);
+    double x=result.collidedX()?result.x():unprobeComponent(result.x(),requested.x());
+    double y=result.collidedY()?result.y():unprobeComponent(result.y(),requested.y());
+    double z=result.collidedZ()?result.z():unprobeComponent(result.z(),requested.z());
+    return new AxisResult(x,y,z,result.collidedX(),result.collidedY(),result.collidedZ());
+  }
+
+  private static double probeComponent(double value){
+    return value==0.0?0.0:value+Math.copySign(COLLISION_EPSILON,value);
+  }
+
+  private static double unprobeComponent(double value,double requested){
+    return requested==0.0?0.0:value-Math.copySign(COLLISION_EPSILON,requested);
+  }
 
   private static AxisResult collideBoundingBox(
       Vec3 requested,BlockBox start,List<BlockBox> blockBoxes,

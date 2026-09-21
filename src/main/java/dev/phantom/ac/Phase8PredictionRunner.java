@@ -668,6 +668,10 @@ public final class Phase8PredictionRunner {
         }
       }
 
+      boolean priorPositionObservationSameTick =
+          move.position() != null
+              && tick.known()
+              && lastObservedMovementClientTick == tick.clientTick();
       if (move.position() != null) {
         rememberObservedMovement(observedBefore, observedAfter, tick);
       }
@@ -918,7 +922,7 @@ public final class Phase8PredictionRunner {
       }
 
       boolean movedWithinCurrentClientTick =
-          lastPositionClientTick == tick.clientTick()
+          priorPositionObservationSameTick
               && !positionMatches(observedBefore.position(), observedAfter.position());
 
       if (movedWithinCurrentClientTick) {
@@ -1090,6 +1094,11 @@ public final class Phase8PredictionRunner {
               && (explicitTimingFullyRepresented || tick.exact())
               && !tick.timingUncertain()
               && uncertaintySources.isEmpty();
+      /*
+       * Exhaustively enumerating the permitted simulation offsets can eliminate
+       * offset ambiguity, but it cannot erase an independent Phase 7 chronology
+       * uncertainty. Keep that signal intact so evidence stays honest.
+       */
       TickResolution validationTick =
           explicitTimingFullyRepresented
               ? tick.withTimingUncertaintyResolved(
@@ -1116,10 +1125,10 @@ public final class Phase8PredictionRunner {
           impossible++;
           latestContinuation = Continuation.IMPOSSIBLE;
           /*
-           * An impossible observation is evidence, not a trusted trajectory.
-           * Retaining the contradicted frontier causes repeated drift and can turn
-           * one model mismatch into a stream of false IMPOSSIBLE observations.
-           * Rebuild from fresh causal authority on the next movement instead.
+           * Keep the persistent client-physics state and observed chronology, but
+           * do not promote a contradicted candidate set into the next validation
+           * baseline. A fresh causal authority or movement bootstrap can establish
+           * the next trusted root.
            */
           prediction = Set.of();
           predictionTick = -1L;
@@ -1130,13 +1139,13 @@ public final class Phase8PredictionRunner {
           uncertain++;
           latestContinuation = Continuation.UNCERTAIN;
           /*
-           * An uncertain observation is likewise not a safe baseline. Preserve
-           * evidence, but require the next clean observation to establish a new
-           * causally aligned root instead of carrying the ambiguity forward.
+           * Preserve the last complete physics frontier through timing/world/input
+           * uncertainty. The missing fact changes the confidence of this observation,
+           * not the client trajectory already established by earlier complete ticks.
            */
-          prediction = Set.of();
-          predictionTick = -1L;
-          trace.add("FRONTIER_RESET reason=UNCERTAIN_OBSERVATION");
+          trace.add("FRONTIER_RETAINED reason=UNCERTAIN_OBSERVATION"
+              + " candidates=" + prediction.size()
+              + " tick=" + predictionTick);
           trace.add("OBSERVED_MOVEMENT_HISTORY_RETAINED reason=RECOVERY_EVIDENCE");
         }
       }
@@ -3453,14 +3462,14 @@ public final class Phase8PredictionRunner {
         observedAfter.position().y() - observedBefore.position().y(),
         observedAfter.position().z() - observedBefore.position().z());
     Vec3 clientVelocity = clientPhysicsState == null
-        ? observedAfter.velocity()
+        ? actualMovement
         : clientPhysicsState.clientVelocity();
-    if (!predictedAfter.isEmpty()) {
-      clientVelocity = predictedAfter.stream()
-          .min(Comparator.comparingLong(candidate -> candidate.id()))
-          .orElseThrow()
-          .context().player().velocity();
-    }
+    Vec3 predictedVelocity = predictedAfter.isEmpty()
+        ? (clientPhysicsState == null ? observedAfter.velocity() : clientPhysicsState.predictedVelocity())
+        : predictedAfter.stream()
+            .min(Comparator.comparingLong(candidate -> candidate.id()))
+            .orElseThrow()
+            .context().player().velocity();
     Vec3 serverVelocity = latestAuthority == null
         ? (clientPhysicsState == null ? observedAfter.velocity() : clientPhysicsState.serverVelocity())
         : latestAuthority.context().serverVelocity();
@@ -3473,8 +3482,11 @@ public final class Phase8PredictionRunner {
             Math.max(0L, modelTick),
             observedAfter.position(),
             clientVelocity,
+            predictedVelocity,
             serverVelocity,
             actualMovement,
+            observedAfter.input(),
+            observedAfter.onGround(),
             observedAfter.onGround(),
             authoritativeServerTick,
             "movement-observation")
@@ -3483,6 +3495,7 @@ public final class Phase8PredictionRunner {
             observedAfter,
             actualMovement,
             clientVelocity,
+            predictedVelocity,
             serverVelocity,
             authoritativeServerTick,
             "movement-observation");
@@ -3493,8 +3506,11 @@ public final class Phase8PredictionRunner {
         + " pitch=" + observedAfter.pitch()
         + " ground=" + observedAfter.onGround());
     mergedTrace.add("CLIENT_PHYSICS_STATE clientVelocity=" + clientPhysicsState.clientVelocity()
+        + " predictedVelocity=" + clientPhysicsState.predictedVelocity()
         + " serverVelocity=" + clientPhysicsState.serverVelocity()
         + " actualMovement=" + clientPhysicsState.actualMovement()
+        + " lastOnGround=" + clientPhysicsState.lastOnGround()
+        + " onGround=" + clientPhysicsState.onGround()
         + " tick=" + clientPhysicsState.clientTick());
     mergedTrace.add("HYPOTHESIS_SET count=" + hypotheses.size()
         + " ids=" + hypotheses.stream()

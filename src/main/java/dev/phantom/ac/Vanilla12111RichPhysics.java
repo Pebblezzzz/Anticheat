@@ -111,7 +111,20 @@ public final class Vanilla12111RichPhysics {
         // Vanilla's movement vector uses the opposite mathematical sideways sign.
         double vanillaStrafe=-context.input().strafe();
         Vec3 acceleration=new Vec3(inputScale*(vanillaStrafe*inputAcceleration*Math.cos(radians)-context.input().forward()*inputAcceleration*Math.sin(radians)),0,inputScale*(context.input().forward()*inputAcceleration*Math.cos(radians)+vanillaStrafe*inputAcceleration*Math.sin(radians)));Vec3 velocity=applyMovementThreshold(s.velocity().add(acceleration));
-        if(climbing){if(context.input().forward()>0)velocity=new Vec3(velocity.x(),CLIMB_MAX_UP,velocity.z());else if(context.input().forward()<0)velocity=new Vec3(velocity.x(),-CLIMB_MAX_DOWN,velocity.z());else velocity=new Vec3(velocity.x(),Math.max(-CLIMB_MAX_DOWN,velocity.y()),velocity.z());}
+        if(climbing){
+            double climbX=Math.max(-CLIMB_MAX_UP,Math.min(CLIMB_MAX_UP,velocity.x()));
+            double climbZ=Math.max(-CLIMB_MAX_UP,Math.min(CLIMB_MAX_UP,velocity.z()));
+            double climbY;
+            if(context.input().forward()>0) climbY=CLIMB_MAX_UP;
+            else if(context.input().forward()<0) climbY=Math.max(-CLIMB_MAX_DOWN,velocity.y());
+            else climbY=Math.max(-CLIMB_MAX_DOWN,velocity.y());
+            // On climbables, sneaking stops downward travel (scaffolding is the exception
+            // in the reference client behavior).
+            if(context.input().sneak() && climbY<0.0) {
+                climbY=0.0;
+            }
+            velocity=new Vec3(climbX,climbY,climbZ);
+        }
         boolean jumped=context.input().jump()&&s.onGround()&&!fluid&&!climbing&&!gliding&&!context.sleeping();
         if(jumped){
             velocity=new Vec3(velocity.x(),JUMP+context.effects().jumpVelocityAdd(),velocity.z());
