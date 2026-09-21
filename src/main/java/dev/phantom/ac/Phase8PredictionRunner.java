@@ -1865,9 +1865,10 @@ public final class Phase8PredictionRunner {
                 authority.context().vehicleState()),
             physicalBeforeGround),
         reconstructedStart.pose() == Pose.SLEEPING,
+        false,
         EntityCollisions.of(authority.context().entityBoxes()),
-          null,
-          observedBefore.onGround());
+        null,
+        observedBefore.onGround());
     Vanilla12111RichPhysics.StepResult step =
         new Vanilla12111RichPhysics().step(context);
 
@@ -2035,9 +2036,10 @@ public final class Phase8PredictionRunner {
           reconstructedStart.pose(),
           environment,
           reconstructedStart.pose() == Pose.SLEEPING,
-          EntityCollisions.of(authority.context().entityBoxes()),
-          null,
-          observedBefore.onGround());
+          false,
+        EntityCollisions.of(authority.context().entityBoxes()),
+        null,
+        observedBefore.onGround());
       Vanilla12111RichPhysics.StepResult step =
           new Vanilla12111RichPhysics().step(context);
 
