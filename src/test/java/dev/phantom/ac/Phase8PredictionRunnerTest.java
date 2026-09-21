@@ -793,6 +793,35 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void uncertainMovementStillMarksSameTickForSubTickGuard() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    var emptyWorld = WorldSnapshot.builder(Contracts.TARGET_VERSION).build();
+
+    var report = runner.process(
+        "uncertain-subtick",
+        List.of(
+            new RawPacket(1, 20, new PlayerContext(
+                "survival", Simulation.Attributes.DEFAULT, Map.of(),
+                Pose.STANDING, MovementEnvironment.dry(true, false, false),
+                anchor().position(), Maths.Vec3.ZERO,
+                false, false, false, List.of())),
+            new RawPacket(2, 30, new ClientTickEnd()),
+            new RawPacket(3, 60, new Move(
+                new Maths.Vec3(.6, 64, .5), 0f, 0f, true, 1L)),
+            new RawPacket(4, 65, new Move(
+                new Maths.Vec3(.7, 64, .5), 0f, 0f, true, 1L))),
+        emptyWorld, anchor(), 20L);
+
+    assertTrue(report.results().stream().allMatch(
+        result -> result.verdict() == Phase8MovementValidation.Verdict.UNCERTAIN),
+        report.results().toString());
+    assertTrue(report.frames().stream().anyMatch(frame -> frame.trace().stream()
+        .anyMatch(line -> line.contains("SUB_TICK_TRAJECTORY_UNMODELED"))),
+        report.frames().toString());
+    assertTrue(report.candidateFrontierRetained(), report.toString());
+  }
+
+  @Test
   void unknownWorldDoesNotDestroyPredictionState() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     var emptyWorld = WorldSnapshot.builder(Contracts.TARGET_VERSION).build();
