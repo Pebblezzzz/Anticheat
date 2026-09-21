@@ -2074,7 +2074,8 @@ public final class Phase8PredictionRunner {
         observed.clientTickRange(),
         authoritative.provenance(),
         authoritative.uncertaintyReasons());
-    MovementEnvironment environment = movementEnvironmentOf(witnessPlayer);
+    MovementEnvironment environment = movementEnvironmentOf(
+        witnessPlayer, Phase5Mechanics.VehicleState.NONE);
     Context context = new Context(
         Math.max(0L, simulationTick),
         witnessPlayer,
