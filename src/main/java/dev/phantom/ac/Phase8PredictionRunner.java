@@ -3481,8 +3481,11 @@ public final class Phase8PredictionRunner {
             Math.max(0L, modelTick),
             observedAfter.position(),
             clientVelocity,
+            predictedVelocity,
             serverVelocity,
             actualMovement,
+            observedAfter.input(),
+            observedAfter.onGround(),
             observedAfter.onGround(),
             authoritativeServerTick,
             "movement-observation")
