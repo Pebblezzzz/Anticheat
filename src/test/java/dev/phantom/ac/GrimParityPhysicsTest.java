@@ -39,7 +39,9 @@ class GrimParityPhysicsTest {
     var water = BlockCatalogue12111.decode("minecraft:water", Map.of("level", "0"));
     var shallow = BlockCatalogue12111.decode("minecraft:water", Map.of("level", "7"));
 
-    var builder = WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0, 0);
+    var builder = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+        .loadChunk(-1, 0)
+        .loadChunk(0, 0);
     builder.setBlock(0, 64, 0, water);
     builder.setBlock(-1, 64, 0, water);
     builder.setBlock(1, 64, 0, shallow);
