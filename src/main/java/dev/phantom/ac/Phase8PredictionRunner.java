@@ -669,6 +669,10 @@ public final class Phase8PredictionRunner {
         }
       }
 
+      boolean priorPositionObservationSameTick =
+          move.position() != null
+              && tick.known()
+              && lastObservedMovementClientTick == tick.clientTick();
       if (move.position() != null) {
         rememberObservedMovement(observedBefore, observedAfter, tick);
       }
@@ -919,7 +923,7 @@ public final class Phase8PredictionRunner {
       }
 
       boolean movedWithinCurrentClientTick =
-          lastPositionClientTick == tick.clientTick()
+          priorPositionObservationSameTick
               && !positionMatches(observedBefore.position(), observedAfter.position());
 
       if (movedWithinCurrentClientTick) {
@@ -1122,16 +1126,14 @@ public final class Phase8PredictionRunner {
           impossible++;
           latestContinuation = Continuation.IMPOSSIBLE;
           /*
-           * Keep the modeled prediction frontier as the expected client trajectory.
-           * An observation contradiction is evidence against that trajectory; it is
-           * not permission to replace the physics state with the observed packet.
-           * This mirrors the production prediction model: subsequent packets remain
-           * comparable to the same client-physics history instead of being silently
-           * re-anchored after the first contradiction.
+           * Keep the persistent client-physics state and observed chronology, but
+           * do not promote a contradicted candidate set into the next validation
+           * baseline. A fresh causal authority or movement bootstrap can establish
+           * the next trusted root.
            */
-          trace.add("FRONTIER_RETAINED reason=OBSERVATION_CONTRADICTION"
-              + " candidates=" + prediction.size()
-              + " tick=" + predictionTick);
+          prediction = Set.of();
+          predictionTick = -1L;
+          trace.add("FRONTIER_RESET reason=OBSERVATION_CONTRADICTION");
           trace.add("OBSERVED_MOVEMENT_HISTORY_RETAINED reason=RECOVERY_EVIDENCE");
         }
         case UNCERTAIN -> {
@@ -1539,13 +1541,6 @@ public final class Phase8PredictionRunner {
       Player observedAfter,
       TickResolution tick) {
     if (!tick.known()) return;
-
-    /*
-     * Track the latest position-bearing client tick independently of verdict.
-     * Uncertainty changes confidence, not chronology: a second position packet
-     * carrying this same tick is still sub-tick movement and must remain unresolved.
-     */
-    lastPositionClientTick = tick.clientTick();
 
     /*
      * Keep the last two distinct client-tick endpoints. A client can emit
