@@ -25,8 +25,10 @@ public final class Phase8ClientModel {
       long clientTick,
       Vec3 position,
       Vec3 clientVelocity,
+      Vec3 predictedVelocity,
       Vec3 serverVelocity,
       Vec3 actualMovement,
+      boolean lastOnGround,
       boolean onGround,
       Long serverTick,
       String source) implements Serializable {
@@ -46,7 +48,9 @@ public final class Phase8ClientModel {
           anchor.position(),
           anchor.velocity(),
           anchor.velocity(),
+          anchor.velocity(),
           Vec3.ZERO,
+          anchor.onGround(),
           anchor.onGround(),
           null,
           "initial-authoritative-anchor");
@@ -61,11 +65,19 @@ public final class Phase8ClientModel {
           Math.max(clientTick, tick),
           position,
           clientVelocity,
+          predictedVelocity,
           Objects.requireNonNull(authoritativeVelocity),
           actualMovement,
+          lastOnGround,
           onGround,
           authoritativeServerTick,
           "server-authority-overlay");
+    }
+
+
+    /** Client movement velocity and authoritative server velocity are intentionally independent. */
+    public boolean serverVelocityIsDistinctFromClientVelocity() {
+      return !serverVelocity.equals(clientVelocity) || serverTick != null;
     }
 
     public ClientPhysicsState observe(
