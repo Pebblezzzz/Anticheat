@@ -1855,6 +1855,71 @@ class Phase8PredictionRunnerTest {
 
 
   @Test
+  void explicitClientTickWithRealPacketGapRemainsUncertain() {
+    Phase7Timing.Config timing = new Phase7Timing.Config(
+        50_000_000L, 50_000_000L, 50_000_000L,
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        250_000_000L, 3, 128);
+
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
+    WorldSnapshot world = floorWorld();
+    Player start = anchor();
+    MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
+    Simulation.AdvancedInput forward = new Simulation.AdvancedInput(1, 0, false, false, false);
+
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(),
+        Pose.STANDING, environment,
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    Player first = physics.step(new Vanilla12111RichPhysics.Context(
+        0L, start, forward, world, Simulation.Environment.DRY,
+        start.attributes(), Phase5Mechanics.MovementEffects.NONE,
+        Pose.STANDING, environment, false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+    Player second = physics.step(new Vanilla12111RichPhysics.Context(
+        1L, first, forward, world, Simulation.Environment.DRY,
+        first.attributes(), Phase5Mechanics.MovementEffects.NONE,
+        Pose.STANDING, environment, false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    var report = runner.process(
+        "explicit-tick-packet-gap",
+        List.of(
+            new RawPacket(1L, 1_000_000L, authority),
+            new RawPacket(2L, 2_000_000L,
+                new ClientInput(true, false, false, false, false, false, false)),
+            new RawPacket(3L, 3_000_000L,
+                new Move(first.position(), 0f, 0f, true, 1L)),
+            // Sequence 4 is intentionally absent: this is a real capture gap.
+            new RawPacket(5L, 5_000_000L,
+                new Move(second.position(), 0f, 0f, true, 2L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(2, report.movementObservations(), report.toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.UNCERTAIN,
+        report.results().getLast().verdict(),
+        report.results().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("CLIENT_TICK 2")
+            && line.contains("exact=true")
+            && line.contains("timingUncertain=false")
+            && line.contains("chronologyUncertain=true")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.results().getLast().evidence().uncertaintySources().stream()
+        .anyMatch(reason -> reason.contains("unmodeled packet/external chronology")),
+        report.results().getLast().evidence().toString());
+  }
+
+
+  @Test
   void truncatedTimingHistoryWithUnrecoverableOriginCannotProduceImpossible() {
     Phase7Timing.Config timing = new Phase7Timing.Config(
         50_000_000L, 50_000_000L, 50_000_000L,
