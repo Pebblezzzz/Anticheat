@@ -640,7 +640,7 @@ class Phase8PredictionRunnerTest {
 
     assertEquals(2, report.movementObservations(), report.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.POSSIBLE,
+        Phase8MovementValidation.Verdict.IMPOSSIBLE,
         report.results().getLast().verdict(),
         report.results().toString());
     assertTrue(
@@ -1831,7 +1831,8 @@ class Phase8PredictionRunnerTest {
               0L)));
     }
 
-    Move observed = new Move(start.position(), 0f, 0f, true, 3L);
+    Move observed = new Move(
+        new Maths.Vec3(20.5, 64.0, 0.5), 0f, 0f, true, 3L);
     packets.add(new RawPacket(
         sequence, 150_000_000L, observed,
         Packets.CaptureProvenance.fromAdapter(
