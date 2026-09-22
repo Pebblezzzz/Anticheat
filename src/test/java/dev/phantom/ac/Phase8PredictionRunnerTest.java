@@ -1104,10 +1104,10 @@ class Phase8PredictionRunnerTest {
         report.frames().toString());
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.contains("BOOTSTRAP_START simulationTick=3")
-            && line.contains("input=AdvancedInput[forward=-1, strafe=0, jump=false, sprint=true, sneak=false]")),
+            && line.contains("input=AdvancedInput[forward=1, strafe=0, jump=false, sprint=true, sneak=false]")),
         report.frames().getLast().trace().toString());
     assertTrue(report.frames().getLast().trace().stream()
-        .anyMatch(line -> line.contains("BOOTSTRAP_START simulationTick=3")
+        .noneMatch(line -> line.contains("BOOTSTRAP_START simulationTick=3")
             && line.contains("input=AdvancedInput[forward=-1, strafe=0, jump=false, sprint=true, sneak=false]")),
         report.frames().toString());
     assertTrue(report.frames().getLast().trace().stream()
