@@ -3300,7 +3300,6 @@ public final class Phase8PredictionRunner {
     inputHistory.clear();
     uncertainInputs.clear();
     inputChronologies = List.of();
-    inputChronologyEnumerationExhaustive = true;
 
     List<Packets.RawPacket> history = List.copyOf(timingHistory);
     List<Packets.NormalizedPacket> normalized =
