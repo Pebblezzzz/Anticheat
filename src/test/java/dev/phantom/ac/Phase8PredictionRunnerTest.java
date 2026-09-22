@@ -494,9 +494,8 @@ class Phase8PredictionRunnerTest {
         second.results().toString());
     assertTrue(second.candidateFrontierRetained(), second.toString());
     assertTrue(second.results().stream()
-        .flatMap(result -> result.evidence().mismatches().stream())
-        .noneMatch(mismatch -> mismatch.dimensions()
-            .contains(Phase6Reachability.ObservedField.POSITION)),
+        .flatMap(result -> result.evidence().uncertaintySources().stream())
+        .noneMatch(reason -> reason.contains("reconciliation envelope")),
         second.results().toString());
   }
 
