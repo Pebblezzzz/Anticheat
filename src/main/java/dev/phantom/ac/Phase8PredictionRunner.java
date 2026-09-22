@@ -768,9 +768,17 @@ public final class Phase8PredictionRunner {
        */
       if (move.position() != null) {
         AuthorityAnchor freshAuthority = freshCausalAuthority(packet);
-        if (freshAuthority != null
-            && positionsMatch(freshAuthority.context().serverPosition(), observedAfter.position())
-            && freshAuthority.context().movementEnvironment().onGround() == observedAfter.onGround()
+        boolean zeroPositionDelta =
+            positionExactlyMatches(observedBefore.position(), observedAfter.position());
+        boolean authorityMatchesObservedBefore =
+            freshAuthority != null
+                && positionsMatch(
+                    freshAuthority.context().serverPosition(),
+                    observedBefore.position())
+                && freshAuthority.context().movementEnvironment().onGround()
+                    == observedBefore.onGround();
+        if (zeroPositionDelta
+            && authorityMatchesObservedBefore
             && (move.onGround() == null
                 || move.onGround() == freshAuthority.context().movementEnvironment().onGround())) {
           Candidate witness = authoritativeObservationWitness(
@@ -2069,7 +2077,7 @@ public final class Phase8PredictionRunner {
           reconstructedStart.pose() == Pose.SLEEPING,
           false,
         EntityCollisions.of(authority.context().entityBoxes()),
-        null,
+        observedDelta,
         observedBefore.onGround());
       Vanilla12111RichPhysics.StepResult step =
           new Vanilla12111RichPhysics().step(context);
