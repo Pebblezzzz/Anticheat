@@ -472,10 +472,10 @@ class Phase8PredictionRunnerTest {
         first.results().toString());
     assertTrue(first.candidateFrontierRetained(), first.toString());
 
-    Candidate retainedBeforeCloseMismatch =
+    var retainedBeforeCloseMismatch =
         first.frames().getLast().predictedAfter().stream().findFirst()
             .orElseThrow();
-    Vec3 clientVelocityBeforeCloseMismatch =
+    var clientVelocityBeforeCloseMismatch =
         retainedBeforeCloseMismatch.context().clientVelocity();
 
     var closeObserved = new Move(
@@ -498,7 +498,7 @@ class Phase8PredictionRunnerTest {
         .anyMatch(line -> line.startsWith("FRONTIER_RECONCILED reason=CLOSE_EXHAUSTIVE_MISMATCH")),
         second.frames().getLast().trace().toString());
 
-    Candidate reconciled =
+    var reconciled =
         second.frames().getLast().predictedAfter().stream().findFirst()
             .orElseThrow();
     assertEquals(closeObserved.position(), reconciled.context().player().position());
