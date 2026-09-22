@@ -471,7 +471,9 @@ public final class Vanilla12111RichPhysics {
                 (collision.collidedX() || collision.collidedY() || collision.collidedZ()),
                 diagnostic,
                 sneakEdgeConstrained,
-                nextVelocity);
+                // Grim carries the pre-collision client movement into the next tick.
+                // state().velocity() remains the post-collision/end-of-tick velocity.
+                velocity);
     }
 
     private StepResult vehicleStep(
@@ -550,7 +552,9 @@ public final class Vanilla12111RichPhysics {
                 (collision.collidedX() || collision.collidedY() || collision.collidedZ()),
                 vehicleResult.diagnostic(),
                 false,
-                nextVelocity);
+                // Grim carries the pre-collision vehicle movement into the next tick.
+                // The Player state still exposes the post-collision velocity.
+                vehicleResult.velocity());
     }
 
     /**
