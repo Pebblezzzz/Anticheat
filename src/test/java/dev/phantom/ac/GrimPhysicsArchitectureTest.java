@@ -134,7 +134,7 @@ class GrimPhysicsArchitectureTest {
   }
 
   @Test
-  void movementTickerKeepsClientVelocitySeparateFromNextTickStartVelocity() {
+  void movementTickerKeepsGrimClientVelocitySeparateFromPostCollisionVelocity() {
     Player start = player(new Vec3(0.0, 0.0, 0.2));
     var movement = MovementEnvironment.dry(false, false, false);
     Simulation.AdvancedInput idle =
@@ -161,7 +161,10 @@ class GrimPhysicsArchitectureTest {
     assertEquals(new Vec3(0.0, 0.0, 0.9), result.clientVelocityBeforeTick());
     assertEquals(1.4, result.state().position().z(), 1.0e-12,
         "physics must start from the explicit client velocity carried into the tick");
-    assertEquals(0.819, result.clientVelocityAfterTick().z(), 1.0e-7);
+    // Grim keeps these velocity boundaries separate:
+    // clientVelocityAfterTick = pre-collision movement carried into the next tick,
+    // predictedVelocityAfterCollision = post-collision/end-of-tick velocity.
+    assertEquals(0.9, result.clientVelocityAfterTick().z(), 1.0e-7);
     assertEquals(0.819, result.predictedVelocityAfterCollision().z(), 1.0e-7);
   }
   @Test
