@@ -1846,9 +1846,6 @@ class Phase8PredictionRunnerTest {
         0L);
 
     assertEquals(1, report.movementObservations(), report.results().toString());
-    assertEquals(
-
-        report.results().toString());
     assertTrue(
         report.results().getFirst().evidence().uncertaintySources().stream()
             .noneMatch(reason -> reason.contains("causal input chronology combinations exceeded")),
