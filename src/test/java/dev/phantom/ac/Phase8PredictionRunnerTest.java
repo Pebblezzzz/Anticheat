@@ -1782,6 +1782,11 @@ class Phase8PredictionRunnerTest {
         .anyMatch(line -> line.contains("inputSelection=selectedSeq=521,selectedTick=41")
             && line.contains("jump=Optional[false]")),
         report.frames().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("CLIENT_TICK 42")
+            && line.contains("exact=true")
+            && line.contains("timingUncertain=false")),
+        report.frames().getLast().trace().toString());
   }
 
 
