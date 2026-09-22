@@ -2940,7 +2940,7 @@ public final class Phase8PredictionRunner {
     Set<Candidate> union = new LinkedHashSet<>();
     LinkedHashSet<String> reasons = new LinkedHashSet<>();
     List<String> trace = new ArrayList<>();
-    boolean exhaustive = inputChronologyEnumerationExhaustive;
+    boolean exhaustive = true;
     int simulatedTicks = 0;
 
     List<InputChronology> chronologies = inputChronologies.isEmpty()
@@ -3389,7 +3389,6 @@ public final class Phase8PredictionRunner {
           next.add(branch);
         }
 
-        if (!inputChronologyEnumerationExhaustive) break;
       }
 
       if (next.isEmpty()) {
