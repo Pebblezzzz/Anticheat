@@ -857,8 +857,27 @@ public final class Phase8PredictionRunner {
        * observation. This avoids treating Bukkit's server-side velocity as an
        * atomic client-tick velocity.
        */
-      if ((predictionWasEmptyBeforeRoot || rootRebasedForMovement || spatialRebase.rebased())
+      boolean observedBoundaryBootstrapRequired =
+          move.position() != null
+              && tick.known()
+              && tick.exact()
+              && tick.clientTick() >= 1L
+              && previousObservedMovementClientTick == tick.clientTick() - 1L
+              && positionExactlyMatches(previousObservedMovementPosition, observedBefore.position())
+              && physicalCandidateAtObservedPosition(
+                  observedBefore.position(), Math.max(0L, tick.clientTick() - 1L)).isEmpty();
+
+      if ((predictionWasEmptyBeforeRoot
+              || rootRebasedForMovement
+              || spatialRebase.rebased()
+              || observedBoundaryBootstrapRequired)
           && move.position() != null) {
+        if (observedBoundaryBootstrapRequired) {
+          trace.add("OBSERVED_BOUNDARY_BOOTSTRAP reason=STALE_NONEMPTY_FRONTIER"
+              + " previousTick=" + previousObservedMovementClientTick
+              + " currentTick=" + tick.clientTick()
+              + " observedBefore=" + observedBefore.position());
+        }
         Optional<Set<Candidate>> bootstrap = bootstrapPredictionFromObservedMovement(
             packet, move, observedBefore, observedAfter, tick, world, trace);
         if (bootstrap.isPresent()) {
