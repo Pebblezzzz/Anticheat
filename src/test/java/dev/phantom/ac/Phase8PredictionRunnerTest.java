@@ -458,7 +458,7 @@ class Phase8PredictionRunnerTest {
             Pose.STANDING,
             environment,
             false,
-            EntityCollisions.of(List.of()))).state();
+            dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
 
     var report = runner.process(
         "causal-final-input-gate",
