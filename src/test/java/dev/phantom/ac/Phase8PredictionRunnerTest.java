@@ -1393,7 +1393,7 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
-  void explicitClientTickRemainsExhaustiveAfterTimingHistoryTruncation() {
+  void explicitClientTickRemainsExhaustiveAfterLongTimingHistory() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     Player authorityState = anchor();
 
@@ -1412,8 +1412,7 @@ class Phase8PredictionRunnerTest {
     packets.add(new RawPacket(
         2, 20L, new Move(authorityState.position(), 0f, 0f, true, 1L)));
 
-    // Force the runner's bounded 512-event timing history to truncate while keeping
-    // a fresh causal authority immediately before the eventual movement observation.
+    // Keep the session comfortably beyond the old Phase 8 512-event journal cutoff.
     long sequence = 3L;
     for (long clientTick = 2L; clientTick <= 516L; clientTick++) {
       packets.add(new RawPacket(
@@ -1796,6 +1795,66 @@ class Phase8PredictionRunnerTest {
         report.frames().getLast().trace().toString());
   }
 
+
+  @Test
+  void inputChronologyAlternativesAreNotArtificiallyCapped() {
+    Phase7Timing.Config timing = new Phase7Timing.Config(
+        50_000_000L, 50_000_000L, 50_000_000L,
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 1L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        250_000_000L, 3, 128);
+
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
+    Player start = anchor();
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    List<RawPacket> packets = new ArrayList<>();
+    packets.add(new RawPacket(
+        1L, 0L, authority,
+        Packets.CaptureProvenance.fromAdapter(
+            "test-authority", authority, 0L, 0L)));
+    packets.add(new RawPacket(2L, 50_000_000L, new ClientTickEnd()));
+
+    long sequence = 3L;
+    for (int i = 0; i < 257; i++) {
+      packets.add(new RawPacket(
+          sequence++, 100_000_000L,
+          new ClientInput(true, false, false, false, false, false, false),
+          Packets.CaptureProvenance.fromAdapter(
+              "test-input",
+              new ClientInput(true, false, false, false, false, false, false),
+              0L)));
+    }
+
+    Move observed = new Move(
+        new Maths.Vec3(20.5, 64.0, 0.5), 0f, 0f, true, 3L);
+    packets.add(new RawPacket(
+        sequence, 150_000_000L, observed,
+        Packets.CaptureProvenance.fromAdapter(
+            "test-movement", observed, 3L, 10L)));
+
+    var report = runner.process(
+        "input-chronology-cap-regression",
+        packets,
+        floorWorld(),
+        start,
+        0L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertTrue(
+        report.results().getFirst().evidence().uncertaintySources().stream()
+            .noneMatch(reason -> reason.contains("causal input chronology combinations exceeded")),
+        report.results().getFirst().evidence().toString());
+    assertTrue(
+        report.frames().getFirst().trace().stream()
+            .noneMatch(line -> line.contains("causal input chronology combinations exceeded")),
+        report.frames().getFirst().trace().toString());
+  }
 
   @Test
   void explicitClientTickWithRealPacketGapRemainsUncertain() {

@@ -155,7 +155,6 @@ public final class Phase8PredictionRunner {
   private final InputConstraint neutralInput;
   private final List<UncertainInput> uncertainInputs = new ArrayList<>();
   private List<InputChronology> inputChronologies = List.of();
-  private boolean inputChronologyEnumerationExhaustive = true;
   private Player initialAnchor;
   private long initialAnchorReceivedNanos = -1L;
 
@@ -260,7 +259,6 @@ public final class Phase8PredictionRunner {
     inputHistory.clear();
     uncertainInputs.clear();
     inputChronologies = List.of();
-    inputChronologyEnumerationExhaustive = true;
 
 
     timingHistory.clear();
@@ -2942,7 +2940,7 @@ public final class Phase8PredictionRunner {
     Set<Candidate> union = new LinkedHashSet<>();
     LinkedHashSet<String> reasons = new LinkedHashSet<>();
     List<String> trace = new ArrayList<>();
-    boolean exhaustive = inputChronologyEnumerationExhaustive;
+    boolean exhaustive = true;
     int simulatedTicks = 0;
 
     List<InputChronology> chronologies = inputChronologies.isEmpty()
@@ -3054,9 +3052,6 @@ public final class Phase8PredictionRunner {
     }
 
     reasons.add("persistent prediction advanced across causally assigned held-input chronologies");
-    if (!inputChronologyEnumerationExhaustive) {
-      reasons.add("causal input chronology combinations exceeded the bounded enumeration budget");
-    }
     return new AdvanceResult(
         Set.copyOf(union), exhaustive, simulatedTicks,
         List.copyOf(reasons), List.copyOf(trace));
@@ -3305,7 +3300,6 @@ public final class Phase8PredictionRunner {
     inputHistory.clear();
     uncertainInputs.clear();
     inputChronologies = List.of();
-    inputChronologyEnumerationExhaustive = true;
 
     List<Packets.RawPacket> history = List.copyOf(timingHistory);
     List<Packets.NormalizedPacket> normalized =
@@ -3367,8 +3361,11 @@ public final class Phase8PredictionRunner {
 
     /*
      * Candidate ticks in one Phase 7 envelope are alternatives, not simultaneous
-     * events. Build full held-state chronologies so a later simulation tick
-     * cannot combine mutually exclusive assignments from different alternatives.
+     * events. Build causally ordered held-state chronologies so a later
+     * simulation tick cannot combine mutually exclusive assignments from
+     * different alternatives. There is deliberately no fixed Phase 8 chronology
+     * cutoff: the candidate budget is enforced by the prediction engine itself,
+     * while this layer preserves every timing-consistent input chronology.
      */
     List<NavigableMap<Long, List<TimedInput>>> chronologies = new ArrayList<>();
     chronologies.add(new TreeMap<>());
@@ -3389,14 +3386,8 @@ public final class Phase8PredictionRunner {
               .add(new TimedInput(
                   event.sequence(), clientTick, event.constraint()));
           next.add(branch);
-
-          if (next.size() > maximumInputChronologies()) {
-            inputChronologyEnumerationExhaustive = false;
-            break;
-          }
         }
 
-        if (!inputChronologyEnumerationExhaustive) break;
       }
 
       if (next.isEmpty()) {
@@ -3421,18 +3412,6 @@ public final class Phase8PredictionRunner {
         inputChronologies.getFirst().history()));
   }
 
-  private int maximumInputChronologies() {
-    return Math.max(1, Math.min(maximumCandidates, 256));
-  }
-
-  /**
-   * The complete Phase 7 connection history has a moving relative tick origin. When the
-   * history is truncated, recover the absolute offset from the same relative
-   * clock anchor and timing constraints Phase 7 used, using an explicit movement
-   * tick as the absolute witness. This remains valid even when unrelated retained
-   * packets arrived out of order; the clock anchor is reconstructed from canonical
-   * timing rather than trusting a raw boundary count alone.
-   */
   private long alignClientTick(long clientTick) {
     return clientTick;
   }
