@@ -137,6 +137,11 @@ public final class Phase8PredictionRunner {
   }
 
   private record MovementInputState(boolean sprinting, boolean sneaking) {}
+  private record SpatialRebaseResult(Set<Candidate> candidates, boolean rebased) {
+    SpatialRebaseResult {
+      candidates = Set.copyOf(candidates);
+    }
+  }
 
   private static final double POSITION_TOLERANCE = Phase6Reachability.POSITION_MATCH_TOLERANCE;
   private static final long MAX_INCREMENTAL_HORIZON = Phase6Reachability.MAX_HORIZON_TICKS;
@@ -611,112 +616,6 @@ public final class Phase8PredictionRunner {
             refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, world, trace);
       }
 
-      /*
-       * Grim keeps a client-side movement velocity separate from the server's
-       * instantaneous velocity. Mirror that principle at bootstrap: when the
-       * current frontier is empty OR is merely an authoritative root, a fresh
-       * authority sample matching the observed pre-movement state can be used to
-       * reconstruct the hidden client-tick start velocity from the actual movement
-       * observation. This avoids treating Bukkit's server-side velocity as an
-       * atomic client-tick velocity.
-       */
-      if ((predictionWasEmptyBeforeRoot || rootRebasedForMovement)
-          && move.position() != null) {
-        Optional<Set<Candidate>> bootstrap = bootstrapPredictionFromObservedMovement(
-            packet, move, observedBefore, observedAfter, tick, world, trace);
-        if (bootstrap.isPresent()) {
-          Set<Candidate> bootstrapCandidates = bootstrap.orElseThrow();
-          prediction = Set.copyOf(bootstrapCandidates);
-          predictionTick = tick.clientTick();
-          physicsFrontierSuppressedUntilPositionMovement = false;
-          latestContinuation = Continuation.ACTIVE;
-          lastPositionClientTick = tick.clientTick();
-
-          SearchResult bootstrapSearch = new SearchResult(
-              Verdict.POSSIBLE,
-              bootstrapCandidates,
-              1,
-              bootstrapCandidates.size(),
-              0, 0, 0, 0,
-              List.of(
-                  "client movement bootstrap reconstructed the hidden start velocity from the observed tick",
-                  "canonical Phase 5 replay reproduced the observed movement exactly",
-                  "physical sprint/sneak state was preserved as explicit candidate alternatives when key-state and server movement-state evidence disagreed"));
-          List<String> bootstrapUncertainty = List.of(
-              "client-side starting velocity was reconstructed from observed movement because the server velocity is not an atomic client-tick state");
-          Phase7Timing.EventTiming bootstrapTiming = phase7TimingBySequence.get(sequence);
-          boolean bootstrapTimingExhaustive =
-              explicitTimingRangeIsExhaustive(move, bootstrapTiming)
-                  && !phase7TimingHasUnmodeledChronology(bootstrapTiming);
-          TickResolution bootstrapValidationTick = bootstrapTimingExhaustive
-              ? tick.withTimingUncertaintyResolved(
-                  "Phase 7 bounded simulation timing was exhaustively evaluated for every permitted offset")
-              : tick;
-          boolean bootstrapGroundClaimMismatch = bootstrapCandidates.stream()
-              .allMatch(candidate ->
-                  move.onGround() != null
-                      && candidate.context().player().onGround() != move.onGround());
-          if (bootstrapGroundClaimMismatch) {
-            trace.add("GROUND_CLAIM_MISMATCH"
-                + " observed=" + move.onGround()
-                + " predictedCandidates=" + bootstrapCandidates.size()
-                + " movementReachability=not-impossible");
-            bootstrapUncertainty = new ArrayList<>(bootstrapUncertainty);
-            bootstrapUncertainty.add(
-                "client ground claim differs from the reconstructed physical ground state; bootstrap reachability ignores that client-only claim");
-            bootstrapValidationTick = new TickResolution(
-                tick.clientTick(),
-                tick.known(),
-                tick.exact(),
-                true,
-                tick.source(),
-                "client ground claim differs from the reconstructed physical ground state; movement reachability does not treat this claim mismatch as an IMPOSSIBLE contradiction");
-          }
-
-          Set<Phase6Reachability.ObservedField> bootstrapObservedFields =
-              bootstrapGroundClaimMismatch
-                  ? EnumSet.of(
-                      Phase6Reachability.ObservedField.POSITION,
-                      Phase6Reachability.ObservedField.ROTATION)
-                  : EnumSet.of(
-                      Phase6Reachability.ObservedField.POSITION,
-                      Phase6Reachability.ObservedField.ROTATION,
-                      Phase6Reachability.ObservedField.GROUND);
-
-          Phase8MovementValidation.Result result = validate(
-              playerId, packet, move, observedBefore, observedAfter, world,
-              bootstrapValidationTick, bootstrapUncertainty, bootstrapSearch,
-              bootstrapTimingExhaustive && !bootstrapGroundClaimMismatch,
-              bootstrapObservedFields);
-          results.add(result);
-          switch (result.verdict()) {
-            case POSSIBLE -> {
-              possible++;
-              latestContinuation = Continuation.ACTIVE;
-            }
-            case UNCERTAIN -> {
-              uncertain++;
-              latestContinuation = Continuation.UNCERTAIN;
-            }
-            case IMPOSSIBLE -> {
-              impossible++;
-              latestContinuation = Continuation.IMPOSSIBLE;
-            }
-          }
-          rememberObservedMovement(observedBefore, observedAfter, tick);
-          trace.add("EVIDENCE POSSIBLE reason=CLIENT_MOVEMENT_BOOTSTRAP"
-              + " reconstructedStartVelocityVerified=true"
-              + " candidateLocomotionAlternatives=" + bootstrapCandidates.size()
-              + " timingExhaustive=" + bootstrapTimingExhaustive);
-          trace.add("FRONTIER_BOOTSTRAPPED source=CLIENT_MOVEMENT_OBSERVATION"
-              + " tick=" + tick.clientTick());
-          frames.add(frame(
-              sequence, packet, tick, move, observedBefore, observedAfter,
-              predictedBefore, prediction, world, bootstrapUncertainty, trace));
-          continue;
-        }
-      }
-
       boolean priorPositionObservationSameTick =
           move.position() != null
               && tick.known()
@@ -928,6 +827,116 @@ public final class Phase8PredictionRunner {
         uncertaintySources.add(tick.uncertaintyReason());
       }
 
+      SpatialRebaseResult spatialRebase = rebasePredictionToObservedBefore(
+          prediction, observedBefore, tick, trace);
+      prediction = spatialRebase.candidates();
+
+      /*
+       * Grim keeps a client-side movement velocity separate from the server's
+       * instantaneous velocity. Mirror that principle at bootstrap: when the
+       * current frontier is empty OR is merely an authoritative root, a fresh
+       * authority sample matching the observed pre-movement state can be used to
+       * reconstruct the hidden client-tick start velocity from the actual movement
+       * observation. This avoids treating Bukkit's server-side velocity as an
+       * atomic client-tick velocity.
+       */
+      if ((predictionWasEmptyBeforeRoot || rootRebasedForMovement || spatialRebase.rebased())
+          && move.position() != null) {
+        Optional<Set<Candidate>> bootstrap = bootstrapPredictionFromObservedMovement(
+            packet, move, observedBefore, observedAfter, tick, world, trace);
+        if (bootstrap.isPresent()) {
+          Set<Candidate> bootstrapCandidates = bootstrap.orElseThrow();
+          prediction = Set.copyOf(bootstrapCandidates);
+          predictionTick = tick.clientTick();
+          physicsFrontierSuppressedUntilPositionMovement = false;
+          latestContinuation = Continuation.ACTIVE;
+          lastPositionClientTick = tick.clientTick();
+
+          SearchResult bootstrapSearch = new SearchResult(
+              Verdict.POSSIBLE,
+              bootstrapCandidates,
+              1,
+              bootstrapCandidates.size(),
+              0, 0, 0, 0,
+              List.of(
+                  "client movement bootstrap reconstructed the hidden start velocity from the observed tick",
+                  "canonical Phase 5 replay reproduced the observed movement exactly",
+                  "physical sprint/sneak state was preserved as explicit candidate alternatives when key-state and server movement-state evidence disagreed"));
+          List<String> bootstrapUncertainty = List.of(
+              "client-side starting velocity was reconstructed from observed movement because the server velocity is not an atomic client-tick state");
+          Phase7Timing.EventTiming bootstrapTiming = phase7TimingBySequence.get(sequence);
+          boolean bootstrapTimingExhaustive =
+              explicitTimingRangeIsExhaustive(move, bootstrapTiming)
+                  && !phase7TimingHasUnmodeledChronology(bootstrapTiming);
+          TickResolution bootstrapValidationTick = bootstrapTimingExhaustive
+              ? tick.withTimingUncertaintyResolved(
+                  "Phase 7 bounded simulation timing was exhaustively evaluated for every permitted offset")
+              : tick;
+          boolean bootstrapGroundClaimMismatch = bootstrapCandidates.stream()
+              .allMatch(candidate ->
+                  move.onGround() != null
+                      && candidate.context().player().onGround() != move.onGround());
+          if (bootstrapGroundClaimMismatch) {
+            trace.add("GROUND_CLAIM_MISMATCH"
+                + " observed=" + move.onGround()
+                + " predictedCandidates=" + bootstrapCandidates.size()
+                + " movementReachability=not-impossible");
+            bootstrapUncertainty = new ArrayList<>(bootstrapUncertainty);
+            bootstrapUncertainty.add(
+                "client ground claim differs from the reconstructed physical ground state; bootstrap reachability ignores that client-only claim");
+            bootstrapValidationTick = new TickResolution(
+                tick.clientTick(),
+                tick.known(),
+                tick.exact(),
+                true,
+                tick.source(),
+                "client ground claim differs from the reconstructed physical ground state; movement reachability does not treat this claim mismatch as an IMPOSSIBLE contradiction");
+          }
+
+          Set<Phase6Reachability.ObservedField> bootstrapObservedFields =
+              bootstrapGroundClaimMismatch
+                  ? EnumSet.of(
+                      Phase6Reachability.ObservedField.POSITION,
+                      Phase6Reachability.ObservedField.ROTATION)
+                  : EnumSet.of(
+                      Phase6Reachability.ObservedField.POSITION,
+                      Phase6Reachability.ObservedField.ROTATION,
+                      Phase6Reachability.ObservedField.GROUND);
+
+          Phase8MovementValidation.Result result = validate(
+              playerId, packet, move, observedBefore, observedAfter, world,
+              bootstrapValidationTick, bootstrapUncertainty, bootstrapSearch,
+              bootstrapTimingExhaustive && !bootstrapGroundClaimMismatch,
+              bootstrapObservedFields);
+          results.add(result);
+          switch (result.verdict()) {
+            case POSSIBLE -> {
+              possible++;
+              latestContinuation = Continuation.ACTIVE;
+            }
+            case UNCERTAIN -> {
+              uncertain++;
+              latestContinuation = Continuation.UNCERTAIN;
+            }
+            case IMPOSSIBLE -> {
+              impossible++;
+              latestContinuation = Continuation.IMPOSSIBLE;
+            }
+          }
+          rememberObservedMovement(observedBefore, observedAfter, tick);
+          trace.add("EVIDENCE POSSIBLE reason=CLIENT_MOVEMENT_BOOTSTRAP"
+              + " reconstructedStartVelocityVerified=true"
+              + " candidateLocomotionAlternatives=" + bootstrapCandidates.size()
+              + " timingExhaustive=" + bootstrapTimingExhaustive);
+          trace.add("FRONTIER_BOOTSTRAPPED source=CLIENT_MOVEMENT_OBSERVATION"
+              + " tick=" + tick.clientTick());
+          frames.add(frame(
+              sequence, packet, tick, move, observedBefore, observedAfter,
+              predictedBefore, prediction, world, bootstrapUncertainty, trace));
+          continue;
+        }
+      }
+
       if (prediction.isEmpty()) {
         uncertaintySources.add("persistent prediction frontier is not anchored to an authoritative or correction state");
         latestContinuation = Continuation.UNCERTAIN;
@@ -942,9 +951,6 @@ public final class Phase8PredictionRunner {
             predictedBefore, prediction, world, uncertaintySources, trace));
         continue;
       }
-
-      prediction = rebasePredictionToObservedBefore(
-          prediction, observedBefore, tick, trace);
 
       Set<Candidate> withEntities =
           overlayEntityCollisions(prediction, entityCollisions(latestAuthority), maximumCandidates);
@@ -2407,13 +2413,13 @@ public final class Phase8PredictionRunner {
     return candidate;
   }
 
-  private static Set<Candidate> rebasePredictionToObservedBefore(
+  private static SpatialRebaseResult rebasePredictionToObservedBefore(
       Set<Candidate> candidates,
       Player observedBefore,
       TickResolution tick,
       List<String> trace) {
     if (!tick.known() || tick.clientTick() <= 0L || candidates.isEmpty()) {
-      return candidates;
+      return new SpatialRebaseResult(candidates, false);
     }
 
     long expectedRootTick = Math.max(0L, tick.clientTick() - 1L);
@@ -2489,7 +2495,7 @@ public final class Phase8PredictionRunner {
           + " observedPosition=" + observedBefore.position()
           + " tolerance=" + POSITION_TOLERANCE);
     }
-    return Set.copyOf(rebased);
+    return new SpatialRebaseResult(Set.copyOf(rebased), rebasedCount > 0);
   }
 
   private static Context withLocomotionState(
