@@ -148,7 +148,6 @@ public final class Phase8ClientModel {
       boolean exact,
       boolean timingUncertain,
       boolean sequenceGap,
-      boolean historyTruncated,
       List<String> reasons) implements Serializable {
     public TickReliabilityState {
       if (clientTick < 0L) throw new IllegalArgumentException("clientTick must be non-negative");
@@ -162,7 +161,6 @@ public final class Phase8ClientModel {
         boolean exact,
         boolean timingUncertain,
         boolean sequenceGap,
-        boolean historyTruncated) {
       LinkedHashSet<String> reasons = new LinkedHashSet<>();
       Reliability level;
       if (!known) {
@@ -172,7 +170,6 @@ public final class Phase8ClientModel {
         if (!exact) reasons.add("client tick is represented by a non-exact timing state");
         if (timingUncertain) reasons.add("Phase 7 timing reconstruction remains uncertain");
         if (sequenceGap) reasons.add("packet sequence gap weakens client-tick chronology");
-        if (historyTruncated) reasons.add("bounded timing history was truncated");
         level = reasons.isEmpty() ? Reliability.RELIABLE : Reliability.PARTIAL;
       }
       return new TickReliabilityState(
@@ -181,7 +178,6 @@ public final class Phase8ClientModel {
           exact,
           timingUncertain,
           sequenceGap,
-          historyTruncated,
           List.copyOf(reasons));
     }
   }
