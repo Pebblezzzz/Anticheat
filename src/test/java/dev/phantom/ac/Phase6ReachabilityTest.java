@@ -156,6 +156,66 @@ class Phase6ReachabilityTest {
   }
 
   @Test
+  void landingPropagatesPostTickGroundStateIntoNextPhase5Tick() {
+    Phase6Reachability reachable = new Phase6Reachability();
+
+    var stone = dev.phantom.ac.world.v12111.BlockCatalogue12111.decode(
+        "minecraft:stone", Map.of());
+    WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+        .loadChunk(0, 0)
+        .setBlock(0, 63, 0, stone)
+        .build();
+
+    Player falling = new Player(
+        new Vec3(0.5, 64.2, 0.5),
+        new Vec3(0.1, -0.3, 0.0),
+        0f, 0f, false, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Phase5Mechanics.Pose.STANDING,
+        State.Environment.DRY, State.TickRange.exact(0),
+        State.Provenance.UNKNOWN, Set.of());
+
+    Phase6Reachability.Context context = new Phase6Reachability.Context(
+        0L,
+        falling,
+        Simulation.Environment.DRY,
+        Simulation.Attributes.DEFAULT,
+        Phase5Mechanics.MovementEffects.NONE,
+        Phase5Mechanics.Pose.STANDING,
+        MovementEnvironment.dry(false, false, false),
+        false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()),
+        Set.of(),
+        null,
+        false);
+
+    var result = reachable.search(
+        context,
+        List.of(
+            Phase6Reachability.InputConstraint.exact(
+                new AdvancedInput(0, 0, false, false, false)),
+            Phase6Reachability.InputConstraint.exact(
+                new AdvancedInput(0, 0, false, false, false))),
+        ignored -> List.of(new Phase6Reachability.WorldBranch(
+            "landing-ground", world, true, "known test ground")),
+        ignored -> List.of(new Phase6Reachability.None()),
+        Phase6Reachability.SearchConfig.defaults(16));
+
+    assertEquals(Phase6Reachability.Verdict.POSSIBLE, result.verdict(), result.toString());
+    var candidate = result.candidates().stream().findFirst().orElseThrow();
+    assertTrue(candidate.context().player().onGround(),
+        candidate.context().toString());
+    assertTrue(candidate.context().movementEnvironment().onGround(),
+        candidate.context().movementEnvironment().toString());
+    assertTrue(candidate.context().lastOnGround(),
+        candidate.context().toString());
+    assertTrue(
+        Math.abs(candidate.context().clientVelocity().x()) < 0.06,
+        () -> "second tick should use ground friction after landing: "
+            + candidate.context().clientVelocity());
+  }
+
+  @Test
   void basicUnknownTickStillUsesLegacyEighteenStateEnvelope() {
     ReachableStates reachable = new ReachableStates(new Vanilla12111Physics());
     Reachability result = reachable.next(Player.initial(Vec3.ZERO), ground(), false);
