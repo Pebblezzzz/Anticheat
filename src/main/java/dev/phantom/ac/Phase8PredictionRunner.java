@@ -2495,7 +2495,7 @@ public final class Phase8PredictionRunner {
           + " observedPosition=" + observedBefore.position()
           + " tolerance=" + POSITION_TOLERANCE);
     }
-    return Set.copyOf(rebased);
+    return new SpatialRebaseResult(Set.copyOf(rebased), rebasedCount > 0);
   }
 
   private static Context withLocomotionState(
