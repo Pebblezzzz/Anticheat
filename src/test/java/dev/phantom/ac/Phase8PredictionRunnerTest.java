@@ -473,7 +473,9 @@ class Phase8PredictionRunnerTest {
     assertTrue(first.candidateFrontierRetained(), first.toString());
 
     var retainedBeforeCloseMismatch =
-        first.frames().getLast().predictedAfter().stream().findFirst()
+        first.frames().getLast().predictedAfter().stream()
+            .filter(candidate -> !candidate.context().clientVelocity().equals(Maths.Vec3.ZERO))
+            .findFirst()
             .orElseThrow();
     var clientVelocityBeforeCloseMismatch =
         retainedBeforeCloseMismatch.context().clientVelocity();
