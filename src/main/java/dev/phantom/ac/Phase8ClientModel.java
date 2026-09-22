@@ -160,7 +160,7 @@ public final class Phase8ClientModel {
         boolean known,
         boolean exact,
         boolean timingUncertain,
-        boolean sequenceGap,
+        boolean sequenceGap) {
       LinkedHashSet<String> reasons = new LinkedHashSet<>();
       Reliability level;
       if (!known) {
