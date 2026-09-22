@@ -545,9 +545,8 @@ public final class Phase8PredictionRunner {
           + " sequenceGap=" + tickReliability.sequenceGap()
           + " reasons=" + tickReliability.reasons());
 
-      InputConstraint tickInput = tick.known() && tick.clientTick() > 0L
-          ? inputForSimulationTick(inputHistory, tick.clientTick() - 1L, sequence)
-          : currentInput;
+      // Grim's KnownInput is a single held-state value consumed by movement.
+      InputConstraint tickInput = currentInput;
       trace.add("INPUT_STATE currentKeyState=" + currentInput
           + " simulationKeyState=" + tickInput
           + " simulationTick=" + (tick.known() ? Math.max(0L, tick.clientTick() - 1L) : -1L));
@@ -2136,8 +2135,8 @@ public final class Phase8PredictionRunner {
     }
 
     long simulationTick = tick.clientTick() - 1L;
-    InputConstraint input = inputForSimulationTick(
-        inputHistory, simulationTick, movementPacket.sequence());
+    // Grim's bootstrap path consumes the current held-state input as well.
+    InputConstraint input = currentInput;
     Optional<Simulation.AdvancedInput> keyInput =
         inputConstraintToAdvancedInput(input);
     if (keyInput.isEmpty()) return Optional.empty();
@@ -3138,9 +3137,8 @@ public final class Phase8PredictionRunner {
         Set<Candidate> local = Set.of(initial);
         while (localTick < targetTick) {
           final long simulationTick = localTick;
-          List<InputConstraint> inputOptions =
-              inputPossibilitiesForSimulationTick(
-                  chronology.history(), simulationTick, targetTick, movementSequence);
+          // Match Grim: simulated ticks consume the current held input state.
+          List<InputConstraint> inputOptions = List.of(currentInput);
 
           Candidate beforeCandidate = local.stream().findFirst().orElse(null);
           if (beforeCandidate != null) {
