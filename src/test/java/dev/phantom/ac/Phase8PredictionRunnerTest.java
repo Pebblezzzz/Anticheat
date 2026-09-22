@@ -1847,7 +1847,7 @@ class Phase8PredictionRunnerTest {
 
     assertEquals(1, report.movementObservations(), report.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.POSSIBLE,
+        Phase8MovementValidation.Verdict.IMPOSSIBLE,
         report.results().getFirst().verdict(),
         report.results().toString());
     assertTrue(
