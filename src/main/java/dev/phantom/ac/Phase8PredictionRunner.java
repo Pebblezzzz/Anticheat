@@ -757,7 +757,7 @@ public final class Phase8PredictionRunner {
       if (move.clientTick() != null && movementTiming != null) {
         trace.add("TIMING_GATE explicitRangeExhaustive=" + explicitTimingRangeExhaustive
             + " chronologyUnmodeled=" + phase7ChronologyUnmodeled
-            + " historyTruncated=false
+            + " historyTruncated=false"
             + " simulationRange=" + movementTiming.simulationClientTicks()
             + " simulationCandidates=" + movementTiming.possibleSimulationClientTicks());
         trace.add("PHASE7_WINDOWS " + phase7TimingWindows(movementTiming));
