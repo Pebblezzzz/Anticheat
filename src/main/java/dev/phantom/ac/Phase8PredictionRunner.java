@@ -1301,7 +1301,7 @@ public final class Phase8PredictionRunner {
             "client ground claim differs from the simulated physical ground state; movement reachability does not treat this claim mismatch as an IMPOSSIBLE contradiction");
       } else {
         validationTick =
-            explicitTimingFullyRepresented
+            explicitTimingFullyRepresented && !tick.timingUncertain()
                 ? tick.withTimingUncertaintyResolved(
                     "Phase 7 bounded simulation timing was exhaustively evaluated for every permitted offset")
                 : tick;
