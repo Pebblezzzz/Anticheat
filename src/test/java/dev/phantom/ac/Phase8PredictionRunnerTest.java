@@ -1108,7 +1108,10 @@ class Phase8PredictionRunnerTest {
         report.frames().getLast().trace().toString());
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.contains("BOOTSTRAP_START simulationTick=3")
-            && line.contains("selectedSeq=3")),
+            && line.contains("input=AdvancedInput[forward=-1, strafe=0, jump=false, sprint=true, sneak=false]")),
+        report.frames().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("inputSelection=grim-held-state")),
         report.frames().toString());
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.contains("CLIENT_MOVEMENT_BOOTSTRAP")

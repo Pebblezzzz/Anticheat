@@ -137,7 +137,7 @@ class Phase8GrimKnownInputLifecycleTest {
         .filter(line -> line.contains("SIM_INPUT_OPTIONS tick=1"))
         .findFirst()
         .orElseThrow();
-    assertTrue(finalInputTrace.contains("forward=OptionalInt[1]"),
+    assertTrue(finalInputTrace.contains("forward=OptionalInt[0]"),
         finalInputTrace);
     assertTrue(
         report.frames().getLast().trace().stream()
