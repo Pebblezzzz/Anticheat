@@ -1789,6 +1789,7 @@ class Phase8PredictionRunnerTest {
             && line.contains("timingUncertain=false")),
         report.frames().getLast().trace().toString());
     assertTrue(report.frames().getLast().trace().stream()
+        .noneMatch(line -> line.contains("historyTruncated")),
         report.frames().getLast().trace().toString());
   }
 
