@@ -500,7 +500,7 @@ class Phase8PredictionRunnerTest {
     assertTrue(
         !reconciled.context().clientVelocity().equals(Maths.Vec3.ZERO),
         "reconciliation must not re-root the persistent client state from zero server velocity");
-    assertEquals(
+    assertNotEquals(
         "AUTHORITATIVE_ANCHOR",
         reconciled.provenance().input(),
         "reconciliation must retain the predicted candidate rather than replacing it with a fresh authority root");
