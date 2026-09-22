@@ -156,6 +156,15 @@ public final class Phase8PredictionRunner {
       POSITION_TOLERANCE * 2.0;
   private static final long MAX_INCREMENTAL_HORIZON = Phase6Reachability.MAX_HORIZON_TICKS;
   private static final long PREDICTION_RESYNC_LAG_TICKS = 2L;
+  /*
+   * Input-tick alternatives are a timing envelope, not prediction candidates.
+   * They can grow exponentially when several ClientInput packets each have
+   * multiple legal simulation ticks. Keep the envelope bounded before copying
+   * histories so a noisy/laggy client cannot turn one validation pass into an
+   * allocation storm. Truncation is represented as an uncertain input below,
+   * so this optimization can only widen the result, never create IMPOSSIBLE.
+   */
+  private static final int MAX_INPUT_CHRONOLOGIES = 256;
 
   private final int maximumCandidates;
   private final GrimPredictionEngine grimPredictionEngine = new GrimPredictionEngine();
@@ -165,6 +174,7 @@ public final class Phase8PredictionRunner {
   private final InputConstraint neutralInput;
   private final List<UncertainInput> uncertainInputs = new ArrayList<>();
   private List<InputChronology> inputChronologies = List.of();
+  private boolean inputChronologyTruncated;
   private Player initialAnchor;
   private long initialAnchorReceivedNanos = -1L;
 
@@ -3553,6 +3563,7 @@ public final class Phase8PredictionRunner {
 
     for (InputEventAlternatives event : exactEvents) {
       List<NavigableMap<Long, List<TimedInput>>> next = new ArrayList<>();
+      boolean truncatedThisEvent = false;
 
       for (NavigableMap<Long, List<TimedInput>> chronology : chronologies) {
         long minimumTick =
@@ -3560,6 +3571,11 @@ public final class Phase8PredictionRunner {
 
         for (long clientTick : event.possibleTicks()) {
           if (clientTick < minimumTick) continue;
+
+          if (next.size() >= MAX_INPUT_CHRONOLOGIES) {
+            truncatedThisEvent = true;
+            break;
+          }
 
           NavigableMap<Long, List<TimedInput>> branch =
               copyInputHistory(chronology);
@@ -3569,6 +3585,18 @@ public final class Phase8PredictionRunner {
           next.add(branch);
         }
 
+        if (truncatedThisEvent) break;
+      }
+
+      if (truncatedThisEvent) {
+        inputChronologyTruncated = true;
+        // Do not silently discard the omitted timing alternatives. Treat the
+        // transition as unconstrained so the reachability proof widens rather
+        // than manufacturing an IMPOSSIBLE result from the retained prefix.
+        long earliestClientTick = event.possibleTicks().isEmpty()
+            ? 0L
+            : Math.max(0L, event.possibleTicks().getFirst());
+        uncertainInputs.add(new UncertainInput(event.sequence(), earliestClientTick));
       }
 
       if (next.isEmpty()) {
