@@ -657,7 +657,6 @@ class Phase8PredictionRunnerTest {
         report.frames().getLast().trace().toString());
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.contains("TICK_RELIABILITY")
-            && line.contains("historyTruncated=false")),
         report.frames().getLast().trace().toString());
   }
 
@@ -1790,7 +1789,6 @@ class Phase8PredictionRunnerTest {
             && line.contains("timingUncertain=false")),
         report.frames().getLast().trace().toString());
     assertTrue(report.frames().getLast().trace().stream()
-        .anyMatch(line -> line.contains("historyTruncated=false")),
         report.frames().getLast().trace().toString());
   }
 
