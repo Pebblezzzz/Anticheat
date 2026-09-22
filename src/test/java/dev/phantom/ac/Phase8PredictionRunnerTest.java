@@ -543,15 +543,20 @@ class Phase8PredictionRunnerTest {
     var firstObserved = new Move(
         new Maths.Vec3(0.6, 64.0, 0.5), 0f, 0f, true, 1L);
 
-    // Move the authoritative pre-tick position by less than the 0.01 spatial
-    // rebase tolerance. The retained candidate therefore rebases to this point
-    // but must not keep treating its older post-tick velocity as authoritative.
+    /*
+     * PlayerContext is server authority evidence and does not rewrite the live
+     * client position. Use an additional position-bearing packet at the same
+     * client tick to establish the observed pre-movement position that the next
+     * tick must spatially rebase onto.
+     */
     PlayerContext rebasedAuthority = new PlayerContext(
         "survival", Simulation.Attributes.DEFAULT, Map.of(),
         Pose.STANDING, environment, new Maths.Vec3(0.605, 64.0, 0.5),
         Maths.Vec3.ZERO, false, false, false, List.of());
 
-    var secondObserved = new Move(
+    var intermediateObserved = new Move(
+        new Maths.Vec3(0.605, 64.0, 0.5), 0f, 0f, true, 1L);
+    var finalObserved = new Move(
         new Maths.Vec3(0.725, 64.0, 0.5), 0f, 0f, true, 2L);
 
     var report = runner.process(
@@ -559,11 +564,12 @@ class Phase8PredictionRunnerTest {
         List.of(
             new RawPacket(1, 10L, initialAuthority),
             new RawPacket(2, 20L, firstObserved),
-            new RawPacket(3, 30L, rebasedAuthority),
-            new RawPacket(4, 40L, secondObserved)),
+            new RawPacket(3, 30L, intermediateObserved),
+            new RawPacket(4, 35L, rebasedAuthority),
+            new RawPacket(5, 40L, finalObserved)),
         world, anchor, 0L);
 
-    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertEquals(3, report.movementObservations(), report.results().toString());
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getLast().verdict(), report.results().toString());
     assertTrue(report.frames().getLast().trace().stream()
@@ -578,7 +584,7 @@ class Phase8PredictionRunnerTest {
         report.frames().getLast().trace().toString());
     assertTrue(report.frames().getLast().predictedAfter().stream()
         .anyMatch(candidate -> Math.abs(
-            candidate.context().player().position().x() - secondObserved.position().x()) <= 1.0E-9),
+            candidate.context().player().position().x() - finalObserved.position().x()) <= 1.0E-9),
         report.frames().getLast().toString());
   }
 
