@@ -604,10 +604,11 @@ class Phase8PredictionRunnerTest {
 
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
     Player start = anchor();
+
     PlayerContext matchingAuthority = new PlayerContext(
         "survival", Simulation.Attributes.DEFAULT, Map.of(),
         Pose.STANDING, MovementEnvironment.dry(true, false, false),
-        start.position(), Maths.Vec3.ZERO,
+        new Maths.Vec3(0.6, 64.0, 0.5), Maths.Vec3.ZERO,
         false, false, false, List.of());
 
     PlayerContext unrelatedAuthority = new PlayerContext(
@@ -616,13 +617,23 @@ class Phase8PredictionRunnerTest {
         new Maths.Vec3(5.0, 64.0, 5.0), Maths.Vec3.ZERO,
         false, false, false, List.of());
 
+    List<RawPacket> packets = new ArrayList<>();
+    packets.add(new RawPacket(1, 10L, matchingAuthority));
+    packets.add(new RawPacket(
+        2, 20L, new Move(new Maths.Vec3(0.6, 64.0, 0.5), 0f, 0f, true, 1L)));
+
+    for (int i = 0; i < 520; i++) {
+      packets.add(new RawPacket(
+          3L + i, 30L + i, unrelatedAuthority));
+    }
+
+    packets.add(new RawPacket(
+        523, 600L, new Move(
+            new Maths.Vec3(0.6, 64.0, 0.5), 15f, 8f, true, 2L)));
+
     var report = runner.process(
         "suppressed-stationary-observation",
-        List.of(
-            new RawPacket(1, 10L, matchingAuthority),
-            new RawPacket(2, 20L, new Move(start.position(), 0f, 0f, true, 1L)),
-            new RawPacket(3, 30L, unrelatedAuthority),
-            new RawPacket(4, 40L, new Move(start.position(), 15f, 8f, true, 2L))),
+        packets,
         floorWorld(),
         start,
         0L);
@@ -644,7 +655,12 @@ class Phase8PredictionRunnerTest {
         .anyMatch(line -> line.startsWith("CLIENT_TICK 2")
             && line.contains("timingUncertain=false")),
         report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("TICK_RELIABILITY")
+            && line.contains("historyTruncated=true")),
+        report.frames().getLast().trace().toString());
   }
+
 
   @Test
   void stationaryObservationRebasesStalePredictionBeforeComparing() {
