@@ -429,6 +429,24 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void latestHeldInputIsNotAppliedBeforeItsPhase7SimulationTick() {
+    assertFalse(
+        Phase8PredictionRunner.shouldOverlayCurrentInput(
+            0L, 2L, 4L, 5L, List.of(1L, 2L)),
+        "an input that can begin at simulation tick 1 must not be replayed onto tick 0");
+
+    assertTrue(
+        Phase8PredictionRunner.shouldOverlayCurrentInput(
+            1L, 2L, 4L, 5L, List.of(1L, 2L)),
+        "the same held input is valid at the final simulated tick once Phase 7 admits it");
+
+    assertFalse(
+        Phase8PredictionRunner.shouldOverlayCurrentInput(
+            1L, 2L, 4L, 5L, List.of()),
+        "an input with no exhaustively enumerated Phase 7 simulation tick must not be overlaid");
+  }
+
+  @Test
   void authorityOverlayDoesNotEraseClientPhysicalSprintState() {
     MovementEnvironment client = MovementEnvironment.dry(true, true, false);
     MovementEnvironment authority = MovementEnvironment.dry(true, false, false);
