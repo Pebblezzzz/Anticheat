@@ -525,6 +525,15 @@ public final class Phase8PredictionRunner {
 
       TickResolution tick = resolveMovementTick(
           packet, move, phase7TimingBySequence);
+      boolean stationaryPositionObservation = move.position() != null
+          && positionExactlyMatches(observedBefore.position(), observedAfter.position())
+          && observedBefore.onGround()
+          && observedAfter.onGround();
+      boolean observationOnlyMovement = move.position() == null || stationaryPositionObservation;
+      if (observationOnlyMovement && tick.timingUncertain()) {
+        tick = tick.withTimingUncertaintyResolved(
+            "observation-only movement does not advance client physics, so Phase 7 chronology uncertainty is not kinematic");
+      }
       boolean packetSequenceGap = sequence > previousSequence + 1L && previousSequence >= 0L;
       tickReliability = Phase8ClientModel.TickReliabilityState.assess(
           tick.clientTick(),
@@ -624,51 +633,61 @@ public final class Phase8PredictionRunner {
         rememberObservedMovement(observedBefore, observedAfter, tick);
       }
 
-      boolean stationaryPositionObservation = move.position() != null
-          && positionExactlyMatches(observedBefore.position(), observedAfter.position())
-          && observedBefore.onGround()
-          && observedAfter.onGround();
-
       if (move.position() == null || stationaryPositionObservation) {
         boolean positionlessRotationObservation = move.position() == null;
 
-        if (positionlessRotationObservation
-            && physicsFrontierSuppressedUntilPositionMovement) {
+        if (physicsFrontierSuppressedUntilPositionMovement) {
           /*
-           * A look packet is an observation, not a physics tick. Do not recreate
-           * the suppressed authority root just to validate rotation. When a fresh
-           * causal authority matches the observed position/ground, use a temporary
-           * witness for this observation only; never retain it as the physics
-           * frontier.
+           * A stationary or look-only packet is an observation, not a physics
+           * tick. The suppressed physics frontier therefore does not make the
+           * packet uncertain. Prefer a fresh causal server witness when one
+           * agrees with the observed state; otherwise validate the observation
+           * against a temporary client-observation witness. Neither witness is
+           * retained as the physics frontier.
            */
           AuthorityAnchor authority = freshCausalAuthority(packet);
-          SearchResult observationSearch;
-          boolean observationPossible = authority != null
+          boolean authorityMatches = authority != null
               && positionsMatch(authority.context().serverPosition(), observedAfter.position())
               && authority.context().movementEnvironment().onGround() == observedAfter.onGround();
-          if (observationPossible) {
-            Candidate witness = authoritativeObservationWitness(
-                authority, observedAfter, tick.clientTick(), sequence);
-            observationSearch = new SearchResult(
-                Verdict.POSSIBLE,
-                Set.of(witness),
-                0,
-                1,
-                0, 0, 0, 0,
-                List.of("rotation-only observation matched fresh causal authority; no physics root retained"));
-          } else {
-            observationSearch = uncertainSearch(
-                prediction,
-                "look-only observation arrived while the physics frontier was intentionally suppressed");
-          }
+
+          Candidate witness = authorityMatches
+              ? authoritativeObservationWitness(
+                  authority, observedAfter, tick.clientTick(), sequence)
+              : candidateFromPlayer(
+                  observedAfter,
+                  tick.clientTick(),
+                  "OBSERVATION_ONLY",
+                  -1L,
+                  EntityCollisions.NONE_TRACKED);
+
+          Set<Phase6Reachability.ObservedField> observedFields =
+              positionlessRotationObservation
+                  ? EnumSet.of(Phase6Reachability.ObservedField.ROTATION)
+                  : EnumSet.of(
+                      Phase6Reachability.ObservedField.POSITION,
+                      Phase6Reachability.ObservedField.ROTATION,
+                      Phase6Reachability.ObservedField.GROUND);
+          SearchResult observationSearch = new SearchResult(
+              Verdict.POSSIBLE,
+              Set.of(witness),
+              0,
+              1,
+              0, 0, 0, 0,
+              List.of(authorityMatches
+                  ? (positionlessRotationObservation
+                      ? "rotation-only observation matched fresh causal authority; no physics root retained"
+                      : "stationary observation matched fresh causal authority; no physics root retained")
+                  : (positionlessRotationObservation
+                      ? "rotation-only observation validated without advancing physics; no physics root retained"
+                      : "stationary observation validated without advancing physics; no physics root retained")));
           Phase8MovementValidation.Result result = validate(
               playerId, packet, move, observedBefore, observedAfter, world,
-              tick, List.of(), observationSearch, observationPossible,
-              EnumSet.of(Phase6Reachability.ObservedField.ROTATION));
+              tick, List.of(), observationSearch, true, observedFields);
           results.add(result);
           if (result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE) {
             possible++;
             latestContinuation = Continuation.ACTIVE;
+            lastPositionClientTick = tick.clientTick();
           } else if (result.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
             impossible++;
             latestContinuation = Continuation.IMPOSSIBLE;
@@ -676,7 +695,9 @@ public final class Phase8PredictionRunner {
             uncertain++;
             latestContinuation = Continuation.UNCERTAIN;
           }
-          trace.add("FRONTIER_SUPPRESSED_LOOK_OBSERVATION result=" + result.verdict()
+          trace.add("FRONTIER_SUPPRESSED_OBSERVATION result=" + result.verdict()
+              + " positionBearing=" + !positionlessRotationObservation
+              + " authorityWitness=" + authorityMatches
               + " retained=" + !prediction.isEmpty());
           frames.add(frame(
               sequence, packet, tick, move, observedBefore, observedAfter,

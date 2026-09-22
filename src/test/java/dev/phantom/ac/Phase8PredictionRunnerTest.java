@@ -589,6 +589,80 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void suppressedStationaryObservationDoesNotRemainUncertain() {
+    Phase7Timing.Config timing = new Phase7Timing.Config(
+        50_000_000L,
+        50_000_000L,
+        50_000_000L,
+        new Phase7Timing.LatencyBounds(0L, 100_000_000L),
+        new Phase7Timing.LatencyBounds(0L, 100_000_000L),
+        new Phase7Timing.TickDelayBounds(0L, 1L),
+        new Phase7Timing.TickDelayBounds(0L, 1L),
+        250_000_000L,
+        3,
+        128);
+
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
+    Player start = anchor();
+
+    PlayerContext matchingAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(0.6, 64.0, 0.5), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    PlayerContext unrelatedAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(5.0, 64.0, 5.0), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    List<RawPacket> packets = new ArrayList<>();
+    packets.add(new RawPacket(1, 10L, matchingAuthority));
+    packets.add(new RawPacket(
+        2, 20L, new Move(new Maths.Vec3(0.6, 64.0, 0.5), 0f, 0f, true, 1L)));
+
+    for (int i = 0; i < 520; i++) {
+      packets.add(new RawPacket(
+          3L + i, 30L + i, unrelatedAuthority));
+    }
+
+    packets.add(new RawPacket(
+        523, 600L, new Move(
+            new Maths.Vec3(0.6, 64.0, 0.5), 15f, 8f, true, 2L)));
+
+    var report = runner.process(
+        "suppressed-stationary-observation",
+        packets,
+        floorWorld(),
+        start,
+        0L);
+
+    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getLast().verdict(),
+        report.results().toString());
+    assertTrue(
+        report.results().getLast().evidence().uncertaintySources().isEmpty(),
+        report.results().getLast().evidence().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("FRONTIER_SUPPRESSED_OBSERVATION")
+            && line.contains("result=POSSIBLE")
+            && line.contains("positionBearing=true")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("CLIENT_TICK 2")
+            && line.contains("timingUncertain=false")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("TICK_RELIABILITY")
+            && line.contains("historyTruncated=true")),
+        report.frames().getLast().trace().toString());
+  }
+
+
+  @Test
   void stationaryObservationRebasesStalePredictionBeforeComparing() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
