@@ -353,6 +353,14 @@ public final class Phase8PredictionRunner {
     }
 
     /*
+     * The bounded timing history may lose its old relative origin, but the live
+     * packet batch still contains a stronger ordinal witness: the number of
+     * CLIENT_TICK_END boundaries seen before an explicit Move.clientTick.
+     * Recover that absolute offset before rebuilding Phase 7/input chronology.
+     */
+    recoverClientTickOriginFromIncomingPackets(packets);
+
+    /*
      * Phase 7 is the sole live client/server timing authority. The history is
      * bounded so timing reconstruction cannot grow without limit; a retained
      * prefix can be truncated only at the cost of becoming conservative.
@@ -547,7 +555,8 @@ public final class Phase8PredictionRunner {
       trace.add("CLIENT_TICK " + tick.display()
           + " exact=" + tick.exact()
           + " source=" + tick.source()
-          + " timingUncertain=" + tick.timingUncertain());
+          + " timingUncertain=" + tick.timingUncertain()
+          + " chronologyUncertain=" + tick.chronologyUncertain());
       if (timingHistoryTruncated) {
         trace.add("INPUT_TICK_ORIGIN known=" + clientTickOriginKnown
             + " offset=" + clientTickOriginOffset);
@@ -776,6 +785,8 @@ public final class Phase8PredictionRunner {
       if (phase7ChronologyUnmodeled) {
         uncertaintySources.add(
             "Phase 7 contains unmodeled packet/external chronology that can affect this physics step");
+        tick = tick.withChronologyUncertainty(
+            "Phase 7 chronology remains uncertain even though the explicit client tick is exact");
       }
 
       if (move.clientTick() != null && movementTiming != null) {
@@ -1333,14 +1344,37 @@ public final class Phase8PredictionRunner {
       boolean known,
       boolean exact,
       boolean timingUncertain,
+      boolean chronologyUncertain,
       String source,
       String uncertaintyReason) {
+    TickResolution(
+        long clientTick,
+        boolean known,
+        boolean exact,
+        boolean timingUncertain,
+        String source,
+        String uncertaintyReason) {
+      this(
+          clientTick,
+          known,
+          exact,
+          timingUncertain,
+          timingUncertain,
+          source,
+          uncertaintyReason);
+    }
+
     String display() {
       return known ? Long.toString(clientTick) : "unknown";
     }
 
     TickResolution withTimingUncertaintyResolved(String reason) {
-      return new TickResolution(clientTick, known, exact, false, source, reason);
+      return new TickResolution(clientTick, known, exact, false, false, source, reason);
+    }
+
+    TickResolution withChronologyUncertainty(String reason) {
+      return new TickResolution(
+          clientTick, known, exact, timingUncertain, true, source, reason);
     }
   }
 
@@ -1432,7 +1466,7 @@ public final class Phase8PredictionRunner {
        * history without making this packet's own simulation tick ambiguous.
        */
       return new TickResolution(
-          tick, true, true, false, source, reason);
+          tick, true, true, false, timingUncertain, source, reason);
     }
 
     /*
@@ -1467,6 +1501,43 @@ public final class Phase8PredictionRunner {
     return new TickResolution(
         0L, false, false, true, "phase7-timing-missing",
         "Phase 7 timing record was unavailable and no explicit client tick was captured");
+  }
+
+  private void recoverClientTickOriginFromIncomingPackets(
+      List<Packets.RawPacket> packets) {
+    long relativeTick = relativeClientTick;
+    Long discoveredOffset = clientTickOriginKnown
+        ? clientTickOriginOffset
+        : null;
+
+    for (Packets.RawPacket packet : packets) {
+      if (packet.packet() instanceof Packets.ClientTickEnd) {
+        relativeTick = Math.addExact(relativeTick, 1L);
+        continue;
+      }
+      if (!(packet.packet() instanceof Packets.Move move)
+          || move.clientTick() == null) {
+        continue;
+      }
+
+      /*
+       * The live ClientTickEnd ordinal is durable state independent of the
+       * bounded timing journal. Capture-supplied Move.clientTick is absolute to
+       * the connection, so their difference recovers the journal's origin.
+       */
+      long offset = Math.subtractExact(move.clientTick(), relativeTick);
+      if (discoveredOffset == null) {
+        discoveredOffset = offset;
+      } else if (discoveredOffset.longValue() != offset) {
+        discoveredOffset = null;
+        break;
+      }
+    }
+
+    if (discoveredOffset != null) {
+      clientTickOriginOffset = discoveredOffset;
+      clientTickOriginKnown = true;
+    }
   }
 
   private void rememberTimingPacket(Packets.RawPacket packet) {
@@ -3231,7 +3302,7 @@ public final class Phase8PredictionRunner {
       boolean timingExhaustivelyModeled,
       Set<Phase6Reachability.ObservedField> observedFields) {
     List<String> timingReasons = new ArrayList<>();
-    if (tick.timingUncertain()) {
+    if (tick.timingUncertain() || tick.chronologyUncertain()) {
       timingReasons.add(tick.uncertaintyReason());
     }
     if (!tick.exact()) {
@@ -3243,7 +3314,7 @@ public final class Phase8PredictionRunner {
     Validation.SyncWindow timing = new Validation.SyncWindow(
         Math.max(0L, tick.clientTick()),
         Math.max(0L, tick.clientTick()),
-        tick.timingUncertain() || !tick.exact(),
+        tick.timingUncertain() || tick.chronologyUncertain() || !tick.exact(),
         List.copyOf(timingReasons));
     List<String> assumptions = new ArrayList<>();
     assumptions.add("client input is retained as held state until the next ClientInput packet");
