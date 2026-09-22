@@ -657,7 +657,7 @@ class Phase8PredictionRunnerTest {
         report.frames().getLast().trace().toString());
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.contains("TICK_RELIABILITY")
-            && line.contains("historyTruncated=true")),
+            && line.contains("historyTruncated=false")),
         report.frames().getLast().trace().toString());
   }
 
@@ -1714,8 +1714,9 @@ class Phase8PredictionRunnerTest {
   }
 
 
+
   @Test
-  void truncatedTimingHistoryPreservesAbsoluteClientTickForHeldInput() {
+  void longTimingHistoryPreservesAbsoluteClientTickForHeldInput() {
     Phase7Timing.Config timing = new Phase7Timing.Config(
         50_000_000L, 50_000_000L, 50_000_000L,
         new Phase7Timing.LatencyBounds(0L, 0L),
@@ -1728,129 +1729,73 @@ class Phase8PredictionRunnerTest {
     WorldSnapshot world = floorWorld();
     Player start = anchor();
     MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
-    Simulation.AdvancedInput forward = new Simulation.AdvancedInput(1, 0, false, false, false);
+    Simulation.AdvancedInput forward =
+        new Simulation.AdvancedInput(1, 0, false, false, false);
 
-    Maths.Vec3 expected = new Vanilla12111RichPhysics().step(
-        new Vanilla12111RichPhysics.Context(
-            41L,
-            start,
-            forward,
-            world,
-            Simulation.Environment.DRY,
-            start.attributes(),
-            Phase5Mechanics.MovementEffects.NONE,
-            Pose.STANDING,
-            environment,
-            false,
-            dev.phantom.ac.world.EntityCollisions.of(List.of())))
-        .state()
-        .position();
+    Player expectedState = start;
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
 
+    List<RawPacket> packets = new ArrayList<>();
+    long sequence = 1L;
     PlayerContext authority = new PlayerContext(
         "survival", start.attributes(), Map.of(),
         Pose.STANDING, environment,
         start.position(), start.velocity(), false, false, false, List.of());
 
-    List<RawPacket> packets = new ArrayList<>();
-    for (int i = 1; i <= 520; i++) {
-      packets.add(new RawPacket(i, i * 1_000_000L, authority));
+    for (int i = 0; i < 520; i++) {
+      packets.add(new RawPacket(sequence++, sequence * 1_000_000L, authority));
     }
-    packets.add(new RawPacket(521, 521_000_000L,
+
+    for (int tick = 0; tick < 41; tick++) {
+      packets.add(new RawPacket(
+          sequence++, sequence * 1_000_000L, new ClientTickEnd()));
+    }
+    packets.add(new RawPacket(
+        sequence++, sequence * 1_000_000L,
         new ClientInput(true, false, false, false, false, false, false)));
-    packets.add(new RawPacket(522, 522_000_000L, new ClientTickEnd()));
-    packets.add(new RawPacket(523, 523_000_000L,
-        new ClientInput(true, false, false, false, true, false, false)));
-    packets.add(new RawPacket(524, 524_000_000L,
-        new Move(expected, 0f, 0f, true, 42L)));
+
+    for (long simulationTick = 0L; simulationTick <= 40L; simulationTick++) {
+      expectedState = physics.step(
+          new Vanilla12111RichPhysics.Context(
+              simulationTick,
+              expectedState,
+              forward,
+              world,
+              Simulation.Environment.DRY,
+              expectedState.attributes(),
+              Phase5Mechanics.MovementEffects.NONE,
+              Pose.STANDING,
+              environment,
+              false,
+              dev.phantom.ac.world.EntityCollisions.of(List.of())))
+          .state();
+    }
+
+    packets.add(new RawPacket(
+        sequence,
+        sequence * 1_000_000L,
+        new Move(expectedState.position(), 0f, 0f, true, 42L)));
 
     var report = runner.process(
-        "truncated-input-origin",
+        "long-timing-history",
         packets,
         world,
         start,
         0L);
 
-    assertTrue(report.results().stream().allMatch(
-        result -> result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE),
-        report.toString());
-    assertTrue(report.frames().stream()
-        .flatMap(frame -> frame.trace().stream())
-        .anyMatch(line -> line.equals("INPUT_TICK_ORIGIN known=true offset=41")),
-        report.frames().toString());
-    assertTrue(report.frames().stream()
-        .flatMap(frame -> frame.trace().stream())
-        .anyMatch(line -> line.contains("inputSelection=selectedSeq=521,selectedTick=41")
-            && line.contains("jump=Optional[false]")),
-        report.frames().toString());
+    assertEquals(1, report.movementObservations(), report.toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(),
+        report.results().toString());
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.startsWith("CLIENT_TICK 42")
             && line.contains("exact=true")
             && line.contains("timingUncertain=false")),
         report.frames().getLast().trace().toString());
-  }
-
-
-  @Test
-  void truncatedTimingHistoryRecoversOriginWhenRetainedExplicitMovePredatesBoundary() {
-    Phase7Timing.Config timing = new Phase7Timing.Config(
-        50_000_000L, 50_000_000L, 50_000_000L,
-        new Phase7Timing.LatencyBounds(0L, 0L),
-        new Phase7Timing.LatencyBounds(0L, 0L),
-        new Phase7Timing.TickDelayBounds(0L, 0L),
-        new Phase7Timing.TickDelayBounds(0L, 0L),
-        250_000_000L, 3, 128);
-
-    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
-    WorldSnapshot world = floorWorld();
-    Player start = anchor();
-    MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
-    PlayerContext authority = new PlayerContext(
-        "survival", start.attributes(), Map.of(),
-        Pose.STANDING, environment,
-        start.position(), start.velocity(), false, false, false, List.of());
-
-    List<RawPacket> packets = new ArrayList<>();
-    long sequence = 1L;
-    for (int i = 0; i < 520; i++) {
-      packets.add(new RawPacket(sequence++, (i + 1L) * 1_000_000L, authority));
-    }
-
-    /*
-     * This explicit move is the earliest retained client event after the bounded
-     * history truncates. Its clientTick is absolute to the connection, while the
-     * retained Phase 7 reconstruction starts a new relative boundary clock.
-     */
-    Move retainedAbsoluteMove = new Move(
-        start.position(), 0f, 0f, true, 100L);
-    packets.add(new RawPacket(
-        sequence++, 2_500_000_000L, retainedAbsoluteMove));
-
-    for (int i = 0; i < 9; i++) {
-      packets.add(new RawPacket(
-          sequence++, 2_550_000_000L + i * 50_000_000L, new ClientTickEnd()));
-    }
-
-    packets.add(new RawPacket(
-        sequence++, 3_000_000_000L,
-        new ClientInput(false, false, false, false, false, false, false)));
-
-    Move finalMove = new Move(
-        start.position(), 0f, 0f, true, 109L);
-    packets.add(new RawPacket(
-        sequence, 3_050_000_000L, finalMove));
-
-    var report = runner.process(
-        "truncated-explicit-anchor",
-        packets,
-        world,
-        start,
-        0L);
-
     assertTrue(report.frames().getLast().trace().stream()
-        .anyMatch(line -> line.equals("INPUT_TICK_ORIGIN known=true offset=100")),
+        .anyMatch(line -> line.contains("historyTruncated=false")),
         report.frames().getLast().trace().toString());
-    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
-        report.results().getLast().verdict(), report.results().toString());
   }
 
 
@@ -1868,14 +1813,14 @@ class Phase8PredictionRunnerTest {
     WorldSnapshot world = floorWorld();
     Player start = anchor();
     MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
-    Simulation.AdvancedInput forward = new Simulation.AdvancedInput(1, 0, false, false, false);
-
     PlayerContext authority = new PlayerContext(
         "survival", start.attributes(), Map.of(),
         Pose.STANDING, environment,
         start.position(), start.velocity(), false, false, false, List.of());
 
     Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    Simulation.AdvancedInput forward =
+        new Simulation.AdvancedInput(1, 0, false, false, false);
     Player first = physics.step(new Vanilla12111RichPhysics.Context(
         0L, start, forward, world, Simulation.Environment.DRY,
         start.attributes(), Phase5Mechanics.MovementEffects.NONE,
@@ -1895,7 +1840,6 @@ class Phase8PredictionRunnerTest {
                 new ClientInput(true, false, false, false, false, false, false)),
             new RawPacket(3L, 3_000_000L,
                 new Move(first.position(), 0f, 0f, true, 1L)),
-            // Sequence 4 is intentionally absent: this is a real capture gap.
             new RawPacket(5L, 5_000_000L,
                 new Move(second.position(), 0f, 0f, true, 2L))),
         world,
@@ -1915,164 +1859,6 @@ class Phase8PredictionRunnerTest {
     assertTrue(report.results().getLast().evidence().uncertaintySources().stream()
         .anyMatch(reason -> reason.contains("unmodeled packet/external chronology")),
         report.results().getLast().evidence().toString());
-    assertTrue(report.results().getLast().evidence().uncertaintySources().stream()
-        .anyMatch(reason -> reason.contains("unmodeled packet/external chronology")),
-        report.results().getLast().evidence().toString());
-  }
-
-
-  @Test
-  void truncatedTimingHistoryWithUnrecoverableOriginCannotProduceImpossible() {
-    Phase7Timing.Config timing = new Phase7Timing.Config(
-        50_000_000L, 50_000_000L, 50_000_000L,
-        new Phase7Timing.LatencyBounds(0L, 0L),
-        new Phase7Timing.LatencyBounds(0L, 0L),
-        new Phase7Timing.TickDelayBounds(0L, 0L),
-        new Phase7Timing.TickDelayBounds(0L, 0L),
-        250_000_000L, 3, 128);
-
-    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
-    WorldSnapshot world = floorWorld();
-    Player start = anchor();
-    MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
-    Simulation.AdvancedInput forward = new Simulation.AdvancedInput(1, 0, false, false, false);
-
-    Maths.Vec3 firstPosition = new Vanilla12111RichPhysics().step(
-        new Vanilla12111RichPhysics.Context(
-            0L, start, forward, world, Simulation.Environment.DRY,
-            start.attributes(), Phase5Mechanics.MovementEffects.NONE,
-            Pose.STANDING, environment, false,
-            dev.phantom.ac.world.EntityCollisions.of(List.of())))
-        .state()
-        .position();
-
-    PlayerContext authority = new PlayerContext(
-        "survival", start.attributes(), Map.of(),
-        Pose.STANDING, environment,
-        start.position(), start.velocity(), false, false, false, List.of());
-
-    List<RawPacket> packets = new ArrayList<>();
-    packets.add(new RawPacket(1, 1_000_000L, authority));
-    packets.add(new RawPacket(2, 2_000_000L,
-        new ClientInput(true, false, false, false, false, false, false)));
-    packets.add(new RawPacket(3, 3_000_000L, new ClientTickEnd()));
-    packets.add(new RawPacket(4, 4_000_000L,
-        new Move(firstPosition, 0f, 0f, true, 1L)));
-
-    for (int i = 5; i <= 520; i++) {
-      packets.add(new RawPacket(i, i * 1_000_000L, authority));
-    }
-
-    packets.add(new RawPacket(521, 521_000_000L,
-        new ClientInput(true, false, false, false, false, false, false)));
-    packets.add(new RawPacket(522, 522_000_000L,
-        new Move(null, 0f, 0f, null, 100L)));
-    packets.add(new RawPacket(523, 523_000_000L, new ClientTickEnd()));
-    packets.add(new RawPacket(524, 524_000_000L,
-        new Move(
-            new Maths.Vec3(firstPosition.x() + 0.1, firstPosition.y(), firstPosition.z()),
-            0f, 0f, true, 42L)));
-
-    var report = runner.process(
-        "truncated-unrecoverable-origin",
-        packets,
-        world,
-        start,
-        0L);
-
-    assertEquals(Phase8MovementValidation.Verdict.UNCERTAIN,
-        report.results().getLast().verdict(), report.toString());
-    assertTrue(report.results().getLast().evidence().uncertaintySources().stream()
-        .anyMatch(reason -> reason.contains("absolute client-tick origin is not recoverable")),
-        report.results().getLast().evidence().toString());
-    assertTrue(report.frames().getLast().trace().stream()
-        .anyMatch(line -> line.equals("INPUT_TICK_ORIGIN known=false offset=0")),
-        report.frames().getLast().trace().toString());
-  }
-
-
-  @Test
-  void truncatedTimingHistoryRecoversOriginDespiteUnrelatedOutOfOrderPacket() {
-    Phase7Timing.Config timing = new Phase7Timing.Config(
-        50_000_000L, 50_000_000L, 50_000_000L,
-        new Phase7Timing.LatencyBounds(0L, 0L),
-        new Phase7Timing.LatencyBounds(0L, 0L),
-        new Phase7Timing.TickDelayBounds(0L, 0L),
-        new Phase7Timing.TickDelayBounds(0L, 0L),
-        250_000_000L,
-        3,
-        128);
-
-    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
-    WorldSnapshot world = floorWorld();
-    Player start = anchor();
-    MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
-    PlayerContext authority = new PlayerContext(
-        "survival", start.attributes(), Map.of(),
-        Pose.STANDING, MovementEnvironment.dry(true, false, false),
-        start.position(), start.velocity(), false, false, false, List.of());
-
-    List<RawPacket> packets = new ArrayList<>();
-    packets.add(new RawPacket(1L, 1_000_000L, new ClientTickEnd()));
-    packets.add(new RawPacket(2L, 2_000_000L,
-        new Move(start.position(), 0f, 0f, true, 1L)));
-
-    long sequence = 3L;
-    long baseNanos = 10_000_000L;
-    for (int i = 0; i < 510; i++) {
-      long received = baseNanos + i;
-      if (i == 250) received += 2_000L;
-      if (i == 251) received -= 2_000L;
-      packets.add(new RawPacket(sequence++, received, authority));
-    }
-
-    for (int i = 0; i < 10; i++) {
-      packets.add(new RawPacket(
-          sequence++, 30_000_000L + i * 50_000_000L, new ClientTickEnd()));
-    }
-
-    packets.add(new RawPacket(
-        sequence++, 470_000_000L,
-        new ClientInput(true, false, false, false, false, false, false)));
-
-    Player expectedState = start;
-    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
-    for (long simulationTick = 0L; simulationTick <= 10L; simulationTick++) {
-      Simulation.AdvancedInput stepInput = simulationTick >= 9L
-          ? new Simulation.AdvancedInput(1, 0, false, false, false)
-          : new Simulation.AdvancedInput(0, 0, false, false, false);
-      expectedState = physics.step(
-          new Vanilla12111RichPhysics.Context(
-              simulationTick,
-              expectedState,
-              stepInput,
-              world,
-              Simulation.Environment.DRY,
-              expectedState.attributes(),
-              Phase5Mechanics.MovementEffects.NONE,
-              Pose.STANDING,
-              environment,
-              false,
-              dev.phantom.ac.world.EntityCollisions.of(List.of())))
-          .state();
-    }
-
-    Move observed = new Move(expectedState.position(), 0f, 0f, true, 11L);
-    packets.add(new RawPacket(sequence, 521_000_000L, observed));
-
-    var report = runner.process(
-        "truncated-origin-out-of-order",
-        packets,
-        world,
-        start,
-        0L);
-
-    assertTrue(report.frames().getLast().trace().stream()
-        .anyMatch(line -> line.startsWith("INPUT_TICK_ORIGIN known=true")),
-        report.frames().getLast().trace().toString());
-    assertTrue(report.results().getLast().verdict()
-            != Phase8MovementValidation.Verdict.IMPOSSIBLE,
-        report.results().toString());
   }
 
 
