@@ -1732,8 +1732,21 @@ class Phase8PredictionRunnerTest {
     Simulation.AdvancedInput forward =
         new Simulation.AdvancedInput(1, 0, false, false, false);
 
-    Player expectedState = start;
     Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    Player expectedState = physics.step(
+        new Vanilla12111RichPhysics.Context(
+            41L,
+            start,
+            forward,
+            world,
+            Simulation.Environment.DRY,
+            start.attributes(),
+            Phase5Mechanics.MovementEffects.NONE,
+            Pose.STANDING,
+            environment,
+            false,
+            dev.phantom.ac.world.EntityCollisions.of(List.of())))
+        .state();
 
     List<RawPacket> packets = new ArrayList<>();
     long sequence = 1L;
@@ -1753,23 +1766,6 @@ class Phase8PredictionRunnerTest {
     packets.add(new RawPacket(
         sequence++, sequence * 1_000_000L,
         new ClientInput(true, false, false, false, false, false, false)));
-
-    for (long simulationTick = 0L; simulationTick <= 40L; simulationTick++) {
-      expectedState = physics.step(
-          new Vanilla12111RichPhysics.Context(
-              simulationTick,
-              expectedState,
-              forward,
-              world,
-              Simulation.Environment.DRY,
-              expectedState.attributes(),
-              Phase5Mechanics.MovementEffects.NONE,
-              Pose.STANDING,
-              environment,
-              false,
-              dev.phantom.ac.world.EntityCollisions.of(List.of())))
-          .state();
-    }
 
     packets.add(new RawPacket(
         sequence,
