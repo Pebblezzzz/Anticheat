@@ -3532,6 +3532,18 @@ public final class Phase8PredictionRunner {
       }
     }
 
+    /*
+     * Match Grim at the live movement boundary: the newest ClientInput already
+     * received before this movement is a valid held-state alternative for the
+     * final simulated tick. Do not apply this live overlay to earlier catch-up
+     * ticks, where it could become retroactive input.
+     */
+    if (simulationTick == targetTick - 1L
+        && currentInputSequence >= 0L
+        && currentInputSequence <= movementSequence) {
+      options.add(currentInput);
+    }
+
     if (options.isEmpty()) return List.of(neutralInput);
     return List.copyOf(options);
   }
