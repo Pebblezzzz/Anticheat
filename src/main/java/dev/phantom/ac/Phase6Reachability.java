@@ -753,7 +753,7 @@ public final class Phase6Reachability {
                   tick + 1, stepped.state(), stepped.clientVelocityAfterTick(),
                   pre.environment(), pre.attributes(), pre.effects(), stepped.state().pose(),
                   pre.movementEnvironment(), pre.sleeping(), pre.entityCollisions(),
-                  stateUncertainty, pre.actualMovementReference(), stepped.state().onGround());
+                  pre.uncertainty(), pre.actualMovementReference(), stepped.state().onGround());
               MovementEnvironment nextEnvironment = nextEnvironmentKnown
                   ? movementEnvironmentFor(nextSample, postStep)
                   : withOnGround(pre.movementEnvironment(), stepped.state().onGround());
