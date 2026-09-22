@@ -3570,15 +3570,29 @@ public final class Phase8PredictionRunner {
      * final simulated tick. Do not apply this live overlay to earlier catch-up
      * ticks, where it could become retroactive input.
      */
-    if (simulationTick == targetTick - 1L
-        && currentInputSequence >= 0L
-        && currentInputSequence <= movementSequence
-        && currentInputPossibleSimulationTicks.contains(simulationTick)) {
+    if (shouldOverlayCurrentInput(
+        simulationTick,
+        targetTick,
+        currentInputSequence,
+        movementSequence,
+        currentInputPossibleSimulationTicks)) {
       options.add(currentInput);
     }
 
     if (options.isEmpty()) return List.of(neutralInput);
     return List.copyOf(options);
+  }
+
+  static boolean shouldOverlayCurrentInput(
+      long simulationTick,
+      long targetTick,
+      long currentInputSequence,
+      long movementSequence,
+      List<Long> possibleSimulationTicks) {
+    return simulationTick == targetTick - 1L
+        && currentInputSequence >= 0L
+        && currentInputSequence <= movementSequence
+        && possibleSimulationTicks.contains(simulationTick);
   }
 
   private TimedInput latestTimedInput(
