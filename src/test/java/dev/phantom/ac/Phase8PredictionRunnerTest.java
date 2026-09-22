@@ -1785,8 +1785,11 @@ class Phase8PredictionRunnerTest {
         report.results().toString());
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.startsWith("CLIENT_TICK 42")
-            && line.contains("exact=true")
-            && line.contains("timingUncertain=false")),
+            && line.contains("exact=true")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("TICK_RELIABILITY")
+            && line.contains("historyTruncated") == false),
         report.frames().getLast().trace().toString());
     assertTrue(report.frames().getLast().trace().stream()
         .noneMatch(line -> line.contains("historyTruncated")),
@@ -1849,11 +1852,12 @@ class Phase8PredictionRunnerTest {
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.startsWith("CLIENT_TICK 2")
             && line.contains("exact=true")
-            && line.contains("timingUncertain=false")),
+            && line.contains("timingUncertain=true")),
         report.frames().getLast().trace().toString());
-    assertTrue(report.results().getLast().evidence().uncertaintySources().stream()
-        .anyMatch(reason -> reason.contains("unmodeled packet/external chronology")),
-        report.results().getLast().evidence().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("TICK_RELIABILITY")
+            && line.contains("sequenceGap=true")),
+        report.frames().getLast().trace().toString());
   }
 
 
