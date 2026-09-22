@@ -30,6 +30,65 @@ class Phase8PredictionRunnerTest {
         State.Provenance.UNKNOWN, Set.of());
   }
 
+
+  @Test
+  void spatialRebaseDropsStaleCollisionMovementReferenceButKeepsClientVelocity() {
+    Player observedBefore = new Player(
+        new Maths.Vec3(10.005, 64.0, 20.005),
+        new Maths.Vec3(0.12, 0.0, 0.08),
+        15f, 5f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(), Simulation.Attributes.DEFAULT,
+        Pose.STANDING, State.Environment.DRY, State.TickRange.exact(4),
+        State.Provenance.UNKNOWN, Set.of());
+
+    Player candidatePlayer = new Player(
+        new Maths.Vec3(10.0, 64.0, 20.0),
+        new Maths.Vec3(0.12, 0.0, 0.08),
+        15f, 5f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(), Simulation.Attributes.DEFAULT,
+        Pose.STANDING, State.Environment.DRY, State.TickRange.exact(4),
+        State.Provenance.UNKNOWN, Set.of());
+
+    Maths.Vec3 clientVelocity = new Maths.Vec3(0.12, -0.08, 0.08);
+    Maths.Vec3 staleMovementReference = new Maths.Vec3(0.12, 0.0, 0.08);
+    Phase6Reachability.Context context = new Phase6Reachability.Context(
+        4L,
+        candidatePlayer,
+        clientVelocity,
+        Simulation.Environment.DRY,
+        Simulation.Attributes.DEFAULT,
+        Phase5Mechanics.MovementEffects.NONE,
+        MovementEnvironment.dry(true, false, false),
+        Pose.STANDING == Pose.SLEEPING,
+        dev.phantom.ac.world.EntityCollisions.NONE_TRACKED,
+        Set.of(),
+        staleMovementReference,
+        false);
+
+    Phase6Reachability.Candidate candidate = new Phase6Reachability.Candidate(
+        1L,
+        context,
+        new Phase6Reachability.Provenance(
+            1L, -1L, 4L, "INPUT", "WORLD", "None", List.of("test"), 1, List.of()));
+
+    List<String> trace = new ArrayList<>();
+    Set<Phase6Reachability.Candidate> rebased =
+        Phase8PredictionRunner.rebasePredictionToObservedBefore(
+            Set.of(candidate),
+            observedBefore,
+            new Phase8PredictionRunner.TickResolution(
+                5L, true, true, false, "test", ""),
+            trace);
+
+    assertEquals(1, rebased.size());
+    Phase6Reachability.Candidate result = rebased.iterator().next();
+    assertEquals(observedBefore.position(), result.context().player().position());
+    assertEquals(clientVelocity, result.context().clientVelocity());
+    assertNull(result.context().actualMovementReference());
+    assertTrue(result.context().lastOnGround());
+    assertTrue(trace.stream().anyMatch(line -> line.startsWith("FRONTIER_SPATIAL_REBASE")));
+  }
+
   @Test
   void groundedEdgeTransitionFeedsFallingVelocityIntoNextClientTick() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
