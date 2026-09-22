@@ -2473,8 +2473,12 @@ public final class Phase8PredictionRunner {
               context.sleeping(),
               context.entityCollisions(),
               context.uncertainty(),
-              context.actualMovementReference(),
-              context.lastOnGround()),
+              // A spatial rebase establishes a new observed pre-movement root.
+              // Do not carry the prior tick's collision movement reference across
+              // that boundary; Grim keeps clientVelocity persistent but derives
+              // actualMovement again from the next movement tick.
+              null,
+              observedBefore.onGround()),
           candidate.provenance()));
       rebasedCount++;
     }
