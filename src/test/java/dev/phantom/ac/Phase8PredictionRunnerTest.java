@@ -447,6 +447,24 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void uncertainMovementTimingKeepsNewestHeldInputAsFinalTickAlternative() {
+    assertFalse(
+        Phase8PredictionRunner.shouldOverlayCurrentInput(
+            0L, 2L, 4L, 5L, List.of(), true),
+        "timing uncertainty must not make the held input retroactive");
+
+    assertTrue(
+        Phase8PredictionRunner.shouldOverlayCurrentInput(
+            1L, 2L, 4L, 5L, List.of(), true),
+        "an unresolved movement boundary must retain the newest held input at the final simulated tick");
+
+    assertFalse(
+        Phase8PredictionRunner.shouldOverlayCurrentInput(
+            1L, 2L, 4L, 5L, List.of(), false),
+        "reliable timing still requires the held input's Phase 7 simulation tick");
+  }
+
+  @Test
   void authorityOverlayDoesNotEraseClientPhysicalSprintState() {
     MovementEnvironment client = MovementEnvironment.dry(true, true, false);
     MovementEnvironment authority = MovementEnvironment.dry(true, false, false);
