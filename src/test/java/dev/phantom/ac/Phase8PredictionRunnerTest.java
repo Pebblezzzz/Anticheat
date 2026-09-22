@@ -443,6 +443,64 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void closeExhaustiveMismatchReconcilesFrontierInsteadOfCascadingImpossible() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    Player anchor = anchor();
+
+    Move closeMismatch = new Move(
+        new Maths.Vec3(0.515, 64.0, 0.5), 0f, 0f, true, 1L);
+
+    var first = runner.process(
+        "close-reconciliation",
+        List.of(
+            new RawPacket(
+                1, 10L, new PlayerContext(
+                    "survival", Simulation.Attributes.DEFAULT, Map.of(),
+                    Pose.STANDING, MovementEnvironment.dry(true, false, false),
+                    anchor.position(), Maths.Vec3.ZERO,
+                    false, false, false, List.of())),
+            new RawPacket(2, 20L, closeMismatch)),
+        floorWorld(),
+        anchor,
+        0L);
+
+    assertEquals(1, first.movementObservations(), first.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.UNCERTAIN,
+        first.results().getFirst().verdict(),
+        first.results().toString());
+    assertTrue(first.candidateFrontierRetained(), first.toString());
+    assertTrue(first.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("FRONTIER_RECONCILED reason=CLOSE_EXHAUSTIVE_MISMATCH")),
+        first.frames().getLast().trace().toString());
+    assertTrue(first.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("CLOSE_MISMATCH")
+            && line.contains("clientVelocity=")),
+        first.frames().getLast().trace().toString());
+
+    var second = runner.process(
+        "close-reconciliation",
+        List.of(new RawPacket(
+            3, 30L, new Move(
+                new Maths.Vec3(0.515, 64.0, 0.5), 0f, 0f, true, 2L))),
+        floorWorld(),
+        anchor,
+        0L);
+
+    assertEquals(1, second.movementObservations(), second.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        second.results().getFirst().verdict(),
+        second.results().toString());
+    assertTrue(second.candidateFrontierRetained(), second.toString());
+    assertTrue(second.results().stream()
+        .flatMap(result -> result.evidence().mismatches().stream())
+        .noneMatch(mismatch -> mismatch.dimensions()
+            .contains(Phase6Reachability.ObservedField.POSITION)),
+        second.results().toString());
+  }
+
+  @Test
   void impossibleObservationDoesNotPoisonNextFreshAuthoritativeObservation() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     Player anchor = anchor();
