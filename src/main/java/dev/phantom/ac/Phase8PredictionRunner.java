@@ -2407,7 +2407,7 @@ public final class Phase8PredictionRunner {
     return candidate;
   }
 
-  private static Set<Candidate> rebasePredictionToObservedBefore(
+  static Set<Candidate> rebasePredictionToObservedBefore(
       Set<Candidate> candidates,
       Player observedBefore,
       TickResolution tick,
