@@ -169,7 +169,7 @@ public final class Phase8PredictionRunner {
   private Phase8ClientModel.ClientPhysicsState clientPhysicsState;
   private Phase8ClientModel.CompensatedWorld compensatedWorld;
   private Phase8ClientModel.TickReliabilityState tickReliability =
-      Phase8ClientModel.TickReliabilityState.assess(0L, false, false, true, false, false);
+      Phase8ClientModel.TickReliabilityState.assess(0L, false, false, true, false);
   /*
    * An authoritative zero-delta witness proves the current observation but its
    * server velocity is not a client-tick physics state. Keep the physics
@@ -254,7 +254,7 @@ public final class Phase8PredictionRunner {
     clientPhysicsState = Phase8ClientModel.ClientPhysicsState.initial(authoritativeAnchor);
     compensatedWorld = null;
     tickReliability =
-        Phase8ClientModel.TickReliabilityState.assess(0L, false, false, true, false, false);
+        Phase8ClientModel.TickReliabilityState.assess(0L, false, false, true, false);
     currentInput = neutralInput;
     currentInputSequence = -1L;
     inputHistory.clear();
@@ -527,8 +527,7 @@ public final class Phase8PredictionRunner {
           tick.known(),
           tick.exact(),
           tick.timingUncertain(),
-          packetSequenceGap,
-          false);
+          packetSequenceGap);
       trace.add("CLIENT_TICK " + tick.display()
           + " exact=" + tick.exact()
           + " source=" + tick.source()
@@ -537,7 +536,6 @@ public final class Phase8PredictionRunner {
           + " exact=" + tickReliability.exact()
           + " timingUncertain=" + tickReliability.timingUncertain()
           + " sequenceGap=" + tickReliability.sequenceGap()
-          + " historyTruncated=" + tickReliability.historyTruncated()
           + " reasons=" + tickReliability.reasons());
 
       InputConstraint tickInput = tick.known() && tick.clientTick() > 0L
@@ -757,7 +755,6 @@ public final class Phase8PredictionRunner {
       if (move.clientTick() != null && movementTiming != null) {
         trace.add("TIMING_GATE explicitRangeExhaustive=" + explicitTimingRangeExhaustive
             + " chronologyUnmodeled=" + phase7ChronologyUnmodeled
-            + " historyTruncated=false"
             + " simulationRange=" + movementTiming.simulationClientTicks()
             + " simulationCandidates=" + movementTiming.possibleSimulationClientTicks());
         trace.add("PHASE7_WINDOWS " + phase7TimingWindows(movementTiming));
