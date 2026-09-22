@@ -356,7 +356,6 @@ public final class Phase8PredictionRunner {
     Phase7Timing.Reconstruction phase7Reconstruction = reconstructPhase7Timing();
     Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence =
         phase7Reconstruction.bySequence();
-    rebuildCausalInputHistory(phase7TimingBySequence);
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     List<PredictionFrame> frames = new ArrayList<>();
     int movementObservations = 0;
@@ -3232,7 +3231,7 @@ public final class Phase8PredictionRunner {
       }
     }
 
-    reasons.add("persistent prediction advanced across causally assigned held-input chronologies");
+    reasons.add("persistent prediction advanced using Grim-style held input state");
     return new AdvanceResult(
         Set.copyOf(union), exhaustive, simulatedTicks,
         List.copyOf(reasons), List.copyOf(trace));
@@ -3444,30 +3443,21 @@ public final class Phase8PredictionRunner {
   }
 
   private List<InputConstraint> inputPossibilitiesForSimulationTick(
-      NavigableMap<Long, List<TimedInput>> history,
+      NavigableMap<Long, List<TimedInput>> ignoredHistory,
       long simulationTick,
       long targetTick,
       long movementSequence) {
-    if (simulationTick < 0L) return List.of(neutralInput);
-
-    LinkedHashSet<InputConstraint> options = new LinkedHashSet<>();
-    options.add(inputForSimulationTickExact(history, simulationTick, movementSequence));
-
     /*
-     * Grim's PacketPlayerSteer keeps the latest KnownInput as live client state
-     * and the prediction engine consumes that state when the movement packet is
-     * evaluated. A held input packet observed before this movement is therefore
-     * a valid final-tick alternative even when Phase 7 assigned its generation
-     * to a later absolute simulation tick. Do not apply this live overlay to
-     * historical ticks: only the final tick gets the packet-time evidence.
+     * Match Grim's PacketPlayerSteer: PLAYER_INPUT is a held state. The live
+     * prediction engine consumes the newest state observed before the movement
+     * packet instead of branching over every possible historical input tick.
      */
-    if (simulationTick == targetTick - 1L
-        && currentInputSequence >= 0L
-        && currentInputSequence <= movementSequence) {
-      options.add(currentInput);
+    if (simulationTick < 0L
+        || currentInputSequence < 0L
+        || currentInputSequence > movementSequence) {
+      return List.of(neutralInput);
     }
-
-    return List.copyOf(options);
+    return List.of(currentInput);
   }
 
   /**
@@ -3670,16 +3660,17 @@ public final class Phase8PredictionRunner {
   }
 
   private InputConstraint inputForSimulationTick(
-      NavigableMap<Long, List<TimedInput>> history,
+      NavigableMap<Long, List<TimedInput>> ignoredHistory,
       long simulationTick,
       long movementSequence) {
-    /*
-     * Bootstrap/reconstruction callers need the historical Phase 7 state only.
-     * The Grim latest-KnownInput overlay belongs exclusively to the live final
-     * prediction tick, where packet order proves that the state was observed
-     * before the movement packet.
-     */
-    return inputForSimulationTickExact(history, simulationTick, movementSequence);
+    // Grim treats PLAYER_INPUT as a held state. Use the latest packet that
+    // precedes this movement; historical tick assignments are not materialized.
+    if (simulationTick < 0L
+        || currentInputSequence < 0L
+        || currentInputSequence > movementSequence) {
+      return neutralInput;
+    }
+    return currentInput;
   }
 
   private static SearchResult uncertainSearch(Set<Candidate> candidates, String reason) {
