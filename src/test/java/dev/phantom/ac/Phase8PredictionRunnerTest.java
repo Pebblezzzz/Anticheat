@@ -1826,7 +1826,9 @@ class Phase8PredictionRunnerTest {
           sequence++, 100_000_000L,
           new ClientInput(true, false, false, false, false, false, false),
           Packets.CaptureProvenance.fromAdapter(
-              "test-input", null, 0L, 2L)));
+              "test-input",
+              new ClientInput(true, false, false, false, false, false, false),
+              0L)));
     }
 
     Move observed = new Move(start.position(), 0f, 0f, true, 3L);
