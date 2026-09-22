@@ -178,6 +178,13 @@ public final class Phase8PredictionRunner {
   private Player clientState;
   private InputConstraint currentInput;
   private long currentInputSequence = -1L;
+  /*
+   * Phase 7's possible simulation ticks for the newest held input. The live
+   * final-tick overlay may only use that input when this envelope contains the
+   * simulated tick, preventing packet receipt order from making the state
+   * retroactive.
+   */
+  private List<Long> currentInputPossibleSimulationTicks = List.of();
   private final NavigableMap<Long, List<TimedInput>> inputHistory = new TreeMap<>();
   private AuthorityAnchor latestAuthority;
   private Set<Candidate> prediction = Set.of();
@@ -273,6 +280,7 @@ public final class Phase8PredictionRunner {
         Phase8ClientModel.TickReliabilityState.assess(0L, false, false, true, false);
     currentInput = neutralInput;
     currentInputSequence = -1L;
+    currentInputPossibleSimulationTicks = List.of();
     inputHistory.clear();
     uncertainInputs.clear();
     ambiguousInputTimings.clear();
@@ -439,6 +447,11 @@ public final class Phase8PredictionRunner {
         // reconstructed by Phase 7 rather than guessed from packet arrival.
         currentInput = InputConstraint.fromClientInput(input);
         currentInputSequence = sequence;
+        Phase7Timing.EventTiming inputTiming = phase7TimingBySequence.get(sequence);
+        currentInputPossibleSimulationTicks =
+            inputTiming != null && Phase7Timing.inputTickEnumerationComplete(inputTiming)
+                ? alignClientTicks(Phase7Timing.possibleSimulationTicks(inputTiming))
+                : List.of();
         if (!prediction.isEmpty()) {
           Set<Candidate> updated = overlayClientInput(prediction, clientState, maximumCandidates);
           if (!updated.isEmpty()) prediction = updated;
@@ -3559,7 +3572,8 @@ public final class Phase8PredictionRunner {
      */
     if (simulationTick == targetTick - 1L
         && currentInputSequence >= 0L
-        && currentInputSequence <= movementSequence) {
+        && currentInputSequence <= movementSequence
+        && currentInputPossibleSimulationTicks.contains(simulationTick)) {
       options.add(currentInput);
     }
 
