@@ -243,7 +243,27 @@ public final class GrimPredictionEngine {
   private static boolean exhaustivelyEnumeratedInputEnvelope(
       SearchResult result,
       InputConstraint constraint) {
-    return constraint.isExact() && result.exhaustive();
+    if (result.verdict() != Phase6Reachability.Verdict.UNCERTAIN
+        || result.metrics().budgetReached()
+        || result.nonExhaustiveWorldBranches() != 0
+        || result.uncertainTransitions() != 0
+        || result.candidates().isEmpty()
+        || constraint.enumerate().isEmpty()) {
+      return false;
+    }
+    if (result.reasons().stream().anyMatch(reason ->
+        reason.contains("maximum ")
+            || reason.contains("world hypothesis")
+            || reason.contains("world ")
+            || reason.contains("Phase 5")
+            || reason.contains("physics")
+            || reason.contains("initial state carries explicit uncertainty")
+            || reason.contains("no deterministic candidate survived"))) {
+      return false;
+    }
+    return result.candidates().stream()
+        .allMatch(candidate -> candidate.context().uncertainty().stream()
+            .allMatch(dimension -> dimension == Phase6Reachability.UncertainDimension.INPUT));
   }
 
   private record MovementInputState(boolean sprinting, boolean sneaking) {}
