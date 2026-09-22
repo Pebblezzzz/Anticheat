@@ -540,7 +540,8 @@ public final class Phase8PredictionRunner {
           && observedBefore.onGround()
           && observedAfter.onGround();
       boolean observationOnlyMovement = move.position() == null || stationaryPositionObservation;
-      if (observationOnlyMovement && tick.timingUncertain()) {
+      if (observationOnlyMovement
+          && (tick.timingUncertain() || tick.chronologyUncertain())) {
         tick = tick.withTimingUncertaintyResolved(
             "observation-only movement does not advance client physics, so Phase 7 chronology uncertainty is not kinematic");
       }
@@ -787,6 +788,10 @@ public final class Phase8PredictionRunner {
             "Phase 7 contains unmodeled packet/external chronology that can affect this physics step");
         tick = tick.withChronologyUncertainty(
             "Phase 7 chronology remains uncertain even though the explicit client tick is exact");
+      }
+      if (inputChronologyUsesUnknownFallback) {
+        uncertaintySources.add(
+            "absolute client-tick origin is not recoverable from the truncated timing history");
       }
 
       if (move.clientTick() != null && movementTiming != null) {
