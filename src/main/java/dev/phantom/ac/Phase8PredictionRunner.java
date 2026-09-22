@@ -159,6 +159,7 @@ public final class Phase8PredictionRunner {
   private List<InputChronology> inputChronologies = List.of();
   private boolean inputChronologyEnumerationExhaustive = true;
   private InputConstraint carryInInput;
+  private boolean inputChronologyUsesUnknownFallback;
   /*
    * Phase 7 reconstructs relative client ticks from the retained timing window.
    * Once that bounded window truncates, its relative zero moves forward while
@@ -274,6 +275,7 @@ public final class Phase8PredictionRunner {
     inputChronologies = List.of();
     inputChronologyEnumerationExhaustive = true;
     carryInInput = neutralInput;
+    inputChronologyUsesUnknownFallback = false;
     clientTickOriginOffset = 0L;
     clientTickOriginKnown = false;
     timingHistory.clear();
@@ -769,7 +771,12 @@ public final class Phase8PredictionRunner {
           phase7TimingHasUnmodeledChronology(movementTiming);
       boolean explicitTimingFullyRepresented =
           explicitTimingRangeExhaustive
-              && !phase7ChronologyUnmodeled;
+              && !phase7ChronologyUnmodeled
+              && inputChronologyEnumerationExhaustive;
+      if (phase7ChronologyUnmodeled) {
+        uncertaintySources.add(
+            "Phase 7 contains unmodeled packet/external chronology that can affect this physics step");
+      }
 
       if (move.clientTick() != null && movementTiming != null) {
         trace.add("TIMING_GATE explicitRangeExhaustive=" + explicitTimingRangeExhaustive
@@ -1425,7 +1432,7 @@ public final class Phase8PredictionRunner {
        * history without making this packet's own simulation tick ambiguous.
        */
       return new TickResolution(
-          tick, true, true, timingUncertain, source, reason);
+          tick, true, true, false, source, reason);
     }
 
     /*
@@ -2993,6 +3000,11 @@ public final class Phase8PredictionRunner {
                   chronology.history(), simulationTick, targetTick, movementSequence);
 
           Candidate beforeCandidate = local.stream().findFirst().orElse(null);
+          if (beforeCandidate != null && inputChronologyUsesUnknownFallback
+              && simulationTick == Math.max(0L, targetTick - 1L)) {
+            trace.add("INPUT_CHRONOLOGY_FALLBACK mode=EXHAUSTIVE_ANY_STATE"
+                + " reason=timing-history-truncated-without-absolute-origin");
+          }
           if (beforeCandidate != null) {
             MovementEnvironment frontierEnvironment =
                 beforeCandidate.context().movementEnvironment();
@@ -3350,14 +3362,20 @@ public final class Phase8PredictionRunner {
     }
 
     reconstructClientTickOrigin(normalized, phase7TimingBySequence);
-    if (timingHistoryTruncated && !clientTickOriginKnown) {
-      /*
-       * Phase 7's bounded timing window has lost its absolute client-tick origin.
-       * The retained relative input chronology is still useful as evidence, but
-       * it is not an exhaustive absolute-tick model. Do not let explicit movement
-       * ticks promote that incomplete held-input history to IMPOSSIBLE.
-       */
-      inputChronologyEnumerationExhaustive = false;
+    boolean absoluteInputTickMappingKnown =
+        !timingHistoryTruncated || clientTickOriginKnown;
+    /*
+     * A truncated timing window may retain ClientInput packets whose relative
+     * ticks can no longer be mapped safely to the connection's absolute client
+     * clock. Never guess those assignments. Instead represent the missing
+     * held-input state with InputConstraint.any(), whose finite domain is fully
+     * enumerated by Phase 6. This makes the input dimension exhaustive without
+     * pretending that an evicted packet had a known timestamp.
+     */
+    inputChronologyUsesUnknownFallback = !absoluteInputTickMappingKnown;
+    if (inputChronologyUsesUnknownFallback) {
+      long markerSequence = Math.max(0L, currentInputSequence);
+      uncertainInputs.add(new UncertainInput(markerSequence, 0L));
     }
 
     List<InputEventAlternatives> exactEvents = new ArrayList<>();
@@ -3384,6 +3402,9 @@ public final class Phase8PredictionRunner {
       }
 
       InputConstraint constraint = InputConstraint.fromClientInput(input);
+      if (!absoluteInputTickMappingKnown) {
+        continue;
+      }
       if (!Phase7Timing.simulationTickEnumerationComplete(timing)) {
         long earliestClientTick = timing.inputClientTickEnvelope().known()
             ? alignClientTick(Math.max(0L, timing.inputClientTicks().min()))
@@ -3415,6 +3436,12 @@ public final class Phase8PredictionRunner {
      * events. Build full held-state chronologies so a later simulation tick
      * cannot combine mutually exclusive assignments from different alternatives.
      */
+    /*
+     * Any unresolved input state is deliberately represented as a finite
+     * InputConstraint.any() domain. If the branch budget is sufficient, the
+     * resulting physics search is exhaustive over the missing input values.
+     */
+    inputChronologyEnumerationExhaustive = true;
     List<NavigableMap<Long, List<TimedInput>>> chronologies = new ArrayList<>();
     chronologies.add(new TreeMap<>());
 
