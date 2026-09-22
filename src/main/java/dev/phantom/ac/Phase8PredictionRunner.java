@@ -3154,9 +3154,7 @@ public final class Phase8PredictionRunner {
                 + " startPos=" + beforeCandidate.context().player().position()
                 + " startVel=" + beforeCandidate.context().player().velocity()
                 + " startGround=" + beforeCandidate.context().player().onGround()
-                + " chronologyAlternatives=" + chronologies.size()
-                + " inputSelection=" + inputSelectionDebug(
-                    chronology.history(), simulationTick, movementSequence));
+                + " inputSelection=grim-held-state");
           }
 
           GrimPredictionEngine.TickResult engineResult = grimPredictionEngine.tick(
