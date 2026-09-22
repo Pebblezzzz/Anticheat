@@ -100,39 +100,18 @@ public final class Phase8PredictionRunner {
       Packets.PlayerContext context,
       boolean entityCollisionComplete) {}
 
-  private record TimedInput(
-      long sequence,
-      long clientTick,
-      InputConstraint constraint) {}
-
-  /*
-   * A ClientInput whose Phase 7 input-tick envelope could not be exhaustively
-   * materialized is still a real held-state transition. Keeping its sequence
-   * and earliest possible tick lets Phase 8 enumerate the safe finite input
-   * envelope instead of silently replacing that state with neutral input.
-   */
-  private record UncertainInput(long sequence, long earliestClientTick) {}
-
-  private record InputEventAlternatives(
+  private record HeldInputTransition(
       long sequence,
       InputConstraint constraint,
-      List<Long> possibleTicks) {
-    InputEventAlternatives {
+      long earliestSimulationTick,
+      long latestSimulationTick,
+      boolean exact) {
+    HeldInputTransition {
       if (sequence < 0L) throw new IllegalArgumentException("input sequence must be non-negative");
-      Objects.requireNonNull(constraint);
-      possibleTicks = List.copyOf(possibleTicks);
-    }
-  }
-
-  private record InputChronology(
-      NavigableMap<Long, List<TimedInput>> history) {
-    InputChronology {
-      Objects.requireNonNull(history);
-      NavigableMap<Long, List<TimedInput>> copy = new TreeMap<>();
-      for (var entry : history.entrySet()) {
-        copy.put(entry.getKey(), List.copyOf(entry.getValue()));
+      if (earliestSimulationTick < 0L || latestSimulationTick < earliestSimulationTick) {
+        throw new IllegalArgumentException("invalid held-input timing envelope");
       }
-      history = Collections.unmodifiableNavigableMap(copy);
+      Objects.requireNonNull(constraint);
     }
   }
 
@@ -163,15 +142,13 @@ public final class Phase8PredictionRunner {
   private final ArrayDeque<Packets.RawPacket> timingHistory = new ArrayDeque<>();
   private long timingEpochNanos = -1L;
   private final InputConstraint neutralInput;
-  private final List<UncertainInput> uncertainInputs = new ArrayList<>();
-  private List<InputChronology> inputChronologies = List.of();
+  private final List<HeldInputTransition> heldInputTransitions = new ArrayList<>();
   private Player initialAnchor;
   private long initialAnchorReceivedNanos = -1L;
 
   private Player clientState;
   private InputConstraint currentInput;
   private long currentInputSequence = -1L;
-  private final NavigableMap<Long, List<TimedInput>> inputHistory = new TreeMap<>();
   private AuthorityAnchor latestAuthority;
   private Set<Candidate> prediction = Set.of();
   private long predictionTick = -1L;
@@ -266,9 +243,7 @@ public final class Phase8PredictionRunner {
         Phase8ClientModel.TickReliabilityState.assess(0L, false, false, true, false);
     currentInput = neutralInput;
     currentInputSequence = -1L;
-    inputHistory.clear();
-    uncertainInputs.clear();
-    inputChronologies = List.of();
+    heldInputTransitions.clear();
 
 
     timingHistory.clear();
@@ -430,6 +405,8 @@ public final class Phase8PredictionRunner {
         // reconstructed by Phase 7 rather than guessed from packet arrival.
         currentInput = InputConstraint.fromClientInput(input);
         currentInputSequence = sequence;
+        rememberHeldInputTransition(
+            sequence, currentInput, phase7TimingBySequence.get(sequence));
         if (!prediction.isEmpty()) {
           Set<Candidate> updated = overlayClientInput(prediction, clientState, maximumCandidates);
           if (!updated.isEmpty()) prediction = updated;
@@ -545,8 +522,9 @@ public final class Phase8PredictionRunner {
           + " sequenceGap=" + tickReliability.sequenceGap()
           + " reasons=" + tickReliability.reasons());
 
-      // Grim's KnownInput is a single held-state value consumed by movement.
-      InputConstraint tickInput = currentInput;
+      long simulationInputTick = tick.known() ? Math.max(0L, tick.clientTick() - 1L) : -1L;
+      InputConstraint tickInput = heldInputOptionsForSimulationTick(
+          simulationInputTick, sequence).getFirst();
       trace.add("INPUT_STATE currentKeyState=" + currentInput
           + " simulationKeyState=" + tickInput
           + " simulationTick=" + (tick.known() ? Math.max(0L, tick.clientTick() - 1L) : -1L));
@@ -1085,7 +1063,6 @@ public final class Phase8PredictionRunner {
             prediction,
             earliestSimulationTick,
             latestSimulationTick,
-            inputChronologies,
             world,
             maximumCandidates,
             sequence,
@@ -1101,7 +1078,6 @@ public final class Phase8PredictionRunner {
             prediction,
             startTick,
             targetTick,
-            inputChronologies,
             world,
             maximumCandidates,
             sequence,
@@ -2135,8 +2111,8 @@ public final class Phase8PredictionRunner {
     }
 
     long simulationTick = tick.clientTick() - 1L;
-    // Grim's bootstrap path consumes the current held-state input as well.
-    InputConstraint input = currentInput;
+    InputConstraint input = heldInputOptionsForSimulationTick(
+        simulationTick, movementPacket.sequence()).getFirst();
     Optional<Simulation.AdvancedInput> keyInput =
         inputConstraintToAdvancedInput(input);
     if (keyInput.isEmpty()) return Optional.empty();
@@ -3006,7 +2982,6 @@ public final class Phase8PredictionRunner {
       Set<Candidate> start,
       long startTick,
       long targetTick,
-      List<InputChronology> inputChronologies,
       WorldSnapshot world,
       int maximumCandidates,
       long movementSequence,
@@ -3026,7 +3001,7 @@ public final class Phase8PredictionRunner {
           List.of("incremental prediction horizon exceeded"), List.of());
     }
     return advancePredictionToTarget(
-        start, targetTick, inputChronologies, world, maximumCandidates, movementSequence,
+        start, targetTick, world, maximumCandidates, movementSequence,
         actualMovementReference, lastOnGroundForPrediction, authoritativeMovementEnvironment);
   }
 
@@ -3034,7 +3009,6 @@ public final class Phase8PredictionRunner {
       Set<Candidate> start,
       long earliestTick,
       long latestTick,
-      List<InputChronology> inputChronologies,
       WorldSnapshot world,
       int maximumCandidates,
       long movementSequence,
@@ -3070,7 +3044,7 @@ public final class Phase8PredictionRunner {
 
     for (long target = earliestTick; target <= latestTick; target++) {
       AdvanceResult one = advancePredictionToTarget(
-          start, target, inputChronologies, world, maximumCandidates, movementSequence,
+          start, target, world, maximumCandidates, movementSequence,
           actualMovementReference, lastOnGroundForPrediction,
           authoritativeMovementEnvironment);
       union.addAll(one.candidates());
@@ -3099,7 +3073,6 @@ public final class Phase8PredictionRunner {
   private AdvanceResult advancePredictionToTarget(
       Set<Candidate> start,
       long targetTick,
-      List<InputChronology> inputChronologies,
       WorldSnapshot world,
       int maximumCandidates,
       long movementSequence,
@@ -3121,145 +3094,83 @@ public final class Phase8PredictionRunner {
     boolean exhaustive = true;
     int simulatedTicks = 0;
 
-    List<InputChronology> chronologies = inputChronologies.isEmpty()
-        ? List.of(new InputChronology(new TreeMap<>()))
-        : inputChronologies;
-
-    for (InputChronology chronology : chronologies) {
-      for (Candidate initial : start) {
-        long localTick = initial.context().simulationTick();
-        if (localTick > targetTick) {
-          reasons.add("candidate simulation tick " + localTick
-              + " is ahead of timing target " + targetTick);
-          continue;
+    for (Candidate initial : start) {
+      long localTick = initial.context().simulationTick();
+      if (localTick > targetTick) {
+        reasons.add("candidate simulation tick " + localTick
+            + " is ahead of timing target " + targetTick);
+        continue;
+      }
+      Set<Candidate> local = Set.of(initial);
+      while (localTick < targetTick) {
+        final long simulationTick = localTick;
+        List<InputConstraint> inputOptions =
+            heldInputOptionsForSimulationTick(simulationTick, movementSequence);
+        Candidate beforeCandidate = local.stream().findFirst().orElse(null);
+        if (beforeCandidate != null) {
+          MovementEnvironment frontierEnvironment =
+              beforeCandidate.context().movementEnvironment();
+          trace.add("SIM_INPUT_OPTIONS tick=" + simulationTick
+              + " keyOptions=" + inputOptions
+              + " physicalSprint=" + frontierEnvironment.sprinting()
+              + " physicalSneak=" + frontierEnvironment.sneaking()
+              + " startPos=" + beforeCandidate.context().player().position()
+              + " startVel=" + beforeCandidate.context().player().velocity()
+              + " startGround=" + beforeCandidate.context().player().onGround()
+              + " inputSelection=grim-held-state");
         }
-
-        Set<Candidate> local = Set.of(initial);
-        while (localTick < targetTick) {
-          final long simulationTick = localTick;
-          // Match Grim: simulated ticks consume the current held input state.
-          List<InputConstraint> inputOptions = List.of(currentInput);
-
-          Candidate beforeCandidate = local.stream().findFirst().orElse(null);
-          if (beforeCandidate != null) {
-            MovementEnvironment frontierEnvironment =
-                beforeCandidate.context().movementEnvironment();
-            trace.add("SIM_INPUT_OPTIONS tick=" + simulationTick
-                + " keyOptions=" + inputOptions
-                + " physicalSprint=" + frontierEnvironment.sprinting()
-                + " physicalSneak=" + frontierEnvironment.sneaking()
-                + " startPos=" + beforeCandidate.context().player().position()
-                + " startVel=" + beforeCandidate.context().player().velocity()
-                + " startGround=" + beforeCandidate.context().player().onGround()
-                + " inputSelection=grim-held-state");
-          }
-
-          GrimPredictionEngine.TickResult engineResult = grimPredictionEngine.tick(
-              local,
-              inputOptions,
-              world,
-              maximumCandidates,
-              movementSequence,
-              simulationTick,
-              targetTick,
-              actualMovementReference,
-              lastOnGroundForPrediction,
-              authoritativeMovementEnvironment);
-
-          trace.addAll(engineResult.trace());
-          LinkedHashSet<String> stepReasons = new LinkedHashSet<>(engineResult.reasons());
-          boolean stepExhaustive = engineResult.exhaustive();
-          Set<Candidate> stepCandidates = engineResult.candidates();
-
-          simulatedTicks++;
-          if (!stepExhaustive) {
-            reasons.addAll(stepReasons);
-            reasons.add("prediction step " + simulationTick
-                + " was not exhaustively modeled");
-            trace.add("SIM_STEP tick=" + simulationTick
-                + " exhaustive=false"
-                + " branchCandidates=" + stepCandidates.size()
-                + " reasons=" + stepReasons);
-            exhaustive = false;
-          }
-
-          if (stepCandidates.isEmpty()) {
-            local = Set.of();
-            break;
-          }
-
-          if (stepCandidates.size() > maximumCandidates) {
-            return new AdvanceResult(Set.of(), false, simulatedTicks,
-                List.of("prediction candidate budget exceeded across input chronologies"),
-                List.copyOf(trace));
-          }
-
-          /*
-           * Grim continues its possible-vector frontier after a non-exhaustive
-           * input/timing step. We cannot promote the result to POSSIBLE, but a
-           * non-empty modeled vector is still a valid causal state and must be
-           * carried into the next tick rather than freezing the parent frontier.
-           */
-          local = Set.copyOf(stepCandidates);
-          Candidate afterCandidate = local.stream().findFirst().orElse(null);
-          if (afterCandidate != null) {
-            MovementEnvironment resultEnvironment =
-                afterCandidate.context().movementEnvironment();
-            trace.add("SIM_STEP tick=" + simulationTick
-                + " exhaustive=true"
-                + " resultPos=" + afterCandidate.context().player().position()
-                + " resultVel=" + afterCandidate.context().player().velocity()
-                + " resultGround=" + afterCandidate.context().player().onGround()
-                + " resultPhysicalSprint=" + resultEnvironment.sprinting()
-                + " resultPhysicalSneak=" + resultEnvironment.sneaking());
-          }
-
-          localTick++;
+        GrimPredictionEngine.TickResult engineResult = grimPredictionEngine.tick(
+            local, inputOptions, world, maximumCandidates, movementSequence,
+            simulationTick, targetTick, actualMovementReference,
+            lastOnGroundForPrediction, authoritativeMovementEnvironment);
+        trace.addAll(engineResult.trace());
+        LinkedHashSet<String> stepReasons = new LinkedHashSet<>(engineResult.reasons());
+        boolean stepExhaustive = engineResult.exhaustive();
+        Set<Candidate> stepCandidates = engineResult.candidates();
+        simulatedTicks++;
+        if (!stepExhaustive) {
+          reasons.addAll(stepReasons);
+          reasons.add("prediction step " + simulationTick + " was not exhaustively modeled");
+          trace.add("SIM_STEP tick=" + simulationTick + " exhaustive=false"
+              + " branchCandidates=" + stepCandidates.size()
+              + " reasons=" + stepReasons);
+          exhaustive = false;
         }
-
-        union.addAll(local);
-        if (union.size() > maximumCandidates) {
+        if (stepCandidates.isEmpty()) {
+          local = Set.of();
+          break;
+        }
+        if (stepCandidates.size() > maximumCandidates) {
           return new AdvanceResult(Set.of(), false, simulatedTicks,
-              List.of("combined prediction candidate budget exceeded across input chronologies"),
+              List.of("prediction candidate budget exceeded in Grim-style prediction engine"),
               List.copyOf(trace));
         }
+        local = Set.copyOf(stepCandidates);
+        Candidate afterCandidate = local.stream().findFirst().orElse(null);
+        if (afterCandidate != null) {
+          MovementEnvironment resultEnvironment =
+              afterCandidate.context().movementEnvironment();
+          trace.add("SIM_STEP tick=" + simulationTick
+              + " exhaustive=" + stepExhaustive
+              + " resultPos=" + afterCandidate.context().player().position()
+              + " resultVel=" + afterCandidate.context().player().velocity()
+              + " resultGround=" + afterCandidate.context().player().onGround()
+              + " resultPhysicalSprint=" + resultEnvironment.sprinting()
+              + " resultPhysicalSneak=" + resultEnvironment.sneaking());
+        }
+        localTick++;
+      }
+      union.addAll(local);
+      if (union.size() > maximumCandidates) {
+        return new AdvanceResult(Set.of(), false, simulatedTicks,
+            List.of("combined prediction candidate budget exceeded across held-input simulation"),
+            List.copyOf(trace));
       }
     }
-
     reasons.add("persistent prediction advanced using Grim-style held input state");
     return new AdvanceResult(
         Set.copyOf(union), exhaustive, simulatedTicks,
         List.copyOf(reasons), List.copyOf(trace));
-  }
-
-  private String inputSelectionDebug(
-      NavigableMap<Long, List<TimedInput>> history,
-      long simulationTick,
-      long movementSequence) {
-    String selected = "selected=none";
-    if (!history.isEmpty()) {
-      outer:
-      for (var entry : history.headMap(simulationTick, true).descendingMap().entrySet()) {
-        for (TimedInput input : entry.getValue()) {
-          if (input.sequence() > movementSequence) continue;
-          selected = "selectedSeq=" + input.sequence()
-              + ",selectedTick=" + input.clientTick()
-              + ",selectedInput=" + input.constraint();
-          break outer;
-        }
-      }
-    }
-    StringBuilder uncertain = new StringBuilder();
-    for (UncertainInput input : uncertainInputs) {
-      if (input.sequence() > movementSequence || simulationTick < input.earliestClientTick()) continue;
-      if (uncertain.length() > 0) uncertain.append(';');
-      uncertain.append("seq=").append(input.sequence())
-          .append("@tick>=").append(input.earliestClientTick());
-    }
-    if (uncertain.length() > 0) {
-      selected += ",uncertainReplacements=" + uncertain;
-    }
-    return selected;
   }
 
   private static Set<Candidate> matchingCandidates(
@@ -3437,235 +3348,45 @@ public final class Phase8PredictionRunner {
         "prediction:flight:" + playerId + ":" + packet.sequence());
   }
 
-  private List<InputConstraint> inputPossibilitiesForSimulationTick(
-      NavigableMap<Long, List<TimedInput>> ignoredHistory,
-      long simulationTick,
-      long targetTick,
-      long movementSequence) {
-    /*
-     * Match Grim's PacketPlayerSteer: PLAYER_INPUT is a held state. The live
-     * prediction engine consumes the newest state observed before the movement
-     * packet instead of branching over every possible historical input tick.
-     */
-    if (simulationTick < 0L
-        || currentInputSequence < 0L
-        || currentInputSequence > movementSequence) {
-      return List.of(neutralInput);
+  private void rememberHeldInputTransition(
+      long sequence,
+      InputConstraint constraint,
+      Phase7Timing.EventTiming timing) {
+    if (timing == null) {
+      heldInputTransitions.add(new HeldInputTransition(
+          sequence, constraint, 0L, Long.MAX_VALUE, false));
+      return;
     }
-    return List.of(currentInput);
+    Phase7Timing.Range range = timing.simulationClientTicks();
+    long earliest = Math.max(0L, range.min());
+    long latest = range.max();
+    boolean exact = range.isExact()
+        && timing.simulationCandidatesExhaustive()
+        && !timing.uncertain();
+    heldInputTransitions.add(new HeldInputTransition(
+        sequence, constraint, earliest, latest, exact));
   }
 
-  /**
-   * Rebuild the live input history from the same Phase 7 timing reconstruction
-   * used by the causal offline pipeline. A packet is inserted at every client
-   * tick that Phase 7 exhaustively proves possible; raw packet arrival is never
-   * treated as the simulation tick.
-   */
-  private void rebuildCausalInputHistory(
-      Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
-    inputHistory.clear();
-    uncertainInputs.clear();
-    inputChronologies = List.of();
-
-    List<Packets.RawPacket> history = List.copyOf(timingHistory);
-    List<Packets.NormalizedPacket> normalized =
-        new Packets.Normalizer().normalize(history);
-    Map<Long, Packets.NormalizedPacket> normalizedBySequence = new HashMap<>();
-    for (Packets.NormalizedPacket packet : normalized) {
-      normalizedBySequence.put(packet.sequence(), packet);
-    }
-
-    List<InputEventAlternatives> exactEvents = new ArrayList<>();
-
-    for (Packets.RawPacket packet : history) {
-      if (!(packet.packet() instanceof Packets.ClientInput input)) continue;
-
-      Packets.NormalizedPacket canonical = normalizedBySequence.get(packet.sequence());
-      if (canonical == null
-          || canonical.flags().contains(Packets.PacketFlag.DUPLICATE)) {
-        continue;
-      }
-
-      if (canonical.flags().contains(Packets.PacketFlag.OUT_OF_ORDER)
-          || canonical.flags().contains(Packets.PacketFlag.SEQUENCE_GAP)) {
-        uncertainInputs.add(new UncertainInput(packet.sequence(), 0L));
-        continue;
-      }
-
-      Phase7Timing.EventTiming timing = phase7TimingBySequence.get(packet.sequence());
-      if (timing == null) {
-        uncertainInputs.add(new UncertainInput(packet.sequence(), 0L));
-        continue;
-      }
-
-      InputConstraint constraint = InputConstraint.fromClientInput(input);
-      if (!Phase7Timing.simulationTickEnumerationComplete(timing)) {
-        long earliestClientTick = timing.inputClientTickEnvelope().known()
-            ? alignClientTick(Math.max(0L, timing.inputClientTicks().min()))
-            : 0L;
-        uncertainInputs.add(new UncertainInput(
-            packet.sequence(), earliestClientTick));
-        continue;
-      }
-
-      /*
-       * For a held ClientInput state, the relevant timestamp for movement
-       * prediction is the simulation tick on which that state can begin taking
-       * effect. Phase 7 derives this separately from packet-generation time via
-       * the configured input-to-simulation delay.
-       */
-      List<Long> candidates = alignClientTicks(
-          Phase7Timing.possibleSimulationTicks(timing));
-      if (candidates.isEmpty()) {
-        uncertainInputs.add(new UncertainInput(packet.sequence(), 0L));
-        continue;
-      }
-
-      exactEvents.add(new InputEventAlternatives(
-          packet.sequence(), constraint, candidates));
-    }
-
-    /*
-     * Candidate ticks in one Phase 7 envelope are alternatives, not simultaneous
-     * events. Build causally ordered held-state chronologies so a later
-     * simulation tick cannot combine mutually exclusive assignments from
-     * different alternatives. There is deliberately no fixed Phase 8 chronology
-     * cutoff: the candidate budget is enforced by the prediction engine itself,
-     * while this layer preserves every timing-consistent input chronology.
-     */
-    List<NavigableMap<Long, List<TimedInput>>> chronologies = new ArrayList<>();
-    chronologies.add(new TreeMap<>());
-
-    for (InputEventAlternatives event : exactEvents) {
-      List<NavigableMap<Long, List<TimedInput>>> next = new ArrayList<>();
-
-      for (NavigableMap<Long, List<TimedInput>> chronology : chronologies) {
-        long minimumTick =
-            chronology.isEmpty() ? Long.MIN_VALUE : chronology.lastKey();
-
-        for (long clientTick : event.possibleTicks()) {
-          if (clientTick < minimumTick) continue;
-
-          NavigableMap<Long, List<TimedInput>> branch =
-              copyInputHistory(chronology);
-          branch.computeIfAbsent(clientTick, ignored -> new ArrayList<>())
-              .add(new TimedInput(
-                  event.sequence(), clientTick, event.constraint()));
-          next.add(branch);
+  private List<InputConstraint> heldInputOptionsForSimulationTick(
+      long simulationTick,
+      long movementSequence) {
+    if (simulationTick < 0L) return List.of(neutralInput);
+    InputConstraint selected = neutralInput;
+    for (HeldInputTransition transition : heldInputTransitions) {
+      if (transition.sequence() > movementSequence) break;
+      if (transition.exact()) {
+        if (transition.earliestSimulationTick() <= simulationTick) {
+          selected = transition.constraint();
         }
-
-      }
-
-      if (next.isEmpty()) {
-        long earliestClientTick = Math.max(
-            0L, event.possibleTicks().getFirst());
-        uncertainInputs.add(new UncertainInput(
-            event.sequence(), earliestClientTick));
         continue;
       }
-      chronologies = next;
-    }
-
-    inputChronologies = chronologies.stream()
-        .map(InputChronology::new)
-        .toList();
-
-    if (inputChronologies.isEmpty()) {
-      inputChronologies = List.of(new InputChronology(new TreeMap<>()));
-    }
-
-    inputHistory.putAll(copyInputHistory(
-        inputChronologies.getFirst().history()));
-  }
-
-  private long alignClientTick(long clientTick) {
-    return clientTick;
-  }
-
-  private List<Long> alignClientTicks(List<Long> clientTicks) {
-    return List.copyOf(clientTicks);
-  }
-
-  private static NavigableMap<Long, List<TimedInput>> copyInputHistory(
-      NavigableMap<Long, List<TimedInput>> source) {
-    NavigableMap<Long, List<TimedInput>> copy = new TreeMap<>();
-    for (var entry : source.entrySet()) {
-      copy.put(entry.getKey(), new ArrayList<>(entry.getValue()));
-    }
-    return copy;
-  }
-
-  private InputConstraint inputForSimulationTickExact(
-      NavigableMap<Long, List<TimedInput>> history,
-      long simulationTick,
-      long movementSequence) {
-    if (simulationTick < 0L) return neutralInput;
-
-    TimedInput selected = null;
-    if (!history.isEmpty()) {
-      for (var entry : history.headMap(simulationTick, true).descendingMap().entrySet()) {
-        for (TimedInput input : entry.getValue()) {
-          if (input.sequence() > movementSequence) break;
-          selected = input;
-        }
-        if (selected != null) break;
+      if (simulationTick < transition.earliestSimulationTick()) continue;
+      if (simulationTick <= transition.latestSimulationTick()) {
+        return List.of(InputConstraint.any());
       }
+      selected = transition.constraint();
     }
-
-    /*
-     * A later input update whose exact tick is not recoverable can already have
-     * replaced the selected held state. Keep that interval unconstrained rather
-     * than silently asserting the previous or neutral input.
-     */
-    for (UncertainInput input : uncertainInputs) {
-      if (input.sequence() > movementSequence) continue;
-      if (simulationTick < input.earliestClientTick()) continue;
-      if (selected == null || input.sequence() > selected.sequence()) {
-        return InputConstraint.any();
-      }
-    }
-
-    return selected == null ? neutralInput : selected.constraint();
-  }
-
-  private static boolean exhaustivelyEnumeratedInputEnvelope(
-      SearchResult result,
-      InputConstraint input) {
-    if (result.verdict() != Verdict.UNCERTAIN
-        || result.metrics().budgetReached()
-        || result.nonExhaustiveWorldBranches() != 0
-        || result.uncertainTransitions() != 0
-        || result.candidates().isEmpty()
-        || input.enumerate().isEmpty()) {
-      return false;
-    }
-    if (result.reasons().stream().anyMatch(reason ->
-        reason.contains("maximum ")
-            || reason.contains("world hypothesis")
-            || reason.contains("world ")
-            || reason.contains("Phase 5")
-            || reason.contains("physics")
-            || reason.contains("initial state carries explicit uncertainty")
-            || reason.contains("no deterministic candidate survived"))) {
-      return false;
-    }
-    return result.candidates().stream()
-        .allMatch(candidate -> candidate.context().uncertainty().stream()
-            .allMatch(dimension -> dimension == UncertainDimension.INPUT));
-  }
-
-  private InputConstraint inputForSimulationTick(
-      NavigableMap<Long, List<TimedInput>> ignoredHistory,
-      long simulationTick,
-      long movementSequence) {
-    // Grim treats PLAYER_INPUT as a held state. Use the latest packet that
-    // precedes this movement; historical tick assignments are not materialized.
-    if (simulationTick < 0L
-        || currentInputSequence < 0L
-        || currentInputSequence > movementSequence) {
-      return neutralInput;
-    }
-    return currentInput;
+    return List.of(selected);
   }
 
   private static SearchResult uncertainSearch(Set<Candidate> candidates, String reason) {
