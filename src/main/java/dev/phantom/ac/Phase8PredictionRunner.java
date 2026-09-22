@@ -931,12 +931,40 @@ public final class Phase8PredictionRunner {
             }
           }
           rememberObservedMovement(observedBefore, observedAfter, tick);
+
+          /*
+           * Preserve the bootstrap frontier for continuity, but carry the reason
+           * for an UNCERTAIN bootstrap into the candidate context. A bootstrap
+           * reproduces the current observation, yet its hidden state is not fully
+           * proven; the following packet must therefore not treat that candidate
+           * as a fully deterministic physics root.
+           */
+          if (result.verdict() == Phase8MovementValidation.Verdict.UNCERTAIN) {
+            Set<Phase6Reachability.UncertainDimension> dimensions =
+                EnumSet.noneOf(Phase6Reachability.UncertainDimension.class);
+            if (bootstrapGroundClaimMismatch) {
+              dimensions.add(Phase6Reachability.UncertainDimension.GROUND);
+            }
+            if (!bootstrapTimingExhaustive) {
+              dimensions.add(Phase6Reachability.UncertainDimension.TIMING);
+            }
+            if (dimensions.isEmpty()) {
+              dimensions.add(Phase6Reachability.UncertainDimension.VELOCITY);
+            }
+            prediction = markCandidatesUncertain(bootstrapCandidates, dimensions);
+            trace.add("FRONTIER_MARKED_UNCERTAIN source=CLIENT_MOVEMENT_BOOTSTRAP"
+                + " dimensions=" + dimensions
+                + " tick=" + tick.clientTick());
+          }
+
           trace.add("EVIDENCE POSSIBLE reason=CLIENT_MOVEMENT_BOOTSTRAP"
               + " reconstructedStartVelocityVerified=true"
               + " candidateLocomotionAlternatives=" + bootstrapCandidates.size()
-              + " timingExhaustive=" + bootstrapTimingExhaustive);
+              + " timingExhaustive=" + bootstrapTimingExhaustive
+              + " validationVerdict=" + result.verdict());
           trace.add("FRONTIER_BOOTSTRAPPED source=CLIENT_MOVEMENT_OBSERVATION"
-              + " tick=" + tick.clientTick());
+              + " tick=" + tick.clientTick()
+              + " retained=" + !prediction.isEmpty());
           frames.add(frame(
               sequence, packet, tick, move, observedBefore, observedAfter,
               predictedBefore, prediction, world, bootstrapUncertainty, trace));
@@ -3094,6 +3122,28 @@ public final class Phase8PredictionRunner {
     return new AdvanceResult(
         Set.copyOf(union), exhaustive, simulatedTicks,
         List.copyOf(reasons), List.copyOf(trace));
+  }
+
+  private static Set<Candidate> markCandidatesUncertain(
+      Set<Candidate> candidates,
+      Set<Phase6Reachability.UncertainDimension> dimensions) {
+    Set<Candidate> result = new LinkedHashSet<>();
+    for (Candidate candidate : candidates) {
+      result.add(new Candidate(
+          candidate.id(),
+          candidate.context().withUncertainty(
+              dimensions.toArray(Phase6Reachability.UncertainDimension[]::new)),
+          candidate.provenance(),
+          candidate.serverTickAssociation(),
+          candidate.timingReference(),
+          candidate.worldReference(),
+          candidate.worldKnowledge(),
+          candidate.movementMode(),
+          candidate.inputAssumption(),
+          candidate.transitionDiagnostics(),
+          candidate.entityCollisionReference()));
+    }
+    return Set.copyOf(result);
   }
 
   private AdvanceResult advancePredictionToTarget(
