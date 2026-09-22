@@ -741,11 +741,23 @@ public final class Phase6Reachability {
               boolean nextEnvironmentKnown =
                   nextSample.isDefinite()
                       && (!nextSample.inFluid() || nextSample.allFluidHeightsKnown());
+              /*
+               * Phase 5 has now produced the authoritative post-tick state for
+               * this candidate. Derive the next environment/pose from that state,
+               * while retaining the pre-tick physical locomotion state (sprint,
+               * sneak, vehicle, etc.) that is intentionally modeled separately.
+               * Mixing post-step player state with pre-step ground bookkeeping
+               * turns a landing into an airborne next tick.
+               */
+              Context postStep = new Context(
+                  tick + 1, stepped.state(), stepped.clientVelocityAfterTick(),
+                  pre.environment(), pre.attributes(), pre.effects(), stepped.state().pose(),
+                  pre.movementEnvironment(), pre.sleeping(), pre.entityCollisions(),
+                  stateUncertainty, pre.actualMovementReference(), stepped.state().onGround());
               MovementEnvironment nextEnvironment = nextEnvironmentKnown
-                  ? movementEnvironmentFor(nextSample, pre)
-                  : pre.movementEnvironment();
-              Pose nextPose = Phase5Mechanics.nextPose(
-                  pre.pose(), nextEnvironment, pre.sleeping());
+                  ? movementEnvironmentFor(nextSample, postStep)
+                  : withOnGround(pre.movementEnvironment(), stepped.state().onGround());
+              Pose nextPose = stepped.state().pose();
 
               Set<UncertainDimension> stateUncertainty = EnumSet.noneOf(UncertainDimension.class);
               stateUncertainty.addAll(pre.uncertainty());
@@ -773,7 +785,7 @@ public final class Phase6Reachability {
                   environmentFor(nextEnvironment),
                   pre.attributes(), pre.effects(), nextPose,
                   nextEnvironment, pre.sleeping(), pre.entityCollisions(),
-                  stateUncertainty, pre.actualMovementReference(), pre.lastOnGround());
+                  stateUncertainty, pre.actualMovementReference(), stepped.state().onGround());
 
               MovementMode mode = movementModeFor(after);
               Candidate newCandidate = new Candidate(
@@ -1219,6 +1231,23 @@ public final class Phase6Reachability {
             context.player().onGround(), sprint, sneak, false,
             gliding, 1.0, 1.0, 1.0),
         context.movementEnvironment().vehicle());
+  }
+
+  private static MovementEnvironment withOnGround(
+      MovementEnvironment environment, boolean onGround) {
+    return new MovementEnvironment(
+        environment.fluid(),
+        environment.submerged(),
+        environment.climbable(),
+        onGround,
+        environment.sprinting(),
+        environment.sneaking(),
+        environment.swimmingInput(),
+        environment.gliding(),
+        environment.fluidSpeedMultiplier(),
+        environment.fluidDrag(),
+        environment.gravityMultiplier(),
+        environment.vehicle());
   }
 
   private static MovementEnvironment withVehicle(
