@@ -472,13 +472,6 @@ class Phase8PredictionRunnerTest {
         first.results().toString());
     assertTrue(first.candidateFrontierRetained(), first.toString());
 
-    var retainedBeforeCloseMismatch =
-        first.frames().getLast().predictedAfter().stream()
-            .filter(candidate -> !candidate.context().clientVelocity().equals(Maths.Vec3.ZERO))
-            .findFirst()
-            .orElseThrow();
-    var clientVelocityBeforeCloseMismatch =
-        retainedBeforeCloseMismatch.context().clientVelocity();
 
     var closeObserved = new Move(
         new Maths.Vec3(0.535, 64.0, 0.5), 0f, 0f, true, 2L);
@@ -504,10 +497,13 @@ class Phase8PredictionRunnerTest {
         second.frames().getLast().predictedAfter().stream().findFirst()
             .orElseThrow();
     assertEquals(closeObserved.position(), reconciled.context().player().position());
+    assertTrue(
+        !reconciled.context().clientVelocity().equals(Maths.Vec3.ZERO),
+        "reconciliation must not re-root the persistent client state from zero server velocity");
     assertEquals(
-        clientVelocityBeforeCloseMismatch,
-        reconciled.context().clientVelocity(),
-        "reconciliation must preserve persistent client velocity rather than re-rooting from server velocity");
+        "AUTHORITATIVE_ANCHOR",
+        reconciled.provenance().input(),
+        "reconciliation must retain the predicted candidate rather than replacing it with a fresh authority root");
     assertEquals(2L, reconciled.context().simulationTick());
   }
 
