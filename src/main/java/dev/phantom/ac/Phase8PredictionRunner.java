@@ -2300,8 +2300,7 @@ public final class Phase8PredictionRunner {
             + " reconstructedStartVelocity=" + startVelocity.orElseThrow()
             + " authoritativeVelocity=" + authority.context().serverVelocity()
             + " input=" + advancedInput
-            + " inputSelection=" + inputSelectionDebug(
-                inputHistory, simulationTick, movementPacket.sequence())
+            + " inputSelection=grim-held-state"
             + " locomotion=" + locomotion
             + " physicalGround=" + physicalGround);
       }
