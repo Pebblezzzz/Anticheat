@@ -146,28 +146,16 @@ public final class Phase8PredictionRunner {
   private static final double POSITION_TOLERANCE = Phase6Reachability.POSITION_MATCH_TOLERANCE;
   private static final long MAX_INCREMENTAL_HORIZON = Phase6Reachability.MAX_HORIZON_TICKS;
   private static final long PREDICTION_RESYNC_LAG_TICKS = 2L;
-  private static final int MAX_TIMING_HISTORY_EVENTS = 512;
 
   private final int maximumCandidates;
   private final GrimPredictionEngine grimPredictionEngine = new GrimPredictionEngine();
   private final Phase7Timing.Config phase7TimingConfig;
   private final ArrayDeque<Packets.RawPacket> timingHistory = new ArrayDeque<>();
   private long timingEpochNanos = -1L;
-  private boolean timingHistoryTruncated;
   private final InputConstraint neutralInput;
   private final List<UncertainInput> uncertainInputs = new ArrayList<>();
   private List<InputChronology> inputChronologies = List.of();
   private boolean inputChronologyEnumerationExhaustive = true;
-  private InputConstraint carryInInput;
-  /*
-   * Phase 7 reconstructs relative client ticks from the retained timing window.
-   * Once that bounded window truncates, its relative zero moves forward while
-   * explicit Move.clientTick values remain absolute to the connection. Preserve
-   * the discovered origin so held-input events keep their causal absolute tick.
-   */
-  private long clientTickOriginOffset;
-  private boolean clientTickOriginKnown;
-
   private Player initialAnchor;
   private long initialAnchorReceivedNanos = -1L;
 
@@ -181,7 +169,7 @@ public final class Phase8PredictionRunner {
   private Phase8ClientModel.ClientPhysicsState clientPhysicsState;
   private Phase8ClientModel.CompensatedWorld compensatedWorld;
   private Phase8ClientModel.TickReliabilityState tickReliability =
-      Phase8ClientModel.TickReliabilityState.assess(0L, false, false, true, false, false);
+      Phase8ClientModel.TickReliabilityState.assess(0L, false, false, true, false);
   /*
    * An authoritative zero-delta witness proves the current observation but its
    * server velocity is not a client-tick physics state. Keep the physics
@@ -212,7 +200,7 @@ public final class Phase8PredictionRunner {
     this.neutralInput = InputConstraint.fromClientInput(
         new Packets.ClientInput(false, false, false, false, false, false, false));
     this.currentInput = neutralInput;
-    this.carryInInput = neutralInput;
+
   }
 
   public synchronized long lastProcessedSequence() {
@@ -266,19 +254,18 @@ public final class Phase8PredictionRunner {
     clientPhysicsState = Phase8ClientModel.ClientPhysicsState.initial(authoritativeAnchor);
     compensatedWorld = null;
     tickReliability =
-        Phase8ClientModel.TickReliabilityState.assess(0L, false, false, true, false, false);
+        Phase8ClientModel.TickReliabilityState.assess(0L, false, false, true, false);
     currentInput = neutralInput;
     currentInputSequence = -1L;
     inputHistory.clear();
     uncertainInputs.clear();
     inputChronologies = List.of();
     inputChronologyEnumerationExhaustive = true;
-    carryInInput = neutralInput;
-    clientTickOriginOffset = 0L;
-    clientTickOriginKnown = false;
+
+
     timingHistory.clear();
     timingEpochNanos = -1L;
-    timingHistoryTruncated = false;
+
     latestAuthority = null;
     prediction = Set.of();
     predictionTick = -1L;
@@ -351,9 +338,9 @@ public final class Phase8PredictionRunner {
     }
 
     /*
-     * Phase 7 is the sole live client/server timing authority. The history is
-     * bounded so timing reconstruction cannot grow without limit; a retained
-     * prefix can be truncated only at the cost of becoming conservative.
+     * Phase 7 is the sole live client/server timing authority. Preserve the
+     * complete connection chronology instead of imposing a second, artificial
+     * packet-history cutoff in Phase 8.
      */
     for (Packets.RawPacket packet : packets) {
       rememberTimingPacket(packet);
@@ -540,21 +527,15 @@ public final class Phase8PredictionRunner {
           tick.known(),
           tick.exact(),
           tick.timingUncertain(),
-          packetSequenceGap,
-          timingHistoryTruncated);
+          packetSequenceGap);
       trace.add("CLIENT_TICK " + tick.display()
           + " exact=" + tick.exact()
           + " source=" + tick.source()
           + " timingUncertain=" + tick.timingUncertain());
-      if (timingHistoryTruncated) {
-        trace.add("INPUT_TICK_ORIGIN known=" + clientTickOriginKnown
-            + " offset=" + clientTickOriginOffset);
-      }
       trace.add("TICK_RELIABILITY level=" + tickReliability.reliability()
           + " exact=" + tickReliability.exact()
           + " timingUncertain=" + tickReliability.timingUncertain()
           + " sequenceGap=" + tickReliability.sequenceGap()
-          + " historyTruncated=" + tickReliability.historyTruncated()
           + " reasons=" + tickReliability.reasons());
 
       InputConstraint tickInput = tick.known() && tick.clientTick() > 0L
@@ -774,7 +755,6 @@ public final class Phase8PredictionRunner {
       if (move.clientTick() != null && movementTiming != null) {
         trace.add("TIMING_GATE explicitRangeExhaustive=" + explicitTimingRangeExhaustive
             + " chronologyUnmodeled=" + phase7ChronologyUnmodeled
-            + " historyTruncated=" + timingHistoryTruncated
             + " simulationRange=" + movementTiming.simulationClientTicks()
             + " simulationCandidates=" + movementTiming.possibleSimulationClientTicks());
         trace.add("PHASE7_WINDOWS " + phase7TimingWindows(movementTiming));
@@ -1465,13 +1445,6 @@ public final class Phase8PredictionRunner {
   private void rememberTimingPacket(Packets.RawPacket packet) {
     if (timingEpochNanos < 0L) timingEpochNanos = packet.receivedNanos();
     timingHistory.addLast(packet);
-    while (timingHistory.size() > MAX_TIMING_HISTORY_EVENTS) {
-      Packets.RawPacket evicted = timingHistory.removeFirst();
-      if (evicted.packet() instanceof Packets.ClientInput input) {
-        carryInInput = InputConstraint.fromClientInput(input);
-      }
-      timingHistoryTruncated = true;
-    }
   }
 
   private Phase7Timing.Reconstruction reconstructPhase7Timing() {
@@ -3082,11 +3055,7 @@ public final class Phase8PredictionRunner {
 
     reasons.add("persistent prediction advanced across causally assigned held-input chronologies");
     if (!inputChronologyEnumerationExhaustive) {
-      if (timingHistoryTruncated && !clientTickOriginKnown) {
-        reasons.add("absolute client-tick origin is not recoverable from the truncated timing history");
-      } else {
-        reasons.add("causal input chronology combinations exceeded the bounded enumeration budget");
-      }
+      reasons.add("causal input chronology combinations exceeded the bounded enumeration budget");
     }
     return new AdvanceResult(
         Set.copyOf(union), exhaustive, simulatedTicks,
@@ -3109,9 +3078,6 @@ public final class Phase8PredictionRunner {
           break outer;
         }
       }
-    }
-    if ("selected=none".equals(selected) && carryInInput != null) {
-      selected = "selected=carry-in,selectedInput=" + carryInInput;
     }
     StringBuilder uncertain = new StringBuilder();
     for (UncertainInput input : uncertainInputs) {
@@ -3349,17 +3315,6 @@ public final class Phase8PredictionRunner {
       normalizedBySequence.put(packet.sequence(), packet);
     }
 
-    reconstructClientTickOrigin(normalized, phase7TimingBySequence);
-    if (timingHistoryTruncated && !clientTickOriginKnown) {
-      /*
-       * Phase 7's bounded timing window has lost its absolute client-tick origin.
-       * The retained relative input chronology is still useful as evidence, but
-       * it is not an exhaustive absolute-tick model. Do not let explicit movement
-       * ticks promote that incomplete held-input history to IMPOSSIBLE.
-       */
-      inputChronologyEnumerationExhaustive = false;
-    }
-
     List<InputEventAlternatives> exactEvents = new ArrayList<>();
 
     for (Packets.RawPacket packet : history) {
@@ -3471,286 +3426,19 @@ public final class Phase8PredictionRunner {
   }
 
   /**
-   * The bounded Phase 7 history has a moving relative tick origin. When the
+   * The complete Phase 7 connection history has a moving relative tick origin. When the
    * history is truncated, recover the absolute offset from the same relative
    * clock anchor and timing constraints Phase 7 used, using an explicit movement
    * tick as the absolute witness. This remains valid even when unrelated retained
    * packets arrived out of order; the clock anchor is reconstructed from canonical
    * timing rather than trusting a raw boundary count alone.
    */
-  private void reconstructClientTickOrigin(
-      List<Packets.NormalizedPacket> normalizedHistory,
-      Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
-    if (!timingHistoryTruncated && !clientTickOriginKnown) return;
-
-    List<Phase7Timing.EventTiming> canonicalTimings = phase7TimingBySequence.values().stream()
-        .sorted(Comparator.comparingInt(Phase7Timing.EventTiming::timelineIndex))
-        .toList();
-
-    OptionalLong ordinalOrigin = recoverClientTickOriginFromRetainedOrdinals(normalizedHistory);
-    if (ordinalOrigin.isPresent()) {
-      clientTickOriginOffset = ordinalOrigin.getAsLong();
-      clientTickOriginKnown = true;
-      return;
-    }
-
-    if (ordinalOrigin.isPresent()) {
-      clientTickOriginOffset = ordinalOrigin.getAsLong();
-      clientTickOriginKnown = true;
-      return;
-    }
-
-    OptionalLong anchorSequence = canonicalTimings.stream()
-        .filter(timing -> timing.kind() == Phase7Timing.EventKind.CLIENT_TICK_END
-            || timing.kind() == Phase7Timing.EventKind.INPUT
-            || timing.kind() == Phase7Timing.EventKind.MOVEMENT
-            || timing.kind() == Phase7Timing.EventKind.TELEPORT_ACK
-            || timing.kind() == Phase7Timing.EventKind.FLIGHT_TOGGLE)
-        .mapToLong(Phase7Timing.EventTiming::sequence)
-        .findFirst();
-    if (anchorSequence.isEmpty()) {
-      clientTickOriginKnown = false;
-      return;
-    }
-
-    long anchorSeq = anchorSequence.getAsLong();
-    Phase7Timing.EventTiming anchorTiming = phase7TimingBySequence.get(anchorSeq);
-    if (anchorTiming == null) {
-      clientTickOriginKnown = false;
-      return;
-    }
-
-    Phase7Timing.Range anchorTick;
-    if (anchorTiming.kind() == Phase7Timing.EventKind.CLIENT_TICK_END) {
-      anchorTick = Phase7Timing.Range.exact(1L);
-    } else if (anchorTiming.explicitClientTick().isPresent()) {
-      anchorTick = Phase7Timing.Range.exact(anchorTiming.explicitClientTick().getAsLong());
-      clientTickOriginOffset = 0L;
-      clientTickOriginKnown = true;
-      return;
-    } else {
-      anchorTick = Phase7Timing.Range.exact(0L);
-    }
-
-    List<RelativeClientBoundary> boundaries = new ArrayList<>();
-    long boundaryOrdinal = 0L;
-    for (Phase7Timing.EventTiming timing : canonicalTimings) {
-      if (timing.kind() != Phase7Timing.EventKind.CLIENT_TICK_END) continue;
-      boundaryOrdinal++;
-      boundaries.add(new RelativeClientBoundary(
-          boundaryOrdinal,
-          timing.packetGenerationNanos()));
-    }
-
-    Set<Long> possibleOffsets = null;
-    for (Packets.NormalizedPacket packet : normalizedHistory.stream()
-        .sorted(Comparator.comparingLong(Packets.NormalizedPacket::sequence))
-        .toList()) {
-      if (!(packet.packet() instanceof Packets.Move move)
-          || move.clientTick() == null
-          || packet.flags().contains(Packets.PacketFlag.DUPLICATE)) {
-        continue;
-      }
-
-      Phase7Timing.EventTiming timing = phase7TimingBySequence.get(packet.sequence());
-      if (timing == null) continue;
-
-      if (packet.sequence() == anchorSeq) {
-        long offset = move.clientTick() - anchorTick.min();
-        possibleOffsets = intersectOffsets(possibleOffsets, Set.of(offset));
-        continue;
-      }
-
-      Phase7Timing.Range relative = relativeClientTickRange(
-          timing.packetGenerationNanos(),
-          anchorTiming.packetGenerationNanos(),
-          anchorTick,
-          boundaries);
-      long cardinality = relative.cardinality();
-      if (cardinality == Long.MAX_VALUE
-          || cardinality > phase7TimingConfig.maxTimingCandidates()) {
-        continue;
-      }
-
-      LinkedHashSet<Long> offsets = new LinkedHashSet<>();
-      for (long candidate = relative.min(); ; candidate++) {
-        offsets.add(Math.subtractExact(move.clientTick(), candidate));
-        if (candidate == relative.max()) break;
-      }
-      possibleOffsets = intersectOffsets(possibleOffsets, offsets);
-    }
-
-    if (possibleOffsets != null && possibleOffsets.size() == 1) {
-      clientTickOriginOffset = possibleOffsets.iterator().next();
-      clientTickOriginKnown = true;
-    } else {
-      clientTickOriginKnown = false;
-    }
+  private long alignClientTick(long clientTick) {
+    return clientTick;
   }
 
-  private OptionalLong recoverClientTickOriginFromRetainedOrdinals(
-      List<Packets.NormalizedPacket> normalizedHistory) {
-    long boundaryOrdinal = 0L;
-    Long discoveredOffset = null;
-
-    for (Packets.NormalizedPacket packet : normalizedHistory.stream()
-        .sorted(Comparator.comparingLong(Packets.NormalizedPacket::sequence))
-        .toList()) {
-      Packets.Packet value = packet.packet();
-      boolean clientChronologyEvent =
-          value instanceof Packets.ClientTickEnd
-              || value instanceof Packets.ClientInput
-              || value instanceof Packets.Move
-              || value instanceof Packets.TeleportConfirm
-              || value instanceof Packets.WorldTransactionAck
-              || value instanceof Packets.FlightToggle;
-      if (!clientChronologyEvent || packet.flags().contains(Packets.PacketFlag.DUPLICATE)) {
-        continue;
-      }
-
-      /*
-       * The ordinal model is valid only when the retained client-originated
-       * chronology itself is clean. Reordering or sequence loss means the retained
-       * boundary count is not a trustworthy tick ordinal.
-       */
-      if (packet.flags().contains(Packets.PacketFlag.SEQUENCE_GAP)
-          || packet.flags().contains(Packets.PacketFlag.OUT_OF_ORDER)) {
-        return OptionalLong.empty();
-      }
-
-      if (value instanceof Packets.ClientTickEnd) {
-        boundaryOrdinal = Math.addExact(boundaryOrdinal, 1L);
-        continue;
-      }
-
-      if (value instanceof Packets.Move move && move.clientTick() != null) {
-        /*
-         * ClientTickTracker assigns the movement its completed CLIENT_TICK_END
-         * ordinal. A move before the first retained boundary is relative tick 0;
-         * a move after N retained boundaries is relative tick N.
-         */
-        long relativeTick = boundaryOrdinal;
-        long offset = Math.subtractExact(move.clientTick(), relativeTick);
-        if (discoveredOffset == null) {
-          discoveredOffset = offset;
-        } else if (discoveredOffset.longValue() != offset) {
-          return OptionalLong.empty();
-        }
-      }
-    }
-
-    /*
-     * Require multiple retained boundaries before using this ordinal shortcut.
-     * Sparse histories are delegated to the existing Phase 7 timing solver, which
-     * remains capable of recovering explicit ticks even with very few boundaries.
-     */
-    if (boundaryOrdinal < 2L || discoveredOffset == null) {
-      return OptionalLong.empty();
-    }
-    return OptionalLong.of(discoveredOffset);
-  }
-
-  private record RelativeClientBoundary(
-      long boundaryIndex,
-      Phase7Timing.TimeRange generationNanos) {}
-
-  private static Set<Long> intersectOffsets(Set<Long> current, Set<Long> next) {
-    if (current == null) return new LinkedHashSet<>(next);
-    LinkedHashSet<Long> intersection = new LinkedHashSet<>(current);
-    intersection.retainAll(next);
-    return intersection;
-  }
-
-  private Phase7Timing.Range relativeClientTickRange(
-      Phase7Timing.TimeRange eventGeneration,
-      Phase7Timing.TimeRange anchorGeneration,
-      Phase7Timing.Range anchorTick,
-      List<RelativeClientBoundary> boundaries) {
-    long deltaMin;
-    long deltaMax;
-    try {
-      deltaMin = Math.subtractExact(
-          eventGeneration.minNanos(), anchorGeneration.maxNanos());
-      deltaMax = Math.subtractExact(
-          eventGeneration.maxNanos(), anchorGeneration.minNanos());
-    } catch (ArithmeticException overflow) {
-      return new Phase7Timing.Range(Long.MAX_VALUE, Long.MAX_VALUE);
-    }
-
-    Phase7Timing.Range wall = new Phase7Timing.Range(
-        safeRelativeAdd(anchorTick.min(),
-            Math.floorDiv(deltaMin, phase7TimingConfig.clientTickMaxNanos())),
-        safeRelativeAdd(anchorTick.max(),
-            Math.floorDiv(deltaMax, phase7TimingConfig.clientTickMinNanos())));
-    long minimum = wall.min();
-    long maximum = wall.max();
-    boolean constrained = false;
-
-    for (RelativeClientBoundary boundary : boundaries) {
-      Phase7Timing.TimeRange generation = boundary.generationNanos();
-      if (eventGeneration.maxNanos() < generation.minNanos()) {
-        maximum = Math.min(
-            maximum,
-            Math.max(0L, boundary.boundaryIndex() - 1L));
-        constrained = true;
-      } else if (eventGeneration.minNanos() > generation.maxNanos()) {
-        minimum = Math.max(minimum, boundary.boundaryIndex());
-        constrained = true;
-        if (boundary.boundaryIndex() == boundaries.getLast().boundaryIndex()) {
-          long boundaryDeltaMax = safeRelativeAdd(
-              eventGeneration.maxNanos(), -generation.minNanos());
-          long elapsedTicks = Math.floorDiv(
-              Math.max(0L, boundaryDeltaMax), phase7TimingConfig.clientTickMinNanos());
-          maximum = Math.min(
-              maximum,
-              safeRelativeAdd(boundary.boundaryIndex(), elapsedTicks));
-        }
-      } else {
-        minimum = Math.max(
-            minimum,
-            Math.max(0L, boundary.boundaryIndex() - 1L));
-        maximum = Math.min(maximum, boundary.boundaryIndex());
-        constrained = true;
-      }
-    }
-
-    if (!constrained) return wall;
-    if (minimum > maximum) return new Phase7Timing.Range(minimum, minimum);
-    return new Phase7Timing.Range(minimum, maximum);
-  }
-
-  private static long safeRelativeAdd(long left, long right) {
-    try {
-      return Math.addExact(left, right);
-    } catch (ArithmeticException overflow) {
-      return right >= 0L ? Long.MAX_VALUE : Long.MIN_VALUE;
-    }
-  }
-
-  private long alignClientTick(long relativeTick) {
-    if (!clientTickOriginKnown || clientTickOriginOffset == 0L) return relativeTick;
-    try {
-      return Math.addExact(relativeTick, clientTickOriginOffset);
-    } catch (ArithmeticException overflow) {
-      clientTickOriginKnown = false;
-      return relativeTick;
-    }
-  }
-
-  private List<Long> alignClientTicks(List<Long> relativeTicks) {
-    if (relativeTicks.isEmpty() || !clientTickOriginKnown || clientTickOriginOffset == 0L) {
-      return List.copyOf(relativeTicks);
-    }
-    List<Long> aligned = new ArrayList<>(relativeTicks.size());
-    for (long tick : relativeTicks) {
-      try {
-        aligned.add(Math.addExact(tick, clientTickOriginOffset));
-      } catch (ArithmeticException overflow) {
-        clientTickOriginKnown = false;
-        return List.of();
-      }
-    }
-    return List.copyOf(aligned);
+  private List<Long> alignClientTicks(List<Long> clientTicks) {
+    return List.copyOf(clientTicks);
   }
 
   private static NavigableMap<Long, List<TimedInput>> copyInputHistory(
@@ -3792,12 +3480,7 @@ public final class Phase8PredictionRunner {
       }
     }
 
-    // A ClientInput evicted from the bounded timing history remains held until
-    // another input update replaces it. This is the carry-in state of the
-    // retained chronology and is more precise than resetting to neutral input.
-    return selected == null
-        ? (carryInInput == null ? neutralInput : carryInInput)
-        : selected.constraint();
+    return selected == null ? neutralInput : selected.constraint();
   }
 
   private static boolean exhaustivelyEnumeratedInputEnvelope(

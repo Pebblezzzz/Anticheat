@@ -56,19 +56,19 @@ final class Phase8ClientModelTest {
   void tickReliabilitySeparatesUnknownFromPartialTiming() {
     Phase8ClientModel.TickReliabilityState unknown =
         Phase8ClientModel.TickReliabilityState.assess(
-            0L, false, false, true, false, false);
+            0L, false, false, true, false);
     assertEquals(Phase8ClientModel.Reliability.UNRELIABLE, unknown.reliability());
     assertTrue(unknown.reasons().stream().anyMatch(r -> r.contains("not known")));
 
     Phase8ClientModel.TickReliabilityState partial =
         Phase8ClientModel.TickReliabilityState.assess(
-            8L, true, true, true, false, false);
+            8L, true, true, true, false);
     assertEquals(Phase8ClientModel.Reliability.PARTIAL, partial.reliability());
     assertTrue(partial.reasons().stream().anyMatch(r -> r.contains("timing reconstruction")));
 
     Phase8ClientModel.TickReliabilityState reliable =
         Phase8ClientModel.TickReliabilityState.assess(
-            9L, true, true, false, false, false);
+            9L, true, true, false, false);
     assertEquals(Phase8ClientModel.Reliability.RELIABLE, reliable.reliability());
     assertTrue(reliable.reasons().isEmpty());
   }
