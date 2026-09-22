@@ -144,6 +144,16 @@ public final class Phase8PredictionRunner {
   }
 
   private static final double POSITION_TOLERANCE = Phase6Reachability.POSITION_MATCH_TOLERANCE;
+  /*
+   * Phase 6 keeps its strict 0.01 block matching envelope. Phase 8 may only use
+   * this separate, twice-the-match-tolerance band for recovery after an
+   * exhaustive no-match, and the recovery is explicitly UNCERTAIN rather than
+   * POSSIBLE. This prevents a tiny collision/precision drift from poisoning the
+   * persistent client-velocity frontier without widening the actual reachability
+   * proof.
+   */
+  private static final double POSITION_RECONCILIATION_TOLERANCE =
+      POSITION_TOLERANCE * 2.0;
   private static final long MAX_INCREMENTAL_HORIZON = Phase6Reachability.MAX_HORIZON_TICKS;
   private static final long PREDICTION_RESYNC_LAG_TICKS = 2L;
 
@@ -1186,6 +1196,62 @@ public final class Phase8PredictionRunner {
             + " movementReachability=not-impossible");
       }
 
+      /*
+       * An exhaustive search can be kinematically complete without being a
+       * mathematically exact representation of every client/server collision
+       * boundary. Grim keeps the live client velocity and actual movement as
+       * separate state, so a tiny post-collision position delta must not be
+       * allowed to destroy the carried client-velocity frontier.
+       *
+       * This path does not weaken Phase 6 matching or turn the close candidate
+       * into a clean POSSIBLE result. It marks the observation UNCERTAIN and
+       * rebases the retained candidate to the observed position for the next
+       * client tick.
+       */
+      Optional<Candidate> reconciliation = Optional.empty();
+      if (fullMatches.isEmpty()
+          && !groundClaimMismatch
+          && uncertaintySources.isEmpty()) {
+        reconciliation = reconcileClosePredictionMismatch(
+            prediction, observedAfter, trace);
+      }
+      if (reconciliation.isPresent()) {
+        Candidate reconciled = reconciliation.orElseThrow();
+        prediction = Set.of(reconciled);
+        predictionTick = targetTick;
+        latestContinuation = Continuation.UNCERTAIN;
+        uncertaintySources.add(
+            "exhaustive prediction was within the Phase 8 position-reconciliation envelope but not the strict Phase 6 match tolerance");
+
+        SearchResult reconciliationSearch = new SearchResult(
+            Verdict.UNCERTAIN,
+            prediction,
+            advance.simulatedTicks(),
+            prediction.size(),
+            0, 0, 0, 0,
+            List.of(
+                "strict Phase 6 position matching failed",
+                "closest deterministic candidate remained within the bounded Phase 8 reconciliation envelope",
+                "client position was rebased while the persistent client velocity was retained"));
+        Phase8MovementValidation.Result result = validate(
+            playerId, packet, move, observedBefore, observedAfter, world,
+            tick, uncertaintySources, reconciliationSearch, false,
+            EnumSet.of(
+                Phase6Reachability.ObservedField.POSITION,
+                Phase6Reachability.ObservedField.ROTATION,
+                Phase6Reachability.ObservedField.GROUND));
+        results.add(result);
+        uncertain++;
+        rememberObservedMovement(observedBefore, observedAfter, tick);
+        trace.add("FRONTIER_RECONCILED reason=CLOSE_EXHAUSTIVE_MISMATCH"
+            + " targetTick=" + targetTick
+            + " retainedClientVelocity=" + reconciled.context().clientVelocity());
+        frames.add(frame(
+            sequence, packet, tick, move, observedBefore, observedAfter,
+            predictedBefore, prediction, world, uncertaintySources, trace));
+        continue;
+      }
+
       Optional<Candidate> inertialRecovery = Optional.empty();
       if (fullMatches.isEmpty() && !groundClaimMismatch) {
         inertialRecovery = recoverObservedInertialContinuation(
@@ -1775,6 +1841,76 @@ public final class Phase8PredictionRunner {
                 Math.abs(maximumSimulationTick - candidate.context().simulationTick()))
             .thenComparingDouble(candidate ->
                 positionDistanceSquared(candidate.context().player().position(), position)));
+  }
+
+  private static Optional<Candidate> reconcileClosePredictionMismatch(
+      Set<Candidate> candidates,
+      Player observedAfter,
+      List<String> trace) {
+    Candidate closest = candidates.stream()
+        .min(Comparator.comparingDouble(candidate ->
+            positionDistanceSquared(
+                candidate.context().player().position(),
+                observedAfter.position())))
+        .orElse(null);
+    if (closest == null) return Optional.empty();
+
+    double distance = Math.sqrt(positionDistanceSquared(
+        closest.context().player().position(),
+        observedAfter.position()));
+    if (!Double.isFinite(distance)
+        || distance <= POSITION_TOLERANCE
+        || distance > POSITION_RECONCILIATION_TOLERANCE) {
+      return Optional.empty();
+    }
+
+    Context old = closest.context();
+    Player oldPlayer = old.player();
+    Player rebasedPlayer = new Player(
+        observedAfter.position(),
+        oldPlayer.velocity(),
+        observedAfter.yaw(),
+        observedAfter.pitch(),
+        oldPlayer.onGround(),
+        oldPlayer.gamemode(),
+        oldPlayer.effects(),
+        oldPlayer.awaitingTeleport(),
+        oldPlayer.uncertain(),
+        oldPlayer.input(),
+        oldPlayer.attributes(),
+        oldPlayer.pose(),
+        oldPlayer.environment(),
+        observedAfter.clientTickRange(),
+        oldPlayer.provenance(),
+        oldPlayer.uncertaintyReasons());
+
+    Context rebasedContext = new Context(
+        old.simulationTick(),
+        rebasedPlayer,
+        old.clientVelocity(),
+        old.environment(),
+        old.attributes(),
+        old.effects(),
+        old.pose(),
+        old.movementEnvironment(),
+        old.sleeping(),
+        old.entityCollisions(),
+        old.uncertainty(),
+        null,
+        old.lastOnGround());
+
+    trace.add("CLOSE_MISMATCH candidate=" + closest.id()
+        + " distance=" + distance
+        + " strictTolerance=" + POSITION_TOLERANCE
+        + " reconciliationTolerance=" + POSITION_RECONCILIATION_TOLERANCE
+        + " oldPosition=" + oldPlayer.position()
+        + " observedPosition=" + observedAfter.position()
+        + " clientVelocity=" + old.clientVelocity());
+
+    return Optional.of(new Candidate(
+        closest.id(),
+        rebasedContext,
+        closest.provenance()));
   }
 
   private Optional<Candidate> recoverObservedInertialContinuation(

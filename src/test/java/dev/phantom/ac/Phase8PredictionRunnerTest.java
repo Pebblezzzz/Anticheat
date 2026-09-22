@@ -443,6 +443,71 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void closeExhaustiveMismatchReconcilesRetainedFrontierWithoutCascading() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    Player anchor = anchor();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        anchor.position(), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    var firstObserved = new Move(
+        new Maths.Vec3(0.510, 64.0, 0.5), 0f, 0f, true, 1L);
+
+    var first = runner.process(
+        "close-reconciliation",
+        List.of(
+            new RawPacket(1, 10L, authority),
+            new RawPacket(2, 20L, firstObserved)),
+        floorWorld(),
+        anchor,
+        0L);
+
+    assertEquals(1, first.movementObservations(), first.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        first.results().getFirst().verdict(),
+        first.results().toString());
+    assertTrue(first.candidateFrontierRetained(), first.toString());
+
+
+    var closeObserved = new Move(
+        new Maths.Vec3(0.535, 64.0, 0.5), 0f, 0f, true, 2L);
+
+    var second = runner.process(
+        "close-reconciliation",
+        List.of(new RawPacket(3, 30L, closeObserved)),
+        floorWorld(),
+        anchor,
+        0L);
+
+    assertEquals(1, second.movementObservations(), second.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.UNCERTAIN,
+        second.results().getFirst().verdict(),
+        second.results().toString());
+    assertTrue(second.candidateFrontierRetained(), second.toString());
+    assertTrue(second.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("FRONTIER_RECONCILED reason=CLOSE_EXHAUSTIVE_MISMATCH")),
+        second.frames().getLast().trace().toString());
+
+    var reconciled =
+        second.frames().getLast().predictedAfter().stream().findFirst()
+            .orElseThrow();
+    assertEquals(closeObserved.position(), reconciled.context().player().position());
+    assertTrue(
+        !reconciled.context().clientVelocity().equals(Maths.Vec3.ZERO),
+        "reconciliation must not re-root the persistent client state from zero server velocity");
+    assertNotEquals(
+        "AUTHORITATIVE_ANCHOR",
+        reconciled.provenance().input(),
+        "reconciliation must retain the predicted candidate rather than replacing it with a fresh authority root");
+    assertEquals(2L, reconciled.context().simulationTick());
+  }
+
+  @Test
   void impossibleObservationDoesNotPoisonNextFreshAuthoritativeObservation() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     Player anchor = anchor();
