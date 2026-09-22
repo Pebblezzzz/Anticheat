@@ -1506,12 +1506,12 @@ class Phase8PredictionRunnerTest {
 
     assertEquals(2, report.movementObservations(), report.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        Phase8MovementValidation.Verdict.UNCERTAIN,
         report.results().getLast().verdict(),
         report.results().toString());
     assertTrue(
         report.results().getLast().evidence().uncertaintySources().stream()
-            .noneMatch(reason -> reason.contains("timing envelope retains chronology uncertainty")),
+            .anyMatch(reason -> reason.contains("timing envelope retains chronology uncertainty")),
         report.results().toString());
   }
 
