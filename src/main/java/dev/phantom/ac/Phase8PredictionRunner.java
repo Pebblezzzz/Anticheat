@@ -768,17 +768,9 @@ public final class Phase8PredictionRunner {
        */
       if (move.position() != null) {
         AuthorityAnchor freshAuthority = freshCausalAuthority(packet);
-        boolean zeroPositionDelta =
-            positionExactlyMatches(observedBefore.position(), observedAfter.position());
-        boolean authorityMatchesObservedBefore =
-            freshAuthority != null
-                && positionsMatch(
-                    freshAuthority.context().serverPosition(),
-                    observedBefore.position())
-                && freshAuthority.context().movementEnvironment().onGround()
-                    == observedBefore.onGround();
-        if (zeroPositionDelta
-            && authorityMatchesObservedBefore
+        if (freshAuthority != null
+            && positionsMatch(freshAuthority.context().serverPosition(), observedAfter.position())
+            && freshAuthority.context().movementEnvironment().onGround() == observedAfter.onGround()
             && (move.onGround() == null
                 || move.onGround() == freshAuthority.context().movementEnvironment().onGround())) {
           Candidate witness = authoritativeObservationWitness(
@@ -942,6 +934,30 @@ public final class Phase8PredictionRunner {
               predictedBefore, prediction, world, bootstrapUncertainty, trace));
           continue;
         }
+      }
+
+      if (prediction.isEmpty()
+          && bootstrapRecoveryRequired
+          && tick.known()
+          && initialAnchor != null
+          && positionsMatch(initialAnchor.position(), observedBefore.position())) {
+        long recoveryRootTick = Math.max(0L, tick.clientTick() - 1L);
+        Player recoveryRoot = withClientRotation(
+            initialAnchor,
+            observedBefore.yaw(),
+            observedBefore.pitch());
+        prediction = Set.of(candidateFromPlayer(
+            recoveryRoot,
+            recoveryRootTick,
+            "INITIAL_AUTHORITATIVE_ANCHOR_RECOVERY",
+            -1L,
+            entityCollisions(latestAuthority)));
+        predictionTick = recoveryRootTick;
+        physicsFrontierSuppressedUntilPositionMovement = false;
+        latestContinuation = Continuation.ACTIVE;
+        trace.add("FRONTIER_RECOVERY source=INITIAL_AUTHORITATIVE_ANCHOR"
+            + " reason=client-movement-bootstrap-unavailable"
+            + " rootTick=" + recoveryRootTick);
       }
 
       if (prediction.isEmpty()) {
@@ -1956,15 +1972,33 @@ public final class Phase8PredictionRunner {
     AuthorityAnchor authority = freshCausalAuthority(movementPacket);
     if (authority == null) return Optional.empty();
 
-    if (!positionsMatch(authority.context().serverPosition(), observedBefore.position())) {
-      return Optional.empty();
+    boolean authorityMatchesObservedBefore =
+        positionsMatch(authority.context().serverPosition(), observedBefore.position());
+    if (!authorityMatchesObservedBefore) {
+      trace.add("BOOTSTRAP_AUTHORITY_SPATIAL_MISMATCH"
+          + " authorityPosition=" + authority.context().serverPosition()
+          + " observedBefore=" + observedBefore.position()
+          + " using-authority-for-dynamic-state=true");
     }
 
     Optional<Candidate> physicalBeforeCandidate =
         physicalCandidateAtObservedPosition(observedBefore.position(), tick.clientTick() - 1L);
-    boolean physicalGround = physicalBeforeCandidate
-        .map(candidate -> candidate.context().player().onGround())
-        .orElse(authority.context().movementEnvironment().onGround());
+
+    LinkedHashSet<Boolean> physicalGroundOptions = new LinkedHashSet<>();
+    if (physicalBeforeCandidate.isPresent()) {
+      physicalGroundOptions.add(
+          physicalBeforeCandidate.orElseThrow().context().player().onGround());
+    } else if (authorityMatchesObservedBefore) {
+      physicalGroundOptions.add(authority.context().movementEnvironment().onGround());
+    } else {
+      /*
+       * After an observation witness clears the physics frontier, neither the
+       * client ground claim nor a post-movement authority sample is atomic
+       * physical state. Enumerate both bounded physical-ground possibilities.
+       */
+      physicalGroundOptions.add(false);
+      physicalGroundOptions.add(true);
+    }
 
     long simulationTick = tick.clientTick() - 1L;
     InputConstraint input = inputForSimulationTick(
@@ -1994,15 +2028,16 @@ public final class Phase8PredictionRunner {
         observedAfter.position().z() - observedBefore.position().z());
 
     Set<Candidate> candidates = new LinkedHashSet<>();
-    for (MovementInputState locomotion : locomotionOptions) {
-      MovementEnvironment environment = preserveClientLocomotionState(
-          physicalBeforeCandidate
-              .map(candidate -> candidate.context().movementEnvironment())
-              .orElse(authorityEnvironment),
-          withVehicle(authorityEnvironment, authority.context().vehicleState()),
-          physicalGround);
-      environment = withLocomotionState(
-          environment, locomotion.sprinting(), locomotion.sneaking());
+    for (boolean physicalGround : physicalGroundOptions) {
+      for (MovementInputState locomotion : locomotionOptions) {
+        MovementEnvironment environment = preserveClientLocomotionState(
+            physicalBeforeCandidate
+                .map(candidate -> candidate.context().movementEnvironment())
+                .orElse(authorityEnvironment),
+            withVehicle(authorityEnvironment, authority.context().vehicleState()),
+            physicalGround);
+        environment = withLocomotionState(
+            environment, locomotion.sprinting(), locomotion.sneaking());
       Simulation.AdvancedInput advancedInput = new Simulation.AdvancedInput(
           keyState.forward(),
           keyState.strafe(),
@@ -2125,14 +2160,16 @@ public final class Phase8PredictionRunner {
           EntityCollisions.of(authority.context().entityBoxes()),
           environment,
           step.clientVelocityAfterTick()));
-      trace.add("BOOTSTRAP_START simulationTick=" + simulationTick
-          + " observedDelta=" + observedDelta
-          + " reconstructedStartVelocity=" + startVelocity.orElseThrow()
-          + " authoritativeVelocity=" + authority.context().serverVelocity()
-          + " input=" + advancedInput
-          + " inputSelection=" + inputSelectionDebug(
-              inputHistory, simulationTick, movementPacket.sequence())
-          + " locomotion=" + locomotion);
+        trace.add("BOOTSTRAP_START simulationTick=" + simulationTick
+            + " observedDelta=" + observedDelta
+            + " reconstructedStartVelocity=" + startVelocity.orElseThrow()
+            + " authoritativeVelocity=" + authority.context().serverVelocity()
+            + " input=" + advancedInput
+            + " inputSelection=" + inputSelectionDebug(
+                inputHistory, simulationTick, movementPacket.sequence())
+            + " locomotion=" + locomotion
+            + " physicalGround=" + physicalGround);
+      }
     }
 
     return candidates.isEmpty() ? Optional.empty() : Optional.of(Set.copyOf(candidates));
