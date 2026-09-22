@@ -827,30 +827,9 @@ public final class Phase8PredictionRunner {
         uncertaintySources.add(tick.uncertaintyReason());
       }
 
-      if (prediction.isEmpty()) {
-        uncertaintySources.add("persistent prediction frontier is not anchored to an authoritative or correction state");
-        latestContinuation = Continuation.UNCERTAIN;
-        SearchResult search = uncertainSearch(prediction, String.join("; ", uncertaintySources));
-        Phase8MovementValidation.Result result = validate(
-            playerId, packet, move, observedBefore, observedAfter, world,
-            tick, uncertaintySources, search, false);
-        results.add(result);
-        uncertain++;
-        frames.add(frame(
-            sequence, packet, tick, move, observedBefore, observedAfter,
-            predictedBefore, prediction, world, uncertaintySources, trace));
-        continue;
-      }
-
       SpatialRebaseResult spatialRebase = rebasePredictionToObservedBefore(
           prediction, observedBefore, tick, trace);
       prediction = spatialRebase.candidates();
-
-      Set<Candidate> withEntities =
-          overlayEntityCollisions(prediction, entityCollisions(latestAuthority), maximumCandidates);
-      if (!withEntities.isEmpty()) prediction = withEntities;
-      Set<Candidate> withRotation = retargetRotation(prediction, move, maximumCandidates);
-      if (!withRotation.isEmpty()) prediction = withRotation;
 
       /*
        * Grim keeps a client-side movement velocity separate from the server's
@@ -957,6 +936,27 @@ public final class Phase8PredictionRunner {
           continue;
         }
       }
+
+      if (prediction.isEmpty()) {
+        uncertaintySources.add("persistent prediction frontier is not anchored to an authoritative or correction state");
+        latestContinuation = Continuation.UNCERTAIN;
+        SearchResult search = uncertainSearch(prediction, String.join("; ", uncertaintySources));
+        Phase8MovementValidation.Result result = validate(
+            playerId, packet, move, observedBefore, observedAfter, world,
+            tick, uncertaintySources, search, false);
+        results.add(result);
+        uncertain++;
+        frames.add(frame(
+            sequence, packet, tick, move, observedBefore, observedAfter,
+            predictedBefore, prediction, world, uncertaintySources, trace));
+        continue;
+      }
+
+      Set<Candidate> withEntities =
+          overlayEntityCollisions(prediction, entityCollisions(latestAuthority), maximumCandidates);
+      if (!withEntities.isEmpty()) prediction = withEntities;
+      Set<Candidate> withRotation = retargetRotation(prediction, move, maximumCandidates);
+      if (!withRotation.isEmpty()) prediction = withRotation;
 
       if (!tick.exact()) {
         uncertaintySources.add("movement timing is not exact; the persistent predictor requires a bounded client-tick state");
