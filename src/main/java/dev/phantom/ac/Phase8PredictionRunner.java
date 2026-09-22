@@ -105,6 +105,12 @@ public final class Phase8PredictionRunner {
       long clientTick,
       InputConstraint constraint) {}
 
+  private record InputTimingAlternative(
+      long sequence,
+      InputConstraint constraint,
+      long earliestTick,
+      long latestTick) {}
+
   /*
    * A ClientInput whose Phase 7 input-tick envelope could not be exhaustively
    * materialized is still a real held-state transition. Keeping its sequence
@@ -164,6 +170,7 @@ public final class Phase8PredictionRunner {
   private long timingEpochNanos = -1L;
   private final InputConstraint neutralInput;
   private final List<UncertainInput> uncertainInputs = new ArrayList<>();
+  private final List<InputTimingAlternative> ambiguousInputTimings = new ArrayList<>();
   private List<InputChronology> inputChronologies = List.of();
   private Player initialAnchor;
   private long initialAnchorReceivedNanos = -1L;
@@ -268,6 +275,7 @@ public final class Phase8PredictionRunner {
     currentInputSequence = -1L;
     inputHistory.clear();
     uncertainInputs.clear();
+    ambiguousInputTimings.clear();
     inputChronologies = List.of();
 
 
@@ -356,6 +364,7 @@ public final class Phase8PredictionRunner {
     Phase7Timing.Reconstruction phase7Reconstruction = reconstructPhase7Timing();
     Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence =
         phase7Reconstruction.bySequence();
+    rebuildLinearCausalInputHistory(phase7TimingBySequence);
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     List<PredictionFrame> frames = new ArrayList<>();
     int movementObservations = 0;
@@ -545,8 +554,9 @@ public final class Phase8PredictionRunner {
           + " sequenceGap=" + tickReliability.sequenceGap()
           + " reasons=" + tickReliability.reasons());
 
-      // Grim's KnownInput is a single held-state value consumed by movement.
-      InputConstraint tickInput = currentInput;
+      InputConstraint tickInput = tick.known() && tick.clientTick() > 0L
+          ? inputForSimulationTick(inputHistory, tick.clientTick() - 1L, sequence)
+          : currentInput;
       trace.add("INPUT_STATE currentKeyState=" + currentInput
           + " simulationKeyState=" + tickInput
           + " simulationTick=" + (tick.known() ? Math.max(0L, tick.clientTick() - 1L) : -1L));
@@ -2163,8 +2173,8 @@ public final class Phase8PredictionRunner {
     }
 
     long simulationTick = tick.clientTick() - 1L;
-    // Grim's bootstrap path consumes the current held-state input as well.
-    InputConstraint input = currentInput;
+    InputConstraint input = inputForSimulationTick(
+        inputHistory, simulationTick, movementPacket.sequence());
     Optional<Simulation.AdvancedInput> keyInput =
         inputConstraintToAdvancedInput(input);
     if (keyInput.isEmpty()) return Optional.empty();
@@ -3187,8 +3197,8 @@ public final class Phase8PredictionRunner {
         Set<Candidate> local = Set.of(initial);
         while (localTick < targetTick) {
           final long simulationTick = localTick;
-          // Match Grim: simulated ticks consume the current held input state.
-          List<InputConstraint> inputOptions = List.of(currentInput);
+          List<InputConstraint> inputOptions = inputPossibilitiesForSimulationTick(
+              inputHistory, simulationTick, targetTick, movementSequence);
 
           Candidate beforeCandidate = local.stream().findFirst().orElse(null);
           if (beforeCandidate != null) {
@@ -3488,21 +3498,159 @@ public final class Phase8PredictionRunner {
   }
 
   private List<InputConstraint> inputPossibilitiesForSimulationTick(
-      NavigableMap<Long, List<TimedInput>> ignoredHistory,
+      NavigableMap<Long, List<TimedInput>> history,
       long simulationTick,
       long targetTick,
       long movementSequence) {
-    /*
-     * Match Grim's PacketPlayerSteer: PLAYER_INPUT is a held state. The live
-     * prediction engine consumes the newest state observed before the movement
-     * packet instead of branching over every possible historical input tick.
-     */
-    if (simulationTick < 0L
-        || currentInputSequence < 0L
-        || currentInputSequence > movementSequence) {
-      return List.of(neutralInput);
+    if (simulationTick < 0L) return List.of(neutralInput);
+
+    LinkedHashSet<InputConstraint> options = new LinkedHashSet<>();
+    TimedInput selected = latestTimedInput(history, simulationTick, movementSequence);
+    if (selected != null) {
+      options.add(selected.constraint());
+
+      /*
+       * A ClientInput whose Phase 7 input timing can land on more than one tick
+       * is a transition boundary, not a single historical fact. Keep the state
+       * immediately before that transition as a second alternative at the
+       * boundary. This is linear and lets the existing Phase 6 candidate frontier
+       * carry the ambiguity instead of building every input chronology up front.
+       */
+      if (ambiguousInputTimingAt(selected.sequence(), simulationTick, movementSequence)) {
+        options.add(inputBeforeSequence(
+            history, simulationTick, selected.sequence(), movementSequence));
+      }
     }
-    return List.of(currentInput);
+
+    for (UncertainInput input : uncertainInputs) {
+      if (input.sequence() > movementSequence || simulationTick < input.earliestClientTick()) {
+        continue;
+      }
+      TimedInput latest = latestTimedInput(history, simulationTick, movementSequence);
+      if (latest == null || input.sequence() > latest.sequence()) {
+        options.add(InputConstraint.any());
+      }
+    }
+
+    if (options.isEmpty()) return List.of(neutralInput);
+    return List.copyOf(options);
+  }
+
+  private TimedInput latestTimedInput(
+      NavigableMap<Long, List<TimedInput>> history,
+      long simulationTick,
+      long movementSequence) {
+    if (history.isEmpty()) return null;
+    for (var entry : history.headMap(simulationTick, true).descendingMap().entrySet()) {
+      for (TimedInput input : entry.getValue()) {
+        if (input.sequence() > movementSequence) continue;
+        return input;
+      }
+    }
+    return null;
+  }
+
+  private boolean ambiguousInputTimingAt(
+      long sequence,
+      long simulationTick,
+      long movementSequence) {
+    if (sequence > movementSequence) return false;
+    for (InputTimingAlternative timing : ambiguousInputTimings) {
+      if (timing.sequence() == sequence
+          && simulationTick >= timing.earliestTick()
+          && simulationTick <= timing.latestTick()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private InputConstraint inputBeforeSequence(
+      NavigableMap<Long, List<TimedInput>> history,
+      long simulationTick,
+      long sequence,
+      long movementSequence) {
+    if (!history.isEmpty()) {
+      for (var entry : history.headMap(simulationTick, true).descendingMap().entrySet()) {
+        for (TimedInput input : entry.getValue()) {
+          if (input.sequence() >= sequence || input.sequence() > movementSequence) continue;
+          return input.constraint();
+        }
+      }
+    }
+    return neutralInput;
+  }
+
+  /**
+   * Build a flat causal held-input history.
+   *
+   * Each packet contributes only its own possible effect ticks. We intentionally
+   * do not construct packet-to-tick Cartesian products.
+   */
+  private void rebuildLinearCausalInputHistory(
+      Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
+    inputHistory.clear();
+    uncertainInputs.clear();
+    ambiguousInputTimings.clear();
+
+    List<Packets.RawPacket> history = List.copyOf(timingHistory);
+    List<Packets.NormalizedPacket> normalized =
+        new Packets.Normalizer().normalize(history);
+    Map<Long, Packets.NormalizedPacket> normalizedBySequence = new HashMap<>();
+    for (Packets.NormalizedPacket packet : normalized) {
+      normalizedBySequence.put(packet.sequence(), packet);
+    }
+
+    for (Packets.RawPacket packet : history) {
+      if (!(packet.packet() instanceof Packets.ClientInput input)) continue;
+
+      Packets.NormalizedPacket canonical = normalizedBySequence.get(packet.sequence());
+      if (canonical == null
+          || canonical.flags().contains(Packets.PacketFlag.DUPLICATE)
+          || canonical.flags().contains(Packets.PacketFlag.OUT_OF_ORDER)
+          || canonical.flags().contains(Packets.PacketFlag.SEQUENCE_GAP)) {
+        uncertainInputs.add(new UncertainInput(packet.sequence(), 0L));
+        continue;
+      }
+
+      Phase7Timing.EventTiming timing = phase7TimingBySequence.get(packet.sequence());
+      if (timing == null) {
+        uncertainInputs.add(new UncertainInput(packet.sequence(), 0L));
+        continue;
+      }
+
+      InputConstraint constraint = InputConstraint.fromClientInput(input);
+      if (!Phase7Timing.inputTickEnumerationComplete(timing)) {
+        long earliest = timing.inputClientTickEnvelope().known()
+            ? alignClientTick(Math.max(0L, timing.inputClientTicks().min()))
+            : 0L;
+        uncertainInputs.add(new UncertainInput(packet.sequence(), earliest));
+        continue;
+      }
+
+      List<Long> ticks = alignClientTicks(Phase7Timing.possibleInputTicks(timing));
+      if (ticks.isEmpty()) {
+        uncertainInputs.add(new UncertainInput(packet.sequence(), 0L));
+        continue;
+      }
+
+      for (long tick : ticks) {
+        inputHistory.computeIfAbsent(tick, ignored -> new ArrayList<>())
+            .add(new TimedInput(packet.sequence(), tick, constraint));
+      }
+
+      if (ticks.size() > 1) {
+        ambiguousInputTimings.add(new InputTimingAlternative(
+            packet.sequence(),
+            constraint,
+            ticks.getFirst(),
+            ticks.getLast()));
+      }
+    }
+
+    for (List<TimedInput> inputs : inputHistory.values()) {
+      inputs.sort(Comparator.comparingLong(TimedInput::sequence));
+    }
   }
 
   /**
@@ -3515,6 +3663,7 @@ public final class Phase8PredictionRunner {
       Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
     inputHistory.clear();
     uncertainInputs.clear();
+    ambiguousInputTimings.clear();
     inputChronologies = List.of();
 
     List<Packets.RawPacket> history = List.copyOf(timingHistory);
