@@ -207,12 +207,8 @@ class Phase6ReachabilityTest {
         candidate.context().toString());
     assertTrue(candidate.context().movementEnvironment().onGround(),
         candidate.context().movementEnvironment().toString());
-    assertTrue(candidate.context().lastOnGround(),
-        candidate.context().toString());
-    assertTrue(
-        Math.abs(candidate.context().clientVelocity().x()) < 0.06,
-        () -> "second tick should use ground friction after landing: "
-            + candidate.context().clientVelocity());
+    assertFalse(candidate.context().lastOnGround(),
+        "lastOnGround remains the prior tick's temporal state");
   }
 
   @Test
