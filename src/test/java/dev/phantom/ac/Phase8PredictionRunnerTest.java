@@ -429,6 +429,74 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void latestHeldInputIsNotAppliedBeforeItsPhase7SimulationTick() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+
+    Player start = new Player(
+        new Maths.Vec3(.5, 70.0, .5),
+        new Maths.Vec3(.2, 0.0, 0.0),
+        0f, 0f, false, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
+
+    MovementEnvironment environment = MovementEnvironment.dry(false, false, false);
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(), Pose.STANDING, environment,
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    Player neutralNext = new Vanilla12111RichPhysics().step(
+        new Vanilla12111RichPhysics.Context(
+            0L,
+            start,
+            new Simulation.AdvancedInput(0, 0, false, false, false),
+            world,
+            Simulation.Environment.DRY,
+            start.attributes(),
+            Phase5Mechanics.MovementEffects.NONE,
+            Pose.STANDING,
+            environment,
+            false,
+            EntityCollisions.of(List.of()))).state();
+
+    var report = runner.process(
+        "causal-final-input-gate",
+        List.of(
+            new RawPacket(1, 10L, authority),
+            new RawPacket(2, 20L, new Move(start.position(), 0f, 0f, false, 0L)),
+            new RawPacket(3, 60L, new ClientTickEnd()),
+            // This input is generated after client tick 1's boundary, so its
+            // Phase 7 simulation envelope begins at tick 1; it must not be
+            // replayed onto movement tick 1's simulation step (tick 0).
+            new RawPacket(4, 70L, new ClientInput(
+                true, false, false, false, false, false, false)),
+            new RawPacket(5, 100L, new Move(
+                neutralNext.position(), 0f, 0f, false, 1L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getLast().verdict(),
+        report.results().toString());
+
+    String finalInputTrace = report.frames().getLast().trace().stream()
+        .filter(line -> line.contains("SIM_INPUT_OPTIONS tick=0"))
+        .findFirst()
+        .orElseThrow();
+    assertTrue(finalInputTrace.contains("forward=OptionalInt[0]"),
+        finalInputTrace);
+    assertFalse(
+        report.frames().getLast().trace().stream()
+            .anyMatch(line -> line.contains("SIM_INPUT_OPTIONS tick=0")
+                && line.contains("forward=OptionalInt[1]")),
+        report.frames().getLast().trace().toString());
+  }
+
+  @Test
   void authorityOverlayDoesNotEraseClientPhysicalSprintState() {
     MovementEnvironment client = MovementEnvironment.dry(true, true, false);
     MovementEnvironment authority = MovementEnvironment.dry(true, false, false);
