@@ -529,6 +529,60 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void spatialRebaseBootstrapsObservedMovementInsteadOfReusingRebasedVelocity() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+    MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
+    Player anchor = anchor();
+
+    PlayerContext initialAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, environment, anchor.position(), anchor.velocity(),
+        false, false, false, List.of());
+
+    var firstObserved = new Move(
+        new Maths.Vec3(0.6, 64.0, 0.5), 0f, 0f, true, 1L);
+
+    // Move the authoritative pre-tick position by less than the 0.01 spatial
+    // rebase tolerance. The retained candidate therefore rebases to this point
+    // but must not keep treating its older post-tick velocity as authoritative.
+    PlayerContext rebasedAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, environment, new Maths.Vec3(0.605, 64.0, 0.5),
+        Maths.Vec3.ZERO, false, false, false, List.of());
+
+    var secondObserved = new Move(
+        new Maths.Vec3(0.725, 64.0, 0.5), 0f, 0f, true, 2L);
+
+    var report = runner.process(
+        "spatial-rebase-bootstrap",
+        List.of(
+            new RawPacket(1, 10L, initialAuthority),
+            new RawPacket(2, 20L, firstObserved),
+            new RawPacket(3, 30L, rebasedAuthority),
+            new RawPacket(4, 40L, secondObserved)),
+        world, anchor, 0L);
+
+    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getLast().verdict(), report.results().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("FRONTIER_SPATIAL_REBASE")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.contains("CLIENT_MOVEMENT_BOOTSTRAP")
+            && line.contains("reconstructedStartVelocityVerified=true")),
+        report.frames().getLast().trace().toString());
+    assertFalse(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("FRONTIER_RESET reason=OBSERVATION_CONTRADICTION")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().predictedAfter().stream()
+        .anyMatch(candidate -> Math.abs(
+            candidate.context().player().position().x() - secondObserved.position().x()) <= 1.0E-9),
+        report.frames().getLast().toString());
+  }
+
+  @Test
   void stationaryObservationRebasesStalePredictionBeforeComparing() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
