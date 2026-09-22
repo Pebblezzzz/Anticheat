@@ -443,60 +443,70 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
-  void closeExhaustiveMismatchReconcilesFrontierInsteadOfCascadingImpossible() {
+  void closeExhaustiveMismatchReconcilesRetainedFrontierWithoutCascading() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     Player anchor = anchor();
 
-    Move closeMismatch = new Move(
-        new Maths.Vec3(0.515, 64.0, 0.5), 0f, 0f, true, 1L);
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        anchor.position(), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    var firstObserved = new Move(
+        new Maths.Vec3(0.510, 64.0, 0.5), 0f, 0f, true, 1L);
 
     var first = runner.process(
         "close-reconciliation",
         List.of(
-            new RawPacket(
-                1, 10L, new PlayerContext(
-                    "survival", Simulation.Attributes.DEFAULT, Map.of(),
-                    Pose.STANDING, MovementEnvironment.dry(true, false, false),
-                    anchor.position(), Maths.Vec3.ZERO,
-                    false, false, false, List.of())),
-            new RawPacket(2, 20L, closeMismatch)),
+            new RawPacket(1, 10L, authority),
+            new RawPacket(2, 20L, firstObserved)),
         floorWorld(),
         anchor,
         0L);
 
     assertEquals(1, first.movementObservations(), first.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.UNCERTAIN,
+        Phase8MovementValidation.Verdict.POSSIBLE,
         first.results().getFirst().verdict(),
         first.results().toString());
     assertTrue(first.candidateFrontierRetained(), first.toString());
-    assertTrue(first.frames().getLast().trace().stream()
-        .anyMatch(line -> line.startsWith("FRONTIER_RECONCILED reason=CLOSE_EXHAUSTIVE_MISMATCH")),
-        first.frames().getLast().trace().toString());
-    assertTrue(first.frames().getLast().trace().stream()
-        .anyMatch(line -> line.startsWith("CLOSE_MISMATCH")
-            && line.contains("clientVelocity=")),
-        first.frames().getLast().trace().toString());
+
+    Candidate retainedBeforeCloseMismatch =
+        first.frames().getLast().predictedAfter().stream().findFirst()
+            .orElseThrow();
+    Vec3 clientVelocityBeforeCloseMismatch =
+        retainedBeforeCloseMismatch.context().clientVelocity();
+
+    var closeObserved = new Move(
+        new Maths.Vec3(0.535, 64.0, 0.5), 0f, 0f, true, 2L);
 
     var second = runner.process(
         "close-reconciliation",
-        List.of(new RawPacket(
-            3, 30L, new Move(
-                new Maths.Vec3(0.515, 64.0, 0.5), 0f, 0f, true, 2L))),
+        List.of(new RawPacket(3, 30L, closeObserved)),
         floorWorld(),
         anchor,
         0L);
 
     assertEquals(1, second.movementObservations(), second.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.POSSIBLE,
+        Phase8MovementValidation.Verdict.UNCERTAIN,
         second.results().getFirst().verdict(),
         second.results().toString());
     assertTrue(second.candidateFrontierRetained(), second.toString());
-    assertTrue(second.results().stream()
-        .flatMap(result -> result.evidence().uncertaintySources().stream())
-        .noneMatch(reason -> reason.contains("reconciliation envelope")),
-        second.results().toString());
+    assertTrue(second.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("FRONTIER_RECONCILED reason=CLOSE_EXHAUSTIVE_MISMATCH")),
+        second.frames().getLast().trace().toString());
+
+    Candidate reconciled =
+        second.frames().getLast().predictedAfter().stream().findFirst()
+            .orElseThrow();
+    assertEquals(closeObserved.position(), reconciled.context().player().position());
+    assertEquals(
+        clientVelocityBeforeCloseMismatch,
+        reconciled.context().clientVelocity(),
+        "reconciliation must preserve persistent client velocity rather than re-rooting from server velocity");
+    assertEquals(2L, reconciled.context().simulationTick());
   }
 
   @Test
