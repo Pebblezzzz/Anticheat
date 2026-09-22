@@ -1235,7 +1235,11 @@ public final class Phase8PredictionRunner {
                 "client position was rebased while the persistent client velocity was retained"));
         Phase8MovementValidation.Result result = validate(
             playerId, packet, move, observedBefore, observedAfter, world,
-            tick, uncertaintySources, reconciliationSearch, false, validationFields);
+            tick, uncertaintySources, reconciliationSearch, false,
+            EnumSet.of(
+                Phase6Reachability.ObservedField.POSITION,
+                Phase6Reachability.ObservedField.ROTATION,
+                Phase6Reachability.ObservedField.GROUND));
         results.add(result);
         uncertain++;
         rememberObservedMovement(observedBefore, observedAfter, tick);
