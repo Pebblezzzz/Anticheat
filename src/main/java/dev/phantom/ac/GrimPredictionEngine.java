@@ -47,7 +47,7 @@ public final class GrimPredictionEngine {
       boolean lastOnGround) {
     return tick(
         starts, inputOptions, world, maximumCandidates, movementSequence,
-        simulationTick, targetTick, actualMovementReference, lastOnGround, null);
+        simulationTick, targetTick, actualMovementReference, lastOnGround, null, false);
   }
 
   public TickResult tick(
@@ -61,6 +61,24 @@ public final class GrimPredictionEngine {
       Vec3 actualMovementReference,
       boolean lastOnGround,
       MovementEnvironment authoritativeMovementEnvironment) {
+    return tick(
+        starts, inputOptions, world, maximumCandidates, movementSequence,
+        simulationTick, targetTick, actualMovementReference, lastOnGround,
+        authoritativeMovementEnvironment, false);
+  }
+
+  public TickResult tick(
+      Set<Candidate> starts,
+      List<InputConstraint> inputOptions,
+      WorldSnapshot world,
+      int maximumCandidates,
+      long movementSequence,
+      long simulationTick,
+      long targetTick,
+      Vec3 actualMovementReference,
+      boolean lastOnGround,
+      MovementEnvironment authoritativeMovementEnvironment,
+      boolean movementTimingUncertain) {
     if (starts.isEmpty()) {
       return new TickResult(
           Set.of(), false,
