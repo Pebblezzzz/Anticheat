@@ -166,7 +166,7 @@ class Phase8MovementValidationTest {
     assertEquals(2.0, state.violationLevel());
     assertEquals(2.0, second.alert().orElseThrow().violationLevel());
 
-    var recoveredEvidence = Phase8MovementValidation.validate("alice", 44, p, p, world(),
+    var recoveredEvidence = Phase8MovementValidation.validate("alice", 50, p, p, world(),
         "world:test:50", stable(), List.of("input known"), possible(p), "replay:50").evidence();
     var recovered = second.state().accept(recoveredEvidence, config);
     assertEquals(0.0, recovered.state().players().get("alice/MOVEMENT_REACHABILITY").violationLevel());
