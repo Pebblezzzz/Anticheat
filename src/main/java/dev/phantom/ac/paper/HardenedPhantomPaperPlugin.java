@@ -75,6 +75,7 @@ import org.bukkit.potion.PotionEffect;
 import java.io.Serializable;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -1685,10 +1686,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   private static void appendPacket(Capture capture,RawPacket packet){
-    synchronized(capture.packets){
-      while(capture.packets.size()>=MAX_CAPTURE_PACKETS)capture.packets.remove(0);
-      capture.packets.add(packet);
-    }
+    capture.packets.addLast(packet);
+    while(capture.packets.size()>MAX_CAPTURE_PACKETS)capture.packets.pollFirst();
   }
 
   private static Vec3 vector(double x,double y,double z){return new Vec3(x,y,z);}
@@ -1892,7 +1891,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     volatile String lastDebugSummaryReason;
     volatile Vec3 lastDebugMovePosition;
     volatile Phase8PredictionRunner.Report lastDebugReport;
-    final List<RawPacket> packets=new ArrayList<>();
+    final ConcurrentLinkedDeque<RawPacket> packets=new ConcurrentLinkedDeque<>();
     final ClientTickTracker clientTickTracker=new ClientTickTracker();
     final dev.phantom.ac.Phase4WorldReplica clientWorld=new dev.phantom.ac.Phase4WorldReplica(Contracts.TARGET_VERSION);
     final ConcurrentHashMap<dev.phantom.ac.world.Pos,ClientBreakPrediction> clientBreakPredictions=new ConcurrentHashMap<>();
@@ -1953,23 +1952,18 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
 
     record ClientBreakPrediction(long captureSequence,int actionSequence,Long clientTick) {}
-    List<RawPacket> copy(){      synchronized(packets){
-        int start=Math.max(0,packets.size()-MAX_VALIDATION_PACKETS);
-        return List.copyOf(packets.subList(start,packets.size()));
-      }
+    List<RawPacket> copy(){
+      List<RawPacket> snapshot=new ArrayList<>(packets);
+      int start=Math.max(0,snapshot.size()-MAX_VALIDATION_PACKETS);
+      return List.copyOf(snapshot.subList(start,snapshot.size()));
     }
 
     List<RawPacket> copyAll(){
-      synchronized(packets){
-        int start=Math.max(0,packets.size()-MAX_CAPTURE_PACKETS);
-        return List.copyOf(packets.subList(start,packets.size()));
-      }
+      return List.copyOf(packets);
     }
 
     List<RawPacket> copySince(long sequenceExclusive){
-      synchronized(packets){
-        return packets.stream().filter(packet->packet.sequence()>sequenceExclusive).toList();
-      }
+      return packets.stream().filter(packet->packet.sequence()>sequenceExclusive).toList();
     }
   }
 }
