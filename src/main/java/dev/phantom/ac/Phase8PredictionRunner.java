@@ -171,6 +171,8 @@ public final class Phase8PredictionRunner {
   private final InputConstraint neutralInput;
   private final List<UncertainInput> uncertainInputs = new ArrayList<>();
   private final List<InputTimingAlternative> ambiguousInputTimings = new ArrayList<>();
+  private static final long CLIENT_BLOCK_BREAK_UNCERTAINTY_SEQUENCE_WINDOW = 32L;
+  private final NavigableMap<Long, Packets.ClientBlockBreak> recentClientBlockBreaks = new TreeMap<>();
   private List<InputChronology> inputChronologies = List.of();
   private Player initialAnchor;
   private long initialAnchorReceivedNanos = -1L;
@@ -285,6 +287,7 @@ public final class Phase8PredictionRunner {
     uncertainInputs.clear();
     ambiguousInputTimings.clear();
     inputChronologies = List.of();
+    recentClientBlockBreaks.clear();
 
 
     timingHistory.clear();
@@ -438,6 +441,13 @@ public final class Phase8PredictionRunner {
               overlayAuthorityState(prediction, effectiveAuthority, maximumCandidates);
           if (!updated.isEmpty()) prediction = updated;
         }
+        continue;
+      }
+
+      if (value instanceof Packets.ClientBlockBreak clientBlockBreak) {
+        recentClientBlockBreaks.put(sequence, clientBlockBreak);
+        recentClientBlockBreaks.headMap(
+            sequence - CLIENT_BLOCK_BREAK_UNCERTAINTY_SEQUENCE_WINDOW, true).clear();
         continue;
       }
 
@@ -768,6 +778,16 @@ public final class Phase8PredictionRunner {
       }
 
       List<String> uncertaintySources = new ArrayList<>();
+      List<Packets.ClientBlockBreak> activeClientBlockBreaks =
+          activeClientBlockBreaks(sequence, tick.clientTick());
+      if (!activeClientBlockBreaks.isEmpty()) {
+        uncertaintySources.add(
+            "recent client-side block-break prediction may precede the authoritative block update");
+        trace.add("CLIENT_BLOCK_BREAK_PREDICTION active="
+            + activeClientBlockBreaks.stream()
+                .map(b -> b.position() + "#" + b.actionSequence())
+                .toList());
+      }
       if (compensatedWorld != null && !compensatedWorld.causallyBounded()) {
         uncertaintySources.add(
             "latency-compensated world snapshot has no causal boundary at or before this movement");
@@ -1801,6 +1821,28 @@ public final class Phase8PredictionRunner {
         authority.effects(), authority.awaitingTeleport(), authority.uncertain(), authority.input(),
         authority.attributes(), authority.pose(), authority.environment(),
         authority.clientTickRange(), authority.provenance(), authority.uncertaintyReasons());
+  }
+
+  private List<Packets.ClientBlockBreak> activeClientBlockBreaks(
+      long sequence, long movementClientTick) {
+    List<Packets.ClientBlockBreak> active = new ArrayList<>();
+    Iterator<Map.Entry<Long, Packets.ClientBlockBreak>> iterator =
+        recentClientBlockBreaks.entrySet().iterator();
+    while (iterator.hasNext()) {
+      Map.Entry<Long, Packets.ClientBlockBreak> entry = iterator.next();
+      long breakSequence = entry.getKey();
+      if (sequence - breakSequence > CLIENT_BLOCK_BREAK_UNCERTAINTY_SEQUENCE_WINDOW) {
+        iterator.remove();
+        continue;
+      }
+      Packets.ClientBlockBreak blockBreak = entry.getValue();
+      if (blockBreak.clientTick() == null
+          || movementClientTick < 0L
+          || movementClientTick - blockBreak.clientTick() <= 2L) {
+        active.add(blockBreak);
+      }
+    }
+    return List.copyOf(active);
   }
 
   private void clearObservedMovementHistory() {

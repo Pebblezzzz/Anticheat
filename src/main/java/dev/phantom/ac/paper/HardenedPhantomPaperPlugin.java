@@ -14,7 +14,9 @@ import com.github.retrooper.packetevents.protocol.world.chunk.Column;
 import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
 import com.github.retrooper.packetevents.protocol.world.states.type.StateValue;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying;
+import com.github.retrooper.packetevents.protocol.player.DiggingAction;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerInput;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPong;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientTeleportConfirm;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
@@ -169,6 +171,40 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         record(capture,clientInput);
         if(debugLevel(capture.playerId).trace())
           logClientInputDebug(capture.playerName,capture.sequence.get(),clientInput);
+      }else if(event.getPacketType()==PacketType.Play.Client.PLAYER_DIGGING){
+        WrapperPlayClientPlayerDigging digging=new WrapperPlayClientPlayerDigging(event);
+        if(digging.getAction()==DiggingAction.FINISHED_DIGGING){
+          var blockPosition=digging.getBlockPosition();
+          var position=new dev.phantom.ac.world.Pos(
+              blockPosition.getX(),blockPosition.getY(),blockPosition.getZ());
+          long sequence=capture.sequence.incrementAndGet();
+          long receivedNanos=System.nanoTime();
+          Long clientTick=capture.clientTickTracker.hasObservedBoundary()
+              ?capture.clientTickTracker.clientTickForMovement()
+              :null;
+          Packets.ClientBlockBreak breakPacket =
+              new Packets.ClientBlockBreak(position,digging.getSequence(),clientTick);
+          WorldSnapshot visibleWorld =
+              capture.clientWorld.snapshotAtOrBeforeIncludingPending(sequence);
+          boolean knownSolid=visibleWorld!=null
+              && visibleWorld.coverageAt(position.x(),position.y(),position.z())
+                  ==dev.phantom.ac.world.Coverage.KNOWN
+              && visibleWorld.blockAtOrNull(position.x(),position.y(),position.z())!=null;
+          if(knownSolid){
+            capture.clientBreakPredictions.put(position,
+                new Capture.ClientBreakPrediction(sequence,digging.getSequence(),clientTick));
+            if(debugLevel(capture.playerId).trace()){
+              getLogger().info("[PhantomAC][BLOCK_BREAK_PREDICT] player="+capture.playerName
+                  +" position="+position
+                  +" actionSequence="+digging.getSequence()
+                  +" clientTick="+clientTick
+                  +" captureSequence="+sequence);
+            }
+          }
+          appendPacket(capture,new RawPacket(sequence,receivedNanos,breakPacket,
+              Packets.CaptureProvenance.fromAdapter("paper-client-block-break",breakPacket,null)));
+          schedulePredictionValidation(capture);
+        }
       }else if(event.getPacketType()==PacketType.Play.Client.TELEPORT_CONFIRM){
         record(capture,new Packets.TeleportConfirm(new WrapperPlayClientTeleportConfirm(event).getTeleportId()));
         schedulePredictionValidation(capture);
@@ -262,6 +298,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         var blockPosition=packet.getBlockPosition();
         var pos=new dev.phantom.ac.world.Pos(blockPosition.getX(),blockPosition.getY(),blockPosition.getZ());
         var state=toCoreState(packet.getBlockState());
+        capture.clientBreakPredictions.remove(pos);
         long sequence=capture.sequence.incrementAndGet();
         long receivedNanos=System.nanoTime();
         capture.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.BlockChange(
@@ -276,6 +313,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         for(var change:packet.getBlocks()){
           var pos=new dev.phantom.ac.world.Pos(change.getX(),change.getY(),change.getZ());
           var state=toCoreState(change.getBlockState(event.getUser().getClientVersion()));
+          capture.clientBreakPredictions.remove(pos);
           long sequence=capture.sequence.incrementAndGet();
           long receivedNanos=System.nanoTime();
           capture.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.BlockChange(
@@ -985,6 +1023,37 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
   }
 
+  private WorldSnapshot clientWorldForMovement(Capture capture,long sequence){
+    WorldSnapshot world=capture.clientWorld.snapshotAtOrBeforeIncludingPending(sequence);
+    if(world==null)return null;
+
+    long movementTick=capture.movementRunner.relativeClientTick();
+    Iterator<Map.Entry<dev.phantom.ac.world.Pos,Capture.ClientBreakPrediction>> iterator =
+        capture.clientBreakPredictions.entrySet().iterator();
+    while(iterator.hasNext()){
+      Map.Entry<dev.phantom.ac.world.Pos,Capture.ClientBreakPrediction> entry=iterator.next();
+      Capture.ClientBreakPrediction prediction=entry.getValue();
+
+      boolean staleBySequence=sequence-prediction.captureSequence()>32L;
+      boolean staleByTick=prediction.clientTick()!=null
+          && movementTick>=0L
+          && movementTick-prediction.clientTick()>2L;
+      if(staleBySequence||staleByTick){
+        iterator.remove();
+        continue;
+      }
+
+      dev.phantom.ac.world.Pos pos=entry.getKey();
+      if(world.coverageAt(pos.x(),pos.y(),pos.z())
+          ==dev.phantom.ac.world.Coverage.KNOWN
+          && world.blockAtOrNull(pos.x(),pos.y(),pos.z())!=null){
+        world=world.withBlockOverride(pos.x(),pos.y(),pos.z(),
+            BlockState.air());
+      }
+    }
+    return world;
+  }
+
   private void runPredictionValidation(Capture capture){
     long startedNanos=System.nanoTime();
     capture.validationRuns.incrementAndGet();
@@ -1006,7 +1075,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       Phase8PredictionRunner.Report incremental=capture.movementRunner.processWithWorldProvider(
           playerName,
           raw,
-          sequence->capture.clientWorld.snapshotAtOrBeforeIncludingPending(sequence),
+          sequence->clientWorldForMovement(capture,sequence),
           anchor,
           capture.initialStateReceivedNanos);
 
@@ -1826,6 +1895,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final List<RawPacket> packets=new ArrayList<>();
     final ClientTickTracker clientTickTracker=new ClientTickTracker();
     final dev.phantom.ac.Phase4WorldReplica clientWorld=new dev.phantom.ac.Phase4WorldReplica(Contracts.TARGET_VERSION);
+    final ConcurrentHashMap<dev.phantom.ac.world.Pos,ClientBreakPrediction> clientBreakPredictions=new ConcurrentHashMap<>();
     volatile Channel nettyChannel;
     volatile String playerName;
     final AtomicBoolean predictionValidationQueued=new AtomicBoolean();
@@ -1882,8 +1952,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       }
     }
 
-    List<RawPacket> copy(){
-      synchronized(packets){
+    record ClientBreakPrediction(long captureSequence,int actionSequence,Long clientTick) {}
+    List<RawPacket> copy(){      synchronized(packets){
         int start=Math.max(0,packets.size()-MAX_VALIDATION_PACKETS);
         return List.copyOf(packets.subList(start,packets.size()));
       }
