@@ -1,6 +1,19 @@
 alerts:
+  # Staff alerts are opt-in by permission unless broadcast is enabled.
   enabled: true
   broadcast: false
+  print-to-console: true
+  permission: phantom.alerts
+  # Minimum server ticks between repeated alerts for the same player/check.
+  alert-interval-ticks: 2
+  # VL added by each exhaustively-impossible observation.
+  violation-increment: 1.0
+  # VL decays continuously with server time; 0.005 is 1 VL per 200 ticks.
+  violation-decay-per-tick: 0.005
+  # Prevent unbounded VL growth during long sessions.
+  maximum-violation-level: 100.0
+  # Alert when VL reaches this level, then every this many additional VL.
+  violation-alert-interval: 2.0
 
 debug:
   # Targeted Phase 8 diagnostics are disabled by default. Use /phantom debug <player> at runtime.
