@@ -271,8 +271,16 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         Packets.Packet blockChange=blockStatePacket(pos,state);
         appendPacket(capture,new RawPacket(sequence,receivedNanos,blockChange,
             Packets.CaptureProvenance.fromAdapter("paper-block-change",blockChange,null)));
+        /*
+         * Mirror Grim's nearby block-change transaction boundary: a clientbound
+         * block update near the player must be acknowledged promptly so the
+         * compensated world can become visible to movement prediction before
+         * the next movement packet.
+         */
+        if (isNearBlock(capture,pos)) requestWorldBarrier(player,capture);
       }else if(event.getPacketType()==PacketType.Play.Server.MULTI_BLOCK_CHANGE){
         var packet=new WrapperPlayServerMultiBlockChange(event);
+        boolean nearbyBlockChange=false;
         for(var change:packet.getBlocks()){
           var pos=new dev.phantom.ac.world.Pos(change.getX(),change.getY(),change.getZ());
           var state=toCoreState(change.getBlockState(event.getUser().getClientVersion()));
@@ -285,7 +293,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           Packets.Packet blockChange=blockStatePacket(pos,state);
           appendPacket(capture,new RawPacket(sequence,receivedNanos,blockChange,
               Packets.CaptureProvenance.fromAdapter("paper-multi-block-change",blockChange,null)));
+          nearbyBlockChange|=isNearBlock(capture,pos);
         }
+        if(nearbyBlockChange) requestWorldBarrier(player,capture);
       }else if(event.getPacketType()==PacketType.Play.Server.UNLOAD_CHUNK){
         var packet=new WrapperPlayServerUnloadChunk(event);
         var chunk=new World.Chunk(packet.getChunkX(),packet.getChunkZ());
