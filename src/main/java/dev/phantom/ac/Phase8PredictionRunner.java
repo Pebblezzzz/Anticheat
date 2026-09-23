@@ -187,6 +187,8 @@ public final class Phase8PredictionRunner {
    * retroactive.
    */
   private List<Long> currentInputPossibleSimulationTicks = List.of();
+  private Phase7Timing.Range currentInputSimulationTickRange = Phase7Timing.Range.empty();
+  private boolean currentInputSimulationTimingExhaustive;
   private final NavigableMap<Long, List<TimedInput>> inputHistory = new TreeMap<>();
   private AuthorityAnchor latestAuthority;
   private Set<Candidate> prediction = Set.of();
@@ -283,6 +285,8 @@ public final class Phase8PredictionRunner {
     currentInput = neutralInput;
     currentInputSequence = -1L;
     currentInputPossibleSimulationTicks = List.of();
+    currentInputSimulationTickRange = Phase7Timing.Range.empty();
+    currentInputSimulationTimingExhaustive = false;
     inputHistory.clear();
     uncertainInputs.clear();
     ambiguousInputTimings.clear();
@@ -470,8 +474,13 @@ public final class Phase8PredictionRunner {
         currentInput = InputConstraint.fromClientInput(input);
         currentInputSequence = sequence;
         Phase7Timing.EventTiming inputTiming = phase7TimingBySequence.get(sequence);
+        currentInputSimulationTickRange = inputTiming == null
+            ? Phase7Timing.Range.empty()
+            : inputTiming.simulationClientTicks();
+        currentInputSimulationTimingExhaustive =
+            inputTiming != null && Phase7Timing.simulationTickEnumerationComplete(inputTiming);
         currentInputPossibleSimulationTicks =
-            inputTiming != null && Phase7Timing.simulationTickEnumerationComplete(inputTiming)
+            currentInputSimulationTimingExhaustive
                 ? alignClientTicks(Phase7Timing.possibleSimulationTicks(inputTiming))
                 : List.of();
         if (!prediction.isEmpty()) {
@@ -3707,6 +3716,8 @@ public final class Phase8PredictionRunner {
         currentInputSequence,
         movementSequence,
         currentInputPossibleSimulationTicks,
+        currentInputSimulationTickRange,
+        currentInputSimulationTimingExhaustive,
         movementTimingUncertain)) {
       options.add(currentInput);
 
@@ -3751,22 +3762,48 @@ public final class Phase8PredictionRunner {
       long movementSequence,
       List<Long> possibleSimulationTicks,
       boolean movementTimingUncertain) {
+    return shouldOverlayCurrentInput(
+        simulationTick,
+        targetTick,
+        currentInputSequence,
+        movementSequence,
+        possibleSimulationTicks,
+        Phase7Timing.Range.empty(),
+        true,
+        movementTimingUncertain);
+  }
+
+  static boolean shouldOverlayCurrentInput(
+      long simulationTick,
+      long targetTick,
+      long currentInputSequence,
+      long movementSequence,
+      List<Long> possibleSimulationTicks,
+      Phase7Timing.Range possibleSimulationTickRange,
+      boolean inputTimingExhaustive,
+      boolean movementTimingUncertain) {
     if (simulationTick != targetTick - 1L
         || currentInputSequence < 0L
         || currentInputSequence > movementSequence) {
       return false;
     }
 
+    if (movementTimingUncertain) {
+      return true;
+    }
+    if (possibleSimulationTicks.contains(simulationTick)
+        || possibleSimulationTicks.contains(targetTick)) {
+      return true;
+    }
+
     /*
-     * Phase 7's simulation envelope describes the client tick reached by the
-     * movement observation. A held ClientInput that can begin taking effect on
-     * that target boundary is a valid alternative for the final step producing
-     * the observation. Keep it bounded to the final step so it never becomes
-     * retroactive input for earlier catch-up ticks.
+     * A non-exhaustively materialized Phase 7 envelope may still include this
+     * final simulation boundary. Use its bounded range rather than treating an
+     * empty candidate list as proof that the input cannot affect the movement.
      */
-    return movementTimingUncertain
-        || possibleSimulationTicks.contains(simulationTick)
-        || possibleSimulationTicks.contains(targetTick);
+    return !inputTimingExhaustive
+        && (possibleSimulationTickRange.contains(simulationTick)
+            || possibleSimulationTickRange.contains(targetTick));
   }
 
   private TimedInput latestTimedInput(

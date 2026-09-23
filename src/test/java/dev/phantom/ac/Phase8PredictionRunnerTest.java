@@ -2165,6 +2165,19 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void boundedUnmaterializedInputRangeCanReachFinalMovementBoundary() {
+    assertFalse(Phase8PredictionRunner.shouldOverlayCurrentInput(
+        738L, 739L, 10L, 20L, List.of(),
+        new Phase7Timing.Range(740L, 741L), false, false),
+        "input timing proven after the boundary must not be overlaid");
+
+    assertTrue(Phase8PredictionRunner.shouldOverlayCurrentInput(
+        738L, 739L, 10L, 20L, List.of(),
+        new Phase7Timing.Range(738L, 739L), false, false),
+        "a bounded but unmaterialized envelope that reaches the boundary remains a valid hypothesis");
+  }
+
+  @Test
   void explicitClientTickRemainsExactAcrossServerTickGaps() {
     Phase7Timing.Config timing = new Phase7Timing.Config(
         50_000_000L, 50_000_000L, 50_000_000L,
