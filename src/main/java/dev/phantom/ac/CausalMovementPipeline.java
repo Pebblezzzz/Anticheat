@@ -2837,7 +2837,8 @@ public final class CausalMovementPipeline {
         for (int z = minZ; z <= maxZ; z++) {
           var state = world.blockAtOrNull(x, y, z);
           if (state == null) continue;
-          if (state.variant() == dev.phantom.ac.world.BlockState.Variant.LADDER) climb = true;
+          var environment = dev.phantom.ac.world.v12111.BlockCatalogue12111.environment(state);
+          if (environment.climbable()) climb = true;
           var fluid = dev.phantom.ac.world.v12111.BlockCatalogue12111.fluid(state);
           if (fluid.type() == dev.phantom.ac.world.FluidState.Type.WATER) water = true;
           if (fluid.type() == dev.phantom.ac.world.FluidState.Type.LAVA) lava = true;
