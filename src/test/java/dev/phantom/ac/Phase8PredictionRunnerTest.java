@@ -995,11 +995,15 @@ class Phase8PredictionRunnerTest {
         firstObserved.position(), 0f, 0f, true, 3L)));
     packets.add(new RawPacket(5, 50L, new Move(
         firstObserved.position(), 0f, 0f, true, 4L)));
-    packets.add(new RawPacket(6, 60L, new PlayerContext(
+    PlayerContext lateAuthority = new PlayerContext(
         "survival", start.attributes(), Map.of(),
         Pose.STANDING, MovementEnvironment.dry(true, false, false),
         firstObserved.position(), Maths.Vec3.ZERO,
-        false, false, false, List.of())));
+        false, false, false, List.of());
+    packets.add(new RawPacket(
+        6, 60L, lateAuthority,
+        Packets.CaptureProvenance.fromAdapter(
+            "test-authority", lateAuthority, 100L, 4L)));
     packets.add(new RawPacket(7, 70L, new Move(
         nextObserved.position(), 0f, 0f, true, 5L)));
 
