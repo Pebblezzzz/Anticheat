@@ -399,7 +399,7 @@ public final class Phase4WorldReplica implements Serializable {
     }
   }
 
-  private static final int MAX_GENERATIONS=512;
+  private static final int MAX_GENERATIONS=64;
 
   private final String version;
   private final AtomicReference<Generation> current;
@@ -409,7 +409,7 @@ public final class Phase4WorldReplica implements Serializable {
   private final NavigableMap<Long,Event> unassigned=new TreeMap<>();
   private final Map<Short,List<Event>> pending=new LinkedHashMap<>();
   private transient volatile WorldSnapshot.CollisionResolver collisionResolver;
-  private volatile boolean entityTrackingComplete=false;
+  private final EntityTrackingState entityTrackingState=new EntityTrackingState(true);
   private final Deque<Short> sentOrder=new ArrayDeque<>();
 
   private long generationId;
@@ -424,7 +424,7 @@ public final class Phase4WorldReplica implements Serializable {
     WorldSnapshot worldSnapshot=snapshotFor(visible,lastVisibleSequence);
     Generation initial=new Generation(
         0,worldId,0,-1L,new Order(0,0,0,0),
-        worldSnapshot,new TrackedEntities(Map.of(),true),Map.of(),List.of());
+        worldSnapshot,new TrackedEntities(Map.of(),entityTrackingState),Map.of(),List.of());
     current=new AtomicReference<>(initial);
     history.add(initial);
   }
@@ -444,19 +444,18 @@ public final class Phase4WorldReplica implements Serializable {
 
   public WorldSnapshot.CollisionResolver collisionResolver(){return collisionResolver;}
 
-  /** Marks live entity reconstruction incomplete until a fresh capture is established. */
-  public synchronized void markEntityTrackingIncomplete(){
-    if(entityTrackingComplete){
-      entityTrackingComplete=false;
-      publish(visible,lastVisibleSequence,List.of());
-    }
+  /**
+   * Marks live entity reconstruction incomplete without publishing a new world generation.
+   *
+   * <p>This is intentionally lock-free because it is called from PacketEvents/Bukkit
+   * callbacks that must never wait behind an expensive chunk publication.</p>
+   */
+  public void markEntityTrackingIncomplete(){
+    entityTrackingState.set(false);
   }
 
-  public synchronized void markEntityTrackingComplete(){
-    if(!entityTrackingComplete){
-      entityTrackingComplete=true;
-      publish(visible,lastVisibleSequence,List.of());
-    }
+  public void markEntityTrackingComplete(){
+    entityTrackingState.set(true);
   }
   public Generation getWorldGeneration(){return current.get();}
   public WorldSnapshot getWorldState(){return current.get().world();}
@@ -575,7 +574,7 @@ public final class Phase4WorldReplica implements Serializable {
       if(batch!=null)visibleEvents.addAll(batch);
       if(head==transactionId)break;
     }
-    acceptVisible(visibleEvents,acknowledgementSequence);
+    acceptLiveVisible(visibleEvents,acknowledgementSequence);
     return true;
   }
 
@@ -684,6 +683,22 @@ public final class Phase4WorldReplica implements Serializable {
 
   private long nextOrdinal(){return ordinal++;}
 
+  /**
+   * Applies an already ordered live transaction batch without retaining it in the
+   * replay journal. Live ACKs are sequence-ordered by {@link #unassigned} and
+   * {@link #sentOrder}; retaining every live event here caused unbounded per-player
+   * memory growth on long-lived connections.
+   */
+  private void acceptLiveVisible(List<Event> events,long causalSequence){
+    if(events.isEmpty()&&causalSequence<=lastVisibleSequence)return;
+    for(Event event:events){
+      visible=applyEvent(visible,event);
+      lastVisibleOrder=event.order();
+    }
+    lastVisibleSequence=Math.max(lastVisibleSequence,causalSequence);
+    publish(visible,lastVisibleSequence,events);
+  }
+
   private void acceptVisible(List<Event> events,long causalSequence){
     boolean changed=false;
     boolean reorder=false;
@@ -791,7 +806,7 @@ public final class Phase4WorldReplica implements Serializable {
   private void publish(VisibleState state,long causalSequence,List<Event> delta){
     lastVisibleSequence=Math.max(lastVisibleSequence,causalSequence);
     WorldSnapshot worldSnapshot=snapshotFor(state,lastVisibleSequence);
-    EntityCollisions entities=new TrackedEntities(state.entities(),entityTrackingComplete);
+    EntityCollisions entities=new TrackedEntities(state.entities(),entityTrackingState);
     long tick=delta.isEmpty()?current.get().serverTick():delta.getLast().order().serverTick();
     Order order=delta.isEmpty()?current.get().order():delta.getLast().order();
     Generation generation=new Generation(
@@ -881,16 +896,25 @@ public final class Phase4WorldReplica implements Serializable {
     }
   }
 
+  private static final class EntityTrackingState implements Serializable {
+    private volatile boolean complete;
+
+    EntityTrackingState(boolean complete){this.complete=complete;}
+
+    void set(boolean complete){this.complete=complete;}
+    boolean complete(){return complete;}
+  }
+
   private static final class TrackedEntities implements EntityCollisions,Serializable {
     private final Map<Integer,EntityCollisions.EntityBox> entities;
-    private final boolean complete;
+    private final EntityTrackingState trackingState;
 
-    TrackedEntities(Map<Integer,EntityCollisions.EntityBox> entities,boolean complete){
+    TrackedEntities(Map<Integer,EntityCollisions.EntityBox> entities,EntityTrackingState trackingState){
       this.entities=Map.copyOf(entities);
-      this.complete=complete;
+      this.trackingState=Objects.requireNonNull(trackingState);
     }
 
-    @Override public boolean complete(){return complete;}
+    @Override public boolean complete(){return trackingState.complete();}
 
     @Override public EntityCollisionResult boxesIn(BlockBox query){
       List<EntityCollisions.EntityBox> result=new ArrayList<>();

@@ -257,6 +257,34 @@ final class Phase4WorldReplicaTest {
             && b.maxX() <= 2 && b.maxY() <= 2 && b.maxZ() <= 2));
   }
 
+  @Test void entityTrackingCompletenessChangesDoNotPublishWorldGenerations() {
+    var r=new Phase4WorldReplica(V);
+    int initialGenerations=r.generations().size();
+    r.markEntityTrackingComplete();
+    assertEquals(initialGenerations,r.generations().size());
+    assertTrue(r.getWorldGeneration().entities().complete());
+
+    r.markEntityTrackingIncomplete();
+    assertEquals(initialGenerations,r.generations().size());
+    assertFalse(r.getWorldGeneration().entities().complete());
+
+    r.markEntityTrackingComplete();
+    assertTrue(r.getWorldGeneration().entities().complete());
+    assertEquals(initialGenerations,r.generations().size());
+  }
+
+  @Test void liveBarrierAcknowledgementDoesNotBuildReplayJournal() {
+    var r=new Phase4WorldReplica(V);
+    for(int i=1;i<=2048;i++) {
+      r.queue(new Phase4WorldReplica.ChunkLoad(
+          o(i,i),p(i,i),new Chunk(i&31,i>>5)));
+    }
+    r.openBarrier((short)-7);
+    assertTrue(r.acknowledge((short)-7,2048L));
+    assertEquals(2,r.generations().size());
+    assertEquals(2048L,r.causalSequence());
+  }
+
   @Test void entityTrackingCompletenessIsExplicitAndReplayable() {
     var box=BlockBox.of(0,64,0,1,66,1);
     var replica=new Phase4WorldReplica(V);
