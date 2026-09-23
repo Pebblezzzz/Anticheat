@@ -261,7 +261,23 @@ public final class Phase8MovementValidation {
 
   public record Alert(String playerId, long serverTick, long firstInconsistentTick, String reason,
                       String evidence, double confidence, int supportingEvents, String replayReference) implements Serializable {
+    /**
+     * Operator-facing alert, intentionally concise like a conventional anti-cheat flag.
+     * Detailed forensic evidence remains available through debugMessage().
+     */
     public String message() {
+      return serverMessage(playerId);
+    }
+
+    public String serverMessage(String displayName) {
+      String name = displayName == null || displayName.isBlank() ? playerId : displayName;
+      return "[PhantomAC] " + name + " failed " + reason + " (x" + supportingEvents + ")";
+    }
+
+    /**
+     * Full evidence is retained for console diagnostics and future forensic tooling.
+     */
+    public String debugMessage() {
       return "[PhantomAC][PHASE8] player=" + playerId + " type=MOVEMENT result=IMPOSSIBLE tick=" + serverTick
           + " first-inconsistent-tick=" + firstInconsistentTick + " reason=" + evidence
           + " confidence=" + String.format(Locale.ROOT, "%.2f", confidence)
