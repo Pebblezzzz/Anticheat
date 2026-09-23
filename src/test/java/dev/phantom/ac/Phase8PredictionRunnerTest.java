@@ -995,12 +995,12 @@ class Phase8PredictionRunnerTest {
                 false, false, false, List.of())),
             new RawPacket(2, 20L, new Move(
                 firstObserved.position(), 0f, 0f, true, 1L)),
-            new RawPacket(
-                3, 30L, lateAuthority,
-                Packets.CaptureProvenance.fromAdapter(
-                    "test-authority", lateAuthority, 100L, 151L)),
-            new RawPacket(4, 40L, new Move(
+            new RawPacket(3, 30L, new Move(
                 firstObserved.position(), 0f, 0f, true, 151L)),
+            new RawPacket(
+                4, 40L, lateAuthority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-authority", lateAuthority, 100L, 152L)),
             new RawPacket(5, 50L, new Move(
                 nextObserved.position(), 0f, 0f, true, 152L))),
         world, start, 0L);
