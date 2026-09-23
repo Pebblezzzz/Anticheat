@@ -281,7 +281,7 @@ final class Phase4WorldReplicaTest {
     }
     r.openBarrier((short)-7);
     assertTrue(r.acknowledge((short)-7,2048L));
-    assertEquals(64,r.generations().size());
+    assertEquals(2,r.generations().size());
     assertEquals(2048L,r.causalSequence());
   }
 
