@@ -471,7 +471,7 @@ public final class Phase8PredictionRunner {
         currentInputSequence = sequence;
         Phase7Timing.EventTiming inputTiming = phase7TimingBySequence.get(sequence);
         currentInputPossibleSimulationTicks =
-            inputTiming != null && Phase7Timing.inputTickEnumerationComplete(inputTiming)
+            inputTiming != null && Phase7Timing.simulationTickEnumerationComplete(inputTiming)
                 ? alignClientTicks(Phase7Timing.possibleSimulationTicks(inputTiming))
                 : List.of();
         if (!prediction.isEmpty()) {
