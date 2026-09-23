@@ -3764,7 +3764,13 @@ public final class Phase8PredictionRunner {
      * the observation. Keep it bounded to the final step so it never becomes
      * retroactive input for earlier catch-up ticks.
      */
+    /*
+     * An empty materialized list is a bounded-but-not-exhaustively-materialized
+     * envelope, not evidence that the held input cannot affect this boundary.
+     * Keep the current held state as a final-tick alternative in that case.
+     */
     return movementTimingUncertain
+        || possibleSimulationTicks.isEmpty()
         || possibleSimulationTicks.contains(simulationTick)
         || possibleSimulationTicks.contains(targetTick);
   }
