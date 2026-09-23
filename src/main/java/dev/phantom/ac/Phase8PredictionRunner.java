@@ -3758,7 +3758,7 @@ public final class Phase8PredictionRunner {
         movementTimingUncertain);
   }
 
-  private static boolean shouldOverlayCurrentInput(
+  static boolean shouldOverlayCurrentInput(
       long simulationTick,
       long targetTick,
       long currentInputSequence,
