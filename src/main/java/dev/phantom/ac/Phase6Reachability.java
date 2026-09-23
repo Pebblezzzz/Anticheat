@@ -1157,6 +1157,23 @@ public final class Phase6Reachability {
     return set.stream().sorted(Comparator.comparing(Enum::name)).toList().toString();
   }
 
+  /**
+   * Merge candidates that represent the same deterministic physics state while
+   * retaining provenance from every equivalent timing/input path. Candidate ids
+   * are diagnostic provenance and are not part of physical-state identity.
+   */
+  public static Set<Candidate> mergeEquivalentCandidates(Collection<Candidate> candidates) {
+    Objects.requireNonNull(candidates);
+    LinkedHashMap<String, Candidate> merged = new LinkedHashMap<>();
+    for (Candidate candidate : candidates) {
+      Objects.requireNonNull(candidate);
+      String key = candidateKey(candidate).toString();
+      Candidate existing = merged.get(key);
+      merged.put(key, existing == null ? candidate : mergeProvenance(existing, candidate));
+    }
+    return Set.copyOf(merged.values());
+  }
+
   private static CandidateKey candidateKey(Candidate candidate) {
     return new CandidateKey(
         contextKey(candidate.context()),
