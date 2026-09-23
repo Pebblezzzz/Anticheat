@@ -375,7 +375,7 @@ public final class Phase8PredictionRunner {
     Phase7Timing.Reconstruction phase7Reconstruction = reconstructPhase7Timing();
     Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence =
         phase7Reconstruction.bySequence();
-    rebuildLinearCausalInputHistory(phase7TimingBySequence);
+    rebuildCausalInputHistory(phase7TimingBySequence);
     /*
      * A FINISHED_DIGGING packet can land later in the same validation batch than
      * the first movement generated from the client's local block prediction.
@@ -3751,10 +3751,22 @@ public final class Phase8PredictionRunner {
       long movementSequence,
       List<Long> possibleSimulationTicks,
       boolean movementTimingUncertain) {
-    return simulationTick == targetTick - 1L
-        && currentInputSequence >= 0L
-        && currentInputSequence <= movementSequence
-        && (movementTimingUncertain || possibleSimulationTicks.contains(simulationTick));
+    if (simulationTick != targetTick - 1L
+        || currentInputSequence < 0L
+        || currentInputSequence > movementSequence) {
+      return false;
+    }
+
+    /*
+     * Phase 7's simulation envelope describes the client tick reached by the
+     * movement observation. A held ClientInput that can begin taking effect on
+     * that target boundary is a valid alternative for the final step producing
+     * the observation. Keep it bounded to the final step so it never becomes
+     * retroactive input for earlier catch-up ticks.
+     */
+    return movementTimingUncertain
+        || possibleSimulationTicks.contains(simulationTick)
+        || possibleSimulationTicks.contains(targetTick);
   }
 
   private TimedInput latestTimedInput(
