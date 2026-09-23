@@ -48,6 +48,25 @@ import dev.phantom.ac.geometry.BlockBox;
   // ------------------------------------------------------------------
 
   @Test
+  void clientBlockPredictionCanOverrideKnownSolidWithoutChangingCoverage() {
+    WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+        .setBlock(0, 64, 1, stoneBlock())
+        .build();
+
+    assertEquals(Coverage.KNOWN, world.coverageAt(0, 64, 1));
+    assertEquals(stoneBlock(), world.blockAtOrNull(0, 64, 1));
+
+    WorldSnapshot predicted = world.withBlockOverride(0, 64, 1, BlockState.air());
+
+    assertEquals(Coverage.KNOWN, predicted.coverageAt(0, 64, 1));
+    assertNull(predicted.blockAtOrNull(0, 64, 1));
+    assertTrue(predicted.collisionShapeAt(0, 64, 1).isEmpty());
+
+    assertEquals(stoneBlock(), world.blockAtOrNull(0, 64, 1),
+        "the client prediction overlay must not mutate the acknowledged snapshot");
+  }
+
+  @Test
   void backedSnapshotsAnswerQueriesWithoutMaterializingTheWholeWorld() {
     java.util.concurrent.atomic.AtomicInteger queries = new java.util.concurrent.atomic.AtomicInteger();
     dev.phantom.ac.world.BlockState stone = stoneBlock();
