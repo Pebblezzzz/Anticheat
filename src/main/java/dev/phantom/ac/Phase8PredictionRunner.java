@@ -1774,35 +1774,55 @@ public final class Phase8PredictionRunner {
      * tick, so normal dry-air vertical velocity must be advanced through the vanilla
      * gravity/drag transition before it becomes the candidate boundary velocity.
      */
+    long rootTick = Math.max(0L, targetTick - 1L);
+    boolean retainedClientBoundary =
+        clientPhysicsState != null
+            && clientPhysicsState.clientTick() == rootTick
+            && positionExactlyMatches(clientPhysicsState.position(), context.serverPosition());
+
     double horizontalX = authority.velocity().x();
     double horizontalZ = authority.velocity().z();
-    Optional<Vec3> inferredHorizontal =
-        inferredHorizontalBoundaryVelocity(context, targetTick, world);
-    if (inferredHorizontal.isPresent()) {
-      horizontalX = inferredHorizontal.get().x();
-      horizontalZ = inferredHorizontal.get().z();
-      trace.add("ROOT_HORIZONTAL source=client-observed-prev-displacement"
-          + " velocity=" + inferredHorizontal.get()
-          + " authorityVelocity=" + authority.velocity()
-          + " authorityPositionDeltaFromLastObservation="
-          + (lastObservedMovementPosition == null
-              ? "unavailable"
-              : new Vec3(
-                  context.serverPosition().x() - lastObservedMovementPosition.x(),
-                  context.serverPosition().y() - lastObservedMovementPosition.y(),
-                  context.serverPosition().z() - lastObservedMovementPosition.z())));
+    double verticalVelocity = authority.velocity().y();
+
+    if (retainedClientBoundary) {
+      Vec3 retainedVelocity = clientPhysicsState.clientVelocity();
+      horizontalX = retainedVelocity.x();
+      horizontalZ = retainedVelocity.z();
+      verticalVelocity = retainedVelocity.y();
+      trace.add("ROOT_VELOCITY source=retained-client-physics-state"
+          + " tick=" + clientPhysicsState.clientTick()
+          + " velocity=" + retainedVelocity
+          + " position=" + clientPhysicsState.position());
     } else {
-      trace.add("ROOT_HORIZONTAL source=authoritative-velocity"
-          + " velocity=" + authority.velocity()
-          + " clientInference=unavailable");
+      Optional<Vec3> inferredHorizontal =
+          inferredHorizontalBoundaryVelocity(context, targetTick, world);
+      if (inferredHorizontal.isPresent()) {
+        horizontalX = inferredHorizontal.get().x();
+        horizontalZ = inferredHorizontal.get().z();
+        trace.add("ROOT_HORIZONTAL source=client-observed-prev-displacement"
+            + " velocity=" + inferredHorizontal.get()
+            + " authorityVelocity=" + authority.velocity()
+            + " authorityPositionDeltaFromLastObservation="
+            + (lastObservedMovementPosition == null
+                ? "unavailable"
+                : new Vec3(
+                    context.serverPosition().x() - lastObservedMovementPosition.x(),
+                    context.serverPosition().y() - lastObservedMovementPosition.y(),
+                    context.serverPosition().z() - lastObservedMovementPosition.z())));
+      } else {
+        trace.add("ROOT_HORIZONTAL source=authoritative-velocity"
+            + " velocity=" + authority.velocity()
+            + " clientInference=unavailable");
+      }
     }
+
     MovementEnvironment authoritativeEnvironment = context.movementEnvironment();
     trace.add("ROOT_MOVEMENT_STATE sprint=" + authoritativeEnvironment.sprinting()
         + " sneak=" + authoritativeEnvironment.sneaking()
         + " ground=" + authoritativeEnvironment.onGround());
-    double verticalVelocity = authority.velocity().y();
     MovementEnvironment movementEnvironment = context.movementEnvironment();
-    if (!authority.onGround()
+    if (!retainedClientBoundary
+        && !authority.onGround()
         && movementEnvironment.fluid() == Fluid.NONE
         && !movementEnvironment.climbable()
         && !movementEnvironment.gliding()) {
