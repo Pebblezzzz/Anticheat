@@ -952,7 +952,7 @@ public final class Phase8PredictionRunner {
           Phase7Timing.EventTiming bootstrapTiming = phase7TimingBySequence.get(sequence);
           boolean bootstrapTimingExhaustive =
               explicitTimingRangeIsExhaustive(move, bootstrapTiming)
-                  && !phase7TimingHasUnmodeledChronology(bootstrapTiming);
+                  && !phase7TimingHasUnmodeledChronology(bootstrapTiming, move.clientTick() != null);
           TickResolution bootstrapValidationTick = bootstrapTimingExhaustive
               ? tick.withTimingUncertaintyResolved(
                   "Phase 7 bounded simulation timing was exhaustively evaluated for every permitted offset")
