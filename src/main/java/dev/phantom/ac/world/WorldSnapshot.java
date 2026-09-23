@@ -390,6 +390,48 @@ public final class WorldSnapshot implements Serializable {
         : coverage + " block=" + state.blockId() + " properties=" + state.properties();
   }
 
+  /**
+   * Returns a causally identical snapshot with one already-known block overridden.
+   *
+   * <p>This is used only for short-lived client-side prediction, such as the
+   * one-tick window after a 1.21+ client finishes digging a block but before
+   * the authoritative block update reaches the client. Unknown/unloaded chunks
+   * are never turned into known air by this helper.</p>
+   */
+  public WorldSnapshot withBlockOverride(int x, int y, int z, BlockState state) {
+    Objects.requireNonNull(state, "state");
+    if (coverageAt(x, y, z) != Coverage.KNOWN) return this;
+    final WorldSnapshot base = this;
+    final Pos target = new Pos(x, y, z);
+    Backend overlay = new Backend() {
+      @Override public String version() { return base.version(); }
+      @Override public int minY() { return base.minY(); }
+      @Override public int maxY() { return base.maxY(); }
+      @Override public Set<Chunk> loadedChunks() { return base.loadedChunks(); }
+      @Override public long causalSequence() { return base.causalSequence(); }
+      @Override public Set<Chunk> unknownChunks() { return base.unknownChunkSet(); }
+      @Override public boolean hasChunk(int chunkX, int chunkZ) { return base.hasChunk(chunkX, chunkZ); }
+      @Override public Coverage coverageAt(int bx, int by, int bz) {
+        return base.coverageAt(bx, by, bz);
+      }
+      @Override public BlockState blockAtOrNull(int bx, int by, int bz) {
+        if (bx == target.x() && by == target.y() && bz == target.z()) {
+          return state.isAir() || state.isUnsupported() ? null : state;
+        }
+        return base.blockAtOrNull(bx, by, bz);
+      }
+      @Override public java.util.Optional<VoxelShape> resolveCollisionShape(
+          WorldSnapshot snapshot, int bx, int by, int bz) {
+        if (bx == target.x() && by == target.y() && bz == target.z()) {
+          if (state.isAir()) return java.util.Optional.of(VoxelShape.empty());
+          if (state.isUnsupported()) return java.util.Optional.empty();
+        }
+        return base.resolveCollisionShape(bx, by, bz);
+      }
+    };
+    return WorldSnapshot.backed(version, minY, maxY, overlay);
+  }
+
   public BlockState blockAtOrNull(int x, int y, int z) {
     if (backend != null) return backend.blockAtOrNull(x, y, z);
     if (y < minY || y > maxY) return null;
