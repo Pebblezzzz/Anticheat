@@ -607,7 +607,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         getServer().broadcastMessage(alert.serverMessage(capture.playerName));
       }else{
         Player player=getServer().getPlayer(capture.playerId);
-        if(player!=null&&player.hasPermission("phantom.admin"))player.sendMessage(alert.message());
+        if(player!=null&&player.hasPermission("phantom.admin"))player.sendMessage(alert.serverMessage(capture.playerName));
       }
     });
   }
@@ -1176,10 +1176,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       capture.accumulator=accumulated.state();
 
       accumulated.alert().ifPresent(alert->{
-        String message=alert.message();
+        String message=alert.debugMessage();
         getLogger().warning(message);
         if(broadcastAlerts){
-          getServer().broadcastMessage(message);
+          getServer().broadcastMessage(alert.serverMessage(capture.playerName));
         }else{
           for(Player recipient:getServer().getOnlinePlayers())
             if(recipient.hasPermission("phantom.admin"))
