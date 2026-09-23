@@ -269,6 +269,11 @@ public final class Phase8MovementValidation {
   public record State(int consecutiveImpossible, int supportingImpossible, int uncertaintyPeriods,
                       int recoveries, long lastObservationTick, long lastAlertTick,
                       double violationLevel, double lastAlertViolationLevel) implements Serializable {
+    public State(int consecutiveImpossible, int supportingImpossible, int uncertaintyPeriods,
+                 int recoveries, long lastObservationTick, long lastAlertTick) {
+      this(consecutiveImpossible, supportingImpossible, uncertaintyPeriods, recoveries,
+          lastObservationTick, lastAlertTick, supportingImpossible, supportingImpossible);
+    }
     public static State empty() { return new State(0, 0, 0, 0, -1, -1, 0.0, 0.0); }
     State impossible(long tick, Config config) {
       double decayed = decayTo(tick, config);
