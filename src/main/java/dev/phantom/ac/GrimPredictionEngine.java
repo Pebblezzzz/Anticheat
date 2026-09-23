@@ -114,6 +114,26 @@ public final class GrimPredictionEngine {
           }
         }
 
+        /*
+         * Grim receives sprinting as a separate ENTITY_ACTION state. Phantom's
+         * reduced packet model currently has held-key input but not that action
+         * event, so an uncertain client/server boundary cannot safely assume
+         * that the retained physical sprint flag still applied to this tick.
+         * Keep a bounded non-sprinting sibling rather than turning the stale
+         * sprint assumption into an exhaustive IMPOSSIBLE result.
+         */
+        if (movementTimingUncertain
+            && inputOption.sprint().orElse(false)
+            && physical.sprinting()) {
+          MovementInputState nonSprinting = new MovementInputState(false, physical.sneaking());
+          startsByMovementState
+              .computeIfAbsent(nonSprinting, ignored -> new ArrayList<>())
+              .add(withLocomotionState(
+                  withActualMovementReference(base, actualMovementReference, simulationTick, targetTick),
+                  false, physical.sneaking()));
+          exhaustive = false;
+        }
+
         if (inputOption.sprint().isPresent() && inputOption.sneak().isPresent()) {
           MovementInputState requested = new MovementInputState(
               inputOption.sprint().get(), inputOption.sneak().get());
