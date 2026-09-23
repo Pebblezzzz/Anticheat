@@ -28,9 +28,10 @@ class HardeningRegressionTest {
     var config = new Phase8MovementValidation.Config(2, 0, true, true);
     accumulator = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 1), config).state();
     accumulator = accumulator.accept(evidence(Verdict.POSSIBLE, 2), config).state();
-    accumulator = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 3), config).state();
+    var third = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 3), config);
+    accumulator = third.state();
     assertEquals(2, accumulator.players().get("player/MOVEMENT_REACHABILITY").supportingImpossible());
-    assertTrue(accumulator.accept(evidence(Verdict.IMPOSSIBLE, 4), config).alert().isPresent());
+    assertTrue(third.alert().isPresent());
   }
 
   @Test void velocityPacketReplacesVelocity() {

@@ -148,6 +148,34 @@ class Phase8MovementValidationTest {
     assertEquals(30, state.lastAlertTick(), "uncertainty must not create or advance an alert");
   }
 
+  @Test
+  void violationLevelAccumulatesDecaysAndAlertsAtIntervals() {
+    Player p = Player.initial(new Maths.Vec3(0, 65, 0));
+    var evidence = Phase8MovementValidation.validate("alice", 40, p,
+        Player.initial(new Maths.Vec3(20, 65, 0)), world(), "world:test:40", stable(),
+        List.of("input known"), possible(p), "replay:40").evidence();
+    var config = new Phase8MovementValidation.Config(2, 0, true, true, 1.0, 0.5, 100.0, 2.0);
+
+    var first = Phase8MovementValidation.Accumulator.empty().accept(evidence, config);
+    assertTrue(first.alert().isEmpty());
+    assertEquals(1.0, first.state().players().get("alice/MOVEMENT_REACHABILITY").violationLevel());
+
+    var second = first.state().accept(evidence, config);
+    assertTrue(second.alert().isPresent());
+    var state = second.state().players().get("alice/MOVEMENT_REACHABILITY");
+    assertEquals(2.0, state.violationLevel());
+    assertEquals(2.0, second.alert().orElseThrow().violationLevel());
+
+    var recoveredEvidence = Phase8MovementValidation.validate("alice", 50, p, p, world(),
+        "world:test:50", stable(), List.of("input known"), possible(p), "replay:50").evidence();
+    var recovered = second.state().accept(recoveredEvidence, config);
+    assertEquals(0.0, recovered.state().players().get("alice/MOVEMENT_REACHABILITY").violationLevel());
+
+    var third = recovered.state().accept(evidence, config);
+    assertTrue(third.alert().isEmpty(), "decay should require fresh evidence to rebuild VL");
+    assertEquals(1.0, third.state().players().get("alice/MOVEMENT_REACHABILITY").violationLevel());
+  }
+
   @Test void replayReproducesSameResultAndEvidence() {
     Player p = Player.initial(new Maths.Vec3(0.5, 65, 0.5));
     Phase8Replay replay = Phase8Replay.of("alice", 20, p, p, world(), "world:test:20", stable(),
@@ -162,8 +190,8 @@ class Phase8MovementValidationTest {
         List.of("input known"), possible(p), "replay:40").evidence();
     var config = new Phase8MovementValidation.Config(1, 0, true, true);
     var alert = Phase8MovementValidation.Accumulator.empty().accept(evidence, config).alert().orElseThrow();
-    assertEquals("[PhantomAC] alice failed MOVEMENT_REACHABILITY (x1)", alert.message());
-    assertEquals("[PhantomAC] Steve failed MOVEMENT_REACHABILITY (x1)", alert.serverMessage("Steve"));
+    assertEquals("[PhantomAC] alice failed MOVEMENT_REACHABILITY (VL 1)", alert.message());
+    assertEquals("[PhantomAC] Steve failed MOVEMENT_REACHABILITY (VL 1)", alert.serverMessage("Steve"));
     assertTrue(alert.debugMessage().contains("[PhantomAC][PHASE8] player=alice type=MOVEMENT result=IMPOSSIBLE"));
     assertTrue(alert.debugMessage().contains("reason=all exhaustively modeled legitimate candidates disagree with the observed movement state"));
     assertEquals("replay:40", alert.replayReference());

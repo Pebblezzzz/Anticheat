@@ -103,7 +103,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private final Map<UUID,DebugLevel> debugPlayers=new ConcurrentHashMap<>();
   private org.bukkit.scheduler.BukkitTask stateTask;
   private int validationBudget;
-  private boolean alertsEnabled,broadcastAlerts,setbacksEnabled,setbacksOnlyExhaustive;
+  private boolean alertsEnabled,broadcastAlerts,printAlertsToConsole,setbacksEnabled,setbacksOnlyExhaustive;
+  private String alertPermission;
+  private int alertIntervalTicks;
+  private double violationIncrement,violationDecayPerTick,maximumViolationLevel;
   private boolean kickEnabled,punishmentEnabled,enforcementOnlyExhaustive,permissionExempt;
   private int minimumImpossibleObservations;
   private double minimumEnforcementConfidence;
@@ -361,6 +364,12 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     saveDefaultConfig();
     alertsEnabled=getConfig().getBoolean("alerts.enabled",true);
     broadcastAlerts=getConfig().getBoolean("alerts.broadcast",false);
+    printAlertsToConsole=getConfig().getBoolean("alerts.print-to-console",true);
+    alertPermission=getConfig().getString("alerts.permission","phantom.alerts");
+    alertIntervalTicks=Math.max(0,getConfig().getInt("alerts.alert-interval-ticks",2));
+    violationIncrement=Math.max(0.000001,getConfig().getDouble("alerts.violation-increment",1.0));
+    violationDecayPerTick=Math.max(0.0,getConfig().getDouble("alerts.violation-decay-per-tick",0.005));
+    maximumViolationLevel=Math.max(1.0,getConfig().getDouble("alerts.maximum-violation-level",100.0));
     setbacksEnabled=getConfig().getBoolean("setbacks.enabled",false);
     setbacksOnlyExhaustive=getConfig().getBoolean("setbacks.only-when-exhaustive",true);
     kickEnabled=getConfig().getBoolean("enforcement.kick-enabled",false);
@@ -598,16 +607,20 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
     if(!accepted)return;
     var accumulated=capture.accumulator.accept(evidence,
-        new Phase8MovementValidation.Config(1,20,alertsEnabled,true));
+        new Phase8MovementValidation.Config(minimumImpossibleObservations,alertIntervalTicks,alertsEnabled,true,
+            violationIncrement,violationDecayPerTick,maximumViolationLevel,
+            Math.max(0.000001, getConfig().getDouble("alerts.violation-alert-interval", minimumImpossibleObservations))));
     capture.accumulator=accumulated.state();
     capture.processedResults++;
     accumulated.alert().ifPresent(alert->{
-      getLogger().warning(alert.debugMessage());
+      if(printAlertsToConsole) getLogger().warning(alert.debugMessage());
       if(broadcastAlerts){
         getServer().broadcastMessage(alert.serverMessage(capture.playerName));
       }else{
-        Player player=getServer().getPlayer(capture.playerId);
-        if(player!=null&&player.hasPermission("phantom.admin"))player.sendMessage(alert.serverMessage(capture.playerName));
+        String message=alert.serverMessage(capture.playerName);
+        for(Player staff:getServer().getOnlinePlayers()){
+          if(staff.hasPermission(alertPermission)) staff.sendMessage(message);
+        }
       }
     });
   }
