@@ -873,6 +873,68 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void futureClientBlockBreakAppliesToEarlierMovementInSameBatch() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+
+    var stone = dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone", Map.of());
+    var solidWorld = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+        .loadChunk(0, 0)
+        .setBlock(0, 63, 0, stone)
+        .setBlock(0, 64, 1, stone)
+        .build();
+    var airWorld = solidWorld.withBlockOverride(0, 64, 1, dev.phantom.ac.world.BlockState.air());
+
+    Player start = new Player(
+        new Maths.Vec3(.5, 64.0, .65),
+        Maths.Vec3.ZERO,
+        0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
+
+    var input = new Simulation.AdvancedInput(1, -1, false, true, false);
+    Player observed = new Vanilla12111RichPhysics().step(
+        new Vanilla12111RichPhysics.Context(
+            1L, start, input, airWorld, Simulation.Environment.DRY, start.attributes(),
+            Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
+            MovementEnvironment.dry(true, true, false), false,
+            dev.phantom.ac.world.EntityCollisions.of(List.of())))
+        .state();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, true, false),
+        start.position(), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    var breakPacket = new ClientBlockBreak(new dev.phantom.ac.world.Pos(0, 64, 1), 17, 1L);
+
+    var report = runner.processWithWorldProvider(
+        "future-block-break",
+        List.of(
+            new RawPacket(1, 10L, authority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-authority", authority, 100L, 0L)),
+            new RawPacket(2, 20L, new ClientInput(
+                true, false, true, false, false, false, true)),
+            new RawPacket(3, 30L, new Move(
+                observed.position(), observed.yaw(), observed.pitch(), observed.onGround(), 1L)),
+            new RawPacket(4, 40L, breakPacket)),
+        sequence -> solidWorld,
+        start,
+        0L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertNotEquals(
+        Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("CLIENT_BLOCK_BREAK_PREDICTION")),
+        report.frames().getFirst().trace().toString());
+  }
+
+  @Test
   void staleResyncBootstrapsObservedMovementBeforeUsingServerVelocity() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     WorldSnapshot world = floorWorld();

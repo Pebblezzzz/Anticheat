@@ -376,6 +376,18 @@ public final class Phase8PredictionRunner {
     Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence =
         phase7Reconstruction.bySequence();
     rebuildLinearCausalInputHistory(phase7TimingBySequence);
+    /*
+     * A FINISHED_DIGGING packet can land later in the same validation batch than
+     * the first movement generated from the client's local block prediction.
+     * Make those explicit client-tick break intents visible to the replay before
+     * the packet loop consumes them in arrival order.
+     */
+    for (Packets.RawPacket packet : packets) {
+      if (packet.packet() instanceof Packets.ClientBlockBreak clientBlockBreak) {
+        recentClientBlockBreaks.put(packet.sequence(), clientBlockBreak);
+      }
+    }
+
     List<Phase8MovementValidation.Result> results = new ArrayList<>();
     List<PredictionFrame> frames = new ArrayList<>();
     int movementObservations = 0;
@@ -585,6 +597,10 @@ public final class Phase8PredictionRunner {
           + " simulationTick=" + (tick.known() ? Math.max(0L, tick.clientTick() - 1L) : -1L));
 
       WorldSnapshot world = worldProvider == null ? null : worldProvider.apply(sequence);
+      if (world != null && tick.known()) {
+        world = applyBatchClientBlockBreakPredictions(
+            world, sequence, tick.clientTick(), packets);
+      }
       if (world != null) {
         compensatedWorld = Phase8ClientModel.CompensatedWorld.forMovement(
             world, sequence, "latency-compensated-packet-world");
@@ -1843,6 +1859,31 @@ public final class Phase8PredictionRunner {
         authority.clientTickRange(), authority.provenance(), authority.uncertaintyReasons());
   }
 
+  private WorldSnapshot applyBatchClientBlockBreakPredictions(
+      WorldSnapshot world,
+      long movementSequence,
+      long movementClientTick,
+      List<Packets.RawPacket> packets) {
+    for (Packets.RawPacket packet : packets) {
+      if (packet.sequence() <= movementSequence) continue;
+      if (!(packet.packet() instanceof Packets.ClientBlockBreak blockBreak)) continue;
+
+      Long breakClientTick = blockBreak.clientTick();
+      if (breakClientTick == null) continue;
+
+      long tickDelta = movementClientTick - breakClientTick;
+      if (tickDelta < -1L || tickDelta > 2L) continue;
+
+      var pos = blockBreak.position();
+      if (world.coverageAt(pos.x(), pos.y(), pos.z()) == dev.phantom.ac.world.Coverage.KNOWN
+          && world.blockAtOrNull(pos.x(), pos.y(), pos.z()) != null) {
+        world = world.withBlockOverride(
+            pos.x(), pos.y(), pos.z(), dev.phantom.ac.world.BlockState.air());
+      }
+    }
+    return world;
+  }
+
   private List<Packets.ClientBlockBreak> activeClientBlockBreaks(
       long sequence, long movementClientTick) {
     List<Packets.ClientBlockBreak> active = new ArrayList<>();
@@ -1858,7 +1899,8 @@ public final class Phase8PredictionRunner {
       Packets.ClientBlockBreak blockBreak = entry.getValue();
       if (blockBreak.clientTick() == null
           || movementClientTick < 0L
-          || movementClientTick - blockBreak.clientTick() <= 2L) {
+          || (movementClientTick - blockBreak.clientTick() >= -1L
+              && movementClientTick - blockBreak.clientTick() <= 2L)) {
         active.add(blockBreak);
       }
     }
