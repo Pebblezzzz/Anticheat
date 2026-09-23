@@ -2153,6 +2153,18 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void currentHeldInputMayAffectTheFinalExplicitMovementBoundary() {
+    assertTrue(Phase8PredictionRunner.shouldOverlayCurrentInput(
+        577L, 578L, 10L, 20L, List.of(578L), false));
+    assertTrue(Phase8PredictionRunner.shouldOverlayCurrentInput(
+        577L, 578L, 10L, 20L, List.of(577L), false));
+    assertFalse(Phase8PredictionRunner.shouldOverlayCurrentInput(
+        576L, 578L, 10L, 20L, List.of(578L), false));
+    assertFalse(Phase8PredictionRunner.shouldOverlayCurrentInput(
+        577L, 578L, 21L, 20L, List.of(578L), false));
+  }
+
+  @Test
   void explicitClientTickRemainsExactAcrossServerTickGaps() {
     Phase7Timing.Config timing = new Phase7Timing.Config(
         50_000_000L, 50_000_000L, 50_000_000L,
