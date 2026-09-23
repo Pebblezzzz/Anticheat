@@ -1006,7 +1006,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       Phase8PredictionRunner.Report incremental=capture.movementRunner.processWithWorldProvider(
           playerName,
           raw,
-          sequence->capture.clientWorld.snapshotAtOrBefore(sequence),
+          sequence->capture.clientWorld.snapshotAtOrBeforeIncludingPending(sequence),
           anchor,
           capture.initialStateReceivedNanos);
 

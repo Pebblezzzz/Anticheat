@@ -499,6 +499,42 @@ public final class Phase4WorldReplica implements Serializable {
     return generationAtSequence(sequence).map(Generation::world).orElse(null);
   }
 
+  public synchronized WorldSnapshot snapshotAtOrBeforeIncludingPending(long sequence){
+    if(sequence<0)return null;
+
+    /*
+     * Movement can arrive after the client has already received a world mutation
+     * but before Phantom's synthetic transaction ACK is observed. Grim keeps the
+     * client-visible world causally compensated across this same ordering window.
+     * Rebuild the acknowledged journal up to this capture sequence, then overlay
+     * any already-captured-but-pending mutations whose outbound sequence is also
+     * before the movement. This does not mutate the acknowledged frontier.
+     */
+    VisibleState state=replayJournalAtSequence(sequence);
+
+    List<Event> pendingEvents=new ArrayList<>();
+    for(Event event:unassigned.values()){
+      if(event.order().sequence()<=sequence)pendingEvents.add(event);
+    }
+    for(List<Event> batch:pending.values()){
+      for(Event event:batch){
+        if(event.order().sequence()<=sequence)pendingEvents.add(event);
+      }
+    }
+    pendingEvents.sort(Comparator.comparing(Event::order));
+    for(Event event:pendingEvents)state=applyEvent(state,event);
+
+    return snapshotFor(state,sequence);
+  }
+
+  private VisibleState replayJournalAtSequence(long sequence){
+    VisibleState state=VisibleState.empty("unknown",WorldSnapshot.OVERWORLD_MIN_Y,WorldSnapshot.OVERWORLD_MAX_Y);
+    for(Event event:journal.values()){
+      if(event.order().sequence()<=sequence)state=applyEvent(state,event);
+    }
+    return state;
+  }
+
   public synchronized void accept(Event event){
     Objects.requireNonNull(event);
     acceptVisible(List.of(event),event.order().sequence());
