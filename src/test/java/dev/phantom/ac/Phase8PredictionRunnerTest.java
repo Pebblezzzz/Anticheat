@@ -954,6 +954,71 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void staleResyncUsesRetainedClientVelocityAtMatchingBoundary() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+    Simulation.AdvancedInput input = new Simulation.AdvancedInput(0, 0, false, false, false);
+
+    Player start = new Player(
+        new Maths.Vec3(.5, 64.0, .5),
+        new Maths.Vec3(.2, 0.0, 0.0),
+        0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.of(input),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
+
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    Player firstObserved = physics.step(new Vanilla12111RichPhysics.Context(
+        1L, start, input, world, Simulation.Environment.DRY, start.attributes(),
+        Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
+        MovementEnvironment.dry(true, false, false), false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+    Player nextObserved = physics.step(new Vanilla12111RichPhysics.Context(
+        2L, firstObserved, input, world, Simulation.Environment.DRY, firstObserved.attributes(),
+        Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
+        MovementEnvironment.dry(true, false, false), false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        firstObserved.position(), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    List<RawPacket> packets = new ArrayList<>();
+    packets.add(new RawPacket(1, 10L, authority));
+    packets.add(new RawPacket(2, 20L, new Move(
+        firstObserved.position(), 0f, 0f, true, 1L)));
+    packets.add(new RawPacket(3, 30L, new Move(
+        firstObserved.position(), 0f, 0f, true, 2L)));
+    packets.add(new RawPacket(4, 40L, new Move(
+        firstObserved.position(), 0f, 0f, true, 3L)));
+    packets.add(new RawPacket(5, 50L, new Move(
+        firstObserved.position(), 0f, 0f, true, 4L)));
+    packets.add(new RawPacket(6, 60L, new PlayerContext(
+        "survival", start.attributes(), Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        firstObserved.position(), Maths.Vec3.ZERO,
+        false, false, false, List.of())));
+    packets.add(new RawPacket(7, 70L, new Move(
+        nextObserved.position(), 0f, 0f, true, 5L)));
+
+    var report = runner.process(
+        "stale-resync-retained-client-velocity",
+        packets, world, start, 0L);
+
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getLast().verdict(), report.results().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
+        report.frames().getLast().trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("ROOT_VELOCITY source=retained-client-physics-state")
+            && line.contains("tick=4")),
+        report.frames().getLast().trace().toString());
+  }
+
+  @Test
   void staleAirborneAuthorityResyncPredictsObservedNextTick() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
