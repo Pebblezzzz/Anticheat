@@ -161,7 +161,9 @@ class GrimPhysicsArchitectureTest {
     assertEquals(new Vec3(0.0, 0.0, 0.9), result.clientVelocityBeforeTick());
     assertEquals(1.4, result.state().position().z(), 1.0e-12,
         "physics must start from the explicit client velocity carried into the tick");
-    assertEquals(0.819, result.clientVelocityAfterTick().z(), 1.0e-7);
+    // Grim keeps the client velocity at the collision boundary while the
+    // predicted state velocity is advanced through end-of-tick drag.
+    assertEquals(0.9, result.clientVelocityAfterTick().z(), 1.0e-7);
     assertEquals(0.819, result.predictedVelocityAfterCollision().z(), 1.0e-7);
   }
   @Test
