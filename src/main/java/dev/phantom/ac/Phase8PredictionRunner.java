@@ -812,7 +812,7 @@ public final class Phase8PredictionRunner {
       boolean explicitTimingRangeExhaustive =
           explicitTimingRangeIsExhaustive(move, movementTiming);
       boolean phase7ChronologyUnmodeled =
-          phase7TimingHasUnmodeledChronology(movementTiming);
+          phase7TimingHasUnmodeledChronology(movementTiming, move.clientTick() != null);
       boolean explicitTimingFullyRepresented =
           explicitTimingRangeExhaustive
               && !phase7ChronologyUnmodeled;
@@ -952,7 +952,7 @@ public final class Phase8PredictionRunner {
           Phase7Timing.EventTiming bootstrapTiming = phase7TimingBySequence.get(sequence);
           boolean bootstrapTimingExhaustive =
               explicitTimingRangeIsExhaustive(move, bootstrapTiming)
-                  && !phase7TimingHasUnmodeledChronology(bootstrapTiming);
+                  && !phase7TimingHasUnmodeledChronology(bootstrapTiming, move.clientTick() != null);
           TickResolution bootstrapValidationTick = bootstrapTimingExhaustive
               ? tick.withTimingUncertaintyResolved(
                   "Phase 7 bounded simulation timing was exhaustively evaluated for every permitted offset")
@@ -1541,13 +1541,20 @@ public final class Phase8PredictionRunner {
   }
 
   private static boolean phase7TimingHasUnmodeledChronology(
-      Phase7Timing.EventTiming timing) {
+      Phase7Timing.EventTiming timing,
+      boolean explicitClientTick) {
     if (timing == null) return true;
     for (Phase7Timing.SynchronizationWindow window : timing.windows()) {
       switch (window.kind()) {
-        case PACKET_GAP, SERVER_TICK_GAP, REORDERING, DUPLICATE,
+        case PACKET_GAP, REORDERING, DUPLICATE,
             TELEPORT, VELOCITY, ACKNOWLEDGEMENT, RECOVERY, TIMING_BUDGET -> {
           return true;
+        }
+        case SERVER_TICK_GAP -> {
+          /* An explicit client tick remains an exact packet-clock witness across
+             missing server-tick observations. A real capture packet gap remains
+             uncertain and is handled by PACKET_GAP above. */
+          if (!explicitClientTick) return true;
         }
         case WORLD_UPDATE, STARTUP -> {
           // World visibility and startup windows do not by themselves make
@@ -1567,6 +1574,9 @@ public final class Phase8PredictionRunner {
           || normalized.contains("movement timing is not fully synchronized")) {
         return true;
       }
+      if (!explicitClientTick && normalized.contains("server tick interval contains unobserved ticks")) {
+        return true;
+      }
     }
     return false;
   }
@@ -1577,6 +1587,12 @@ public final class Phase8PredictionRunner {
       Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
     Phase7Timing.EventTiming timing = phase7TimingBySequence.get(packet.sequence());
     boolean timingUncertain = timing != null && timing.uncertain();
+    if (timingUncertain
+        && move.clientTick() != null
+        && explicitTimingRangeIsExhaustive(move, timing)
+        && !phase7TimingHasUnmodeledChronology(timing, true)) {
+      timingUncertain = false;
+    }
 
     /*
      * The captured client tick is the strongest simulation-clock fact available
@@ -3254,6 +3270,7 @@ public final class Phase8PredictionRunner {
           authoritativeMovementEnvironment,
           movementTimingUncertain);
       union.addAll(one.candidates());
+      union = new LinkedHashSet<>(Phase6Reachability.mergeEquivalentCandidates(union));
       reasons.addAll(one.reasons());
       trace.add("TIMING_OFFSET target=" + target
           + " exhaustive=" + one.exhaustive()

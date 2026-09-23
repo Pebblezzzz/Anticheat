@@ -39,6 +39,32 @@ class Phase6ReachabilityTest {
   }
 
   @Test
+  void equivalentCandidateStatesMergeWithoutTreatingIdsAsPhysics() {
+    Player player = new Player(Vec3.ZERO, Vec3.ZERO, 0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(), Simulation.Attributes.DEFAULT,
+        Phase5Mechanics.Pose.STANDING, State.Environment.DRY, State.TickRange.unknown(),
+        State.Provenance.UNKNOWN, Set.of());
+    var context = new Phase6Reachability.Context(
+        0L, player, Simulation.Environment.DRY, Simulation.Attributes.DEFAULT,
+        Phase5Mechanics.MovementEffects.NONE, Phase5Mechanics.Pose.STANDING,
+        Phase5Mechanics.MovementEnvironment.dry(true, false, false), false);
+    var first = new Phase6Reachability.Candidate(
+        1L, context,
+        new Phase6Reachability.Provenance(1L, -1L, 0L, "input-a", "world", "none", List.of("a"), 1, List.of()));
+    var second = new Phase6Reachability.Candidate(
+        2L, context,
+        new Phase6Reachability.Provenance(2L, -1L, 0L, "input-b", "world", "none", List.of("b"), 1, List.of()));
+
+    Set<Phase6Reachability.Candidate> merged =
+        Phase6Reachability.mergeEquivalentCandidates(List.of(first, second));
+
+    assertEquals(1, merged.size());
+    var survivor = merged.iterator().next();
+    assertEquals(2, survivor.provenance().mergedPathCount());
+    assertEquals(1L, survivor.id());
+  }
+
+  @Test
   void completeInputEnvelopeIsFiniteAndDeterministic() {
     List<AdvancedInput> inputs = Validation.allInputs();
     assertEquals(72, inputs.size());

@@ -2153,6 +2153,58 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void explicitClientTickRemainsExactAcrossServerTickGaps() {
+    Phase7Timing.Config timing = new Phase7Timing.Config(
+        50_000_000L, 50_000_000L, 50_000_000L,
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        250_000_000L, 3, 128);
+
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, timing);
+    WorldSnapshot world = floorWorld();
+    Player start = anchor();
+    MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(), Pose.STANDING, environment,
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    Simulation.AdvancedInput forward = new Simulation.AdvancedInput(1, 0, false, false, false);
+    Player first = physics.step(new Vanilla12111RichPhysics.Context(
+        0L, start, forward, world, Simulation.Environment.DRY,
+        start.attributes(), Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
+        environment, false, dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+    Player second = physics.step(new Vanilla12111RichPhysics.Context(
+        1L, first, forward, world, Simulation.Environment.DRY,
+        first.attributes(), Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
+        environment, false, dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    Move firstMove = new Move(first.position(), 0f, 0f, true, 2L);
+    Move secondMove = new Move(second.position(), 0f, 0f, true, 3L);
+    var report = runner.process(
+        "explicit-tick-server-gap",
+        List.of(
+            new RawPacket(1L, 1_000_000L, authority,
+                Packets.CaptureProvenance.fromAdapter("authority", authority, 100L, 1L)),
+            new RawPacket(2L, 2_000_000L, firstMove,
+                Packets.CaptureProvenance.fromAdapter("move", firstMove, 101L, 2L)),
+            new RawPacket(3L, 3_000_000L, secondMove,
+                Packets.CaptureProvenance.fromAdapter("move", secondMove, 103L, 3L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("CLIENT_TICK 3")
+            && line.contains("exact=true")
+            && line.contains("timingUncertain=false")),
+        report.frames().getLast().toString());
+  }
+
+  @Test
   void explicitClientTickWithRealPacketGapRemainsUncertain() {
     Phase7Timing.Config timing = new Phase7Timing.Config(
         50_000_000L, 50_000_000L, 50_000_000L,
