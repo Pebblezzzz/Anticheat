@@ -54,6 +54,20 @@ class Phase5FullMechanicsTest {
         assertTrue(up.state().velocity().y() > result.state().velocity().y());
     }
 
+    @Test void vinesAndVineVariantsAreRecognizedAsClimbableEnvironment() {
+        for (String id : java.util.List.of(
+                "minecraft:vine",
+                "minecraft:weeping_vines",
+                "minecraft:weeping_vines_plant",
+                "minecraft:twisting_vines",
+                "minecraft:twisting_vines_plant",
+                "minecraft:cave_vines",
+                "minecraft:cave_vines_plant")) {
+            var state = dev.phantom.ac.world.v12111.BlockCatalogue12111.decode(id, java.util.Map.of());
+            assertTrue(dev.phantom.ac.world.v12111.BlockCatalogue12111.environment(state).climbable(), id);
+        }
+    }
+
     @Test void glidingHasItsOwnMovementModeAndPose() {
         Player state = new Player(new Vec3(0, 70, 0), new Vec3(0, -0.2, 0.1), 0, 0, false,
                 "survival", java.util.Map.of(), OptionalInt.empty(), false);
