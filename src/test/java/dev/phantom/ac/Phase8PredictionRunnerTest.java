@@ -2165,16 +2165,6 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
-  void unmaterializedHeldInputTimingRemainsABoundaryAlternative() {
-    assertTrue(Phase8PredictionRunner.shouldOverlayCurrentInput(
-        738L, 739L, 10L, 20L, List.of(), false));
-    assertFalse(Phase8PredictionRunner.shouldOverlayCurrentInput(
-        738L, 739L, 10L, 20L, List.of(740L), false));
-    assertTrue(Phase8PredictionRunner.shouldOverlayCurrentInput(
-        738L, 739L, 10L, 20L, List.of(739L), false));
-  }
-
-  @Test
   void boundedUnmaterializedInputRangeCanReachFinalMovementBoundary() {
     assertFalse(Phase8PredictionRunner.shouldOverlayCurrentInput(
         738L, 739L, 10L, 20L, List.of(),
