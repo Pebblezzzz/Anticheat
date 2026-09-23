@@ -26,13 +26,26 @@ public final class Phase8MovementValidation {
   public enum Verdict { POSSIBLE, UNCERTAIN, IMPOSSIBLE }
 
   public record Config(int minimumImpossibleObservations, int alertDebounceTicks,
-                       boolean alertsEnabled, boolean observationOnly) implements Serializable {
+                       boolean alertsEnabled, boolean observationOnly,
+                       double violationIncrement, double violationDecayPerTick,
+                       double maximumViolationLevel, double alertInterval) implements Serializable {
     public Config {
       if (minimumImpossibleObservations < 1) throw new IllegalArgumentException("minimumImpossibleObservations must be positive");
       if (alertDebounceTicks < 0) throw new IllegalArgumentException("alertDebounceTicks must be non-negative");
       if (!observationOnly) throw new IllegalArgumentException("Phase 8 is observation-only; punishment is not part of this phase");
+      if (!Double.isFinite(violationIncrement) || violationIncrement <= 0) throw new IllegalArgumentException("violationIncrement must be finite and positive");
+      if (!Double.isFinite(violationDecayPerTick) || violationDecayPerTick < 0) throw new IllegalArgumentException("violationDecayPerTick must be finite and non-negative");
+      if (!Double.isFinite(maximumViolationLevel) || maximumViolationLevel <= 0) throw new IllegalArgumentException("maximumViolationLevel must be finite and positive");
+      if (!Double.isFinite(alertInterval) || alertInterval <= 0) throw new IllegalArgumentException("alertInterval must be finite and positive");
+      if (maximumViolationLevel < minimumImpossibleObservations) throw new IllegalArgumentException("maximumViolationLevel must cover the alert threshold");
+    }
+    public Config(int minimumImpossibleObservations, int alertDebounceTicks,
+                  boolean alertsEnabled, boolean observationOnly) {
+      this(minimumImpossibleObservations, alertDebounceTicks, alertsEnabled, observationOnly,
+          1.0, 0.005, 100.0, minimumImpossibleObservations);
     }
     public static Config defaults() { return new Config(1, 20, true, true); }
+    public double alertThreshold() { return minimumImpossibleObservations; }
   }
 
   public record Evidence(
@@ -230,18 +243,23 @@ public final class Phase8MovementValidation {
       String key = evidence.playerId() + "/" + evidence.rule();
       State old = players.getOrDefault(key, State.empty());
       State next = switch (evidence.verdict()) {
-        case IMPOSSIBLE -> old.impossible(evidence.serverTick());
-        case POSSIBLE -> old.recovered(evidence.serverTick());
-        case UNCERTAIN -> old.uncertain();
+        case IMPOSSIBLE -> old.impossible(evidence.serverTick(), config);
+        case POSSIBLE -> old.recovered(evidence.serverTick(), config);
+        case UNCERTAIN -> old.uncertain(evidence.serverTick(), config);
       };
       Map<String, State> updated = new LinkedHashMap<>(players); updated.put(key, next);
       Optional<Alert> alert = Optional.empty();
+      double threshold = config.alertThreshold();
+      double previousLevel = old.decayTo(evidence.serverTick(), config);
+      boolean thresholdReached = next.violationLevel() >= threshold;
+      boolean crossedNextInterval = next.violationLevel() + 1e-9 >= next.lastAlertViolationLevel() + config.alertInterval();
+      boolean debounceSatisfied = next.lastAlertTick() < 0
+          || evidence.serverTick() - next.lastAlertTick() >= config.alertDebounceTicks();
       if (config.alertsEnabled() && evidence.verdict() == Verdict.IMPOSSIBLE
-          && next.supportingImpossible() >= config.minimumImpossibleObservations()
-          && (next.lastAlertTick() < 0 || evidence.serverTick() - next.lastAlertTick() >= config.alertDebounceTicks())) {
-        double confidence = Math.min(1.0, (double) next.supportingImpossible() / config.minimumImpossibleObservations());
+          && thresholdReached && (next.lastAlertTick() < 0 || crossedNextInterval) && debounceSatisfied) {
+        double confidence = Math.min(1.0, next.violationLevel() / threshold);
         alert = Optional.of(new Alert(evidence.playerId(), evidence.serverTick(), evidence.firstInconsistentTick().orElse(evidence.serverTick()),
-            evidence.rule(), evidence.eliminationReason(), confidence, next.supportingImpossible(), evidence.replayReference()));
+            evidence.rule(), evidence.eliminationReason(), confidence, next.supportingImpossible(), next.violationLevel(), evidence.replayReference()));
         updated.put(key, next.alerted(evidence.serverTick()));
       }
       return new Accumulated(new Accumulator(updated), alert);
@@ -249,18 +267,37 @@ public final class Phase8MovementValidation {
   }
 
   public record State(int consecutiveImpossible, int supportingImpossible, int uncertaintyPeriods,
-                      int recoveries, long lastObservationTick, long lastAlertTick) implements Serializable {
-    public static State empty() { return new State(0, 0, 0, 0, -1, -1); }
-    State impossible(long tick) { return new State(consecutiveImpossible + 1, supportingImpossible + 1, uncertaintyPeriods, recoveries, tick, lastAlertTick); }
-    State recovered(long tick) { return new State(0, supportingImpossible, uncertaintyPeriods, recoveries + 1, tick, lastAlertTick); }
-    State uncertain() { return new State(0, supportingImpossible, uncertaintyPeriods + 1, recoveries, lastObservationTick, lastAlertTick); }
-    State alerted(long tick) { return new State(consecutiveImpossible, supportingImpossible, uncertaintyPeriods, recoveries, lastObservationTick, tick); }
+                      int recoveries, long lastObservationTick, long lastAlertTick,
+                      double violationLevel, double lastAlertViolationLevel) implements Serializable {
+    public static State empty() { return new State(0, 0, 0, 0, -1, -1, 0.0, 0.0); }
+    State impossible(long tick, Config config) {
+      double decayed = decayTo(tick, config);
+      return new State(consecutiveImpossible + 1, supportingImpossible + 1, uncertaintyPeriods, recoveries,
+          tick, lastAlertTick, Math.min(config.maximumViolationLevel(), decayed + config.violationIncrement()), lastAlertViolationLevel);
+    }
+    State recovered(long tick, Config config) {
+      return new State(0, supportingImpossible, uncertaintyPeriods, recoveries + 1, tick, lastAlertTick,
+          decayTo(tick, config), lastAlertViolationLevel);
+    }
+    State uncertain(long tick, Config config) {
+      return new State(0, supportingImpossible, uncertaintyPeriods + 1, recoveries, lastObservationTick, lastAlertTick,
+          decayTo(tick, config), lastAlertViolationLevel);
+    }
+    State alerted(long tick) {
+      return new State(consecutiveImpossible, supportingImpossible, uncertaintyPeriods, recoveries,
+          lastObservationTick, tick, violationLevel, violationLevel);
+    }
+    double decayTo(long tick, Config config) {
+      if (lastObservationTick < 0 || tick <= lastObservationTick || config.violationDecayPerTick() == 0) return violationLevel;
+      return Math.max(0.0, violationLevel - (tick - lastObservationTick) * config.violationDecayPerTick());
+    }
   }
 
   public record Accumulated(Accumulator state, Optional<Alert> alert) implements Serializable {}
 
   public record Alert(String playerId, long serverTick, long firstInconsistentTick, String reason,
-                      String evidence, double confidence, int supportingEvents, String replayReference) implements Serializable {
+                      String evidence, double confidence, int supportingEvents, double violationLevel,
+                      String replayReference) implements Serializable {
     /**
      * Operator-facing alert, intentionally concise like a conventional anti-cheat flag.
      * Detailed forensic evidence remains available through debugMessage().
@@ -271,12 +308,15 @@ public final class Phase8MovementValidation {
 
     public String serverMessage(String displayName) {
       String name = displayName == null || displayName.isBlank() ? playerId : displayName;
-      return "[PhantomAC] " + name + " failed " + reason + " (x" + supportingEvents + ")";
+      return "[PhantomAC] " + name + " failed " + reason + " (VL " + formatViolationLevel(violationLevel) + ")";
     }
 
-    /**
-     * Full evidence is retained for console diagnostics and future forensic tooling.
-     */
+    private static String formatViolationLevel(double value) {
+      if (Math.abs(value - Math.rint(value)) < 1e-9) return Long.toString(Math.round(value));
+      return String.format(Locale.ROOT, "%.2f", value);
+    }
+
+    /** Full evidence is retained for console diagnostics and future forensic tooling. */
     public String debugMessage() {
       return "[PhantomAC][PHASE8] player=" + playerId + " type=MOVEMENT result=IMPOSSIBLE tick=" + serverTick
           + " first-inconsistent-tick=" + firstInconsistentTick + " reason=" + evidence
