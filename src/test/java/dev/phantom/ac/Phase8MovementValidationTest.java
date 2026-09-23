@@ -162,8 +162,10 @@ class Phase8MovementValidationTest {
         List.of("input known"), possible(p), "replay:40").evidence();
     var config = new Phase8MovementValidation.Config(1, 0, true, true);
     var alert = Phase8MovementValidation.Accumulator.empty().accept(evidence, config).alert().orElseThrow();
-    assertTrue(alert.message().contains("[PhantomAC][PHASE8] player=alice type=MOVEMENT result=IMPOSSIBLE"));
-    assertTrue(alert.message().contains("reason=all exhaustively modeled legitimate candidates disagree with the observed movement state"));
+    assertEquals("[PhantomAC] alice failed MOVEMENT_REACHABILITY (x1)", alert.message());
+    assertEquals("[PhantomAC] Steve failed MOVEMENT_REACHABILITY (x1)", alert.serverMessage("Steve"));
+    assertTrue(alert.debugMessage().contains("[PhantomAC][PHASE8] player=alice type=MOVEMENT result=IMPOSSIBLE"));
+    assertTrue(alert.debugMessage().contains("reason=all exhaustively modeled legitimate candidates disagree with the observed movement state"));
     assertEquals("replay:40", alert.replayReference());
   }
 }
