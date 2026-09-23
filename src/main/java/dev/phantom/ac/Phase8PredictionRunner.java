@@ -3745,6 +3745,21 @@ public final class Phase8PredictionRunner {
       long targetTick,
       long currentInputSequence,
       long movementSequence,
+      List<Long> possibleSimulationTicks) {
+    return shouldOverlayCurrentInput(
+        simulationTick,
+        targetTick,
+        currentInputSequence,
+        movementSequence,
+        possibleSimulationTicks,
+        false);
+  }
+
+  static boolean shouldOverlayCurrentInput(
+      long simulationTick,
+      long targetTick,
+      long currentInputSequence,
+      long movementSequence,
       List<Long> possibleSimulationTicks,
       boolean movementTimingUncertain) {
     return shouldOverlayCurrentInput(
