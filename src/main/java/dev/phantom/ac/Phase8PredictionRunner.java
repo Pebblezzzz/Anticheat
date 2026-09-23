@@ -481,7 +481,7 @@ public final class Phase8PredictionRunner {
             inputTiming != null && Phase7Timing.simulationTickEnumerationComplete(inputTiming);
         currentInputPossibleSimulationTicks =
             currentInputSimulationTimingExhaustive
-                ? alignClientTicks(Phase7Timing.possibleSimulationClientTicks(inputTiming))
+                ? alignClientTicks(Phase7Timing.possibleSimulationTicks(inputTiming))
                 : List.of();
         if (!prediction.isEmpty()) {
           Set<Candidate> updated = overlayClientInput(prediction, clientState, maximumCandidates);
