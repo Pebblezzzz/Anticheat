@@ -9,7 +9,7 @@ public final class Packets {
 
   public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm,
       Velocity, Effect, Gamemode, PlayerContext, FlightToggle, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange,
-      WorldTransactionSend, WorldTransactionAck, PaperMovementRejection, EntitySpawn, EntityMove, EntityDespawn {
+      WorldTransactionSend, WorldTransactionAck, PaperMovementRejection, ClientBlockBreak, EntitySpawn, EntityMove, EntityDespawn {
     default boolean mutatesWorld() {
       return this instanceof ChunkData || this instanceof ChunkUnload
           || this instanceof BlockChange || this instanceof ChunkStates || this instanceof BlockStateChange || this instanceof UnsupportedBlockStateChange
@@ -23,6 +23,15 @@ public final class Packets {
   public record ClientInput(boolean forward, boolean backward, boolean left, boolean right, boolean jump, boolean sneak, boolean sprint) implements Packet {}
   /** Server-side event evidence that the client attempted to toggle flying. */
   public record FlightToggle(boolean flying, boolean cancelled) implements Packet {}
+  /** Client-side block-break prediction intent used for the short pre-authoritative-update window. */
+  public record ClientBlockBreak(dev.phantom.ac.world.Pos position, int actionSequence, Long clientTick) implements Packet {
+    public ClientBlockBreak {
+      Objects.requireNonNull(position, "position");
+      if (actionSequence < 0) throw new IllegalArgumentException("actionSequence must be non-negative");
+      if (clientTick != null && clientTick < 0) throw new IllegalArgumentException("clientTick must be non-negative");
+    }
+  }
+
   public record Teleport(int id, Vec3 position, float yaw, float pitch, boolean relativeX, boolean relativeY, boolean relativeZ, boolean relativeYaw, boolean relativePitch) implements Packet { public Teleport { Objects.requireNonNull(position,"position"); }
     public Teleport(int id, Vec3 position, float yaw, float pitch) { this(id,position,yaw,pitch,false,false,false,false,false); }
   }
@@ -109,7 +118,7 @@ public final class Packets {
     public static CaptureProvenance fromAdapter(String sourceId,Packet packet,Long authoritativeServerTick){Objects.requireNonNull(packet);return new CaptureProvenance(sourceId,directionFor(packet),packet.getClass().getSimpleName(),authoritativeServerTick,null);}
     public static CaptureProvenance fromAdapter(String sourceId,Packet packet,Long authoritativeServerTick,Long authoritativeClientTick){Objects.requireNonNull(packet);return new CaptureProvenance(sourceId,directionFor(packet),packet.getClass().getSimpleName(),authoritativeServerTick,authoritativeClientTick);}
     public static String directionFor(Packet packet){
-      if(packet instanceof Move||packet instanceof ClientInput||packet instanceof ClientTickEnd||packet instanceof TeleportConfirm||packet instanceof WorldTransactionAck||packet instanceof FlightToggle)return "CLIENT_TO_SERVER";
+      if(packet instanceof Move||packet instanceof ClientInput||packet instanceof ClientTickEnd||packet instanceof TeleportConfirm||packet instanceof WorldTransactionAck||packet instanceof FlightToggle||packet instanceof ClientBlockBreak)return "CLIENT_TO_SERVER";
       if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof Effect||packet instanceof Gamemode||packet instanceof PlayerContext||packet instanceof WorldTransactionSend||packet.mutatesWorld())return "SERVER_TO_CLIENT";
       return "UNKNOWN";
     }
