@@ -293,8 +293,9 @@ public final class Phase8MovementValidation {
           lastObservationTick, tick, violationLevel, violationLevel);
     }
     double decayTo(long tick, Config config) {
-      if (lastObservationTick < 0 || tick <= lastObservationTick || config.violationDecayPerTick() == 0) return violationLevel;
-      return Math.max(0.0, violationLevel - (tick - lastObservationTick) * config.violationDecayPerTick());
+      if (lastObservationTick < 0 || tick <= lastObservationTick + 1 || config.violationDecayPerTick() == 0) return violationLevel;
+      long idleTicks = tick - lastObservationTick - 1;
+      return Math.max(0.0, violationLevel - idleTicks * config.violationDecayPerTick());
     }
   }
 
