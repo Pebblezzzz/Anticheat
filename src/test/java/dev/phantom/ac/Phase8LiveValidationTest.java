@@ -123,7 +123,7 @@ class Phase8LiveValidationTest {
     assertNotNull(emitted);
     assertEquals("phase8-test", emitted.playerId());
     assertEquals(2, emitted.supportingEvents());
-    assertEquals("[PhantomAC] phase8-test failed MOVEMENT_REACHABILITY (x2)", emitted.message());
+    assertEquals("[PhantomAC] phase8-test failed MOVEMENT_REACHABILITY (VL 2)", emitted.message());
     assertTrue(emitted.debugMessage().contains("result=IMPOSSIBLE"));
   }
 
