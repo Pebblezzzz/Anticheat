@@ -226,6 +226,31 @@ public final class WorldSnapshot implements Serializable {
     return backend == null ? -1L : backend.causalSequence();
   }
 
+  /** Returns an immutable view with the supplied causal visibility boundary. */
+  public WorldSnapshot withCausalSequence(long sequence) {
+    if (backend == null) return this;
+    WorldSnapshot base = this;
+    Backend overlay = new Backend() {
+      @Override public String version() { return base.version(); }
+      @Override public int minY() { return base.minY(); }
+      @Override public int maxY() { return base.maxY(); }
+      @Override public Set<Chunk> loadedChunks() { return base.loadedChunks(); }
+      @Override public long causalSequence() { return sequence; }
+      @Override public Set<Chunk> unknownChunks() { return base.unknownChunkSet(); }
+      @Override public boolean hasChunk(int chunkX, int chunkZ) { return base.hasChunk(chunkX, chunkZ); }
+      @Override public Coverage coverageAt(int x, int y, int z) { return base.coverageAt(x, y, z); }
+      @Override public BlockState blockAtOrNull(int x, int y, int z) { return base.blockAtOrNull(x, y, z); }
+      @Override public java.util.Optional<VoxelShape> resolveCollisionShape(
+          WorldSnapshot snapshot, int x, int y, int z) {
+        return base.resolveCollisionShape(x, y, z);
+      }
+      @Override public String coverageDetailAt(int x, int y, int z) {
+        return base.coverageDetailAt(x, y, z);
+      }
+    };
+    return WorldSnapshot.backed(version, minY, maxY, overlay);
+  }
+
   /** Canonical position order: x, then y, then z. */
   public static final java.util.Comparator<Pos> POS_ORDER =
       java.util.Comparator.comparingInt(Pos::x).thenComparingInt(Pos::y).thenComparingInt(Pos::z);

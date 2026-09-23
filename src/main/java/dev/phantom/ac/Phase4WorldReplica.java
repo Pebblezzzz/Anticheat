@@ -501,38 +501,35 @@ public final class Phase4WorldReplica implements Serializable {
 
   public synchronized WorldSnapshot snapshotAtOrBeforeIncludingPending(long sequence){
     if(sequence<0)return null;
+    WorldSnapshot base=generationAtSequence(sequence).map(Generation::world).orElse(null);
+    if(base==null)return null;
 
     /*
-     * Movement can arrive after the client has already received a world mutation
-     * but before Phantom's synthetic transaction ACK is observed. Grim keeps the
-     * client-visible world causally compensated across this same ordering window.
-     * Rebuild the acknowledged journal up to this capture sequence, then overlay
-     * any already-captured-but-pending mutations whose outbound sequence is also
-     * before the movement. This does not mutate the acknowledged frontier.
+     * Movement is a hot path. The acknowledged generation already contains the
+     * complete visible world at this sequence; only still-pending block updates
+     * need a short-lived overlay. Replaying the complete event journal here would
+     * make validation cost grow with player uptime and movement packet count.
      */
-    VisibleState state=replayJournalAtSequence(sequence);
-
     List<Event> pendingEvents=new ArrayList<>();
     for(Event event:unassigned.values()){
-      if(event.order().sequence()<=sequence)pendingEvents.add(event);
+      if(event.order().sequence()<=sequence && event instanceof BlockChange)
+        pendingEvents.add(event);
     }
     for(List<Event> batch:pending.values()){
       for(Event event:batch){
-        if(event.order().sequence()<=sequence)pendingEvents.add(event);
+        if(event.order().sequence()<=sequence && event instanceof BlockChange)
+          pendingEvents.add(event);
       }
     }
     pendingEvents.sort(Comparator.comparing(Event::order));
-    for(Event event:pendingEvents)state=applyEvent(state,event);
 
-    return snapshotFor(state,sequence);
-  }
-
-  private VisibleState replayJournalAtSequence(long sequence){
-    VisibleState state=VisibleState.empty("unknown",WorldSnapshot.OVERWORLD_MIN_Y,WorldSnapshot.OVERWORLD_MAX_Y);
-    for(Event event:journal.values()){
-      if(event.order().sequence()<=sequence)state=applyEvent(state,event);
+    WorldSnapshot result=base;
+    for(Event event:pendingEvents){
+      BlockChange change=(BlockChange)event;
+      result=result.withBlockOverride(
+          change.position().x(),change.position().y(),change.position().z(),change.state());
     }
-    return state;
+    return result.withCausalSequence(sequence);
   }
 
   public synchronized void accept(Event event){

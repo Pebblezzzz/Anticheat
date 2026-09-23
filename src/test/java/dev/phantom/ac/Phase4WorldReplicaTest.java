@@ -126,8 +126,10 @@ final class Phase4WorldReplicaTest {
 
     assertEquals(stone,r.snapshotAtOrBefore(3).blockAtOrNull(0,64,0));
     assertNull(r.snapshotAtOrBeforeIncludingPending(3).blockAtOrNull(0,64,0));
-    assertEquals(Coverage.KNOWN,
-        r.snapshotAtOrBeforeIncludingPending(3).coverageAt(0,64,0));
+    var pending=r.snapshotAtOrBeforeIncludingPending(3);
+    assertEquals(Coverage.KNOWN,pending.coverageAt(0,64,0));
+    assertEquals(3L,pending.causalSequence());
+    assertNull(pending.blockAtOrNull(0,64,0));
   }
 
   @Test void packedSectionRoundTripsAcrossLongBoundary(){
