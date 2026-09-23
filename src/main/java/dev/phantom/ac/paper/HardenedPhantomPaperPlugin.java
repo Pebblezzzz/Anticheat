@@ -1798,3 +1798,108 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     Map<String,String> properties=new LinkedHashMap<>();
     for(StateValue value:StateValue.values()){
       Object raw=state.getData(value);
+      if(raw!=null)properties.put(value.getName(),raw.toString().toLowerCase(Locale.ROOT));
+    }
+    return dev.phantom.ac.world.v12111.BlockCatalogue12111.decode(name,properties);
+  }
+
+  private static boolean isFence(String name){return name.endsWith("_fence")&&!name.endsWith("_fence_gate");}
+  private static boolean isWall(String name){return name.endsWith("_wall");}
+  private static boolean isPane(String name){return name.endsWith("_pane");}
+  private static boolean hasAll(Map<String,String> map,String... keys){for(String key:keys)if(!map.containsKey(key))return false;return true;}
+  private static void putEnum(Map<String,String> map,String key,Object value){if(value!=null)map.put(key,value.toString().toLowerCase(Locale.ROOT));}
+  private static void putNumber(Map<String,String> map,String key,Object value){if(value instanceof Number number)map.put(key,Integer.toString(number.intValue()));}
+  private static void putBoolean(Map<String,String> map,String key,Object value){if(value instanceof Boolean bool)map.put(key,Boolean.toString(bool));}
+
+  private static final class Capture{
+    final UUID playerId;
+    final long epochNanos;
+    final AtomicLong sequence=new AtomicLong();
+    final AtomicLong chunkPackets=new AtomicLong();
+    final AtomicLong multiMovementPackets=new AtomicLong();
+    final AtomicLong lastWorldBarrierNanos=new AtomicLong(Long.MIN_VALUE);
+    volatile long lastDebugSummaryNanos=-1L;
+    volatile Phase8MovementValidation.Verdict lastDebugSummaryVerdict;
+    volatile String lastDebugSummaryReason;
+    volatile Vec3 lastDebugMovePosition;
+    volatile Phase8PredictionRunner.Report lastDebugReport;
+    final List<RawPacket> packets=new ArrayList<>();
+    final ClientTickTracker clientTickTracker=new ClientTickTracker();
+    final dev.phantom.ac.Phase4WorldReplica clientWorld=new dev.phantom.ac.Phase4WorldReplica(Contracts.TARGET_VERSION);
+    volatile Channel nettyChannel;
+    volatile String playerName;
+    final AtomicBoolean predictionValidationQueued=new AtomicBoolean();
+    final Phase8PredictionRunner movementRunner;
+    volatile State.Player initialState;
+    volatile long initialStateReceivedNanos=-1L;
+    final Set<Short> outstandingTransactions=ConcurrentHashMap.newKeySet();
+    final Set<Short> reservedTransactions=ConcurrentHashMap.newKeySet();
+    final ConcurrentLinkedQueue<PendingChunk> chunkQueue=new ConcurrentLinkedQueue<>();
+    final ConcurrentHashMap<Integer,ClientEntityTrack> clientEntities=new ConcurrentHashMap<>();
+    final AtomicInteger pendingChunkDecodes=new AtomicInteger();
+    final AtomicLong transactionCounter=new AtomicLong(1);
+    final AtomicLong paperMoveFailureSequence=new AtomicLong();
+    final AtomicLong authoritativeServerTick=new AtomicLong(-1L);
+    volatile Vec3 lastAuthoritativePosition=Vec3.ZERO;
+    volatile Vec3 lastAuthoritativeVelocity=Vec3.ZERO;
+    volatile boolean lastAuthoritativeOnGround;
+    volatile boolean lastAuthoritativeCanFly;
+    volatile boolean lastAuthoritativeFlying;
+    volatile long paperMoveFailureWindowStartNanos=-1L;
+    volatile int paperMoveFailureCount;
+    volatile Phase8MovementValidation.Accumulator accumulator=Phase8MovementValidation.Accumulator.empty();
+    final ValidationResultGate validationGate=new ValidationResultGate();
+    final AtomicLong validationRuns=new AtomicLong();
+    final AtomicLong validationPackets=new AtomicLong();
+    final AtomicLong validationMovements=new AtomicLong();
+    volatile long lastValidationElapsedMicros=-1L;
+    volatile int lastValidationBatchPackets;
+    volatile int lastValidationBatchMovements;
+    int processedResults;
+    volatile int minY=-64,maxY=319;
+    volatile double lastServerX,lastServerY,lastServerZ;
+
+    Capture(UUID id,long epoch,int candidateBudget){
+      playerId=id;epochNanos=epoch;
+      movementRunner=new Phase8PredictionRunner(candidateBudget);
+      clientWorld.setCollisionResolver((snapshot,state,x,y,z)->PaperVanillaCollision.resolve(state,x,y,z));      clientWorld.markEntityTrackingComplete();
+    }
+
+    void updateServerPosition(Player player){
+      org.bukkit.Location location=player.getLocation();
+      lastServerX=location.getX();
+      lastServerY=location.getY();
+      lastServerZ=location.getZ();
+    }
+
+    short nextWorldTransaction(){
+      while(true){
+        int raw=(int)(transactionCounter.getAndIncrement()&0x7FFF);
+        if(raw==0)continue;
+        short id=(short)-raw;
+        if(outstandingTransactions.contains(id)||reservedTransactions.contains(id))continue;
+        if(reservedTransactions.add(id))return id;
+      }
+    }
+
+    List<RawPacket> copy(){
+      synchronized(packets){
+        int start=Math.max(0,packets.size()-MAX_VALIDATION_PACKETS);
+        return List.copyOf(packets.subList(start,packets.size()));
+      }
+    }
+
+    List<RawPacket> copyAll(){
+      synchronized(packets){
+        int start=Math.max(0,packets.size()-MAX_CAPTURE_PACKETS);
+        return List.copyOf(packets.subList(start,packets.size()));
+      }
+    }
+
+    List<RawPacket> copySince(long sequenceExclusive){
+      synchronized(packets){
+        return packets.stream().filter(packet->packet.sequence()>sequenceExclusive).toList();
+      }
+    }
+  }
+}
