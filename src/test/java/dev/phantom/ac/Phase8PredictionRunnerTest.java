@@ -979,37 +979,31 @@ class Phase8PredictionRunnerTest {
         MovementEnvironment.dry(true, false, false), false,
         dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
 
-    PlayerContext authority = new PlayerContext(
-        "survival", start.attributes(), Map.of(),
-        Pose.STANDING, MovementEnvironment.dry(true, false, false),
-        firstObserved.position(), Maths.Vec3.ZERO,
-        false, false, false, List.of());
-
-    List<RawPacket> packets = new ArrayList<>();
-    packets.add(new RawPacket(1, 10L, authority));
-    packets.add(new RawPacket(2, 20L, new Move(
-        firstObserved.position(), 0f, 0f, true, 1L)));
-    packets.add(new RawPacket(3, 30L, new Move(
-        firstObserved.position(), 0f, 0f, true, 2L)));
-    packets.add(new RawPacket(4, 40L, new Move(
-        firstObserved.position(), 0f, 0f, true, 3L)));
-    packets.add(new RawPacket(5, 50L, new Move(
-        firstObserved.position(), 0f, 0f, true, 4L)));
     PlayerContext lateAuthority = new PlayerContext(
         "survival", start.attributes(), Map.of(),
         Pose.STANDING, MovementEnvironment.dry(true, false, false),
         firstObserved.position(), Maths.Vec3.ZERO,
         false, false, false, List.of());
-    packets.add(new RawPacket(
-        6, 60L, lateAuthority,
-        Packets.CaptureProvenance.fromAdapter(
-            "test-authority", lateAuthority, 100L, 4L)));
-    packets.add(new RawPacket(7, 70L, new Move(
-        nextObserved.position(), 0f, 0f, true, 5L)));
 
     var report = runner.process(
         "stale-resync-retained-client-velocity",
-        packets, world, start, 0L);
+        List.of(
+            new RawPacket(1, 10L, new PlayerContext(
+                "survival", start.attributes(), Map.of(),
+                Pose.STANDING, MovementEnvironment.dry(true, false, false),
+                start.position(), Maths.Vec3.ZERO,
+                false, false, false, List.of())),
+            new RawPacket(2, 20L, new Move(
+                firstObserved.position(), 0f, 0f, true, 1L)),
+            new RawPacket(
+                3, 30L, lateAuthority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-authority", lateAuthority, 100L, 151L)),
+            new RawPacket(4, 40L, new Move(
+                firstObserved.position(), 0f, 0f, true, 151L)),
+            new RawPacket(5, 50L, new Move(
+                nextObserved.position(), 0f, 0f, true, 152L))),
+        world, start, 0L);
 
     assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getLast().verdict(), report.results().toString());
@@ -1018,7 +1012,7 @@ class Phase8PredictionRunnerTest {
         report.frames().getLast().trace().toString());
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.startsWith("ROOT_VELOCITY source=retained-client-physics-state")
-            && line.contains("tick=4")),
+            && line.contains("tick=151")),
         report.frames().getLast().trace().toString());
   }
 
