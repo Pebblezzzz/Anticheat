@@ -170,7 +170,9 @@ public final class Vanilla12111RichPhysics {
                     collision.collidedY(),
                     collision.collidedZ(),
                     (collision.collidedX() || collision.collidedY() || collision.collidedZ()),
-                    "Grim-style 1.21.11 Elytra movement");
+                    "Grim-style 1.21.11 Elytra movement",
+                    false,
+                    postCollision);
         }
 
         // KnownInput controls direction; physical locomotion state controls sprint/sneak effects.
@@ -417,6 +419,10 @@ public final class Vanilla12111RichPhysics {
                 nextY,
                 collision.collidedZ() ? 0.0 : velocity.z() * horizontalFactor);
 
+        // Grim keeps the pre-end-of-tick client velocity separate from the
+        // predicted post-collision velocity.
+        Vec3 clientVelocityAfterTick = zeroCollidedAxes(velocity, collision);
+
         Phase5Mechanics.MovementEnvironment nextEnvironment = new Phase5Mechanics.MovementEnvironment(
                 fluid,
                 fluid != Phase5Mechanics.Fluid.NONE,
@@ -471,7 +477,7 @@ public final class Vanilla12111RichPhysics {
                 (collision.collidedX() || collision.collidedY() || collision.collidedZ()),
                 diagnostic,
                 sneakEdgeConstrained,
-                nextVelocity);
+                clientVelocityAfterTick);
     }
 
     private StepResult vehicleStep(
@@ -503,6 +509,10 @@ public final class Vanilla12111RichPhysics {
 
         Vec3 displacement = collision.displacement();
         Vec3 nextVelocity = zeroCollidedAxes(vehicleResult.velocity(), collision);
+        // Vehicles follow the same Grim lifecycle: keep the collision-adjusted
+        // movement vector as client velocity; do not replace it with end-of-tick
+        // drag/gravity.
+        Vec3 clientVelocityAfterTick = nextVelocity;
 
         Phase5Mechanics.MovementEnvironment nextEnvironment = new Phase5Mechanics.MovementEnvironment(
                 fluid,
@@ -550,7 +560,7 @@ public final class Vanilla12111RichPhysics {
                 (collision.collidedX() || collision.collidedY() || collision.collidedZ()),
                 vehicleResult.diagnostic(),
                 false,
-                nextVelocity);
+                clientVelocityAfterTick);
     }
 
     /**
@@ -653,7 +663,16 @@ public final class Vanilla12111RichPhysics {
                 entityCollision,
                 diagnostic,
                 false,
-                velocity);
+                spectator ? velocity : zeroCollidedAxes(velocity,
+                        new RichWorldCollision.Result(
+                                displacement,
+                                collidedX,
+                                collidedY,
+                                collidedZ,
+                                stepAttempted,
+                                stepSucceeded,
+                                false,
+                                diagnostic)));
     }
 
     private record PoseResolution(Phase5Mechanics.Pose pose, boolean uncertain, String diagnostic) {}
@@ -942,7 +961,9 @@ public final class Vanilla12111RichPhysics {
                 false,
                 false,
                 false,
-                message);
+                message,
+                false,
+                context.clientVelocity());
     }
 
     public record Context(
