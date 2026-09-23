@@ -366,7 +366,7 @@ class Phase8PredictionRunnerTest {
             new RawPacket(3, 30L, new Move(
                 first.position(), 0f, 0f, false, 1L)),
             new RawPacket(4, 40L, new ClientInput(
-                false, false, false, true, true, false, false)),
+                false, false, false, false, true, false, true)),
             // Missing packet sequence 5 deliberately leaves the movement
             // boundary chronologically uncertain.
             new RawPacket(6, 60L, new Move(
