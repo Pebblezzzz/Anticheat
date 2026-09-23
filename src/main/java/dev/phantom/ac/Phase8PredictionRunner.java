@@ -3264,7 +3264,8 @@ public final class Phase8PredictionRunner {
               targetTick,
               actualMovementReference,
               lastOnGroundForPrediction,
-              authoritativeMovementEnvironment);
+              authoritativeMovementEnvironment,
+              movementTimingUncertain);
 
           trace.addAll(engineResult.trace());
           LinkedHashSet<String> stepReasons = new LinkedHashSet<>(engineResult.reasons());

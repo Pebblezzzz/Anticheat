@@ -47,7 +47,7 @@ public final class GrimPredictionEngine {
       boolean lastOnGround) {
     return tick(
         starts, inputOptions, world, maximumCandidates, movementSequence,
-        simulationTick, targetTick, actualMovementReference, lastOnGround, null);
+        simulationTick, targetTick, actualMovementReference, lastOnGround, null, false);
   }
 
   public TickResult tick(
@@ -61,6 +61,24 @@ public final class GrimPredictionEngine {
       Vec3 actualMovementReference,
       boolean lastOnGround,
       MovementEnvironment authoritativeMovementEnvironment) {
+    return tick(
+        starts, inputOptions, world, maximumCandidates, movementSequence,
+        simulationTick, targetTick, actualMovementReference, lastOnGround,
+        authoritativeMovementEnvironment, false);
+  }
+
+  public TickResult tick(
+      Set<Candidate> starts,
+      List<InputConstraint> inputOptions,
+      WorldSnapshot world,
+      int maximumCandidates,
+      long movementSequence,
+      long simulationTick,
+      long targetTick,
+      Vec3 actualMovementReference,
+      boolean lastOnGround,
+      MovementEnvironment authoritativeMovementEnvironment,
+      boolean movementTimingUncertain) {
     if (starts.isEmpty()) {
       return new TickResult(
           Set.of(), false,
@@ -112,6 +130,26 @@ public final class GrimPredictionEngine {
                     withActualMovementReference(base, actualMovementReference, simulationTick, targetTick),
                     authoritative.sprinting(), authoritative.sneaking()));
           }
+        }
+
+        /*
+         * Grim receives sprinting as a separate ENTITY_ACTION state. Phantom's
+         * reduced packet model currently has held-key input but not that action
+         * event, so an uncertain client/server boundary cannot safely assume
+         * that the retained physical sprint flag still applied to this tick.
+         * Keep a bounded non-sprinting sibling rather than turning the stale
+         * sprint assumption into an exhaustive IMPOSSIBLE result.
+         */
+        if (movementTimingUncertain
+            && inputOption.sprint().orElse(false)
+            && physical.sprinting()) {
+          MovementInputState nonSprinting = new MovementInputState(false, physical.sneaking());
+          startsByMovementState
+              .computeIfAbsent(nonSprinting, ignored -> new ArrayList<>())
+              .add(withLocomotionState(
+                  withActualMovementReference(base, actualMovementReference, simulationTick, targetTick),
+                  false, physical.sneaking()));
+          exhaustive = false;
         }
 
         if (inputOption.sprint().isPresent() && inputOption.sneak().isPresent()) {
