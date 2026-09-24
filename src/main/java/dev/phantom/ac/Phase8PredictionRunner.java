@@ -2412,7 +2412,8 @@ public final class Phase8PredictionRunner {
       trace.add("BOOTSTRAP_JUMP_DELAY_OPTIONS range=0..10 source=grim-held-jump-cooldown");
     }
     InputConstraint previousBoundaryInput =
-        inputBeforeSequence(inputHistory, simulationTick, movementPacket.sequence());
+        inputBeforeSequence(
+            inputHistory, simulationTick, currentInputSequence, movementPacket.sequence());
     trace.add("SIM_INPUT_OPTIONS tick=" + simulationTick
         + " keyOptions=[" + input + ", " + previousBoundaryInput + "]"
         + " physicalSprint=" + keyState.sprint()
