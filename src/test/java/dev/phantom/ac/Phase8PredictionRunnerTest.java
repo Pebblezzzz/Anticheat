@@ -775,6 +775,24 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void latestHeldJumpIsRetainedAtFinalBoundaryWhenSimulationEnvelopeIsUnmaterialized() {
+    assertTrue(
+        Phase8PredictionRunner.shouldOverlayCurrentJumpInput(
+            2831L,
+            2832L,
+            10L,
+            11L,
+            List.of(),
+            Phase7Timing.Range.empty(),
+            true,
+            List.of(),
+            Phase7Timing.Range.empty(),
+            true,
+            false),
+        "a currently held jump received before the movement must remain a final-boundary candidate");
+  }
+
+  @Test
   void latestHeldInputIsNotAppliedBeforeItsPhase7SimulationTick() {
     assertFalse(
         Phase8PredictionRunner.shouldOverlayCurrentInput(
@@ -1855,6 +1873,95 @@ class Phase8PredictionRunnerTest {
             .anyMatch(source -> source.contains("Phase 5 could not deterministically simulate"))),
         report.results().toString());
     assertTrue(report.candidateFrontierRetained(), report.toString());
+  }
+
+  @Test
+  void heldJumpRespectsGrimGroundJumpDelay() {
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    WorldSnapshot world = floorWorld();
+
+    Player state = new Player(
+        new Maths.Vec3(.5, 64.0, .5),
+        Maths.Vec3.ZERO,
+        0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of(), 2);
+
+    MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
+    Simulation.AdvancedInput heldJump =
+        new Simulation.AdvancedInput(0, 0, true, false, false);
+
+    Player delayed = physics.step(new Vanilla12111RichPhysics.Context(
+        0L,
+        state,
+        heldJump,
+        world,
+        Simulation.Environment.DRY,
+        state.attributes(),
+        Phase5Mechanics.MovementEffects.NONE,
+        Pose.STANDING,
+        environment,
+        false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    assertEquals(64.0, delayed.position().y(), 1.0E-9);
+    assertEquals(1, delayed.jumpDelay());
+
+    Player jumped = physics.step(new Vanilla12111RichPhysics.Context(
+        1L,
+        delayed,
+        heldJump,
+        world,
+        Simulation.Environment.DRY,
+        delayed.attributes(),
+        Phase5Mechanics.MovementEffects.NONE,
+        Pose.STANDING,
+        environment,
+        false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    assertEquals(64.42, jumped.position().y(), 1.0E-7);
+    assertEquals(10, jumped.jumpDelay());
+  }
+
+  @Test
+  void stationaryGroundTransitionDoesNotBecomeImpossible() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+
+    Player airborneAnchor = new Player(
+        new Maths.Vec3(.5, 64.0, .5),
+        Maths.Vec3.ZERO,
+        0f, 0f, false, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
+
+    PlayerContext airborneAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(false, false, false),
+        airborneAnchor.position(), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    var report = runner.process(
+        "stationary-ground-transition",
+        List.of(
+            new RawPacket(1, 20, airborneAuthority),
+            new RawPacket(2, 30, new ClientTickEnd()),
+            new RawPacket(3, 60, new Move(
+                airborneAnchor.position(), 0f, 0f, true, 1L))),
+        floorWorld(),
+        airborneAnchor,
+        20L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("OBSERVATION stationary-position packet")),
+        report.frames().toString());
   }
 
   @Test

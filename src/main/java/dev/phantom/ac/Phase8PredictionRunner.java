@@ -595,9 +595,15 @@ public final class Phase8PredictionRunner {
 
       TickResolution tick = resolveMovementTick(
           packet, move, phase7TimingBySequence);
+      /*
+       * A zero-displacement position packet while the client reports grounded is
+       * an observation of the current location, not a new physics step. The
+       * previous state may still carry a stale airborne ground bit during join,
+       * correction, or client/server reconciliation; requiring both states to be
+       * grounded turns that harmless transition into an IMPOSSIBLE movement.
+       */
       boolean stationaryPositionObservation = move.position() != null
           && positionExactlyMatches(observedBefore.position(), observedAfter.position())
-          && observedBefore.onGround()
           && observedAfter.onGround();
       boolean observationOnlyMovement = move.position() == null || stationaryPositionObservation;
       if (observationOnlyMovement && tick.timingUncertain()) {
@@ -780,8 +786,7 @@ public final class Phase8PredictionRunner {
                 ? EnumSet.of(Phase6Reachability.ObservedField.ROTATION)
                 : EnumSet.of(
                     Phase6Reachability.ObservedField.POSITION,
-                    Phase6Reachability.ObservedField.ROTATION,
-                    Phase6Reachability.ObservedField.GROUND);
+                    Phase6Reachability.ObservedField.ROTATION);
         SearchResult observationSearch = possibleObservation
             ? new SearchResult(
                 Verdict.POSSIBLE,
@@ -3148,7 +3153,8 @@ public final class Phase8PredictionRunner {
         source.environment(),
         old.clientTickRange(),
         old.provenance(),
-        old.uncertaintyReasons());
+        old.uncertaintyReasons(),
+        old.jumpDelay());
   }
 
   private static Candidate rebuildCandidate(
@@ -3910,6 +3916,15 @@ public final class Phase8PredictionRunner {
     if (!inputTimingExhaustive && possibleSimulationTickRange.contains(simulationTick)) {
       return true;
     }
+
+    /*
+     * Grim's PLAYER_INPUT is a persistent held-state update. Once this input
+     * packet has actually arrived before the movement packet, the final
+     * movement boundary must still consider the newest held state even when
+     * Phase 7 could not materialize the packet's simulation envelope onto
+     * target-1. The guard above still prevents retroactive use on earlier ticks.
+     */
+    if (currentInputSequence < movementSequence) return true;
 
     return inputClientTickTimingExhaustive
         ? possibleInputClientTicks.contains(targetTick)
