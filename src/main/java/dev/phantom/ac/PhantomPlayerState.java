@@ -150,12 +150,13 @@ public final class PhantomPlayerState {
 
   public synchronized void markBarrierSent(short transactionId, Packets.PlayerContext context) {
     Objects.requireNonNull(context, "context");
-    if (acknowledgedTransactions.contains(transactionId)) {
-      throw new IllegalStateException("transaction barrier was already acknowledged: " + transactionId);
-    }
     if (sentTransactions.contains(transactionId)) {
       throw new IllegalStateException("transaction barrier already sent: " + transactionId);
     }
+    // Synthetic transaction IDs are a signed 15-bit ring. Once an ID is
+    // safely out of flight, its old acknowledgement state must be retired so
+    // long-lived connections can reuse the ID without breaking the state machine.
+    acknowledgedTransactions.remove(transactionId);
     sentTransactions.addLast(transactionId);
     pendingBarrierContexts.put(transactionId, context);
   }
