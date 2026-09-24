@@ -272,8 +272,25 @@ public final class Vanilla12111RichPhysics {
             velocity = new Vec3(climbX, climbY, climbZ);
         }
 
+        /*
+         * Grim tracks the modern CLIENT_TICK_END jump delay separately from
+         * held input. A PLAYER_INPUT packet can keep jump=true while a second
+         * ground jump is still on cooldown.
+         */
+        int jumpDelay = s.jumpDelay();
+        if (!context.input().jump() || context.flying()) {
+            jumpDelay = 0;
+        } else if (jumpDelay > 0) {
+            jumpDelay--;
+        }
+
         boolean jumped = context.input().jump() && !context.sleeping() && !climbing;
-        if (jumped && s.onGround() && fluid == Phase5Mechanics.Fluid.NONE) {
+        boolean jumpedFromGround =
+                jumped
+                    && s.onGround()
+                    && fluid == Phase5Mechanics.Fluid.NONE
+                    && jumpDelay == 0;
+        if (jumpedFromGround) {
             velocity = new Vec3(
                     velocity.x(),
                     JUMP + context.effects().jumpVelocityAdd(),
@@ -284,6 +301,7 @@ public final class Vanilla12111RichPhysics {
                         0.0,
                         Math.cos(radians) * SPRINT_JUMP_HORIZONTAL_BOOST));
             }
+            jumpDelay = 10;
         } else if (jumped && fluid != Phase5Mechanics.Fluid.NONE) {
             /*
              * Grim keeps the small fluid jump branch as an alternative start
@@ -449,7 +467,8 @@ public final class Vanilla12111RichPhysics {
                 grounded,
                 nextPose,
                 context,
-                false);
+                false,
+                jumpDelay);
 
         String diagnostic = switch (fluid) {
             case WATER -> "Grim-style water prediction: fluid height/current + swimming steering";
@@ -704,6 +723,19 @@ public final class Vanilla12111RichPhysics {
             Phase5Mechanics.Pose pose,
             Context context,
             boolean uncertain) {
+        return richPlayer(
+                source, position, velocity, onGround, pose, context, uncertain, source.jumpDelay());
+    }
+
+    private static Player richPlayer(
+            Player source,
+            Vec3 position,
+            Vec3 velocity,
+            boolean onGround,
+            Phase5Mechanics.Pose pose,
+            Context context,
+            boolean uncertain,
+            int jumpDelay) {
         State.Environment environment;
         if (context.environment() == Simulation.Environment.UNKNOWN) {
             environment = State.Environment.UNKNOWN;
@@ -733,7 +765,8 @@ public final class Vanilla12111RichPhysics {
                 environment,
                 source.clientTickRange(),
                 source.provenance(),
-                source.uncertaintyReasons());
+                source.uncertaintyReasons(),
+                jumpDelay);
     }
 
     private static Vec3 zeroCollidedAxes(Vec3 velocity, RichWorldCollision.Result collision) {
