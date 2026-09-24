@@ -556,7 +556,6 @@ public final class Phase4WorldReplica implements Serializable {
   public synchronized void openBarrier(short transactionId,long sequenceBoundary){
     if(pending.containsKey(transactionId))
       throw new IllegalStateException("transaction barrier already open: "+transactionId);
-    if(unassigned.isEmpty())return;
     List<Event> batch=new ArrayList<>(unassigned.values());
     unassigned.clear();
     pending.put(transactionId,List.copyOf(batch));
