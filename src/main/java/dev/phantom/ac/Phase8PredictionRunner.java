@@ -3766,27 +3766,39 @@ public final class Phase8PredictionRunner {
      * final simulated tick. Do not apply this live overlay to earlier catch-up
      * ticks, where it could become retroactive input.
      */
-    if (shouldOverlayCurrentInput(
-        simulationTick,
-        targetTick,
-        currentInputSequence,
-        movementSequence,
-        currentInputPossibleSimulationTicks,
-        currentInputSimulationTickRange,
-        currentInputSimulationTimingExhaustive,
-        movementTimingUncertain)
-        || currentInputGenerationAllowsFinalBoundary(
+    boolean jumpInput = currentInput.jump().orElse(false);
+    boolean currentInputOverlayAllowed = jumpInput
+        ? shouldOverlayCurrentJumpInput(
             simulationTick,
             targetTick,
             currentInputSequence,
             movementSequence,
-            currentInputPossibleClientTicks,
-            currentInputClientTickRange,
-            currentInputClientTickTimingExhaustive)
-        || (explicitMovementTick
-            && currentInputSequence >= 0L
-            && currentInputSequence < movementSequence
-            && simulationTick == targetTick - 1L)) {
+            currentInputPossibleSimulationTicks,
+            currentInputSimulationTickRange,
+            currentInputSimulationTimingExhaustive,
+            movementTimingUncertain)
+        : shouldOverlayCurrentInput(
+            simulationTick,
+            targetTick,
+            currentInputSequence,
+            movementSequence,
+            currentInputPossibleSimulationTicks,
+            currentInputSimulationTickRange,
+            currentInputSimulationTimingExhaustive,
+            movementTimingUncertain)
+            || currentInputGenerationAllowsFinalBoundary(
+                simulationTick,
+                targetTick,
+                currentInputSequence,
+                movementSequence,
+                currentInputPossibleClientTicks,
+                currentInputClientTickRange,
+                currentInputClientTickTimingExhaustive)
+            || (explicitMovementTick
+                && currentInputSequence >= 0L
+                && currentInputSequence < movementSequence
+                && simulationTick == targetTick - 1L);
+    if (currentInputOverlayAllowed) {
       options.add(currentInput);
 
       /*
@@ -3857,6 +3869,32 @@ public final class Phase8PredictionRunner {
     return inputTimingExhaustive
         ? possibleInputClientTicks.contains(targetTick)
         : inputClientTickRange.contains(targetTick);
+  }
+
+  static boolean shouldOverlayCurrentJumpInput(
+      long simulationTick,
+      long targetTick,
+      long currentInputSequence,
+      long movementSequence,
+      List<Long> possibleSimulationTicks,
+      Phase7Timing.Range possibleSimulationTickRange,
+      boolean inputTimingExhaustive,
+      boolean movementTimingUncertain) {
+    if (simulationTick != targetTick - 1L
+        || currentInputSequence < 0L
+        || currentInputSequence > movementSequence) {
+      return false;
+    }
+
+    /*
+     * Jump is a discrete movement transition. Unlike a held directional axis,
+     * admitting an input possibility at the movement's target tick must not make
+     * the jump happen on the preceding simulation step. The input may affect the
+     * boundary only when Phase 7 admits that exact simulation tick.
+     */
+    if (movementTimingUncertain) return true;
+    if (possibleSimulationTicks.contains(simulationTick)) return true;
+    return !inputTimingExhaustive && possibleSimulationTickRange.contains(simulationTick);
   }
 
   static boolean shouldOverlayCurrentInput(
