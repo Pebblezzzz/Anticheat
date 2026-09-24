@@ -2952,8 +2952,14 @@ public final class Phase8PredictionRunner {
               observedBefore.position()));
     }
 
-    return !hasExpectedRoot
-        || closestDistanceSquared
+    /*
+     * A frontier that is simply behind the expected root tick is handled by the
+     * normal bounded catch-up simulation. Spatial-disconnection evidence only
+     * exists when we actually have a candidate for this tick and that candidate
+     * is materially displaced from the observed pre-movement state.
+     */
+    return hasExpectedRoot
+        && closestDistanceSquared
             > POSITION_RECONCILIATION_TOLERANCE * POSITION_RECONCILIATION_TOLERANCE;
   }
 
