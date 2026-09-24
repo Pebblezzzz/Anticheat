@@ -1230,7 +1230,8 @@ public final class Phase8PredictionRunner {
             observedMovementReference,
             observedBefore.onGround(),
             authoritativeMovementEnvironment,
-            tick.timingUncertain());
+            tick.timingUncertain(),
+            move.clientTick() != null);
         trace.add("TIMING_OFFSETS range=" + earliestSimulationTick + ".."
             + latestSimulationTick
             + " candidates=" + movementTiming.possibleSimulationClientTicks()
@@ -1247,7 +1248,8 @@ public final class Phase8PredictionRunner {
             observedMovementReference,
             observedBefore.onGround(),
             authoritativeMovementEnvironment,
-            tick.timingUncertain());
+            tick.timingUncertain(),
+            move.clientTick() != null);
       }
       trace.add("PREDICT_FORWARD startTick=" + startTick
           + " targetTick=" + targetTick
@@ -3262,7 +3264,8 @@ public final class Phase8PredictionRunner {
       Vec3 actualMovementReference,
       boolean lastOnGroundForPrediction,
       MovementEnvironment authoritativeMovementEnvironment,
-      boolean movementTimingUncertain) {
+      boolean movementTimingUncertain,
+      boolean explicitMovementTick) {
     if (start.isEmpty()) {
       return new AdvanceResult(Set.of(), false, 0,
           List.of("prediction frontier is empty"), List.of());
@@ -3292,7 +3295,8 @@ public final class Phase8PredictionRunner {
       Vec3 actualMovementReference,
       boolean lastOnGroundForPrediction,
       MovementEnvironment authoritativeMovementEnvironment,
-      boolean movementTimingUncertain) {
+      boolean movementTimingUncertain,
+      boolean explicitMovementTick) {
     if (start.isEmpty()) {
       return new AdvanceResult(Set.of(), false, 0,
           List.of("prediction frontier is empty"), List.of());
@@ -3325,7 +3329,8 @@ public final class Phase8PredictionRunner {
           start, target, inputChronologies, world, maximumCandidates, movementSequence,
           actualMovementReference, lastOnGroundForPrediction,
           authoritativeMovementEnvironment,
-          movementTimingUncertain);
+          movementTimingUncertain,
+          explicitMovementTick);
       union.addAll(one.candidates());
       union = new LinkedHashSet<>(Phase6Reachability.mergeEquivalentCandidates(union));
       reasons.addAll(one.reasons());
@@ -3416,7 +3421,8 @@ public final class Phase8PredictionRunner {
           final long simulationTick = localTick;
           List<InputConstraint> inputOptions = inputPossibilitiesForSimulationTick(
               inputHistory, simulationTick, targetTick, movementSequence,
-              movementTimingUncertain);
+              movementTimingUncertain,
+              explicitMovementTick);
 
           Candidate beforeCandidate = local.stream().findFirst().orElse(null);
           if (beforeCandidate != null) {
@@ -3721,7 +3727,8 @@ public final class Phase8PredictionRunner {
       long simulationTick,
       long targetTick,
       long movementSequence,
-      boolean movementTimingUncertain) {
+      boolean movementTimingUncertain,
+      boolean explicitMovementTick) {
     if (simulationTick < 0L) return List.of(neutralInput);
 
     LinkedHashSet<InputConstraint> options = new LinkedHashSet<>();
@@ -3774,7 +3781,11 @@ public final class Phase8PredictionRunner {
             movementSequence,
             currentInputPossibleClientTicks,
             currentInputClientTickRange,
-            currentInputClientTickTimingExhaustive)) {
+            currentInputClientTickTimingExhaustive)
+        || (explicitMovementTick
+            && currentInputSequence >= 0L
+            && currentInputSequence < movementSequence
+            && simulationTick == targetTick - 1L)) {
       options.add(currentInput);
 
       /*
