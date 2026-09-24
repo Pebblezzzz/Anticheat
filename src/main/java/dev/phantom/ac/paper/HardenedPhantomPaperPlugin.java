@@ -1912,8 +1912,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     volatile String playerName;
     final AtomicBoolean predictionValidationQueued=new AtomicBoolean();
     final Phase8PredictionRunner movementRunner;
-    volatile State.Player initialState;
-    volatile long initialStateReceivedNanos=-1L;
+    final PhantomPlayerState playerState;
     final Set<Short> outstandingTransactions=ConcurrentHashMap.newKeySet();
     final Set<Short> reservedTransactions=ConcurrentHashMap.newKeySet();
     final ConcurrentLinkedQueue<PendingChunk> chunkQueue=new ConcurrentLinkedQueue<>();
@@ -1944,6 +1943,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     Capture(UUID id,long epoch,int candidateBudget){
       playerId=id;epochNanos=epoch;
       movementRunner=new Phase8PredictionRunner(candidateBudget);
+      playerState=new PhantomPlayerState(id);
       clientWorld.setCollisionResolver((snapshot,state,x,y,z)->PaperVanillaCollision.resolve(state,x,y,z));      clientWorld.markEntityTrackingComplete();
     }
 
