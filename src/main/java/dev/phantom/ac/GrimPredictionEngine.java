@@ -174,53 +174,73 @@ public final class GrimPredictionEngine {
          * server-side sprint flag is therefore a movement constraint, not just
          * another field carried into physics.
          */
-        int forward = inputOption.forward().orElse(0);
         boolean swimming = entry.getValue().stream()
             .findFirst()
             .map(Context::movementEnvironment)
             .map(MovementEnvironment::swimmingInput)
             .orElse(false);
-        if (state.sprinting() && !swimming) {
-          forward = 1;
+
+        /*
+         * A retained sprint action and the current movement axis are separate
+         * causal facts. At the final tick, an explicit neutral axis can coexist
+         * with a sprint-forward boundary transition, so keep both hypotheses
+         * instead of overwriting the observed neutral state.
+         */
+        LinkedHashSet<Integer> forwardOptions = new LinkedHashSet<>();
+        if (inputOption.forward().isPresent()) {
+          forwardOptions.add(inputOption.forward().getAsInt());
+          if (state.sprinting()
+              && !swimming
+              && simulationTick == targetTick - 1L
+              && inputOption.forward().getAsInt() == 0) {
+            forwardOptions.add(1);
+          }
+        } else if (state.sprinting() && !swimming) {
+          forwardOptions.add(1);
+        } else {
+          forwardOptions.add(0);
         }
 
-        InputConstraint simulationInput = new InputConstraint(
-            java.util.OptionalInt.of(forward),
-            inputOption.strafe(),
-            inputOption.jump(),
-            java.util.Optional.of(state.sprinting()),
-            java.util.Optional.of(state.sneaking()));
+        for (int forward : forwardOptions) {
+          InputConstraint simulationInput = new InputConstraint(
+              java.util.OptionalInt.of(forward),
+              inputOption.strafe(),
+              inputOption.jump(),
+              java.util.Optional.of(state.sprinting()),
+              java.util.Optional.of(state.sneaking()));
 
-        SearchResult result = reachability.search(
-            entry.getValue(),
-            List.of(simulationInput),
-            ignored -> List.of(new Phase6Reachability.WorldBranch(
-                "packet-world@" + simulationTick,
-                world,
-                true,
-                "causal client-visible packet world")),
-            ignored -> List.of(new Phase6Reachability.None()),
-            Phase6Reachability.SearchConfig.defaults(maximumCandidates));
+          SearchResult result = reachability.search(
+              entry.getValue(),
+              List.of(simulationInput),
+              ignored -> List.of(new Phase6Reachability.WorldBranch(
+                  "packet-world@" + simulationTick,
+                  world,
+                  true,
+                  "causal client-visible packet world")),
+              ignored -> List.of(new Phase6Reachability.None()),
+              Phase6Reachability.SearchConfig.defaults(maximumCandidates));
 
-        trace.add("GRIM_ENGINE_TICK tick=" + simulationTick
-            + " authoritySprint=" + (authoritativeMovementEnvironment == null ? "unknown"
-                : Boolean.toString(authoritativeMovementEnvironment.sprinting()))
-            + " authoritySneak=" + (authoritativeMovementEnvironment == null ? "unknown"
-                : Boolean.toString(authoritativeMovementEnvironment.sneaking()))
-            + " physicalSprint=" + state.sprinting()
-            + " physicalSneak=" + state.sneaking()
-            + " movementSprint=" + state.sprinting()
-            + " movementSneak=" + state.sneaking()
-            + " input=" + simulationInput
-            + " candidates=" + result.candidates().size()
-            + " exhaustive=" + result.exhaustive()
-            + " actualMovementReference=" + actualMovementReference);
-        stepCandidates.addAll(result.candidates());
-        reasons.addAll(result.reasons());
+          trace.add("GRIM_ENGINE_TICK tick=" + simulationTick
+              + " authoritySprint=" + (authoritativeMovementEnvironment == null ? "unknown"
+                  : Boolean.toString(authoritativeMovementEnvironment.sprinting()))
+              + " authoritySneak=" + (authoritativeMovementEnvironment == null ? "unknown"
+                  : Boolean.toString(authoritativeMovementEnvironment.sneaking()))
+              + " physicalSprint=" + state.sprinting()
+              + " physicalSneak=" + state.sneaking()
+              + " movementSprint=" + state.sprinting()
+              + " movementSneak=" + state.sneaking()
+              + " input=" + simulationInput
+              + " candidates=" + result.candidates().size()
+              + " exhaustive=" + result.exhaustive()
+              + " actualMovementReference=" + actualMovementReference);
 
-        boolean branchExhaustive =
-            result.exhaustive() || exhaustivelyEnumeratedInputEnvelope(result, inputOption);
-        if (!branchExhaustive) exhaustive = false;
+          stepCandidates.addAll(result.candidates());
+          reasons.addAll(result.reasons());
+
+          boolean branchExhaustive =
+              result.exhaustive() || exhaustivelyEnumeratedInputEnvelope(result, inputOption);
+          if (!branchExhaustive) exhaustive = false;
+        }
       }
     }
 
