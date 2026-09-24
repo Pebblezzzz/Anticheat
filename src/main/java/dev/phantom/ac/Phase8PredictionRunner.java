@@ -3733,7 +3733,7 @@ public final class Phase8PredictionRunner {
     if (simulationTick < 0L) return List.of(neutralInput);
 
     LinkedHashSet<InputConstraint> options = new LinkedHashSet<>();
-    TimedInput selected = latestTimedInput(history, simulationTick, movementSequence);
+    TimedInput selected = latestCausalTimedInput(history, simulationTick);
     if (selected != null) {
       options.add(selected.constraint());
 
@@ -3798,23 +3798,27 @@ public final class Phase8PredictionRunner {
                 && currentInputSequence >= 0L
                 && currentInputSequence < movementSequence
                 && simulationTick == targetTick - 1L);
-    if (currentInputOverlayAllowed) {
+    boolean currentInputIsFinalBoundaryCandidate =
+        currentInputSequence >= 0L
+            && simulationTick == targetTick - 1L
+            && ((currentInputOverlayAllowed)
+                || (selected != null && selected.sequence() == currentInputSequence));
+
+    if (currentInputIsFinalBoundaryCandidate) {
       options.add(currentInput);
 
       /*
-       * Jump is a discrete transition. Even with an otherwise complete timing
-       * envelope, a live held-state update can sit on the boundary immediately
-       * before the movement packet's final simulation step. Keep the prior held
-       * state alongside the new jump state so the observation decides which
-       * ordering is kinematically valid instead of treating the newest jump bit
-       * as retroactive by construction.
+       * The movement packet and the ClientInput update are separate network
+       * events. At the final simulation boundary, either ordering can be valid:
+       * the new held state may have affected this step, or the prior held state
+       * may still have produced the movement before the input transition was
+       * observed. Mirror Grim's explicit current/last-jump state separation by
+       * retaining the pre-transition held state as a sibling hypothesis.
        */
-      if (jumpInput || movementTimingUncertain) {
-        InputConstraint previous = inputBeforeSequence(
-            history, simulationTick, currentInputSequence, movementSequence);
-        if (!previous.equals(currentInput)) {
-          options.add(previous);
-        }
+      InputConstraint previous = inputBeforeSequence(
+          history, simulationTick, currentInputSequence, movementSequence);
+      if (!previous.equals(currentInput)) {
+        options.add(previous);
       }
     }
 
@@ -3940,6 +3944,23 @@ public final class Phase8PredictionRunner {
     for (var entry : history.headMap(simulationTick, true).descendingMap().entrySet()) {
       for (TimedInput input : entry.getValue()) {
         if (input.sequence() > movementSequence) continue;
+        return input;
+      }
+    }
+    return null;
+  }
+
+  private TimedInput latestCausalTimedInput(
+      NavigableMap<Long, List<TimedInput>> history,
+      long simulationTick) {
+    if (history.isEmpty()) return null;
+    for (var entry : history.headMap(simulationTick, true).descendingMap().entrySet()) {
+      for (TimedInput input : entry.getValue()) {
+        /*
+         * Phase 7 simulation-tick assignment is the causal boundary here. A
+         * packet can arrive after the movement packet while still describing the
+         * held input for this simulation tick.
+         */
         return input;
       }
     }
