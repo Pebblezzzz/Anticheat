@@ -451,7 +451,6 @@ public final class Phase8PredictionRunner {
       }
 
       if (value instanceof Packets.PlayerContext authority) {
-        clientState = State.apply(clientState, normalized);
         Short barrierId = authority.transactionBarrierId();
         AuthorityAnchor anchor = authorityAnchorFromContext(
             authority, sequence, packet.receivedNanos(), packet.provenance());
