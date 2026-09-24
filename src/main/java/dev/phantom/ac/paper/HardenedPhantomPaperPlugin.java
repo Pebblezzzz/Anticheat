@@ -693,36 +693,62 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     return channel instanceof Channel nettyChannel ? nettyChannel : null;
   }
 
-  private void requestWorldBarrier(Player player,Capture capture){
-    // Do not open a visibility barrier while a previously captured chunk is
-    // still being decoded. This makes the ACK boundary deterministic without
-    // ever waiting on a decoder from the Netty thread.
+  private void requestStateBarrier(Player player,Capture capture){
     if(capture.pendingChunkDecodes.get()>0)return;
-    if(!capture.clientWorld.hasUnassignedMutations())return;
     long now=System.nanoTime();
     long last=capture.lastWorldBarrierNanos.get();
     if(last!=Long.MIN_VALUE&&now-last<WORLD_TRANSACTION_MIN_INTERVAL_NANOS)return;
-    sendWorldTransaction(player,capture);
+    sendStateBarrier(player,capture);
   }
 
-  private void sendWorldTransaction(Player player,Capture capture){
-    if(!capture.clientWorld.hasUnassignedMutations())return;
+  private void sendStateBarrier(Player player,Capture capture){
+    Packets.PlayerContext context=capture.playerState.pendingAuthoritativeContext();
+    if(context==null)return;
+
     short transactionId=capture.nextWorldTransaction();
     long sequenceBoundary=capture.sequence.get();
     capture.clientWorld.openBarrier(transactionId,sequenceBoundary);
+
+    Packets.PlayerContext barrierContext=context.withTransactionBarrier(transactionId);
+    capture.playerState.markBarrierSent(transactionId,barrierContext);
     capture.outstandingTransactions.add(transactionId);
 
     try{
-      PacketEvents.getAPI().getPlayerManager().sendPacket(player,new WrapperPlayServerPing((int)transactionId));
+      PacketEvents.getAPI().getPlayerManager().sendPacket(
+          player,new WrapperPlayServerPing((int)transactionId));
       capture.lastWorldBarrierNanos.set(System.nanoTime());
-      var tx=new Packets.WorldTransactionSend(transactionId);
-      appendPacket(capture,new RawPacket(capture.sequence.incrementAndGet(),System.nanoTime(),tx,
-          Packets.CaptureProvenance.fromAdapter("paper-transaction",tx,null)));
+
+      Packets.WorldTransactionSend tx=new Packets.WorldTransactionSend(transactionId);
+      long txSequence=capture.sequence.incrementAndGet();
+      long txNanos=System.nanoTime();
+      appendPacket(capture,new RawPacket(
+          txSequence,txNanos,tx,
+          Packets.CaptureProvenance.fromAdapter(
+              "paper-transaction",tx,authoritativeTick(capture))));
+
+      long contextSequence=capture.sequence.incrementAndGet();
+      long contextNanos=System.nanoTime();
+      appendPacket(capture,new RawPacket(
+          contextSequence,
+          contextNanos,
+          barrierContext,
+          Packets.CaptureProvenance.fromAdapter(
+              "paper-live-transaction",
+              barrierContext,
+              authoritativeTick(capture),
+              capture.clientTickTracker.hasObservedBoundary()
+                  ?capture.clientTickTracker.clientTickForMovement()
+                  :null)));
+      capture.playerState.markContextPublished();
     }catch(RuntimeException failure){
       capture.outstandingTransactions.remove(transactionId);
       capture.reservedTransactions.remove(transactionId);
+      capture.playerState.abortBarrier(transactionId);
       capture.clientWorld.abortBarrier(transactionId);
-      getLogger().log(java.util.logging.Level.FINE,"[PhantomAC][WORLD] transaction send failed for "+capture.playerId,failure);
+      getLogger().log(
+          java.util.logging.Level.FINE,
+          "[PhantomAC][WORLD] transaction send failed for "+capture.playerId,
+          failure);
     }
   }
 
@@ -834,7 +860,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       Long authoritativeClientTick=capture.clientTickTracker.hasObservedBoundary()
           ?capture.clientTickTracker.clientTickForMovement():null;
       capture.updateServerPosition(player);
-      if(capture.clientWorld.hasUnassignedMutations())requestWorldBarrier(player,capture);
       capture.lastAuthoritativePosition=new Vec3(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ());
       org.bukkit.util.Vector authoritativeVelocity=player.getVelocity();
       capture.lastAuthoritativeVelocity=new Vec3(authoritativeVelocity.getX(),authoritativeVelocity.getY(),authoritativeVelocity.getZ());
@@ -953,9 +978,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             anchorReceivedNanos);
       }
 
-      long contextReceivedNanos=System.nanoTime();
-      appendPacket(capture,new RawPacket(capture.sequence.incrementAndGet(),contextReceivedNanos,context,
-          Packets.CaptureProvenance.fromAdapter("paper-live",context,authoritativeTick,authoritativeClientTick)));
+      capture.playerState.observeAuthoritativeContext(context);
+      requestStateBarrier(player,capture);
     }
   }
 
