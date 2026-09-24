@@ -2551,7 +2551,8 @@ public final class Phase8PredictionRunner {
           step.state().environment(),
           observedAfter.clientTickRange(),
           step.state().provenance(),
-          step.state().uncertaintyReasons());
+          step.state().uncertaintyReasons(),
+          step.state().jumpDelay());
 
       candidates.add(candidateFromPlayer(
           after,
@@ -2569,10 +2570,6 @@ public final class Phase8PredictionRunner {
             + " inputSelection=grim-held-state"
             + " locomotion=" + locomotion
             + " physicalGround=" + physicalGround);
-      }
-    }
-
-        }
       }
     }
 
