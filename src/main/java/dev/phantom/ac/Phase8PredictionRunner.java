@@ -2404,6 +2404,13 @@ public final class Phase8PredictionRunner {
         authorityEnvironment.sprinting(), authorityEnvironment.sneaking()));
     locomotionOptions.add(new MovementInputState(
         keyState.sprint(), keyState.sneak()));
+    int maxBootstrapJumpDelay =
+        keyState.jump() && physicalGroundOptions.contains(true)
+            ? 10
+            : 0;
+    if (maxBootstrapJumpDelay > 0) {
+      trace.add("BOOTSTRAP_JUMP_DELAY_OPTIONS range=0..10 source=grim-held-jump-cooldown");
+    }
     trace.add("BOOTSTRAP_LOCOMOTION_OPTIONS authority="
         + authorityEnvironment.sprinting() + "/" + authorityEnvironment.sneaking()
         + " key=" + keyState.sprint() + "/" + keyState.sneak()
@@ -2419,7 +2426,9 @@ public final class Phase8PredictionRunner {
 
     Set<Candidate> candidates = new LinkedHashSet<>();
     for (boolean physicalGround : physicalGroundOptions) {
-      for (MovementInputState locomotion : locomotionOptions) {
+      int maxJumpDelayForGround = physicalGround ? maxBootstrapJumpDelay : 0;
+      for (int jumpDelay = 0; jumpDelay <= maxJumpDelayForGround; jumpDelay++) {
+        for (MovementInputState locomotion : locomotionOptions) {
         MovementEnvironment environment = preserveClientLocomotionState(
             physicalBeforeCandidate
                 .map(candidate -> candidate.context().movementEnvironment())
@@ -2451,10 +2460,11 @@ public final class Phase8PredictionRunner {
           observedBefore.environment(),
           observedBefore.clientTickRange(),
           authorityState.provenance(),
-          authorityState.uncertaintyReasons());
+          authorityState.uncertaintyReasons(),
+          jumpDelay);
 
       Optional<Vec3> startVelocity = reconstructCollisionFreeStartVelocity(
-          startTemplate, advancedInput, observedDelta, world, environment);
+          startTemplate, advancedInput, observedDelta, world, environment, jumpDelay);
       if (startVelocity.isEmpty()) {
         trace.add("BOOTSTRAP_REJECTED locomotion=" + locomotion
             + " reason=start-velocity-reconstruction-unavailable");
@@ -2487,7 +2497,8 @@ public final class Phase8PredictionRunner {
           startTemplate.environment(),
           startTemplate.clientTickRange(),
           startTemplate.provenance(),
-          startTemplate.uncertaintyReasons());
+          startTemplate.uncertaintyReasons(),
+          jumpDelay);
 
       Vanilla12111RichPhysics.Context context = new Vanilla12111RichPhysics.Context(
           simulationTick,
@@ -2561,6 +2572,10 @@ public final class Phase8PredictionRunner {
       }
     }
 
+        }
+      }
+    }
+
     return candidates.isEmpty() ? Optional.empty() : Optional.of(Set.copyOf(candidates));
   }
 
@@ -2569,7 +2584,8 @@ public final class Phase8PredictionRunner {
       Simulation.AdvancedInput input,
       Vec3 observedDelta,
       WorldSnapshot world,
-      MovementEnvironment environment) {
+      MovementEnvironment environment,
+      int jumpDelay) {
     if (environment.fluid() != Fluid.NONE
         || environment.climbable()
         || environment.gliding()) {
@@ -2625,6 +2641,7 @@ public final class Phase8PredictionRunner {
     double boostZ = 0.0;
     boolean jumped = input.jump()
         && start.onGround()
+        && jumpDelay == 0
         && start.pose() != Pose.SLEEPING
         && environment.fluid() == Fluid.NONE
         && !environment.climbable()
