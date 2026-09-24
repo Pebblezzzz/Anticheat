@@ -907,19 +907,24 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           baseEnvironment.gravityMultiplier(),vehicleState);
 
       /*
-       * Keep the Bukkit-side entity query spatially bounded. The old implementation
-       * scanned every entity in the world once per tracked player on every server
-       * tick, which made entity-heavy worlds an avoidable main-thread hotspot.
-       * Paper's nearby-entity query is backed by the world's spatial index, so only
-       * entities that can affect this validation volume are materialized here.
+       * Entity collision state is already captured from the clientbound packet
+       * stream into the per-player ClientEntityTrack map. Do not query Bukkit's
+       * live entity index here: this method runs once per tracked player every
+       * server tick, and the packet-backed view is both cheaper and closer to
+       * what that player can actually see.
+       *
+       * The 6-block expansion is retained so the candidate set has the same
+       * collision volume as the previous live-world query. Entity boxes remain
+       * sorted by entity id for deterministic replay/validation.
        */
-      org.bukkit.util.BoundingBox relevantEntityRegion=box.expand(6.0,6.0,6.0);
+      dev.phantom.ac.geometry.BlockBox relevantEntityRegion=new dev.phantom.ac.geometry.BlockBox(
+          box.getMinX()-6.0,box.getMinY()-6.0,box.getMinZ()-6.0,
+          box.getMaxX()+6.0,box.getMaxY()+6.0,box.getMaxZ()+6.0);
       List<EntityCollisions.EntityBox> entityBoxes=new ArrayList<>();
-      for(Entity entity:player.getWorld().getNearbyEntities(relevantEntityRegion)){
-        if(entity.getEntityId()==player.getEntityId())continue;
-        org.bukkit.util.BoundingBox eb=entity.getBoundingBox();
-        entityBoxes.add(new EntityCollisions.EntityBox(entity.getEntityId(),
-            new dev.phantom.ac.geometry.BlockBox(eb.getMinX(),eb.getMinY(),eb.getMinZ(),eb.getMaxX(),eb.getMaxY(),eb.getMaxZ())));
+      for(ClientEntityTrack tracked:capture.clientEntities.values()){
+        if(tracked.entityId()==player.getEntityId())continue;
+        if(tracked.box().intersects(relevantEntityRegion))
+          entityBoxes.add(new EntityCollisions.EntityBox(tracked.entityId(),tracked.box()));
       }
       entityBoxes.sort(Comparator.comparingInt(EntityCollisions.EntityBox::entityId));
 
