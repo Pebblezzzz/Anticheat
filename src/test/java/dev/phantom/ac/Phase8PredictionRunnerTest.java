@@ -571,6 +571,63 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void jumpBoundaryRetainsPreviousHeldStateWhenInputAndMovementShareTheBoundary() {
+    Phase7Timing.Config exactTiming = new Phase7Timing.Config(
+        50_000_000L, 50_000_000L, 50_000_000L,
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        250_000_000L, 3, 128);
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, exactTiming);
+    WorldSnapshot world = floorWorld();
+
+    Player start = new Player(
+        new Maths.Vec3(.5, 64.0, .5),
+        Maths.Vec3.ZERO,
+        0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
+
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(), Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    Simulation.AdvancedInput neutral = new Simulation.AdvancedInput(0, 0, false, false, false);
+    Player observed = new Vanilla12111RichPhysics().step(
+        new Vanilla12111RichPhysics.Context(
+            0L, start, neutral, world, Simulation.Environment.DRY,
+            start.attributes(), Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
+            MovementEnvironment.dry(true, false, false), false,
+            dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    var report = runner.process(
+        "jump-boundary-shared-tick",
+        List.of(
+            new RawPacket(1L, 10L, authority),
+            new RawPacket(2L, 20L, new ClientInput(
+                false, false, false, false, true, false, false)),
+            new RawPacket(3L, 30L, new ClientTickEnd()),
+            new RawPacket(4L, 40L, new Move(
+                observed.position(), 0f, 0f, true, 1L))),
+        world, start, 0L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(
+        report.frames().getFirst().trace().stream()
+            .anyMatch(line -> line.contains("SIM_INPUT_OPTIONS")
+                && line.contains("jump=true")
+                && line.contains("jump=false")),
+        report.frames().getFirst().trace().toString());
+  }
+
+  @Test
   void latestHeldInputIsNotAppliedBeforeItsPhase7SimulationTick() {
     assertFalse(
         Phase8PredictionRunner.shouldOverlayCurrentInput(
