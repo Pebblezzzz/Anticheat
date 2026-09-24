@@ -439,9 +439,13 @@ public final class Phase8PredictionRunner {
       }
 
       if (value instanceof Packets.WorldTransactionSend send) {
-        if (!acknowledgedTransactions.contains(send.id())) {
-          sentTransactions.addLast(send.id());
+        if (sentTransactions.contains(send.id())) {
+          continue;
         }
+        // The adapter guarantees the reused synthetic id is no longer in flight.
+        // Retire the previous epoch's acknowledgement before accepting the new one.
+        acknowledgedTransactions.remove(send.id());
+        sentTransactions.addLast(send.id());
         continue;
       }
 
