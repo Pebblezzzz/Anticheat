@@ -1858,6 +1858,56 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void heldJumpRespectsGrimGroundJumpDelay() {
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    WorldSnapshot world = floorWorld();
+
+    Player state = new Player(
+        new Maths.Vec3(.5, 64.0, .5),
+        Maths.Vec3.ZERO,
+        0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of(), 1);
+
+    MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
+    Simulation.AdvancedInput heldJump =
+        new Simulation.AdvancedInput(0, 0, true, false, false);
+
+    Player delayed = physics.step(new Vanilla12111RichPhysics.Context(
+        0L,
+        state,
+        heldJump,
+        world,
+        Simulation.Environment.DRY,
+        state.attributes(),
+        Phase5Mechanics.MovementEffects.NONE,
+        Pose.STANDING,
+        environment,
+        false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    assertEquals(64.0, delayed.position().y(), 1.0E-9);
+    assertEquals(0, delayed.jumpDelay());
+
+    Player jumped = physics.step(new Vanilla12111RichPhysics.Context(
+        1L,
+        delayed,
+        heldJump,
+        world,
+        Simulation.Environment.DRY,
+        delayed.attributes(),
+        Phase5Mechanics.MovementEffects.NONE,
+        Pose.STANDING,
+        environment,
+        false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    assertEquals(64.42, jumped.position().y(), 1.0E-7);
+    assertEquals(10, jumped.jumpDelay());
+  }
+
+  @Test
   void stationaryGroundTransitionDoesNotBecomeImpossible() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
