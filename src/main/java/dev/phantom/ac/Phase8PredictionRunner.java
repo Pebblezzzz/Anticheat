@@ -935,6 +935,72 @@ public final class Phase8PredictionRunner {
       prediction = spatialRebase.candidates();
 
       /*
+       * A retained frontier can have a perfectly reliable client tick while its
+       * spatial root is no longer causally connected to the packet we are about
+       * to validate. This happens after sub-tick corrections/reconciliation when
+       * the client has already reported a new position but no fresh authoritative
+       * snapshot is available yet. Do not run an exhaustive physics search from
+       * that disconnected root: every candidate would be answering a different
+       * initial state than the one the client actually started this tick from.
+       *
+       * Grim-style prediction keeps the client trajectory and server authority as
+       * separate evidence channels. When a fresh causal authority exists we can
+       * rebuild through the observed-movement bootstrap; when it does not, the
+       * only sound verdict is UNCERTAIN until a new causal anchor arrives.
+       */
+      boolean spatialFrontierDisconnected =
+          move.position() != null
+              && predictionRootDisconnectedFromObservedBefore(prediction, observedBefore, tick);
+      if (spatialFrontierDisconnected) {
+        AuthorityAnchor freshCausalAuthority = freshCausalAuthority(packet);
+        if (freshCausalAuthority == null) {
+          uncertaintySources.add(
+              "persistent prediction frontier is spatially disconnected from the observed pre-movement state");
+          trace.add("FRONTIER_SPATIAL_DISCONNECTED"
+              + " expectedRootTick=" + Math.max(0L, tick.clientTick() - 1L)
+              + " observedBefore=" + observedBefore.position()
+              + " action=UNCERTAIN_UNTIL_CAUSAL_ANCHOR");
+          AuthorityAnchor staleAuthority = latestCausalAuthority(packet);
+          if (staleAuthority != null) {
+            Long movementServerTick = packet.provenance().authoritativeServerTick();
+            long age = movementServerTick == null
+                ? Long.MIN_VALUE
+                : movementServerTick - staleAuthority.serverTick();
+            trace.add("FRONTIER_SPATIAL_DISCONNECTED_AUTHORITY"
+                + " authorityServerTick=" + staleAuthority.serverTick()
+                + " movementServerTick=" + movementServerTick
+                + " age=" + age);
+          }
+          latestContinuation = Continuation.UNCERTAIN;
+          SearchResult search = uncertainSearch(
+              prediction, String.join("; ", uncertaintySources));
+          Phase8MovementValidation.Result result = validate(
+              playerId, packet, move, observedBefore, observedAfter, world,
+              tick, uncertaintySources, search, false);
+          results.add(result);
+          uncertain++;
+          rememberObservedMovement(observedBefore, observedAfter, tick);
+          frames.add(frame(
+              sequence, packet, tick, move, observedBefore, observedAfter,
+              predictedBefore, prediction, world, uncertaintySources, trace));
+          continue;
+        }
+
+        trace.add("FRONTIER_SPATIAL_DISCONNECTED"
+            + " expectedRootTick=" + Math.max(0L, tick.clientTick() - 1L)
+            + " observedBefore=" + observedBefore.position()
+            + " action=REBUILD_FROM_FRESH_CAUSAL_AUTHORITY");
+        /*
+         * Let the existing observed-movement bootstrap reconstruct the hidden
+         * client-boundary velocity from the fresh causal authority + current
+         * observation. The stale frontier is not allowed to participate.
+         */
+        prediction = Set.of();
+        predictionTick = -1L;
+        rootRebasedForMovement = true;
+      }
+
+      /*
        * Grim keeps a client-side movement velocity separate from the server's
        * instantaneous velocity. Mirror that principle at bootstrap: when the
        * current frontier is empty OR is merely an authoritative root, a fresh
