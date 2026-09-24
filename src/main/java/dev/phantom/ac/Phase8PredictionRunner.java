@@ -486,13 +486,13 @@ public final class Phase8PredictionRunner {
         currentInput = InputConstraint.fromClientInput(input);
         currentInputSequence = sequence;
         Phase7Timing.EventTiming inputTiming = phase7TimingBySequence.get(sequence);
-        currentInputSimulationTickRange = inputTiming == null
+        currentInputClientTickRange = inputTiming == null
             ? Phase7Timing.Range.empty()
-            : inputTiming.simulationClientTicks();
-        currentInputSimulationTimingExhaustive =
-            inputTiming != null && Phase7Timing.simulationTickEnumerationComplete(inputTiming);
-        currentInputPossibleSimulationTicks =
-            currentInputSimulationTimingExhaustive
+            : inputTiming.inputClientTicks();
+        currentInputClientTickTimingExhaustive =
+            inputTiming != null && Phase7Timing.inputTickEnumerationComplete(inputTiming);
+        currentInputPossibleClientTicks =
+            currentInputClientTickTimingExhaustive
                 ? alignClientTicks(Phase7Timing.possibleSimulationTicks(inputTiming))
                 : List.of();
         if (!prediction.isEmpty()) {
