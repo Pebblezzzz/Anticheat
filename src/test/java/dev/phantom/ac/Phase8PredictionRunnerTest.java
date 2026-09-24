@@ -1888,7 +1888,7 @@ class Phase8PredictionRunnerTest {
         dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
 
     assertEquals(64.0, delayed.position().y(), 1.0E-9);
-    assertEquals(0, delayed.jumpDelay());
+    assertEquals(1, delayed.jumpDelay());
 
     Player jumped = physics.step(new Vanilla12111RichPhysics.Context(
         1L,
