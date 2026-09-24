@@ -1097,7 +1097,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       if(raw.isEmpty())return;
 
       String playerName=capture.playerName==null?capture.playerId.toString():capture.playerName;
-      State.Player anchor=capture.initialState;
+      State.Player anchor=capture.playerState.initialState();
       if(debugLevel(capture.playerId).trace()){
         getLogger().info("[PhantomAC][PHASE8][PREDICT_START] player="+playerName
             +" thread="+Thread.currentThread().getName()
