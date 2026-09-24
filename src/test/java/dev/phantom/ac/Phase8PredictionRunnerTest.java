@@ -628,6 +628,83 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void lateClientInputUsesItsPhase7SimulationTickEvenWhenItArrivesAfterMovement() {
+    Phase7Timing.Config exactTiming = new Phase7Timing.Config(
+        50_000_000L, 50_000_000L, 50_000_000L,
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.LatencyBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        new Phase7Timing.TickDelayBounds(0L, 0L),
+        250_000_000L, 3, 128);
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096, exactTiming);
+    WorldSnapshot world = floorWorld();
+
+    Player start = new Player(
+        new Maths.Vec3(.5, 64.0, .5),
+        new Maths.Vec3(.1, 0.0, 0.0),
+        0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
+
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(), Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    Simulation.AdvancedInput neutral = new Simulation.AdvancedInput(0, 0, false, false, false);
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    Player first = physics.step(new Vanilla12111RichPhysics.Context(
+        0L, start, neutral, world, Simulation.Environment.DRY,
+        start.attributes(), Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
+        MovementEnvironment.dry(true, false, false), false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    Simulation.AdvancedInput jump = new Simulation.AdvancedInput(0, 0, true, false, false);
+    Player second = physics.step(new Vanilla12111RichPhysics.Context(
+        1L, first, jump, world, Simulation.Environment.DRY,
+        start.attributes(), Phase5Mechanics.MovementEffects.NONE, Pose.STANDING,
+        MovementEnvironment.dry(true, false, false), false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    CaptureProvenance lateInputProvenance =
+        new CaptureProvenance("test", "CLIENT_TO_SERVER", "ClientInput", 0L, 1L);
+
+    var report = runner.process(
+        "late-input-causal-tick",
+        List.of(
+            new RawPacket(1L, 10L, authority),
+            new RawPacket(2L, 20L, new ClientTickEnd()),
+            new RawPacket(3L, 30L, new Move(
+                first.position(), 0f, 0f, true, 1L)),
+            new RawPacket(4L, 40L, new ClientTickEnd()),
+            new RawPacket(5L, 50L, new Move(
+                second.position(), 0f, 0f, false, 2L)),
+            new RawPacket(6L, 60L, new ClientInput(
+                false, false, false, false, true, false, false),
+                lateInputProvenance)),
+        world,
+        start,
+        0L);
+
+    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(),
+        report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getLast().verdict(),
+        report.results().toString());
+    assertTrue(
+        report.frames().getLast().trace().stream()
+            .anyMatch(line -> line.contains("SIM_INPUT_OPTIONS")
+                && line.contains("jump=Optional[true]")
+                && line.contains("jump=Optional[false]")),
+        report.frames().getLast().trace().toString());
+  }
+
+  @Test
   void latestHeldInputIsNotAppliedBeforeItsPhase7SimulationTick() {
     assertFalse(
         Phase8PredictionRunner.shouldOverlayCurrentInput(
