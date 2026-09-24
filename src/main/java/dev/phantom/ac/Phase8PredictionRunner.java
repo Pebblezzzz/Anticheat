@@ -3917,6 +3917,15 @@ public final class Phase8PredictionRunner {
       return true;
     }
 
+    /*
+     * Grim's PLAYER_INPUT is a persistent held-state update. Once this input
+     * packet has actually arrived before the movement packet, the final
+     * movement boundary must still consider the newest held state even when
+     * Phase 7 could not materialize the packet's simulation envelope onto
+     * target-1. The guard above still prevents retroactive use on earlier ticks.
+     */
+    if (currentInputSequence < movementSequence) return true;
+
     return inputClientTickTimingExhaustive
         ? possibleInputClientTicks.contains(targetTick)
         : inputClientTickRange.contains(targetTick);
