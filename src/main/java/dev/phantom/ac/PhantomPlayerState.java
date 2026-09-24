@@ -196,6 +196,11 @@ public final class PhantomPlayerState {
     return acknowledgedTransactions.contains(transactionId);
   }
 
+  public synchronized void abortBarrier(short transactionId) {
+    sentTransactions.remove(transactionId);
+    pendingBarrierContexts.remove(transactionId);
+  }
+
   private static void requireTimestamp(long nanos) {
     if (nanos < 0L) throw new IllegalArgumentException("timestamp must be non-negative");
   }
