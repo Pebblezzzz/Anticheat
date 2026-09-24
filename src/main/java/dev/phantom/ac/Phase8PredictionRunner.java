@@ -3153,7 +3153,8 @@ public final class Phase8PredictionRunner {
         source.environment(),
         old.clientTickRange(),
         old.provenance(),
-        old.uncertaintyReasons());
+        old.uncertaintyReasons(),
+        old.jumpDelay());
   }
 
   private static Candidate rebuildCandidate(
