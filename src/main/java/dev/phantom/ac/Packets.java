@@ -58,7 +58,8 @@ public final class Packets {
                               Phase5Mechanics.Pose pose, Phase5Mechanics.MovementEnvironment movementEnvironment,
                               Vec3 serverPosition, Vec3 serverVelocity, boolean canFly, boolean flying,
                               boolean sleeping, List<dev.phantom.ac.world.EntityCollisions.EntityBox> entityBoxes,
-                              Phase5Mechanics.VehicleState vehicleState) implements Packet {
+                              Phase5Mechanics.VehicleState vehicleState,
+                              Short transactionBarrierId) implements Packet {
     public PlayerContext {
       if(gamemode==null||gamemode.isBlank()) throw new IllegalArgumentException("gamemode is required");
       Objects.requireNonNull(attributes); effects=Map.copyOf(effects); Objects.requireNonNull(pose);
@@ -69,11 +70,21 @@ public final class Packets {
       if(!Double.isFinite(serverVelocity.x())||!Double.isFinite(serverVelocity.y())||!Double.isFinite(serverVelocity.z()))
         throw new IllegalArgumentException("serverVelocity must be finite");
       entityBoxes=List.copyOf(entityBoxes);
+      if(transactionBarrierId != null && transactionBarrierId >= 0) {
+        throw new IllegalArgumentException("transaction barrier ids must use the synthetic negative transaction range");
+      }
+    }
+
+    public PlayerContext withTransactionBarrier(short transactionId) {
+      return new PlayerContext(
+          gamemode, attributes, effects, pose, movementEnvironment,
+          serverPosition, serverVelocity, canFly, flying, sleeping,
+          entityBoxes, vehicleState, transactionId);
     }
     public PlayerContext(String gamemode, Simulation.Attributes attributes, Map<String,Integer> effects,
                          Phase5Mechanics.Pose pose, Phase5Mechanics.MovementEnvironment movementEnvironment,
                          boolean sleeping, List<dev.phantom.ac.world.EntityCollisions.EntityBox> entityBoxes) {
-      this(gamemode,attributes,effects,pose,movementEnvironment,Vec3.ZERO,Vec3.ZERO,false,false,sleeping,entityBoxes,Phase5Mechanics.VehicleState.NONE);
+      this(gamemode,attributes,effects,pose,movementEnvironment,Vec3.ZERO,Vec3.ZERO,false,false,sleeping,entityBoxes,Phase5Mechanics.VehicleState.NONE,null);
     }
 
     public PlayerContext(String gamemode, Simulation.Attributes attributes, Map<String,Integer> effects,
@@ -81,7 +92,7 @@ public final class Packets {
                          Vec3 serverPosition, Vec3 serverVelocity, boolean canFly, boolean flying,
                          boolean sleeping, List<dev.phantom.ac.world.EntityCollisions.EntityBox> entityBoxes) {
       this(gamemode,attributes,effects,pose,movementEnvironment,serverPosition,serverVelocity,
-          canFly,flying,sleeping,entityBoxes,Phase5Mechanics.VehicleState.NONE);
+          canFly,flying,sleeping,entityBoxes,Phase5Mechanics.VehicleState.NONE,null);
     }
   }
   public record BlockChange(World.Pos position, World.Block block) implements Packet { public BlockChange { Objects.requireNonNull(position,"position"); Objects.requireNonNull(block,"block"); } }
