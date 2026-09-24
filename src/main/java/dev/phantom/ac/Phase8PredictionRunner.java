@@ -481,7 +481,7 @@ public final class Phase8PredictionRunner {
 
       if (value instanceof Packets.ClientInput input) {
         clientState = State.apply(clientState, normalized);
-        // PLAYER_INPUT is a held-state update. Its causal simulation tick is
+        // PLAYER_INPUT is a held-state update. Its causal input-generation tick is
         // reconstructed by Phase 7 rather than guessed from packet arrival.
         currentInput = InputConstraint.fromClientInput(input);
         currentInputSequence = sequence;
@@ -493,7 +493,7 @@ public final class Phase8PredictionRunner {
             inputTiming != null && Phase7Timing.inputTickEnumerationComplete(inputTiming);
         currentInputPossibleClientTicks =
             currentInputClientTickTimingExhaustive
-                ? alignClientTicks(Phase7Timing.possibleSimulationTicks(inputTiming))
+                ? alignClientTicks(Phase7Timing.possibleInputTicks(inputTiming))
                 : List.of();
         if (!prediction.isEmpty()) {
           Set<Candidate> updated = overlayClientInput(prediction, clientState, maximumCandidates);
