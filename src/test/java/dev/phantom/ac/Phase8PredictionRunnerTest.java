@@ -1141,6 +1141,74 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void spatiallyDisconnectedFrontierWithoutFreshAuthorityIsUncertain() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+    Player start = anchor();
+
+    PlayerContext initialAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    Move firstMove = new Move(
+        new Maths.Vec3(.6, 64.0, .5), 0f, 0f, true, 1L);
+    Move sameTickCorrection = new Move(
+        new Maths.Vec3(1.8, 64.0, .5), 0f, 0f, true, 1L);
+    Move nextTickMove = new Move(
+        new Maths.Vec3(1.9, 64.0, .5), 0f, 0f, true, 2L);
+
+    var report = runner.process(
+        "spatially-disconnected-frontier",
+        List.of(
+            new RawPacket(
+                1L, 10L, initialAuthority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-authority", initialAuthority, 1L, 0L)),
+            new RawPacket(
+                2L, 20L, firstMove,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-movement", firstMove, 1L, 1L)),
+            /*
+             * This second position-bearing packet is the client-side correction/
+             * reconciliation boundary. Phase 8 already treats the sub-tick change
+             * as unresolved, so the retained physics frontier is intentionally not
+             * rewritten to this observed position.
+             */
+            new RawPacket(
+                3L, 30L, sameTickCorrection,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-correction", sameTickCorrection, 1L, 1L)),
+            /*
+             * The next movement arrives with an older causal authority than the
+             * packet itself. An exact client tick must not turn the disconnected
+             * spatial frontier into exhaustive IMPOSSIBLE evidence.
+             */
+            new RawPacket(
+                4L, 40L, nextTickMove,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-movement", nextTickMove, 10L, 2L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(3, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.UNCERTAIN,
+        report.results().getLast().verdict(),
+        report.results().toString());
+    assertTrue(
+        report.frames().getLast().trace().stream()
+            .anyMatch(line -> line.startsWith("FRONTIER_SPATIAL_DISCONNECTED")
+                && line.contains("UNCERTAIN_UNTIL_CAUSAL_ANCHOR")),
+        report.frames().getLast().trace().toString());
+    assertTrue(
+        report.frames().getLast().trace().stream()
+            .anyMatch(line -> line.contains("age=")),
+        report.frames().getLast().trace().toString());
+  }
+
+  @Test
   void suppressedStationaryObservationDoesNotRemainUncertain() {
     Phase7Timing.Config timing = new Phase7Timing.Config(
         50_000_000L,
