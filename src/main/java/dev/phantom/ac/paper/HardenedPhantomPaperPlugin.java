@@ -94,11 +94,24 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private static final int PAPER_MOVE_FAILURE_THRESHOLD=1;
 
   private final Map<UUID,Capture> captures=new ConcurrentHashMap<>();
-  private enum DebugLevel {
-    OFF, SUMMARY, FOCUS, TRACE;
+  enum DebugLevel {
+    OFF, SUMMARY, FOCUS, IMPOSSIBLE, TRACE;
     boolean summary(){return this==SUMMARY;}
     boolean focus(){return this==FOCUS || this==TRACE;}
+    boolean impossibleOnly(){return this==IMPOSSIBLE;}
     boolean trace(){return this==TRACE;}
+  }
+
+  static DebugLevel parseDebugMode(String mode){
+    if(mode==null || mode.isBlank())return DebugLevel.SUMMARY;
+    return switch(mode.toLowerCase(Locale.ROOT)){
+      case "off" -> DebugLevel.OFF;
+      case "summary" -> DebugLevel.SUMMARY;
+      case "focus" -> DebugLevel.FOCUS;
+      case "impossible", "flag" -> DebugLevel.IMPOSSIBLE;
+      case "trace" -> DebugLevel.TRACE;
+      default -> null;
+    };
   }
 
   private final Map<UUID,DebugLevel> debugPlayers=new ConcurrentHashMap<>();
@@ -650,7 +663,12 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         case "focus" -> {
           debugPlayers.put(target.getUniqueId(),DebugLevel.FOCUS);
           sender.sendMessage("Phase 8 focused debug enabled for "+target.getName()
-              +" (movement/input/timing decisions only).");
+              +" (movement/input/timing decisions, including UNCERTAIN).");
+        }
+        case "impossible", "flag" -> {
+          debugPlayers.put(target.getUniqueId(),DebugLevel.IMPOSSIBLE);
+          sender.sendMessage("Phase 8 impossible-only flagging enabled for "+target.getName()
+              +" (detailed IMPOSSIBLE evidence only; UNCERTAIN is suppressed).");
         }
         case "trace" -> {
           debugPlayers.put(target.getUniqueId(),DebugLevel.TRACE);
@@ -663,7 +681,28 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         }
         case "status" -> sender.sendMessage("Phase 8 debug for "+target.getName()+": "
             +debugPlayers.getOrDefault(target.getUniqueId(),DebugLevel.OFF));
-        default -> sender.sendMessage("Usage: /phantom debug <player> [summary|focus|trace|dump|off|status]");
+        default -> sender.sendMessage("Usage: /phantom debug <player> [summary|focus|impossible|flag|trace|dump|off|status]");
+      }
+      return true;
+    }
+
+    if(args[0].equalsIgnoreCase("flag")&&args.length>=2){
+      Player target=getServer().getPlayerExact(args[1]);
+      if(target==null){sender.sendMessage("Player not found: "+args[1]);return true;}
+      String mode=args.length>=3?args[2].toLowerCase(Locale.ROOT):"on";
+      switch(mode){
+        case "on", "impossible" -> {
+          debugPlayers.put(target.getUniqueId(),DebugLevel.IMPOSSIBLE);
+          sender.sendMessage("Phase 8 impossible-only flagging enabled for "+target.getName()
+              +" (detailed IMPOSSIBLE evidence only; UNCERTAIN is suppressed).");
+        }
+        case "off" -> {
+          debugPlayers.remove(target.getUniqueId());
+          sender.sendMessage("Phase 8 impossible-only flagging disabled for "+target.getName());
+        }
+        case "status" -> sender.sendMessage("Phase 8 flag mode for "+target.getName()+": "
+            +(debugPlayers.getOrDefault(target.getUniqueId(),DebugLevel.OFF)==DebugLevel.IMPOSSIBLE?"IMPOSSIBLE":"OFF"));
+        default -> sender.sendMessage("Usage: /phantom flag <player> [on|off|status]");
       }
       return true;
     }
@@ -683,7 +722,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       return true;
     }
 
-    sender.sendMessage("Usage: /phantom status | /phantom debug <player> [summary|focus|trace|dump|off|status] | /phantom setback <player> [on|off]");
+    sender.sendMessage("Usage: /phantom status | /phantom debug <player> [summary|focus|impossible|flag|trace|dump|off|status] | /phantom flag <player> [on|off|status] | /phantom setback <player> [on|off]");
     return true;
   }
 
@@ -1137,6 +1176,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
                 +PhantomDebugFormatter.movement(playerName,frame,frameResult));
           }
         }
+      }else if(debug.impossibleOnly()){
+        logImpossibleDebug(playerName,incremental);
       }
       if(debug.summary() || debug.trace()){
         getLogger().info("[PhantomAC][PHASE8][BATCH] player="+playerName
@@ -1445,6 +1486,47 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         }
       }
       break;
+    }
+  }
+
+  private void logImpossibleDebug(String playerName, Phase8PredictionRunner.Report report){
+    if(report==null || report.results().isEmpty())return;
+    List<Phase8MovementValidation.Evidence> impossibleEvidence=new ArrayList<>();
+    for(Phase8MovementValidation.Result result:report.results()){
+      if(result.verdict()!=Phase8MovementValidation.Verdict.IMPOSSIBLE)continue;
+      impossibleEvidence.add(result.evidence());
+      logValidationDebug(playerName,result);
+    }
+    if(impossibleEvidence.isEmpty())return;
+
+    for(Phase8PredictionRunner.PredictionFrame frame:report.frames()){
+      boolean relevant=false;
+      for(Phase8MovementValidation.Evidence evidence:impossibleEvidence){
+        if(evidence.replayReference().endsWith(":"+frame.sequence())){
+          relevant=true;
+          break;
+        }
+      }
+      if(!relevant)continue;
+      Set<String> emittedTraceLines=new LinkedHashSet<>();
+      for(String line:frame.trace()){
+        if(line.startsWith("CLIENT_TICK ")
+            || line.startsWith("TICK_RELIABILITY ")
+            || line.startsWith("INPUT_STATE ")
+            || line.startsWith("SIM_INPUT_OPTIONS ")
+            || line.startsWith("SIM_INPUT_BRANCH ")
+            || line.startsWith("SIM_STEP ")
+            || line.startsWith("TIMING_")
+            || line.startsWith("PHASE7_")
+            || line.startsWith("BOOTSTRAP_")
+            || line.startsWith("FRONTIER_")
+            || line.startsWith("EVIDENCE ")
+            || line.startsWith("ROOT_")){
+          if(!emittedTraceLines.add(line))continue;
+          getLogger().info("[PhantomAC][PHASE8][FLAG] player="+playerName
+              +" seq="+frame.sequence()+" "+line);
+        }
+      }
     }
   }
 
