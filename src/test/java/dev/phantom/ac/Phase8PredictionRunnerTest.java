@@ -584,7 +584,7 @@ class Phase8PredictionRunnerTest {
 
     Player start = new Player(
         new Maths.Vec3(.5, 64.0, .5),
-        Maths.Vec3.ZERO,
+        new Maths.Vec3(.1, 0.0, 0.0),
         0f, 0f, true, "survival", Map.of(),
         OptionalInt.empty(), false, Optional.empty(),
         Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
