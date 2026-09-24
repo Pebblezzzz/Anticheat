@@ -219,19 +219,16 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         if(capture.outstandingTransactions.remove(transaction)){
           long sequence=capture.sequence.incrementAndGet();
           long receivedNanos=System.nanoTime();
+          capture.playerState.acknowledgeBarrier(transaction,sequence);
           try{
             worldPublishExecutor.execute(()->{
               try{
-                if(capture.clientWorld.acknowledge(transaction,sequence)){
-                  Packets.WorldTransactionAck ack=new Packets.WorldTransactionAck(transaction);
-                  appendPacket(capture,new RawPacket(sequence,receivedNanos,ack,
-                      Packets.CaptureProvenance.fromAdapter("paper-transaction-ack",ack,null)));
-                  schedulePredictionValidation(capture);
-                }
+                capture.clientWorld.acknowledge(transaction,sequence);
+                Packets.WorldTransactionAck ack=new Packets.WorldTransactionAck(transaction);
+                appendPacket(capture,new RawPacket(sequence,receivedNanos,ack,
+                    Packets.CaptureProvenance.fromAdapter("paper-transaction-ack",ack,null)));
+                schedulePredictionValidation(capture);
               }finally{
-                // The ID only needs to stay reserved while this transaction is
-                // outstanding. Release it after the ACK has been published so
-                // long-running players cannot exhaust the 15-bit ID space.
                 capture.reservedTransactions.remove(transaction);
               }
             });
@@ -241,7 +238,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         }
       }
     }
-
     @Override public void onPacketSend(PacketSendEvent event){
       UUID playerId=event.getUser().getUUID();
       if(playerId==null)return;
