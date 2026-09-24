@@ -595,9 +595,15 @@ public final class Phase8PredictionRunner {
 
       TickResolution tick = resolveMovementTick(
           packet, move, phase7TimingBySequence);
+      /*
+       * A zero-displacement position packet while the client reports grounded is
+       * an observation of the current location, not a new physics step. The
+       * previous state may still carry a stale airborne ground bit during join,
+       * correction, or client/server reconciliation; requiring both states to be
+       * grounded turns that harmless transition into an IMPOSSIBLE movement.
+       */
       boolean stationaryPositionObservation = move.position() != null
           && positionExactlyMatches(observedBefore.position(), observedAfter.position())
-          && observedBefore.onGround()
           && observedAfter.onGround();
       boolean observationOnlyMovement = move.position() == null || stationaryPositionObservation;
       if (observationOnlyMovement && tick.timingUncertain()) {
@@ -780,8 +786,7 @@ public final class Phase8PredictionRunner {
                 ? EnumSet.of(Phase6Reachability.ObservedField.ROTATION)
                 : EnumSet.of(
                     Phase6Reachability.ObservedField.POSITION,
-                    Phase6Reachability.ObservedField.ROTATION,
-                    Phase6Reachability.ObservedField.GROUND);
+                    Phase6Reachability.ObservedField.ROTATION);
         SearchResult observationSearch = possibleObservation
             ? new SearchResult(
                 Verdict.POSSIBLE,
