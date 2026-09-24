@@ -1114,7 +1114,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           raw,
           sequence->clientWorldForMovement(capture,sequence),
           anchor,
-          capture.playerState.initialStateReceivedNanos);
+          capture.playerState.initialStateReceivedNanos());
 
       Phase8PredictionRunner.Report report=incremental;
       capture.lastDebugReport=incremental;
