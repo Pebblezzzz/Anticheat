@@ -211,6 +211,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         }
       }else if(event.getPacketType()==PacketType.Play.Client.TELEPORT_CONFIRM){
         record(capture,new Packets.TeleportConfirm(new WrapperPlayClientTeleportConfirm(event).getTeleportId()));
+        capture.playerState.completeResync();
         schedulePredictionValidation(capture);
       }else if(event.getPacketType()==PacketType.Play.Client.PONG){
         int id=new WrapperPlayClientPong(event).getId();
