@@ -2252,6 +2252,23 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void inputGenerationTickCanBridgeOnlyTheFinalExplicitMovementBoundary() {
+    assertTrue(Phase8PredictionRunner.currentInputGenerationAllowsFinalBoundary(
+        577L, 578L, 10L, 20L, List.of(578L),
+        Phase7Timing.Range.exact(578L), true));
+    assertTrue(Phase8PredictionRunner.currentInputGenerationAllowsFinalBoundary(
+        577L, 578L, 10L, 20L, List.of(),
+        new Phase7Timing.Range(577L, 578L), false));
+
+    assertFalse(Phase8PredictionRunner.currentInputGenerationAllowsFinalBoundary(
+        576L, 578L, 10L, 20L, List.of(578L),
+        Phase7Timing.Range.exact(578L), true));
+    assertFalse(Phase8PredictionRunner.currentInputGenerationAllowsFinalBoundary(
+        577L, 578L, 10L, 20L, List.of(579L),
+        Phase7Timing.Range.exact(579L), true));
+  }
+
+  @Test
   void boundedUnmaterializedInputRangeCanReachFinalMovementBoundary() {
     assertFalse(Phase8PredictionRunner.shouldOverlayCurrentInput(
         738L, 739L, 10L, 20L, List.of(),

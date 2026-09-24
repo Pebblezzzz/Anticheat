@@ -170,14 +170,17 @@ public final class Phase8PredictionRunner {
   private InputConstraint currentInput;
   private long currentInputSequence = -1L;
   /*
-   * Phase 7's possible simulation ticks for the newest held input. The live
-   * final-tick overlay may only use that input when this envelope contains the
-   * simulated tick, preventing packet receipt order from making the state
-   * retroactive.
+   * Phase 7 simulation ticks are the normal source for replaying held input
+   * through historical physics. We also retain the packet's input-generation
+   * envelope separately so an input generated on the explicit movement boundary
+   * can be admitted as a final-tick sibling without being replayed earlier.
    */
   private List<Long> currentInputPossibleSimulationTicks = List.of();
   private Phase7Timing.Range currentInputSimulationTickRange = Phase7Timing.Range.empty();
   private boolean currentInputSimulationTimingExhaustive;
+  private List<Long> currentInputPossibleClientTicks = List.of();
+  private Phase7Timing.Range currentInputClientTickRange = Phase7Timing.Range.empty();
+  private boolean currentInputClientTickTimingExhaustive;
   private final NavigableMap<Long, List<TimedInput>> inputHistory = new TreeMap<>();
   private AuthorityAnchor latestAuthority;
   /*
@@ -288,9 +291,9 @@ public final class Phase8PredictionRunner {
         Phase8ClientModel.TickReliabilityState.assess(0L, false, false, true, false);
     currentInput = neutralInput;
     currentInputSequence = -1L;
-    currentInputPossibleSimulationTicks = List.of();
-    currentInputSimulationTickRange = Phase7Timing.Range.empty();
-    currentInputSimulationTimingExhaustive = false;
+    currentInputPossibleClientTicks = List.of();
+    currentInputClientTickRange = Phase7Timing.Range.empty();
+    currentInputClientTickTimingExhaustive = false;
     inputHistory.clear();
     inputChronologies = List.of();
     uncertainInputs.clear();
@@ -493,6 +496,15 @@ public final class Phase8PredictionRunner {
         currentInputPossibleSimulationTicks =
             currentInputSimulationTimingExhaustive
                 ? alignClientTicks(Phase7Timing.possibleSimulationTicks(inputTiming))
+                : List.of();
+        currentInputClientTickRange = inputTiming == null
+            ? Phase7Timing.Range.empty()
+            : inputTiming.inputClientTicks();
+        currentInputClientTickTimingExhaustive =
+            inputTiming != null && Phase7Timing.inputTickEnumerationComplete(inputTiming);
+        currentInputPossibleClientTicks =
+            currentInputClientTickTimingExhaustive
+                ? alignClientTicks(Phase7Timing.possibleInputTicks(inputTiming))
                 : List.of();
         if (!prediction.isEmpty()) {
           Set<Candidate> updated = overlayClientInput(prediction, clientState, maximumCandidates);
@@ -3754,7 +3766,15 @@ public final class Phase8PredictionRunner {
         currentInputPossibleSimulationTicks,
         currentInputSimulationTickRange,
         currentInputSimulationTimingExhaustive,
-        movementTimingUncertain)) {
+        movementTimingUncertain)
+        || currentInputGenerationAllowsFinalBoundary(
+            simulationTick,
+            targetTick,
+            currentInputSequence,
+            movementSequence,
+            currentInputPossibleClientTicks,
+            currentInputClientTickRange,
+            currentInputClientTickTimingExhaustive)) {
       options.add(currentInput);
 
       /*
@@ -3807,6 +3827,24 @@ public final class Phase8PredictionRunner {
         Phase7Timing.Range.empty(),
         true,
         movementTimingUncertain);
+  }
+
+  static boolean currentInputGenerationAllowsFinalBoundary(
+      long simulationTick,
+      long targetTick,
+      long currentInputSequence,
+      long movementSequence,
+      List<Long> possibleInputClientTicks,
+      Phase7Timing.Range inputClientTickRange,
+      boolean inputTimingExhaustive) {
+    if (simulationTick != targetTick - 1L
+        || currentInputSequence < 0L
+        || currentInputSequence >= movementSequence) {
+      return false;
+    }
+    return inputTimingExhaustive
+        ? possibleInputClientTicks.contains(targetTick)
+        : inputClientTickRange.contains(targetTick);
   }
 
   static boolean shouldOverlayCurrentInput(
@@ -3890,8 +3928,8 @@ public final class Phase8PredictionRunner {
   /**
    * Build a flat causal held-input history.
    *
-   * Each packet contributes only its own possible effect ticks. We intentionally
-   * do not construct packet-to-tick Cartesian products.
+   * Each packet contributes only its own possible input-generation ticks. We
+   * intentionally do not construct packet-to-tick Cartesian products.
    */
   private void rebuildLinearCausalInputHistory(
       Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
