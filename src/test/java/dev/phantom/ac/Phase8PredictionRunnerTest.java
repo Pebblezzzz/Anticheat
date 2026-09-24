@@ -496,6 +496,57 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void jumpInputIsNotAppliedToThePrecedingExplicitMovementTick() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+    Player start = anchor();
+
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    var jumpInput = new Simulation.AdvancedInput(0, 0, true, false, false);
+    Player jumped = physics.step(new Vanilla12111RichPhysics.Context(
+        1L,
+        start,
+        jumpInput,
+        world,
+        Simulation.Environment.DRY,
+        start.attributes(),
+        Phase5Mechanics.MovementEffects.NONE,
+        Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(), Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        start.position(), start.velocity(), false, false, false, List.of());
+
+    var report = runner.process(
+        "jump-boundary",
+        List.of(
+            new RawPacket(1L, 10L, authority),
+            new RawPacket(2L, 20L, new ClientInput(
+                false, false, false, false, true, false, false)),
+            new RawPacket(3L, 30L, new Move(
+                start.position(), 0f, 0f, true, 1L)),
+            new RawPacket(4L, 40L, new Move(
+                jumped.position(), 0f, 0f, false, 2L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertTrue(report.results().stream()
+        .allMatch(result -> result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE),
+        report.results().toString());
+    assertEquals(start.position(), report.frames().getFirst().observedAfter().position());
+    assertEquals(jumped.position(), report.frames().getLast().observedAfter().position());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.startsWith("TIMING_OFFSETS")),
+        report.frames().getFirst().trace().toString());
+  }
+
+  @Test
   void latestHeldInputIsNotAppliedBeforeItsPhase7SimulationTick() {
     assertFalse(
         Phase8PredictionRunner.shouldOverlayCurrentInput(
