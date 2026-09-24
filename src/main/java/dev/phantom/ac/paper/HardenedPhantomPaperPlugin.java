@@ -447,7 +447,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
      */
     getServer().getScheduler().runTask(this,()->{
       if(!player.isOnline() || !captures.containsKey(player.getUniqueId()))return;
-      State.Player template=capture.initialState;
+      State.Player template=capture.playerState.initialState();
       if(template==null)return;
       org.bukkit.Location location=player.getLocation();
       org.bukkit.util.Vector velocity=player.getVelocity();
@@ -460,8 +460,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           template.attributes(),template.pose(),template.environment(),
           State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
       long receivedNanos=System.nanoTime();
-      capture.initialState=authoritativeAnchor;
-      capture.initialStateReceivedNanos=receivedNanos;
+      capture.playerState.beginResync(authoritativeAnchor,receivedNanos);
       if (debugLevel(player.getUniqueId()).trace()) {
         getLogger().info("[PhantomAC][PHASE8][REANCHOR] player="+player.getName()
             +" reason=PLAYER_TELEPORT_EVENT"
@@ -478,8 +477,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       captures.put(player.getUniqueId(),capture);
       State.Player anchor=State.Player.initial(
           new Vec3(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()));
-      capture.initialState=anchor;
-      capture.initialStateReceivedNanos=System.nanoTime();
+      capture.playerState.activate(anchor,System.nanoTime());
     });
   }
 
@@ -491,6 +489,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   @EventHandler public void onQuit(PlayerQuitEvent event){
+    Capture existing=captures.get(event.getPlayer().getUniqueId());
+    if(existing!=null) existing.playerState.disconnect();
     captures.remove(event.getPlayer().getUniqueId());
     debugPlayers.remove(event.getPlayer().getUniqueId());
     setbackOverrides.remove(event.getPlayer().getUniqueId());
