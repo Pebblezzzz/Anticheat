@@ -71,9 +71,11 @@ class Phase8PredictionRunnerTest {
     assertTrue(report.frames().getFirst().trace().stream()
         .anyMatch(line -> line.contains("OBSERVATION stationary-position packet retained=")),
         report.frames().getFirst().trace().toString());
-    assertTrue(report.frames().getFirst().predictedAfter().stream()
+    assertTrue(report.frames().getFirst().predictedBefore().stream()
         .anyMatch(candidate -> candidate.provenance().input()
             .equals("AUTHORITATIVE_ANCHOR")),
+        report.frames().getFirst().predictedBefore().toString());
+    assertTrue(report.frames().getFirst().predictedAfter().isEmpty(),
         report.frames().getFirst().predictedAfter().toString());
     assertTrue(report.frames().getFirst().trace().stream()
         .noneMatch(line -> line.contains("FRONTIER_RESET reason=OBSERVATION_CONTRADICTION")),
@@ -1963,7 +1965,7 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
-  void stationaryObservationIsComparedAgainstRetainedPrediction() {
+  void stationaryObservationSuppressesRetainedPredictionFrontier() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     var report = runner.process(
         "stationary",
@@ -1989,7 +1991,11 @@ class Phase8PredictionRunnerTest {
         result -> result.evidence().uncertaintySources().stream()
             .anyMatch(source -> source.contains("Phase 5 could not deterministically simulate"))),
         report.results().toString());
-    assertTrue(report.candidateFrontierRetained(), report.toString());
+    assertFalse(report.candidateFrontierRetained(), report.toString());
+    assertTrue(report.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
+        .anyMatch(line -> line.contains("FRONTIER_CLEARED source=STATIONARY_OBSERVATION")),
+        report.frames().toString());
   }
 
   @Test
