@@ -2572,6 +2572,7 @@ public final class Phase8PredictionRunner {
             + " physicalGround=" + physicalGround);
       }
     }
+  }
 
     return candidates.isEmpty() ? Optional.empty() : Optional.of(Set.copyOf(candidates));
   }
