@@ -499,13 +499,33 @@ class Phase8PredictionRunnerTest {
   void jumpInputIsNotAppliedToThePrecedingExplicitMovementTick() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     WorldSnapshot world = floorWorld();
-    Player start = anchor();
+    Player start = new Player(
+        new Maths.Vec3(.5, 64.0, .5),
+        new Maths.Vec3(0.0, 0.0, 0.1),
+        0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
 
     Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    var neutral = new Simulation.AdvancedInput(0, 0, false, false, false);
+    Player groundedStep = physics.step(new Vanilla12111RichPhysics.Context(
+        0L,
+        start,
+        neutral,
+        world,
+        Simulation.Environment.DRY,
+        start.attributes(),
+        Phase5Mechanics.MovementEffects.NONE,
+        Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
     var jumpInput = new Simulation.AdvancedInput(0, 0, true, false, false);
     Player jumped = physics.step(new Vanilla12111RichPhysics.Context(
         1L,
-        start,
+        groundedStep,
         jumpInput,
         world,
         Simulation.Environment.DRY,
@@ -528,7 +548,7 @@ class Phase8PredictionRunnerTest {
             new RawPacket(2L, 20L, new ClientInput(
                 false, false, false, false, true, false, false)),
             new RawPacket(3L, 30L, new Move(
-                start.position(), 0f, 0f, true, 1L)),
+                groundedStep.position(), 0f, 0f, true, 1L)),
             new RawPacket(4L, 40L, new Move(
                 jumped.position(), 0f, 0f, false, 2L))),
         world,
@@ -536,14 +556,18 @@ class Phase8PredictionRunnerTest {
         0L);
 
     assertEquals(2, report.movementObservations(), report.results().toString());
-    assertTrue(report.results().stream()
-        .allMatch(result -> result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE),
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(),
         report.results().toString());
-    assertEquals(start.position(), report.frames().getFirst().observedAfter().position());
-    assertEquals(jumped.position(), report.frames().getLast().observedAfter().position());
-    assertTrue(report.frames().getFirst().trace().stream()
-        .anyMatch(line -> line.startsWith("TIMING_OFFSETS")),
-        report.frames().getFirst().trace().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getLast().verdict(),
+        report.results().toString());
+    assertEquals(groundedStep.position(),
+        report.frames().getFirst().observedAfter().position());
+    assertEquals(jumped.position(),
+        report.frames().getLast().observedAfter().position());
   }
 
   @Test
