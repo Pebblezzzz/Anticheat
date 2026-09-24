@@ -907,22 +907,17 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           baseEnvironment.gravityMultiplier(),vehicleState);
 
       /*
-       * Enumerate the complete Bukkit entity set for the current world and retain
-       * the subset capable of intersecting the local validation volume. The local
-       * collision provider is explicitly marked complete for that deterministic
-       * server snapshot; no incomplete nearby-query result is passed downstream.
+       * Keep the Bukkit-side entity query spatially bounded. The old implementation
+       * scanned every entity in the world once per tracked player on every server
+       * tick, which made entity-heavy worlds an avoidable main-thread hotspot.
+       * Paper's nearby-entity query is backed by the world's spatial index, so only
+       * entities that can affect this validation volume are materialized here.
        */
       org.bukkit.util.BoundingBox relevantEntityRegion=box.expand(6.0,6.0,6.0);
       List<EntityCollisions.EntityBox> entityBoxes=new ArrayList<>();
-      for(Entity entity:player.getWorld().getEntities()){
+      for(Entity entity:player.getWorld().getNearbyEntities(relevantEntityRegion)){
         if(entity.getEntityId()==player.getEntityId())continue;
         org.bukkit.util.BoundingBox eb=entity.getBoundingBox();
-        if(eb.getMaxX()<relevantEntityRegion.getMinX()
-            ||eb.getMinX()>relevantEntityRegion.getMaxX()
-            ||eb.getMaxY()<relevantEntityRegion.getMinY()
-            ||eb.getMinY()>relevantEntityRegion.getMaxY()
-            ||eb.getMaxZ()<relevantEntityRegion.getMinZ()
-            ||eb.getMinZ()>relevantEntityRegion.getMaxZ())continue;
         entityBoxes.add(new EntityCollisions.EntityBox(entity.getEntityId(),
             new dev.phantom.ac.geometry.BlockBox(eb.getMinX(),eb.getMinY(),eb.getMinZ(),eb.getMaxX(),eb.getMaxY(),eb.getMaxZ())));
       }
