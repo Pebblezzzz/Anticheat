@@ -778,9 +778,36 @@ public final class Phase8PredictionRunner {
               predictedBefore, prediction, world, result.evidence().uncertaintySources(), trace));
           continue;
         }
-        prediction = retargetRotation(prediction, move, maximumCandidates);
-        Set<Candidate> rotated = prediction;
-        boolean possibleObservation = !rotated.isEmpty();
+        /*
+         * Grim treats a position/rotation observation separately from the
+         * prediction tick. In particular, a stationary position packet is not
+         * proof that the retained physics candidate occupies the observed
+         * position. The client has already supplied the observation; validating
+         * that packet against an older physics root manufactured the false
+         * IMPOSSIBLE results seen after join/reconciliation.
+         *
+         * Keep rotation-only observations attached to the retained physics
+         * frontier, but use an observation witness for stationary position
+         * packets. The witness is deliberately not promoted to the persistent
+         * physics frontier because its velocity is observational rather than a
+         * verified client-tick boundary.
+         */
+        Set<Candidate> observationCandidates;
+        boolean possibleObservation;
+        if (positionlessRotationObservation) {
+          observationCandidates = retargetRotation(prediction, move, maximumCandidates);
+          possibleObservation = !observationCandidates.isEmpty();
+        } else {
+          Candidate witness = candidateFromPlayer(
+              observedAfter,
+              tick.clientTick(),
+              "OBSERVATION_ONLY",
+              -1L,
+              EntityCollisions.NONE_TRACKED);
+          observationCandidates = Set.of(witness);
+          possibleObservation = true;
+        }
+
         Set<Phase6Reachability.ObservedField> observedFields =
             positionlessRotationObservation
                 ? EnumSet.of(Phase6Reachability.ObservedField.ROTATION)
@@ -790,13 +817,13 @@ public final class Phase8PredictionRunner {
         SearchResult observationSearch = possibleObservation
             ? new SearchResult(
                 Verdict.POSSIBLE,
-                rotated,
+                observationCandidates,
                 0,
-                rotated.size(),
+                observationCandidates.size(),
                 0, 0, 0, 0,
                 List.of(positionlessRotationObservation
                     ? "rotation is a retained client-state observation; no physics step is advanced"
-                    : "stationary position/rotation observation; no physics step is advanced"))
+                    : "stationary position/rotation observation; observed state is used as a non-physics witness"))
             : uncertainSearch(prediction, "no prediction root exists for observation-only movement packet");
         /*
          * Observation-only look/stationary packets do not advance physics, so
@@ -826,7 +853,7 @@ public final class Phase8PredictionRunner {
             : "OBSERVATION stationary-position packet retained=" + !prediction.isEmpty());
         frames.add(frame(
             sequence, packet, tick, move, observedBefore, observedAfter,
-            prediction, prediction, world, List.of(), trace));
+            predictedBefore, prediction, world, List.of(), trace));
         continue;
       }
 

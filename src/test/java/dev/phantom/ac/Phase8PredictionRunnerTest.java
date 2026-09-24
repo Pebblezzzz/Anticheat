@@ -1914,7 +1914,7 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
-  void stationaryObservationIsComparedAgainstRetainedPrediction() {
+  void stationaryObservationUsesObservedWitnessWithoutClearingFrontier() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     var report = runner.process(
         "stationary",
@@ -1941,6 +1941,14 @@ class Phase8PredictionRunnerTest {
             .anyMatch(source -> source.contains("Phase 5 could not deterministically simulate"))),
         report.results().toString());
     assertTrue(report.candidateFrontierRetained(), report.toString());
+    assertTrue(report.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
+        .anyMatch(line -> line.contains("OBSERVATION stationary-position packet")),
+        report.frames().toString());
+    assertTrue(report.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
+        .noneMatch(line -> line.contains("FRONTIER_RESET reason=OBSERVATION_CONTRADICTION")),
+        report.frames().toString());
   }
 
   @Test
