@@ -90,6 +90,15 @@ public final class Packets {
     public PlayerContext(String gamemode, Simulation.Attributes attributes, Map<String,Integer> effects,
                          Phase5Mechanics.Pose pose, Phase5Mechanics.MovementEnvironment movementEnvironment,
                          Vec3 serverPosition, Vec3 serverVelocity, boolean canFly, boolean flying,
+                         boolean sleeping, List<dev.phantom.ac.world.EntityCollisions.EntityBox> entityBoxes,
+                         Phase5Mechanics.VehicleState vehicleState) {
+      this(gamemode,attributes,effects,pose,movementEnvironment,serverPosition,serverVelocity,
+          canFly,flying,sleeping,entityBoxes,vehicleState,null);
+    }
+
+    public PlayerContext(String gamemode, Simulation.Attributes attributes, Map<String,Integer> effects,
+                         Phase5Mechanics.Pose pose, Phase5Mechanics.MovementEnvironment movementEnvironment,
+                         Vec3 serverPosition, Vec3 serverVelocity, boolean canFly, boolean flying,
                          boolean sleeping, List<dev.phantom.ac.world.EntityCollisions.EntityBox> entityBoxes) {
       this(gamemode,attributes,effects,pose,movementEnvironment,serverPosition,serverVelocity,
           canFly,flying,sleeping,entityBoxes,Phase5Mechanics.VehicleState.NONE,null);
