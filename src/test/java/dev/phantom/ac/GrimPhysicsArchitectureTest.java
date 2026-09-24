@@ -87,7 +87,7 @@ class GrimPhysicsArchitectureTest {
   }
 
   @Test
-  void sprintingFinalTickUsesGrimForwardConstraintForHeldNeutralInput() {
+  void sprintingFinalTickRetainsGrimForwardAndExplicitNeutralHypotheses() {
     Player start = player(new Vec3(0.0, 0.0, 0.2));
     MovementEnvironment movement = MovementEnvironment.dry(false, true, false);
     Phase6Reachability.Context context = new Phase6Reachability.Context(
@@ -128,7 +128,7 @@ class GrimPhysicsArchitectureTest {
     assertTrue(result.trace().stream().anyMatch(line ->
         line.contains("input=InputConstraint[forward=OptionalInt[1]")),
         result.trace().toString());
-    assertFalse(result.trace().stream().anyMatch(line ->
+    assertTrue(result.trace().stream().anyMatch(line ->
         line.contains("input=InputConstraint[forward=OptionalInt[0]")),
         result.trace().toString());
   }
