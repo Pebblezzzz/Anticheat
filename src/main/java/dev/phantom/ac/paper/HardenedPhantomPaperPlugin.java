@@ -1491,16 +1491,23 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   private void logImpossibleDebug(String playerName, Phase8PredictionRunner.Report report){
     if(report==null || report.results().isEmpty())return;
-    Set<String> impossibleReferences=new LinkedHashSet<>();
+    List<Phase8MovementValidation.Evidence> impossibleEvidence=new ArrayList<>();
     for(Phase8MovementValidation.Result result:report.results()){
       if(result.verdict()!=Phase8MovementValidation.Verdict.IMPOSSIBLE)continue;
-      impossibleReferences.add(result.evidence().replayReference());
+      impossibleEvidence.add(result.evidence());
       logValidationDebug(playerName,result);
     }
-    if(impossibleReferences.isEmpty())return;
+    if(impossibleEvidence.isEmpty())return;
 
     for(Phase8PredictionRunner.PredictionFrame frame:report.frames()){
-      if(!impossibleReferences.contains(frame.replayReference()))continue;
+      boolean relevant=false;
+      for(Phase8MovementValidation.Evidence evidence:impossibleEvidence){
+        if(evidence.replayReference().endsWith(":"+frame.sequence())){
+          relevant=true;
+          break;
+        }
+      }
+      if(!relevant)continue;
       Set<String> emittedTraceLines=new LinkedHashSet<>();
       for(String line:frame.trace()){
         if(line.startsWith("CLIENT_TICK ")
