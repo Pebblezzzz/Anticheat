@@ -170,14 +170,15 @@ public final class Phase8PredictionRunner {
   private InputConstraint currentInput;
   private long currentInputSequence = -1L;
   /*
-   * Phase 7's possible simulation ticks for the newest held input. The live
-   * final-tick overlay may only use that input when this envelope contains the
-   * simulated tick, preventing packet receipt order from making the state
-   * retroactive.
+   * Phase 7's possible input-generation ticks for the newest held input. The
+   * input packet's own generation tick is the causal boundary for a held
+   * PLAYER_INPUT state; its delayed simulation envelope is not the same clock.
+   * The live final-tick overlay may only use that input on the bounded input-tick
+   * envelope, preventing packet receipt order from making the state retroactive.
    */
-  private List<Long> currentInputPossibleSimulationTicks = List.of();
-  private Phase7Timing.Range currentInputSimulationTickRange = Phase7Timing.Range.empty();
-  private boolean currentInputSimulationTimingExhaustive;
+  private List<Long> currentInputPossibleClientTicks = List.of();
+  private Phase7Timing.Range currentInputClientTickRange = Phase7Timing.Range.empty();
+  private boolean currentInputClientTickTimingExhaustive;
   private final NavigableMap<Long, List<TimedInput>> inputHistory = new TreeMap<>();
   private AuthorityAnchor latestAuthority;
   /*
@@ -288,9 +289,9 @@ public final class Phase8PredictionRunner {
         Phase8ClientModel.TickReliabilityState.assess(0L, false, false, true, false);
     currentInput = neutralInput;
     currentInputSequence = -1L;
-    currentInputPossibleSimulationTicks = List.of();
-    currentInputSimulationTickRange = Phase7Timing.Range.empty();
-    currentInputSimulationTimingExhaustive = false;
+    currentInputPossibleClientTicks = List.of();
+    currentInputClientTickRange = Phase7Timing.Range.empty();
+    currentInputClientTickTimingExhaustive = false;
     inputHistory.clear();
     inputChronologies = List.of();
     uncertainInputs.clear();
@@ -3751,9 +3752,9 @@ public final class Phase8PredictionRunner {
         targetTick,
         currentInputSequence,
         movementSequence,
-        currentInputPossibleSimulationTicks,
-        currentInputSimulationTickRange,
-        currentInputSimulationTimingExhaustive,
+        currentInputPossibleClientTicks,
+        currentInputClientTickRange,
+        currentInputClientTickTimingExhaustive,
         movementTimingUncertain)) {
       options.add(currentInput);
 
@@ -3890,8 +3891,8 @@ public final class Phase8PredictionRunner {
   /**
    * Build a flat causal held-input history.
    *
-   * Each packet contributes only its own possible effect ticks. We intentionally
-   * do not construct packet-to-tick Cartesian products.
+   * Each packet contributes only its own possible input-generation ticks. We
+   * intentionally do not construct packet-to-tick Cartesian products.
    */
   private void rebuildLinearCausalInputHistory(
       Map<Long, Phase7Timing.EventTiming> phase7TimingBySequence) {
@@ -3926,15 +3927,15 @@ public final class Phase8PredictionRunner {
       }
 
       InputConstraint constraint = InputConstraint.fromClientInput(input);
-      if (!Phase7Timing.simulationTickEnumerationComplete(timing)) {
-        long earliest = timing.simulationClientTickEnvelope().known()
-            ? alignClientTick(Math.max(0L, timing.simulationClientTicks().min()))
+      if (!Phase7Timing.inputTickEnumerationComplete(timing)) {
+        long earliest = timing.inputClientTickEnvelope().known()
+            ? alignClientTick(Math.max(0L, timing.inputClientTicks().min()))
             : 0L;
         uncertainInputs.add(new UncertainInput(packet.sequence(), earliest));
         continue;
       }
 
-      List<Long> ticks = alignClientTicks(Phase7Timing.possibleSimulationTicks(timing));
+      List<Long> ticks = alignClientTicks(Phase7Timing.possibleInputTicks(timing));
       if (ticks.isEmpty()) {
         uncertainInputs.add(new UncertainInput(packet.sequence(), 0L));
         continue;
