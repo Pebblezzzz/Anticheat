@@ -3281,7 +3281,7 @@ public final class Phase8PredictionRunner {
     return advancePredictionToTarget(
         start, targetTick, inputChronologies, world, maximumCandidates, movementSequence,
         actualMovementReference, lastOnGroundForPrediction, authoritativeMovementEnvironment,
-        movementTimingUncertain);
+        movementTimingUncertain, explicitMovementTick);
   }
 
   private AdvanceResult advancePredictionAcrossTimingRange(
@@ -3387,7 +3387,8 @@ public final class Phase8PredictionRunner {
       Vec3 actualMovementReference,
       boolean lastOnGroundForPrediction,
       MovementEnvironment authoritativeMovementEnvironment,
-      boolean movementTimingUncertain) {
+      boolean movementTimingUncertain,
+      boolean explicitMovementTick) {
     if (start.isEmpty()) {
       return new AdvanceResult(Set.of(), false, 0,
           List.of("prediction frontier is empty"), List.of());
