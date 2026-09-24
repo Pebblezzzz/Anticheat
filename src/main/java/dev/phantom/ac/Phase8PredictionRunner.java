@@ -3776,6 +3776,9 @@ public final class Phase8PredictionRunner {
             currentInputPossibleSimulationTicks,
             currentInputSimulationTickRange,
             currentInputSimulationTimingExhaustive,
+            currentInputPossibleClientTicks,
+            currentInputClientTickRange,
+            currentInputClientTickTimingExhaustive,
             movementTimingUncertain)
         : shouldOverlayCurrentInput(
             simulationTick,
@@ -3885,6 +3888,9 @@ public final class Phase8PredictionRunner {
       List<Long> possibleSimulationTicks,
       Phase7Timing.Range possibleSimulationTickRange,
       boolean inputTimingExhaustive,
+      List<Long> possibleInputClientTicks,
+      Phase7Timing.Range inputClientTickRange,
+      boolean inputClientTickTimingExhaustive,
       boolean movementTimingUncertain) {
     if (simulationTick != targetTick - 1L
         || currentInputSequence < 0L
@@ -3893,14 +3899,44 @@ public final class Phase8PredictionRunner {
     }
 
     /*
-     * Jump is a discrete movement transition. Unlike a held directional axis,
-     * admitting an input possibility at the movement's target tick must not make
-     * the jump happen on the preceding simulation step. The input may affect the
-     * boundary only when Phase 7 admits that exact simulation tick.
+     * The persistent predictor labels the step that produces client tick N as
+     * simulation tick N-1. Therefore a jump input whose own client-generation
+     * envelope includes the movement boundary N may legitimately affect the
+     * N-1 -> N step. This is distinct from replaying the input onto any earlier
+     * catch-up tick.
      */
     if (movementTimingUncertain) return true;
     if (possibleSimulationTicks.contains(simulationTick)) return true;
-    return !inputTimingExhaustive && possibleSimulationTickRange.contains(simulationTick);
+    if (!inputTimingExhaustive && possibleSimulationTickRange.contains(simulationTick)) {
+      return true;
+    }
+
+    return inputClientTickTimingExhaustive
+        ? possibleInputClientTicks.contains(targetTick)
+        : inputClientTickRange.contains(targetTick);
+  }
+
+  static boolean shouldOverlayCurrentJumpInput(
+      long simulationTick,
+      long targetTick,
+      long currentInputSequence,
+      long movementSequence,
+      List<Long> possibleSimulationTicks,
+      Phase7Timing.Range possibleSimulationTickRange,
+      boolean inputTimingExhaustive,
+      boolean movementTimingUncertain) {
+    return shouldOverlayCurrentJumpInput(
+        simulationTick,
+        targetTick,
+        currentInputSequence,
+        movementSequence,
+        possibleSimulationTicks,
+        possibleSimulationTickRange,
+        inputTimingExhaustive,
+        List.of(),
+        Phase7Timing.Range.empty(),
+        true,
+        movementTimingUncertain);
   }
 
   static boolean shouldOverlayCurrentInput(
