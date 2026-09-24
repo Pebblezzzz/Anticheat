@@ -952,7 +952,7 @@ public final class Phase8PredictionRunner {
           move.position() != null
               && !rootRebasedForMovement
               && !spatialRebase.rebased()
-              && lastObservedMovementClientTick != tick.clientTick()
+              && !priorPositionObservationSameTick
               && predictionRootDisconnectedFromObservedBefore(prediction, observedBefore, tick);
       if (spatialFrontierDisconnected) {
         AuthorityAnchor freshCausalAuthority = freshCausalAuthority(packet);
