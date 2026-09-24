@@ -622,8 +622,8 @@ class Phase8PredictionRunnerTest {
     assertTrue(
         report.frames().getFirst().trace().stream()
             .anyMatch(line -> line.contains("SIM_INPUT_OPTIONS")
-                && line.contains("jump=true")
-                && line.contains("jump=false")),
+                && line.contains("jump=Optional[true]")
+                && line.contains("jump=Optional[false]")),
         report.frames().getFirst().trace().toString());
   }
 
