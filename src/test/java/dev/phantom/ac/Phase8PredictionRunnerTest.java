@@ -649,6 +649,93 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void staleAuthorityDoesNotRelabelRetainedPredictionFrontier() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+    MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
+
+    Player start = new Player(
+        new Maths.Vec3(.5, 64.0, .5),
+        new Maths.Vec3(.3, 0.0, 0.0),
+        0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
+
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    Player first = physics.step(new Vanilla12111RichPhysics.Context(
+        0L, start, new Simulation.AdvancedInput(0, 0, false, false, false),
+        world, Simulation.Environment.DRY, start.attributes(),
+        Phase5Mechanics.MovementEffects.NONE, Pose.STANDING, environment, false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+    Player second = physics.step(new Vanilla12111RichPhysics.Context(
+        1L, first, new Simulation.AdvancedInput(0, 0, false, false, false),
+        world, Simulation.Environment.DRY, first.attributes(),
+        Phase5Mechanics.MovementEffects.NONE, Pose.STANDING, environment, false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+    Player third = physics.step(new Vanilla12111RichPhysics.Context(
+        2L, second, new Simulation.AdvancedInput(0, 0, false, false, false),
+        world, Simulation.Environment.DRY, second.attributes(),
+        Phase5Mechanics.MovementEffects.NONE, Pose.STANDING, environment, false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+    Player fourth = physics.step(new Vanilla12111RichPhysics.Context(
+        3L, third, new Simulation.AdvancedInput(0, 0, false, false, false),
+        world, Simulation.Environment.DRY, third.attributes(),
+        Phase5Mechanics.MovementEffects.NONE, Pose.STANDING, environment, false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    PlayerContext initialAuthority = new PlayerContext(
+        "survival", start.attributes(), Map.of(), Pose.STANDING, environment,
+        start.position(), start.velocity(), false, false, false, List.of());
+    PlayerContext staleAuthority = new PlayerContext(
+        "survival", first.attributes(), Map.of(), Pose.STANDING, environment,
+        first.position(), first.velocity(), false, false, false, List.of());
+
+    Move firstMove = new Move(first.position(), 0f, 0f, first.onGround(), 1L);
+    Move finalMove = new Move(fourth.position(), 0f, 0f, fourth.onGround(), 4L);
+
+    var report = runner.process(
+        "stale-authority-frontier",
+        List.of(
+            new RawPacket(1L, 10L, initialAuthority,
+                Packets.CaptureProvenance.fromAdapter("authority", initialAuthority, 0L, 0L)),
+            new RawPacket(2L, 20L, firstMove,
+                Packets.CaptureProvenance.fromAdapter("move", firstMove, 1L, 1L)),
+            new RawPacket(3L, 30L, staleAuthority,
+                Packets.CaptureProvenance.fromAdapter("authority", staleAuthority, 0L, 1L)),
+            new RawPacket(4L, 40L, new ClientTickEnd()),
+            new RawPacket(5L, 50L, new ClientTickEnd()),
+            new RawPacket(6L, 60L, new ClientTickEnd()),
+            new RawPacket(7L, 70L, finalMove,
+                Packets.CaptureProvenance.fromAdapter("move", finalMove, 4L, 4L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getLast().verdict(),
+        report.results().toString());
+    assertTrue(
+        report.frames().getLast().trace().stream()
+            .anyMatch(line -> line.contains("ROOT_REFRESH_SKIPPED")
+                && line.contains("CAUSAL_AUTHORITY_STALE")),
+        report.frames().getLast().trace().toString());
+    assertTrue(
+        report.frames().getLast().trace().stream()
+            .noneMatch(line -> line.startsWith("ROOT_REFRESH reason=PREDICTION_LAG")),
+        report.frames().getLast().trace().toString());
+    assertTrue(
+        report.frames().getLast().predictedAfter().stream()
+            .anyMatch(candidate ->
+                Math.abs(candidate.context().player().position().x() - fourth.position().x()) <= 1.0E-9
+                    && Math.abs(candidate.context().player().position().y() - fourth.position().y()) <= 1.0E-9
+                    && Math.abs(candidate.context().player().position().z() - fourth.position().z()) <= 1.0E-9),
+        report.frames().getLast().toString());
+  }
+
+  @Test
   void stalePredictionRebasesToFreshCausalAuthority() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
