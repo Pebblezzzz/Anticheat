@@ -811,14 +811,9 @@ public final class Phase8PredictionRunner {
         Set<Phase6Reachability.ObservedField> observedFields =
             positionlessRotationObservation
                 ? EnumSet.of(Phase6Reachability.ObservedField.ROTATION)
-                : (move.onGround() == null
-                    ? EnumSet.of(
-                        Phase6Reachability.ObservedField.POSITION,
-                        Phase6Reachability.ObservedField.ROTATION)
-                    : EnumSet.of(
-                        Phase6Reachability.ObservedField.POSITION,
-                        Phase6Reachability.ObservedField.ROTATION,
-                        Phase6Reachability.ObservedField.GROUND));
+                : EnumSet.of(
+                    Phase6Reachability.ObservedField.POSITION,
+                    Phase6Reachability.ObservedField.ROTATION);
         SearchResult observationSearch = possibleObservation
             ? new SearchResult(
                 Verdict.POSSIBLE,
@@ -845,6 +840,21 @@ public final class Phase8PredictionRunner {
           possible++;
           latestContinuation = Continuation.ACTIVE;
           lastPositionClientTick = tick.clientTick();
+
+          if (!positionlessRotationObservation) {
+            /*
+             * A stationary position observation is not an atomic physics
+             * boundary. Grim keeps the packet observation separate from the
+             * persistent client-physics state/velocity. Do not carry a stale
+             * frontier through an observation whose position is supplied by the
+             * client but whose boundary velocity is unknown.
+             */
+            prediction = Set.of();
+            predictionTick = -1L;
+            physicsFrontierSuppressedUntilPositionMovement = true;
+            trace.add("FRONTIER_CLEARED source=STATIONARY_OBSERVATION"
+                + " reason=observation-is-not-a-physics-root");
+          }
         } else if (result.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
           impossible++;
           latestContinuation = Continuation.IMPOSSIBLE;
@@ -858,7 +868,7 @@ public final class Phase8PredictionRunner {
             : "OBSERVATION stationary-position packet retained=" + !prediction.isEmpty());
         frames.add(frame(
             sequence, packet, tick, move, observedBefore, observedAfter,
-            prediction, prediction, world, List.of(), trace));
+            predictedBefore, prediction, world, List.of(), trace));
         continue;
       }
 
