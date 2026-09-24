@@ -1858,6 +1858,45 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void stationaryGroundTransitionDoesNotBecomeImpossible() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+
+    Player airborneAnchor = new Player(
+        new Maths.Vec3(.5, 64.0, .5),
+        Maths.Vec3.ZERO,
+        0f, 0f, false, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
+
+    PlayerContext airborneAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(false, false, false),
+        airborneAnchor.position(), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    var report = runner.process(
+        "stationary-ground-transition",
+        List.of(
+            new RawPacket(1, 20, airborneAuthority),
+            new RawPacket(2, 30, new ClientTickEnd()),
+            new RawPacket(3, 60, new Move(
+                airborneAnchor.position(), 0f, 0f, true, 1L))),
+        floorWorld(),
+        airborneAnchor,
+        20L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("OBSERVATION stationary-position packet")),
+        report.frames().toString());
+  }
+
+  @Test
   void sameTickSubTickMotionBecomesUncertainWithoutClearingFrontier() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     var report = runner.process(
