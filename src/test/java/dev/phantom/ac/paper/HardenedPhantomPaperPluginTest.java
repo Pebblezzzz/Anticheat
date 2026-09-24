@@ -17,6 +17,18 @@ class HardenedPhantomPaperPluginTest {
   }
 
   @Test
+  void flagModeMapsToImpossibleOnlyAndSuppressesUncertain() {
+    assertEquals(HardenedPhantomPaperPlugin.DebugLevel.IMPOSSIBLE,
+        HardenedPhantomPaperPlugin.parseDebugMode("flag"));
+    assertEquals(HardenedPhantomPaperPlugin.DebugLevel.IMPOSSIBLE,
+        HardenedPhantomPaperPlugin.parseDebugMode("impossible"));
+    assertTrue(HardenedPhantomPaperPlugin.DebugLevel.IMPOSSIBLE.impossibleOnly());
+    assertFalse(HardenedPhantomPaperPlugin.DebugLevel.FOCUS.impossibleOnly());
+    assertFalse(HardenedPhantomPaperPlugin.DebugLevel.TRACE.impossibleOnly());
+    assertNull(HardenedPhantomPaperPlugin.parseDebugMode("not-a-mode"));
+  }
+
+  @Test
   void unsupportedBlockChangesAreRecordedAsUnsupportedPackets() {
     Pos position = new Pos(1, 64, 1);
     BlockState unsupported = BlockState.unsupported("minecraft:future_block");
