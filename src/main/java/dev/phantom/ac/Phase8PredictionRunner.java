@@ -4226,37 +4226,17 @@ public final class Phase8PredictionRunner {
   }
 
   private InputConstraint inputForSimulationTick(
-      NavigableMap<Long, List<TimedInput>> history,
+      NavigableMap<Long, List<TimedInput>> ignoredHistory,
       long simulationTick,
       long movementSequence) {
-    if (simulationTick < 0L) return neutralInput;
-
-    /*
-     * Bootstrap reconstructs a movement boundary from packets already observed
-     * before that movement. Keep that path strict: an input that arrived after
-     * the movement cannot be used to invent the bootstrap state, even if Phase 7
-     * later proves that the input belongs to an earlier client tick.
-     */
-    TimedInput selected = latestTimedInput(history, simulationTick, movementSequence);
-    if (selected != null) {
-      return selected.constraint();
+    // Grim treats PLAYER_INPUT as a held state. Use the latest packet that
+    // precedes this movement; historical tick assignments are not materialized.
+    if (simulationTick < 0L
+        || currentInputSequence < 0L
+        || currentInputSequence > movementSequence) {
+      return neutralInput;
     }
-
-    for (UncertainInput input : uncertainInputs) {
-      if (input.sequence() > movementSequence) continue;
-      if (simulationTick < input.earliestClientTick()) continue;
-      return InputConstraint.any();
-    }
-
-    if (currentInputSequence >= 0L
-        && currentInputSequence <= movementSequence) {
-      boolean possibleAtTick = currentInputSimulationTimingExhaustive
-          ? currentInputPossibleSimulationTicks.contains(simulationTick)
-          : currentInputSimulationTickRange.contains(simulationTick);
-      if (possibleAtTick) return currentInput;
-    }
-
-    return neutralInput;
+    return currentInput;
   }
 
   private static SearchResult uncertainSearch(Set<Candidate> candidates, String reason) {
