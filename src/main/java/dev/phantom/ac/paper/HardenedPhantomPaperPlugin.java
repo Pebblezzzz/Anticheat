@@ -936,20 +936,21 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           new Vec3(authoritativeVelocity.getX(),authoritativeVelocity.getY(),authoritativeVelocity.getZ()),
           player.getAllowFlight(),player.isFlying(),player.isSleeping(),entityBoxes,vehicleState);
 
-      if(capture.initialState==null){
+      if(capture.playerState.initialState()==null){
         long anchorReceivedNanos=System.nanoTime();
         State.Environment stateEnvironment=switch(env.fluid()){
           case WATER -> State.Environment.WATER;
           case LAVA -> State.Environment.LAVA;
           case NONE -> env.climbable()?State.Environment.CLIMBABLE:State.Environment.DRY;
         };
-        capture.initialState=new State.Player(
-            vector(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()),
-            vector(authoritativeVelocity.getX(),authoritativeVelocity.getY(),authoritativeVelocity.getZ()),player.getLocation().getYaw(),player.getLocation().getPitch(),player.isOnGround(),
-            player.getGameMode().name().toLowerCase(Locale.ROOT),effects,java.util.OptionalInt.empty(),false,
-            java.util.Optional.empty(),new dev.phantom.ac.Simulation.Attributes(movementSpeed),pose,stateEnvironment,
-            State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
-        capture.initialStateReceivedNanos=anchorReceivedNanos;
+        capture.playerState.activate(
+            new State.Player(
+                vector(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()),
+                vector(authoritativeVelocity.getX(),authoritativeVelocity.getY(),authoritativeVelocity.getZ()),player.getLocation().getYaw(),player.getLocation().getPitch(),player.isOnGround(),
+                player.getGameMode().name().toLowerCase(Locale.ROOT),effects,java.util.OptionalInt.empty(),false,
+                java.util.Optional.empty(),new dev.phantom.ac.Simulation.Attributes(movementSpeed),pose,stateEnvironment,
+                State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of()),
+            anchorReceivedNanos);
       }
 
       long contextReceivedNanos=System.nanoTime();
@@ -962,7 +963,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
                                              double observedX,double observedZ){
     double anchorX=centerX;
     double anchorZ=centerZ;
-    State.Player anchor=capture.initialState;
+    State.Player anchor=capture.playerState.initialState();
     if(anchor!=null&&!anchor.uncertain()){
       anchorX=anchor.position().x();
       anchorZ=anchor.position().z();
@@ -1091,7 +1092,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           raw,
           sequence->clientWorldForMovement(capture,sequence),
           anchor,
-          capture.initialStateReceivedNanos);
+          capture.playerState.initialStateReceivedNanos);
 
       Phase8PredictionRunner.Report report=incremental;
       capture.lastDebugReport=incremental;
