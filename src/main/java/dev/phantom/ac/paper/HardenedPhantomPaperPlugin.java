@@ -1177,11 +1177,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           }
         }
       }else if(debug.impossibleOnly()){
-        for(Phase8MovementValidation.Result result:incremental.results()){
-          if(result.verdict()==Phase8MovementValidation.Verdict.IMPOSSIBLE){
-            logValidationDebug(playerName,result);
-          }
-        }
+        logImpossibleDebug(playerName,incremental);
       }
       if(debug.summary() || debug.trace()){
         getLogger().info("[PhantomAC][PHASE8][BATCH] player="+playerName
@@ -1490,6 +1486,40 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         }
       }
       break;
+    }
+  }
+
+  private void logImpossibleDebug(String playerName, Phase8PredictionRunner.Report report){
+    if(report==null || report.results().isEmpty())return;
+    Set<String> impossibleReferences=new LinkedHashSet<>();
+    for(Phase8MovementValidation.Result result:report.results()){
+      if(result.verdict()!=Phase8MovementValidation.Verdict.IMPOSSIBLE)continue;
+      impossibleReferences.add(result.evidence().replayReference());
+      logValidationDebug(playerName,result);
+    }
+    if(impossibleReferences.isEmpty())return;
+
+    for(Phase8PredictionRunner.PredictionFrame frame:report.frames()){
+      if(!impossibleReferences.contains(frame.replayReference()))continue;
+      Set<String> emittedTraceLines=new LinkedHashSet<>();
+      for(String line:frame.trace()){
+        if(line.startsWith("CLIENT_TICK ")
+            || line.startsWith("TICK_RELIABILITY ")
+            || line.startsWith("INPUT_STATE ")
+            || line.startsWith("SIM_INPUT_OPTIONS ")
+            || line.startsWith("SIM_INPUT_BRANCH ")
+            || line.startsWith("SIM_STEP ")
+            || line.startsWith("TIMING_")
+            || line.startsWith("PHASE7_")
+            || line.startsWith("BOOTSTRAP_")
+            || line.startsWith("FRONTIER_")
+            || line.startsWith("EVIDENCE ")
+            || line.startsWith("ROOT_")){
+          if(!emittedTraceLines.add(line))continue;
+          getLogger().info("[PhantomAC][PHASE8][FLAG] player="+playerName
+              +" seq="+frame.sequence()+" "+line);
+        }
+      }
     }
   }
 
