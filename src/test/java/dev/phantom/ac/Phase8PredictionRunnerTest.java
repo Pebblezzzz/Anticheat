@@ -775,6 +775,24 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void latestHeldJumpIsRetainedAtFinalBoundaryWhenSimulationEnvelopeIsUnmaterialized() {
+    assertTrue(
+        Phase8PredictionRunner.shouldOverlayCurrentJumpInput(
+            2831L,
+            2832L,
+            10L,
+            11L,
+            List.of(),
+            Phase7Timing.Range.empty(),
+            true,
+            List.of(),
+            Phase7Timing.Range.empty(),
+            true,
+            false),
+        "a currently held jump received before the movement must remain a final-boundary candidate");
+  }
+
+  @Test
   void latestHeldInputIsNotAppliedBeforeItsPhase7SimulationTick() {
     assertFalse(
         Phase8PredictionRunner.shouldOverlayCurrentInput(
