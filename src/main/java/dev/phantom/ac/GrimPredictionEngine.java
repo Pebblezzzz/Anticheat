@@ -180,7 +180,14 @@ public final class GrimPredictionEngine {
             .map(Context::movementEnvironment)
             .map(MovementEnvironment::swimmingInput)
             .orElse(false);
-        if (state.sprinting() && !swimming) {
+        /*
+         * A physical sprint flag is not itself a forward-input packet. During a
+         * sprint-state transition the client can legitimately report an explicit
+         * neutral movement input for the tick while retaining the sprint action.
+         * Only infer forward movement when the input chronology left the forward
+         * axis unknown; never overwrite an explicit forward=0 observation.
+         */
+        if (state.sprinting() && !swimming && inputOption.forward().isEmpty()) {
           forward = 1;
         }
 
