@@ -1868,7 +1868,7 @@ class Phase8PredictionRunnerTest {
         0f, 0f, true, "survival", Map.of(),
         OptionalInt.empty(), false, Optional.empty(),
         Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
-        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of(), 1);
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of(), 2);
 
     MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
     Simulation.AdvancedInput heldJump =
