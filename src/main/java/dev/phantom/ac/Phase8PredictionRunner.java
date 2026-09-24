@@ -439,12 +439,8 @@ public final class Phase8PredictionRunner {
       }
 
       if (value instanceof Packets.WorldTransactionSend send) {
-        sentTransactions.addLast(send.id());
-        if (acknowledgedTransactions.remove(send.id())) {
-          // A replay may legitimately contain an acknowledgement record before
-          // its send record because capture was assembled from separate adapters.
-          // Keep the barrier known rather than re-opening an already visible epoch.
-          acknowledgedTransactions.add(send.id());
+        if (!acknowledgedTransactions.contains(send.id())) {
+          sentTransactions.addLast(send.id());
         }
         continue;
       }
