@@ -32,6 +32,55 @@ class Phase8PredictionRunnerTest {
 
 
   @Test
+  void stationaryPositionObservationUsesObservedWitnessNotStalePhysicsFrontier() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+
+    Player start = new Player(
+        new Maths.Vec3(5.5, 64.0, 5.5),
+        Maths.Vec3.ZERO,
+        0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(), Simulation.Attributes.DEFAULT,
+        Pose.STANDING, State.Environment.DRY, State.TickRange.exact(0),
+        State.Provenance.UNKNOWN, Set.of());
+
+    PlayerContext staleAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    var report = runner.process(
+        "stationary-observation-witness",
+        List.of(
+            new RawPacket(1L, 10L, staleAuthority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-authority", staleAuthority, 100L, 0L)),
+            new RawPacket(2L, 20L, new Move(
+                new Maths.Vec3(5.5, 64.0, 5.5),
+                0f, 0f, true, 1L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(1, report.movementObservations(), report.toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("OBSERVATION stationary-position packet retained=")),
+        report.frames().getFirst().trace().toString());
+    assertTrue(report.frames().getFirst().predictedAfter().stream()
+        .anyMatch(candidate -> candidate.provenance().input()
+            .equals("AUTHORITATIVE_ANCHOR")),
+        report.frames().getFirst().predictedAfter().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .noneMatch(line -> line.contains("FRONTIER_RESET reason=OBSERVATION_CONTRADICTION")),
+        report.frames().getFirst().trace().toString());
+  }
+
+  @Test
   void groundedEdgeTransitionFeedsFallingVelocityIntoNextClientTick() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
