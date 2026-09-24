@@ -119,17 +119,6 @@ public final class Phase8PredictionRunner {
    */
   private record UncertainInput(long sequence, long earliestClientTick) {}
 
-  private record InputEventAlternatives(
-      long sequence,
-      InputConstraint constraint,
-      List<Long> possibleTicks) {
-    InputEventAlternatives {
-      if (sequence < 0L) throw new IllegalArgumentException("input sequence must be non-negative");
-      Objects.requireNonNull(constraint);
-      possibleTicks = List.copyOf(possibleTicks);
-    }
-  }
-
   private record InputChronology(
       NavigableMap<Long, List<TimedInput>> history) {
     InputChronology {
