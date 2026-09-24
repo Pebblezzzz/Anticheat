@@ -840,21 +840,6 @@ public final class Phase8PredictionRunner {
           possible++;
           latestContinuation = Continuation.ACTIVE;
           lastPositionClientTick = tick.clientTick();
-
-          if (!positionlessRotationObservation) {
-            /*
-             * A stationary position observation is not an atomic physics
-             * boundary. Grim keeps the packet observation separate from the
-             * persistent client-physics state/velocity. Do not carry a stale
-             * frontier through an observation whose position is supplied by the
-             * client but whose boundary velocity is unknown.
-             */
-            prediction = Set.of();
-            predictionTick = -1L;
-            physicsFrontierSuppressedUntilPositionMovement = true;
-            trace.add("FRONTIER_CLEARED source=STATIONARY_OBSERVATION"
-                + " reason=observation-is-not-a-physics-root");
-          }
         } else if (result.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
           impossible++;
           latestContinuation = Continuation.IMPOSSIBLE;
