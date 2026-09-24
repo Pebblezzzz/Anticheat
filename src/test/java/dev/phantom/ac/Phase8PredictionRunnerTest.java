@@ -1926,6 +1926,72 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void heldJumpBootstrapEnumeratesGrimJumpDelay() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+
+    Player start = new Player(
+        new Maths.Vec3(.5, 64.0, .5),
+        Maths.Vec3.ZERO,
+        0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of(), 2);
+
+    MovementEnvironment environment = MovementEnvironment.dry(true, true, false);
+    Simulation.AdvancedInput heldJump =
+        new Simulation.AdvancedInput(1, 0, true, true, false);
+    Player observed = new Vanilla12111RichPhysics().step(
+        new Vanilla12111RichPhysics.Context(
+            0L,
+            start,
+            heldJump,
+            world,
+            Simulation.Environment.DRY,
+            start.attributes(),
+            Phase5Mechanics.MovementEffects.NONE,
+            Pose.STANDING,
+            environment,
+            false,
+            dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    PlayerContext staleAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(), Pose.STANDING,
+        environment,
+        start.position(), Maths.Vec3.ZERO,
+        true, false, false, List.of());
+
+    var report = runner.process(
+        "held-jump-bootstrap-delay",
+        List.of(
+            new RawPacket(1, 10L, staleAuthority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "paper-live", staleAuthority, 0L, 0L)),
+            new RawPacket(2, 20L, new ClientTickEnd()),
+            new RawPacket(3, 30L, new ClientInput(
+                true, false, false, false, true, false, true)),
+            new RawPacket(4, 40L, new Move(
+                observed.position(), observed.yaw(), observed.pitch(),
+                observed.onGround(), 1L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("BOOTSTRAP_JUMP_DELAY_OPTIONS range=0..10")),
+        report.frames().getFirst().trace().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.contains("input=AdvancedInput[forward=1, strafe=0, jump=true, sprint=true, sneak=false]")
+            && line.contains("reconstructedStartVelocity=")),
+        report.frames().getFirst().trace().toString());
+  }
+
+  @Test
   void stationaryGroundTransitionDoesNotBecomeImpossible() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
