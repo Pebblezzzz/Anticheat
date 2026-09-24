@@ -241,6 +241,7 @@ public final class GrimPredictionEngine {
               result.exhaustive() || exhaustivelyEnumeratedInputEnvelope(result, inputOption);
           if (!branchExhaustive) exhaustive = false;
         }
+      }
     }
 
     if (stepCandidates.size() > maximumCandidates) {
