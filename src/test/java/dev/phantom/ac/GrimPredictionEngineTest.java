@@ -91,6 +91,7 @@ class GrimPredictionEngineTest {
         Pose.STANDING,
         environment,
         false,
+        false,
         EntityCollisions.of(List.of()),
         new Maths.Vec3(
             .11245690494119422,
