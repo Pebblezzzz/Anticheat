@@ -1704,8 +1704,33 @@ public final class Phase8PredictionRunner {
       WorldSnapshot world,
       List<String> trace) {
     if (prediction.isEmpty() || !tick.known()) return false;
-    AuthorityAnchor authority = latestCausalAuthority(movementPacket);
-    if (authority == null || authority.clientTick() == null) return false;
+
+    /*
+     * A live prediction frontier is already a client-tick state machine. Do not
+     * relabel an older server snapshot as the current client position just
+     * because the retained frontier has fallen a few ticks behind. The old
+     * snapshot is still useful as causal evidence elsewhere, but using its
+     * spatial position as targetTick-1 can manufacture a kinematic contradiction.
+     *
+     * Only an authority sample whose server tick is fresh for this movement may
+     * perform the destructive spatial re-anchor.
+     */
+    AuthorityAnchor authority = freshCausalAuthority(movementPacket);
+    if (authority == null || authority.clientTick() == null) {
+      AuthorityAnchor staleAuthority = latestCausalAuthority(movementPacket);
+      if (staleAuthority != null && staleAuthority.clientTick() != null) {
+        Long movementServerTick = movementPacket.provenance().authoritativeServerTick();
+        long age = movementServerTick == null
+            ? Long.MIN_VALUE
+            : movementServerTick - staleAuthority.serverTick();
+        trace.add("ROOT_REFRESH_SKIPPED reason=CAUSAL_AUTHORITY_STALE"
+            + " authorityClientTick=" + staleAuthority.clientTick()
+            + " authorityServerTick=" + staleAuthority.serverTick()
+            + " movementServerTick=" + movementServerTick
+            + " age=" + age);
+      }
+      return false;
+    }
 
     long authorityTick = authority.clientTick();
     long lag = tick.clientTick() - predictionTick;
