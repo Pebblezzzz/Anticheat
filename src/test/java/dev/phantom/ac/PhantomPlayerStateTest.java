@@ -76,4 +76,21 @@ class PhantomPlayerStateTest {
         false,
         List.of());
   }
+  @Test
+  void acknowledgedTransactionIdsCanBeReusedAfterCompletion() {
+    PhantomPlayerState state = new PhantomPlayerState(UUID.randomUUID());
+    Packets.PlayerContext first = context(4.0).withTransactionBarrier((short) -7);
+    Packets.PlayerContext second = context(5.0).withTransactionBarrier((short) -7);
+
+    state.markBarrierSent((short) -7, first);
+    assertEquals(1, state.acknowledgeBarrier((short) -7, 50L).size());
+
+    state.markBarrierSent((short) -7, second);
+
+    assertEquals(
+        second,
+        state.acknowledgeBarrier((short) -7, 70L).getFirst());
+    assertEquals(second, state.latestClientVisibleContext().orElseThrow());
+  }
+
 }
