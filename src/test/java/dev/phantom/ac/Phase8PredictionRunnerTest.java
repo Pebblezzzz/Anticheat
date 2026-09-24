@@ -2293,4 +2293,51 @@ class Phase8PredictionRunnerTest {
   }
 
 
+  @Test
+  void serverAuthorityIsInvisibleUntilTransactionAcknowledgement() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    Player start = anchor();
+
+    PlayerContext authority = new PlayerContext(
+        "survival",
+        start.attributes(),
+        Map.of(),
+        Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(8.5, 64.0, 8.5),
+        new Maths.Vec3(0.3, 0.0, 0.0),
+        false,
+        false,
+        false,
+        List.of());
+
+    short transaction = -1;
+    PlayerContext barrierAuthority = authority.withTransactionBarrier(transaction);
+
+    runner.process(
+        "authority-barrier",
+        List.of(
+            new RawPacket(1L, 1_000L, new WorldTransactionSend(transaction)),
+            new RawPacket(2L, 2_000L, barrierAuthority)),
+        floorWorld(),
+        start,
+        0L);
+
+    assertTrue(
+        runner.latestClientVisibleAuthority().isEmpty(),
+        "server authority must remain hidden until the client crosses the barrier");
+
+    runner.process(
+        "authority-barrier",
+        List.of(new RawPacket(3L, 3_000L, new WorldTransactionAck(transaction))),
+        floorWorld(),
+        start,
+        0L);
+
+    assertEquals(
+        barrierAuthority,
+        runner.latestClientVisibleAuthority().orElseThrow(),
+        "the acknowledged snapshot becomes the newest client-visible authority");
+  }
+
 }
