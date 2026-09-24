@@ -677,10 +677,9 @@ class Phase8PredictionRunnerTest {
             new RawPacket(2L, 20L, new ClientTickEnd()),
             new RawPacket(3L, 30L, new Move(
                 first.position(), 0f, 0f, true, 1L)),
-            new RawPacket(4L, 40L, new ClientTickEnd()),
-            new RawPacket(5L, 50L, new Move(
+            new RawPacket(4L, 40L, new Move(
                 second.position(), 0f, 0f, false, 2L)),
-            new RawPacket(6L, 60L, new ClientInput(
+            new RawPacket(5L, 50L, new ClientInput(
                 false, false, false, false, true, false, false),
                 lateInputProvenance)),
         world,
