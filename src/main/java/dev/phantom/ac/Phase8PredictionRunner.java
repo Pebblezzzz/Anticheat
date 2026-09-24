@@ -188,7 +188,7 @@ public final class Phase8PredictionRunner {
    */
   private final ArrayDeque<Short> sentTransactions = new ArrayDeque<>();
   private final Set<Short> acknowledgedTransactions = new HashSet<>();
-  private final Map<Short, Packets.PlayerContext> pendingAuthorityContexts = new LinkedHashMap<>();
+  private final Map<Short, AuthorityAnchor> pendingAuthorityContexts = new LinkedHashMap<>();
   private Set<Candidate> prediction = Set.of();
   private long predictionTick = -1L;
   private Phase8ClientModel.ClientPhysicsState clientPhysicsState;
@@ -457,16 +457,18 @@ public final class Phase8PredictionRunner {
       if (value instanceof Packets.PlayerContext authority) {
         clientState = State.apply(clientState, normalized);
         Short barrierId = authority.transactionBarrierId();
+        AuthorityAnchor anchor = authorityAnchorFromContext(
+            authority, sequence, packet.receivedNanos(), packet.provenance());
         if (barrierId != null && !acknowledgedTransactions.contains(barrierId)) {
           /*
            * The snapshot is authoritative for the server but not yet causally
            * visible to this client. Keep the newest snapshot for this barrier
-           * until the matching PONG/transaction acknowledgement arrives.
+           * until the transaction acknowledgement arrives.
            */
-          pendingAuthorityContexts.put(barrierId, authority);
-          continue;
+          pendingAuthorityContexts.put(barrierId, anchor);
+        } else {
+          applyClientVisibleAuthority(anchor);
         }
-        applyClientVisibleAuthority(authority, sequence, packet.receivedNanos());
         continue;
       }
 
@@ -3956,77 +3958,75 @@ public final class Phase8PredictionRunner {
     return copy;
   }
 
-  private void acknowledgeTransaction(short transactionId, long acknowledgementSequence, long receivedNanos) {
+  private void acknowledgeTransaction(
+      short transactionId,
+      long acknowledgementSequence,
+      long receivedNanos) {
     if (acknowledgementSequence < 0L || receivedNanos < 0L) {
       throw new IllegalArgumentException("invalid transaction acknowledgement provenance");
     }
 
-    boolean found = false;
-    while (!sentTransactions.isEmpty()) {
-      short head = sentTransactions.removeFirst();
-      found = true;
-      acknowledgedTransactions.add(head);
+    if (acknowledgedTransactions.contains(transactionId)) return;
 
-      Packets.PlayerContext staged = pendingAuthorityContexts.remove(head);
-      if (staged != null) {
-        applyClientVisibleAuthority(staged, acknowledgementSequence, receivedNanos);
+    if (sentTransactions.contains(transactionId)) {
+      while (!sentTransactions.isEmpty()) {
+        short head = sentTransactions.removeFirst();
+        acknowledgedTransactions.add(head);
+
+        AuthorityAnchor staged = pendingAuthorityContexts.remove(head);
+        if (staged != null) {
+          applyClientVisibleAuthority(staged);
+        }
+
+        if (head == transactionId) break;
       }
-
-      if (head == transactionId) break;
+      return;
     }
 
-    if (!found && !acknowledgedTransactions.contains(transactionId)) {
-      /*
-       * Captures can begin after the transaction-send record. An acknowledgement
-       * is still authoritative evidence that the client has crossed the barrier.
-       */
-      acknowledgedTransactions.add(transactionId);
-      Packets.PlayerContext staged = pendingAuthorityContexts.remove(transactionId);
-      if (staged != null) {
-        applyClientVisibleAuthority(staged, acknowledgementSequence, receivedNanos);
-      }
+    /*
+     * Captures can begin after a transaction-send record. The acknowledgement
+     * is still a valid causal watermark for a barrier that was not retained in
+     * this runner's local packet window.
+     */
+    acknowledgedTransactions.add(transactionId);
+    AuthorityAnchor staged = pendingAuthorityContexts.remove(transactionId);
+    if (staged != null) {
+      applyClientVisibleAuthority(staged);
     }
   }
 
-  private void applyClientVisibleAuthority(
+  private AuthorityAnchor authorityAnchorFromContext(
       Packets.PlayerContext authority,
       long sequence,
-      long receivedNanos) {
-    long authorityServerTick = authority == null || authority.transactionBarrierId() == null
-        ? (latestAuthority == null ? 0L : latestAuthority.serverTick())
-        : Math.max(0L, latestAuthority == null ? 0L : latestAuthority.serverTick());
-
+      long receivedNanos,
+      Packets.CaptureProvenance provenance) {
+    long authorityServerTick = provenance.authoritativeServerTick() == null
+        ? 0L
+        : provenance.authoritativeServerTick();
     boolean entityCollisionComplete =
-        authority != null
-            && authority.entityBoxes() != null
-            && !"entity-collision-incomplete".equals(
-                authority == null ? "" : ""); // provenance is carried by the packet wrapper below.
-
-    Packets.CaptureProvenance provenance =
-        Packets.CaptureProvenance.fromAdapter(
-            "transaction-visible-player-context",
-            authority,
-            null,
-            null);
-
-    latestAuthority = new AuthorityAnchor(
+        !"entity-collision-incomplete".equals(provenance.sourceId());
+    return new AuthorityAnchor(
         sequence,
         receivedNanos,
         authorityServerTick,
-        null,
+        provenance.authoritativeClientTick(),
         authority,
         entityCollisionComplete);
+  }
 
+  private void applyClientVisibleAuthority(AuthorityAnchor authority) {
+    latestAuthority = authority;
+    Packets.PlayerContext context = authority.context();
     if (clientPhysicsState != null) {
       clientPhysicsState = clientPhysicsState.withServerAuthority(
           clientPhysicsState.clientTick(),
-          authority.serverPosition(),
-          authority.serverVelocity(),
-          null);
+          context.serverPosition(),
+          context.serverVelocity(),
+          authority.serverTick());
     }
     if (!prediction.isEmpty()) {
       Set<Candidate> updated =
-          overlayAuthorityState(prediction, authority, maximumCandidates);
+          overlayAuthorityState(prediction, context, maximumCandidates);
       if (!updated.isEmpty()) prediction = updated;
     }
   }
