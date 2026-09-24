@@ -2411,6 +2411,13 @@ public final class Phase8PredictionRunner {
     if (maxBootstrapJumpDelay > 0) {
       trace.add("BOOTSTRAP_JUMP_DELAY_OPTIONS range=0..10 source=grim-held-jump-cooldown");
     }
+    InputConstraint previousBoundaryInput =
+        inputBeforeSequence(inputHistory, simulationTick, movementPacket.sequence());
+    trace.add("SIM_INPUT_OPTIONS tick=" + simulationTick
+        + " keyOptions=[" + input + ", " + previousBoundaryInput + "]"
+        + " physicalSprint=" + keyState.sprint()
+        + " physicalSneak=" + keyState.sneak()
+        + " inputSelection=grim-held-state");
     trace.add("BOOTSTRAP_LOCOMOTION_OPTIONS authority="
         + authorityEnvironment.sprinting() + "/" + authorityEnvironment.sneaking()
         + " key=" + keyState.sprint() + "/" + keyState.sneak()
