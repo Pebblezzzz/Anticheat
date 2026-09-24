@@ -3733,7 +3733,7 @@ public final class Phase8PredictionRunner {
     if (simulationTick < 0L) return List.of(neutralInput);
 
     LinkedHashSet<InputConstraint> options = new LinkedHashSet<>();
-    TimedInput selected = latestTimedInput(history, simulationTick, movementSequence);
+    TimedInput selected = latestCausalTimedInput(history, simulationTick);
     if (selected != null) {
       options.add(selected.constraint());
 
@@ -3943,10 +3943,23 @@ public final class Phase8PredictionRunner {
     if (history.isEmpty()) return null;
     for (var entry : history.headMap(simulationTick, true).descendingMap().entrySet()) {
       for (TimedInput input : entry.getValue()) {
+        if (input.sequence() > movementSequence) continue;
+        return input;
+      }
+    }
+    return null;
+  }
+
+  private TimedInput latestCausalTimedInput(
+      NavigableMap<Long, List<TimedInput>> history,
+      long simulationTick) {
+    if (history.isEmpty()) return null;
+    for (var entry : history.headMap(simulationTick, true).descendingMap().entrySet()) {
+      for (TimedInput input : entry.getValue()) {
         /*
-         * The map key is the Phase 7 simulation tick, which is the causal fact we
-         * need here. Capture sequence is deliberately not a causal cutoff because
-         * a valid input update may arrive after the movement packet it affected.
+         * Phase 7 simulation-tick assignment is the causal boundary here. A
+         * packet can arrive after the movement packet while still describing the
+         * held input for this simulation tick.
          */
         return input;
       }
@@ -4219,37 +4232,24 @@ public final class Phase8PredictionRunner {
     if (simulationTick < 0L) return neutralInput;
 
     /*
-     * PLAYER_INPUT is a held state, but capture sequence is arrival order rather
-     * than causal client-tick order. A ClientInput packet can arrive after the
-     * movement packet it affected. Phase 7 has already assigned the input to the
-     * client simulation tick, so that tick assignment is the causal boundary;
-     * do not discard a late-arriving input solely because its capture sequence is
-     * greater than the movement sequence.
+     * Bootstrap reconstructs a movement boundary from packets already observed
+     * before that movement. Keep that path strict: an input that arrived after
+     * the movement cannot be used to invent the bootstrap state, even if Phase 7
+     * later proves that the input belongs to an earlier client tick.
      */
-    TimedInput selected = latestTimedInput(
-        history, simulationTick, Long.MAX_VALUE);
+    TimedInput selected = latestTimedInput(history, simulationTick, movementSequence);
     if (selected != null) {
       return selected.constraint();
     }
 
-    /*
-     * Preserve the same conservative treatment for timing that could not be
-     * materialized into a concrete tick: once its causal lower bound reaches this
-     * simulation tick, the held state is genuinely unresolved.
-     */
     for (UncertainInput input : uncertainInputs) {
-      if (simulationTick >= input.earliestClientTick()
-          && input.sequence() <= Math.max(currentInputSequence, movementSequence)) {
-        return InputConstraint.any();
-      }
+      if (input.sequence() > movementSequence) continue;
+      if (simulationTick < input.earliestClientTick()) continue;
+      return InputConstraint.any();
     }
 
-    /*
-     * If Phase 7 could not materialize this current input into inputHistory, only
-     * use it when its own simulation envelope admits this exact tick. This keeps
-     * bootstrap causal without falling back to an arbitrary latest arrival.
-     */
-    if (currentInputSequence >= 0L) {
+    if (currentInputSequence >= 0L
+        && currentInputSequence <= movementSequence) {
       boolean possibleAtTick = currentInputSimulationTimingExhaustive
           ? currentInputPossibleSimulationTicks.contains(simulationTick)
           : currentInputSimulationTickRange.contains(simulationTick);
