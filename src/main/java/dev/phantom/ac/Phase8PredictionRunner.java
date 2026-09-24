@@ -2928,6 +2928,35 @@ public final class Phase8PredictionRunner {
     return candidate;
   }
 
+  private static boolean predictionRootDisconnectedFromObservedBefore(
+      Set<Candidate> candidates,
+      Player observedBefore,
+      TickResolution tick) {
+    if (!tick.known() || tick.clientTick() <= 0L || candidates.isEmpty()) {
+      return false;
+    }
+
+    long expectedRootTick = Math.max(0L, tick.clientTick() - 1L);
+    double closestDistanceSquared = Double.POSITIVE_INFINITY;
+    boolean hasExpectedRoot = false;
+
+    for (Candidate candidate : candidates) {
+      if (candidate.context().simulationTick() != expectedRootTick) {
+        continue;
+      }
+      hasExpectedRoot = true;
+      closestDistanceSquared = Math.min(
+          closestDistanceSquared,
+          positionDistanceSquared(
+              candidate.context().player().position(),
+              observedBefore.position()));
+    }
+
+    return !hasExpectedRoot
+        || closestDistanceSquared
+            > POSITION_RECONCILIATION_TOLERANCE * POSITION_RECONCILIATION_TOLERANCE;
+  }
+
   private static SpatialRebaseResult rebasePredictionToObservedBefore(
       Set<Candidate> candidates,
       Player observedBefore,
