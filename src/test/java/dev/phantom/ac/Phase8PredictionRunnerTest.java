@@ -1141,6 +1141,82 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void staleSpatialRebaseCannotProveImpossibleFromRetainedVelocity() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+    MovementEnvironment environment = MovementEnvironment.dry(true, false, false);
+    Player start = anchor();
+
+    PlayerContext initialAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, environment, start.position(), start.velocity(),
+        false, false, false, List.of());
+
+    Move firstObserved = new Move(
+        new Maths.Vec3(0.6, 64.0, 0.5), 0f, 0f, true, 1L);
+    Move intermediateObserved = new Move(
+        new Maths.Vec3(0.605, 64.0, 0.5), 0f, 0f, true, 1L);
+
+    PlayerContext staleAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, environment,
+        new Maths.Vec3(0.605, 64.0, 0.5),
+        Maths.Vec3.ZERO, false, false, false, List.of());
+
+    Move finalObserved = new Move(
+        new Maths.Vec3(0.9, 64.0, 0.5), 0f, 0f, true, 2L);
+
+    var report = runner.process(
+        "stale-spatial-rebase-proof",
+        List.of(
+            new RawPacket(
+                1L, 10L, initialAuthority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-authority", initialAuthority, 1L, 0L)),
+            new RawPacket(
+                2L, 20L, firstObserved,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-movement", firstObserved, 1L, 1L)),
+            new RawPacket(
+                3L, 30L, intermediateObserved,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-movement", intermediateObserved, 1L, 1L)),
+            new RawPacket(
+                4L, 40L, staleAuthority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-authority", staleAuthority, 10L, 2L)),
+            new RawPacket(
+                5L, 50L, finalObserved,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-movement", finalObserved, 20L, 2L))),
+        world,
+        start,
+        0L);
+
+    assertNotEquals(
+        Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        report.results().getLast().verdict(),
+        report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.UNCERTAIN,
+        report.results().getLast().verdict(),
+        report.results().toString());
+    assertTrue(
+        report.frames().getLast().trace().stream()
+            .anyMatch(line -> line.startsWith("FRONTIER_SPATIAL_REBASE")),
+        report.frames().getLast().trace().toString());
+    assertTrue(
+        report.frames().getLast().trace().stream()
+            .anyMatch(line -> line.startsWith("FRONTIER_REBASE_AUTHORITY_STALE")
+                && line.contains("UNCERTAIN_UNTIL_CAUSAL_ANCHOR")),
+        report.frames().getLast().trace().toString());
+    assertTrue(
+        report.frames().getLast().trace().stream()
+            .anyMatch(line -> line.startsWith("FRONTIER_PRESERVED")),
+        report.frames().getLast().trace().toString());
+  }
+
+  @Test
   void spatiallyDisconnectedFrontierWithoutFreshAuthorityIsUncertain() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     WorldSnapshot world = floorWorld();
