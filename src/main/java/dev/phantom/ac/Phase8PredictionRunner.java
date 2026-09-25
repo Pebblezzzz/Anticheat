@@ -1438,6 +1438,43 @@ public final class Phase8PredictionRunner {
       }
 
       /*
+       * A spatial rebase deliberately changes the candidate's position to the
+       * observed pre-movement boundary. If the only causal authority available
+       * for that boundary is already stale, the carried client velocity is not
+       * strong enough evidence to prove an IMPOSSIBLE movement when the
+       * one-tick replay misses. Grim keeps client velocity separate from the
+       * server's instantaneous state; once that causal boundary is stale, the
+       * remaining trajectory is unresolved evidence rather than a proof of
+       * cheating. Keep the candidate frontier for recovery and report UNCERTAIN.
+       */
+      boolean staleAuthorityAfterSpatialRebase =
+          spatialRebase.rebased() && freshCausalAuthority(packet) == null;
+      if (fullMatches.isEmpty()
+          && !groundClaimMismatch
+          && staleAuthorityAfterSpatialRebase) {
+        uncertaintySources.add(
+            "spatially rebased physics frontier depends on stale causal authority; "
+                + "client velocity cannot establish exhaustive impossibility");
+        latestContinuation = Continuation.UNCERTAIN;
+        SearchResult search = uncertainSearch(
+            prediction,
+            String.join("; ", uncertaintySources));
+        Phase8MovementValidation.Result result = validate(
+            playerId, packet, move, observedBefore, observedAfter, world,
+            tick, uncertaintySources, search, false);
+        results.add(result);
+        uncertain++;
+        rememberObservedMovement(observedBefore, observedAfter, tick);
+        trace.add("FRONTIER_REBASE_AUTHORITY_STALE"
+            + " action=UNCERTAIN_UNTIL_CAUSAL_ANCHOR");
+        trace.add("FRONTIER_PRESERVED reason=STALE_REBASE_UNPROVEN");
+        frames.add(frame(
+            sequence, packet, tick, move, observedBefore, observedAfter,
+            predictedBefore, prediction, world, uncertaintySources, trace));
+        continue;
+      }
+
+      /*
        * An exhaustive search can be kinematically complete without being a
        * mathematically exact representation of every client/server collision
        * boundary. Grim keeps the live client velocity and actual movement as
