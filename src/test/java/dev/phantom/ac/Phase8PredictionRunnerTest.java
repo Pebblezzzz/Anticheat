@@ -78,6 +78,45 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void staleCausalAuthorityCannotPromoteExhaustiveMismatchToImpossible() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+    Player start = anchor();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        start.position(), start.velocity(), false, false, false, List.of());
+    Move impossibleMovement = new Move(
+        new Maths.Vec3(100.0, 64.0, 0.5), 0f, 0f, true, 1L);
+
+    var report = runner.process(
+        "stale-authority-mismatch",
+        List.of(
+            new RawPacket(
+                1L, 10L, authority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-authority", authority, 0L, 0L)),
+            new RawPacket(
+                2L, 20L, impossibleMovement,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-movement", impossibleMovement, 10L, 1L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.UNCERTAIN,
+        report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(
+        report.results().getFirst().evidence().uncertaintySources().stream()
+            .anyMatch(reason -> reason.contains("causal authority is stale for movement replay")),
+        report.results().getFirst().toString());
+  }
+
+  @Test
   void groundClaimMismatchDoesNotBecomeMovementImpossible() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
