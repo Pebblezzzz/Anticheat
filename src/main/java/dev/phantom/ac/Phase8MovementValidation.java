@@ -183,6 +183,56 @@ public final class Phase8MovementValidation {
     return new Result(Verdict.IMPOSSIBLE, evidence);
   }
 
+  /**
+   * An exhaustive movement mismatch cannot be promoted to IMPOSSIBLE when the
+   * only causal server anchor is materially stale. Grim keeps server authority
+   * and client movement/velocity as separate evidence channels; without a
+   * causally fresh authority state, the retained hidden client state is not a
+   * complete basis for a hard reachability contradiction.
+   */
+  public static Result downgradeImpossibleForStaleAuthority(
+      Result result,
+      String reason) {
+    Objects.requireNonNull(result);
+    Objects.requireNonNull(reason);
+    if (result.verdict() != Verdict.IMPOSSIBLE) {
+      return result;
+    }
+
+    Evidence original = result.evidence();
+    List<String> diagnostics = new ArrayList<>(original.simulationDiagnostics());
+    diagnostics.add(reason);
+    List<String> uncertainty = new ArrayList<>(original.uncertaintySources());
+    uncertainty.add(reason);
+    Evidence evidence = new Evidence(
+        VERSION,
+        Verdict.UNCERTAIN,
+        original.playerId(),
+        original.serverTick(),
+        original.clientTickMin(),
+        original.clientTickMax(),
+        original.priorState(),
+        original.observedState(),
+        original.worldVersion(),
+        original.worldReference(),
+        original.inputAssumptions(),
+        original.timingAssumptions(),
+        original.reachableCandidateCount(),
+        original.matchingCandidateCount(),
+        0,
+        "exhaustive candidate mismatch observed while the causal server authority was stale",
+        OptionalLong.empty(),
+        original.closestCandidate(),
+        diagnostics,
+        uncertainty,
+        original.phase5Version(),
+        original.phase6Version(),
+        original.phase7Version(),
+        original.replayReference(),
+        original.rule());
+    return new Result(Verdict.UNCERTAIN, evidence);
+  }
+
   private static Evidence evidence(Verdict verdict, String playerId, long serverTick, Player prior, Player observed,
                                    WorldSnapshot world, String worldReference, Validation.SyncWindow timing,
                                    List<String> inputs, int candidates, int matches, int eliminated,
