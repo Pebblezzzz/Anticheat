@@ -3863,7 +3863,7 @@ public final class Phase8PredictionRunner {
     assumptions.add("trusted prediction candidates are retained only while they remain valid physics states; observation witnesses are not reused as physics roots");
     assumptions.addAll(uncertainty);
 
-    return Phase8MovementValidation.validate(
+    Phase8MovementValidation.Result result = Phase8MovementValidation.validate(
         playerId,
         movementServerTick(packet),
         prior,
@@ -3876,6 +3876,24 @@ public final class Phase8PredictionRunner {
         "prediction:phase8:" + playerId + ":" + packet.sequence(),
         timingExhaustivelyModeled,
         observedFields);
+
+    if (result.verdict() == Phase8MovementValidation.Verdict.IMPOSSIBLE) {
+      AuthorityAnchor staleAuthority = latestCausalAuthority(packet);
+      Long movementServerTick = packet.provenance().authoritativeServerTick();
+      if (staleAuthority != null && movementServerTick != null) {
+        long age = movementServerTick - staleAuthority.serverTick();
+        if (age < 0L || age > 1L) {
+          String reason = "causal authority is stale for movement replay: "
+              + "authorityServerTick=" + staleAuthority.serverTick()
+              + " movementServerTick=" + movementServerTick
+              + " age=" + age
+              + " (freshness bound=1)";
+          return Phase8MovementValidation.downgradeImpossibleForStaleAuthority(result, reason);
+        }
+      }
+    }
+
+    return result;
   }
 
   private Phase8MovementValidation.Result unauthorizedFlightResult(
