@@ -61,3 +61,7 @@ Client/server ground disagreement and client/server position divergence are like
 - `IMPOSSIBLE`: the modeled envelope is exhaustive and every legitimate candidate is contradicted by the observed facts, or a separate explicit authoritative contradiction satisfies its own stated rule.
 
 The system should prefer uncertainty over false certainty.
+
+
+## CI current-head marker
+
