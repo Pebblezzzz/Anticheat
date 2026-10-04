@@ -555,8 +555,8 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
         continue;
       }
 
-      Player before = frame.observedBefore();
-      Player after = frame.observedAfter();
+      dev.phantom.ac.State.Player before = frame.observedBefore();
+      dev.phantom.ac.State.Player after = frame.observedAfter();
       long sequence = frame.sequence();
       long tick = frame.serverTick();
 
@@ -692,7 +692,7 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
           && ("survival".equalsIgnoreCase(after.gamemode())
               || "adventure".equalsIgnoreCase(after.gamemode()))
           && after.onGround()
-          && (after.environment() == dev.phantom.ac.dev.phantom.ac.State.Environment.WATER
+          && (after.environment() == dev.phantom.ac.State.Environment.WATER
               || after.environment() == dev.phantom.ac.dev.phantom.ac.State.Environment.LAVA)) {
         int bx = (int) Math.floor(after.position().x());
         int by = (int) Math.floor(after.position().y());
