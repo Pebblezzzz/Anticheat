@@ -252,20 +252,10 @@ public final class ProductionCheckEngine {
         }
       }
 
-      if (packet instanceof Packets.VehicleMove vehicleMove && frame != null
-          && frame.movement().position() != null) {
-        // Vehicle packets are only semantically valid while the server context
-        // is in a vehicle. When the causal movement frame disagrees materially
-        // with the claimed vehicle position, retain the result as evidence.
-        Vec3 claimed = vehicleMove.position();
-        Vec3 observed = frame.observedAfter().position();
-        double distance = Math.sqrt(distanceSquared(claimed, observed));
-        if (distance > 1.0 && !frame.observedAfter().uncertain()) {
-          findings.add(finding(playerId, serverTick, "VehicleMoveSpoof",
-              String.format(Locale.ROOT, "vehicle packet position differs from movement state by %.3f", distance),
-              Math.min(1.0, distance / 4.0), sequence));
-        }
-      }
+      // VehicleMove is captured separately so future vehicle prediction can consume
+      // exact client vehicle claims. It is not independently punished here because
+      // passenger offsets, vehicle interpolation, and causal server vehicle state
+      // must be modeled before a spoof verdict is sound.
     }
 
     if (lastRotationSequence < 0) {
