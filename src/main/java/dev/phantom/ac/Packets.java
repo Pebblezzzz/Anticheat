@@ -10,7 +10,7 @@ public final class Packets {
   public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm,
       Velocity, Effect, Gamemode, PlayerContext, FlightToggle, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange,
       WorldTransactionSend, WorldTransactionAck, PaperMovementRejection, ClientBlockBreak, EntitySpawn, EntityMove, EntityDespawn,
-      InteractEntity, BlockPlace, VehicleMove {
+      InteractEntity, BlockPlace, VehicleMove, HeldItemChange, EntityAction, DigAction {
     default boolean mutatesWorld() {
       return this instanceof ChunkData || this instanceof ChunkUnload
           || this instanceof BlockChange || this instanceof ChunkStates || this instanceof BlockStateChange || this instanceof UnsupportedBlockStateChange
@@ -56,6 +56,26 @@ public final class Packets {
       if (!Float.isFinite(yaw) || !Float.isFinite(pitch)) {
         throw new IllegalArgumentException("vehicle rotation must be finite");
       }
+    }
+  }
+
+  /** Client hotbar selection; valid survival hotbar slots are 0..8. */
+  public record HeldItemChange(int slot) implements Packet {}
+
+  /** Client entity-action state transition, kept separate from held movement input. */
+  public record EntityAction(String action, int jumpBoost) implements Packet {
+    public EntityAction {
+      if (action == null || action.isBlank()) throw new IllegalArgumentException("action is required");
+      if (jumpBoost < 0) throw new IllegalArgumentException("jumpBoost must be non-negative");
+    }
+  }
+
+  /** Full digging action provenance used for safe break/timing analysis. */
+  public record DigAction(String action, dev.phantom.ac.world.Pos position, int sequence) implements Packet {
+    public DigAction {
+      if (action == null || action.isBlank()) throw new IllegalArgumentException("action is required");
+      Objects.requireNonNull(position, "position");
+      if (sequence < 0) throw new IllegalArgumentException("sequence must be non-negative");
     }
   }
 
@@ -167,7 +187,8 @@ public final class Packets {
     public static String directionFor(Packet packet){
       if(packet instanceof Move||packet instanceof ClientInput||packet instanceof ClientTickEnd||packet instanceof TeleportConfirm
           ||packet instanceof WorldTransactionAck||packet instanceof FlightToggle||packet instanceof ClientBlockBreak
-          ||packet instanceof InteractEntity||packet instanceof BlockPlace||packet instanceof VehicleMove)return "CLIENT_TO_SERVER";
+          ||packet instanceof InteractEntity||packet instanceof BlockPlace||packet instanceof VehicleMove
+          ||packet instanceof HeldItemChange||packet instanceof EntityAction||packet instanceof DigAction)return "CLIENT_TO_SERVER";
       if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof Effect||packet instanceof Gamemode||packet instanceof PlayerContext||packet instanceof WorldTransactionSend||packet.mutatesWorld())return "SERVER_TO_CLIENT";
       return "UNKNOWN";
     }

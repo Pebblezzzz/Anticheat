@@ -22,6 +22,8 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientTe
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerBlockPlacement;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientVehicleMove;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientHeldItemChange;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientEntityAction;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChunkData;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityVelocity;
@@ -226,12 +228,34 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         record(capture,clientInput);
         if(debugLevel(capture.playerId).trace())
           logClientInputDebug(capture.playerName,capture.sequence.get(),clientInput);
+      }else if(event.getPacketType()==PacketType.Play.Client.HELD_ITEM_CHANGE){
+        var held=new WrapperPlayClientHeldItemChange(event);
+        Packets.HeldItemChange packet=new Packets.HeldItemChange(held.getSlot());
+        record(capture,packet);
+        schedulePredictionValidation(capture);
+      }else if(event.getPacketType()==PacketType.Play.Client.ENTITY_ACTION){
+        var action=new WrapperPlayClientEntityAction(event);
+        if(action.getAction()!=null){
+          Packets.EntityAction packet=new Packets.EntityAction(action.getAction().name(),action.getJumpBoost());
+          record(capture,packet);
+          schedulePredictionValidation(capture);
+        }
       }else if(event.getPacketType()==PacketType.Play.Client.PLAYER_DIGGING){
         WrapperPlayClientPlayerDigging digging=new WrapperPlayClientPlayerDigging(event);
+        var digBlockPosition=digging.getBlockPosition();
+        if(digBlockPosition!=null){
+          int diggingSequence=digging.getSequence();
+          Packets.DigAction digAction=new Packets.DigAction(
+              digging.getAction().name(),
+              new dev.phantom.ac.world.Pos(digBlockPosition.x,digBlockPosition.y,digBlockPosition.z),
+              diggingSequence);
+          record(capture,digAction);
+        }
         if(digging.getAction()==DiggingAction.FINISHED_DIGGING){
-          var blockPosition=digging.getBlockPosition();
+          var finishedPosition=digging.getBlockPosition();
+          if(finishedPosition==null) return;
           var position=new dev.phantom.ac.world.Pos(
-              blockPosition.getX(),blockPosition.getY(),blockPosition.getZ());
+              finishedPosition.getX(),finishedPosition.getY(),finishedPosition.getZ());
           long sequence=capture.sequence.incrementAndGet();
           long receivedNanos=System.nanoTime();
           Long clientTick=capture.clientTickTracker.hasObservedBoundary()
@@ -435,7 +459,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         Math.max(1,getConfig().getInt("checks.reset-after-ticks",40)),
         Math.max(0,getConfig().getInt("checks.alert-debounce-ticks",20)),
         Math.max(1.0,getConfig().getDouble("checks.attack-reach",4.0)),
-        Math.max(1.0,getConfig().getDouble("checks.block-interaction-reach",5.0)));
+        Math.max(1.0,getConfig().getDouble("checks.block-interaction-reach",5.0)),
+        getConfig().getBoolean("checks.timer-enabled",true),
+        Math.max(4,getConfig().getInt("checks.timer-window-ticks",20)),
+        Math.max(1_000_000L,getConfig().getLong("checks.timer-window-nanos",250_000_000L)));
     getServer().getPluginManager().registerEvents(this,this);
     PacketEvents.getAPI().getEventManager().registerListener(listener);
     int processors=Runtime.getRuntime().availableProcessors();

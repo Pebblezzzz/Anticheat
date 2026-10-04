@@ -52,3 +52,7 @@ checks:
   # in future versions, so checks stay conservative until those attributes are wired.
   attack-reach: 4.0
   block-interaction-reach: 5.0
+  # Conservative timer detector: 20 client tick boundaries inside 250 ms (~80 TPS).
+  timer-enabled: true
+  timer-window-ticks: 20
+  timer-window-nanos: 250000000

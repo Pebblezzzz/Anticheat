@@ -26,13 +26,29 @@ public final class ProductionCheckEngine {
       int resetAfterTicks,
       int alertDebounceTicks,
       double attackReach,
-      double blockInteractionReach) implements java.io.Serializable {
+      double blockInteractionReach,
+      boolean timerEnabled,
+      int timerWindowTicks,
+      long timerWindowNanos) implements java.io.Serializable {
     public Config {
       if (minimumObservations < 1 || resetAfterTicks < 1 || alertDebounceTicks < 0)
         throw new IllegalArgumentException("invalid production check thresholds");
       if (!Double.isFinite(attackReach) || attackReach <= 0.0
           || !Double.isFinite(blockInteractionReach) || blockInteractionReach <= 0.0)
         throw new IllegalArgumentException("interaction ranges must be finite and positive");
+      if (timerWindowTicks < 4 || timerWindowNanos <= 0L)
+        throw new IllegalArgumentException("invalid timer window");
+    }
+
+    public Config(
+        boolean enabled,
+        int minimumObservations,
+        int resetAfterTicks,
+        int alertDebounceTicks,
+        double attackReach,
+        double blockInteractionReach) {
+      this(enabled, minimumObservations, resetAfterTicks, alertDebounceTicks,
+          attackReach, blockInteractionReach, true, 20, 250_000_000L);
     }
   }
 
@@ -144,6 +160,9 @@ public final class ProductionCheckEngine {
     float lastYaw = Float.NaN;
     long lastRotationSequence = -1L;
     int modulo360Streak = 0;
+    ArrayDeque<Long> clientTickEndTimes = new ArrayDeque<>();
+    Map<Pos, Long> diggingStarts = new HashMap<>();
+    Map<Pos, PredictionFrame> diggingStartFrames = new HashMap<>();
 
     for (Packets.RawPacket raw : ordered) {
       Packets.Packet packet = raw.packet();
@@ -153,6 +172,23 @@ public final class ProductionCheckEngine {
           : frames.floorEntry(sequence).getValue();
       long serverTick = frame == null ? lastServerTick : frame.serverTick();
       lastServerTick = serverTick;
+
+      if (packet instanceof Packets.ClientTickEnd && config.timerEnabled()) {
+        clientTickEndTimes.addLast(raw.receivedNanos());
+        while (clientTickEndTimes.size() > config.timerWindowTicks()) {
+          clientTickEndTimes.removeFirst();
+        }
+        if (clientTickEndTimes.size() == config.timerWindowTicks()) {
+          long elapsed = raw.receivedNanos() - clientTickEndTimes.getFirst();
+          if (elapsed >= 0L && elapsed <= config.timerWindowNanos()) {
+            double severity = Math.min(1.0,
+                (double) config.timerWindowNanos() / Math.max(1L, elapsed) / 4.0);
+            findings.add(finding(playerId, serverTick, "TimerBurst",
+                "client tick-boundary packets arrived materially faster than 20 TPS",
+                severity, sequence));
+          }
+        }
+      }
 
       if (packet instanceof Packets.EntitySpawn spawn) {
         entities.put(spawn.entityId(), spawn.box());
@@ -167,7 +203,23 @@ public final class ProductionCheckEngine {
         continue;
       }
 
+      if (packet instanceof Packets.HeldItemChange heldItem) {
+        if (heldItem.slot() < 0 || heldItem.slot() > 8) {
+          findings.add(finding(playerId, serverTick, "HeldItemSlot",
+              "held-item slot is outside the legal hotbar range 0..8",
+              1.0, sequence));
+        }
+      }
+
       if (packet instanceof Packets.Move move) {
+        if (move.onGround() && frame != null && !frame.predictedAfter().isEmpty()
+            && frame.predictedAfter().stream()
+                .noneMatch(candidate -> candidate.context().player().onGround())) {
+          findings.add(finding(playerId, serverTick, "GroundSpoof",
+              "the observed ground claim is contradicted by every retained movement candidate",
+              1.0, sequence));
+        }
+
         if (move.position() != null) {
           Vec3 p = move.position();
           if (!finite(p) || Math.abs(p.x()) > WORLD_BORDER || Math.abs(p.z()) > WORLD_BORDER
@@ -252,6 +304,40 @@ public final class ProductionCheckEngine {
         }
       }
 
+      if (packet instanceof Packets.DigAction dig) {
+        String action = dig.action();
+        if (action.contains("STARTED_DIGGING")) {
+          diggingStarts.put(dig.position(), raw.receivedNanos());
+          if (frame != null) {
+            diggingStartFrames.put(dig.position(), frame);
+          } else {
+            diggingStartFrames.remove(dig.position());
+          }
+        } else if (action.contains("FINISHED_DIGGING")) {
+          Long started = diggingStarts.remove(dig.position());
+          PredictionFrame startedFrame = diggingStartFrames.remove(dig.position());
+          PredictionFrame worldFrame = startedFrame != null ? startedFrame : frame;
+          if (started != null
+              && worldFrame != null
+              && frame != null
+              && raw.receivedNanos() >= started
+              && raw.receivedNanos() - started <= 35_000_000L
+              && ("survival".equalsIgnoreCase(frame.observedAfter().gamemode())
+                  || "adventure".equalsIgnoreCase(frame.observedAfter().gamemode()))) {
+            var state = worldFrame.world().blockAtOrNull(
+                dig.position().x(), dig.position().y(), dig.position().z());
+            if (state != null
+                && !state.isAir()
+                && !state.isUnsupported()
+                && isSlowBreakBlock(state.blockId())) {
+              findings.add(finding(playerId, serverTick, "FastBreak",
+                  "a slow-to-break block reached FINISHED_DIGGING within 35 ms of STARTED_DIGGING",
+                  1.0, sequence));
+            }
+          }
+        }
+      }
+
       // VehicleMove is captured separately so future vehicle prediction can consume
       // exact client vehicle claims. It is not independently punished here because
       // passenger offsets, vehicle interpolation, and causal server vehicle state
@@ -270,6 +356,21 @@ public final class ProductionCheckEngine {
     return new Finding(
         playerId, serverTick, rule, Verdict.IMPOSSIBLE, reason, severity,
         "production-check:" + playerId + ":" + rule + ":" + sequence);
+  }
+
+  private static boolean isSlowBreakBlock(String blockId) {
+    return switch (blockId) {
+      case "minecraft:obsidian",
+          "minecraft:crying_obsidian",
+          "minecraft:respawn_anchor",
+          "minecraft:netherite_block",
+          "minecraft:ancient_debris",
+          "minecraft:deepslate",
+          "minecraft:reinforced_deepslate" -> true;
+      default -> blockId.endsWith("_ore")
+          || blockId.equals("minecraft:stone")
+          || blockId.equals("minecraft:deepslate_bricks");
+    };
   }
 
   private static boolean finite(Vec3 v) {
@@ -347,6 +448,6 @@ public final class ProductionCheckEngine {
   }
 
   public static Config defaultConfig() {
-    return new Config(true, 3, 40, 20, 4.0, 5.0);
+    return new Config(true, 3, 40, 20, 4.0, 5.0, true, 20, 250_000_000L);
   }
 }
