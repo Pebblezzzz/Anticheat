@@ -117,6 +117,60 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void staleCorrectionRebuildsPredictionFromObservedPacketMovementWithoutAuthority() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+    Player start = anchor();
+
+    Maths.Vec3 correctedPosition = new Maths.Vec3(8.5, 64.0, 8.5);
+    Teleport correction = new Teleport(77, correctedPosition, 15f, 4f);
+    Move firstMovement = new Move(
+        new Maths.Vec3(8.42, 64.0, 8.18), 15f, 4f, true, 6723L);
+    Move secondMovement = new Move(
+        new Maths.Vec3(8.31, 64.0, 7.88), 15f, 4f, true, 6724L);
+
+    var report = runner.process(
+        "stale-correction-packet-bootstrap",
+        List.of(
+            new RawPacket(
+                1L, 10L, correction,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-correction", correction, 0L, 0L)),
+            new RawPacket(
+                2L, 20L, firstMovement,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-movement", firstMovement, 1L, 6723L)),
+            new RawPacket(
+                3L, 30L, secondMovement,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-movement", secondMovement, 1L, 6724L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(),
+        report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().get(1).verdict(),
+        report.results().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.startsWith("BOOTSTRAP_AUTHORITY_FALLBACK")),
+        report.frames().getFirst().trace().toString());
+    assertTrue(report.frames().getFirst().predictedAfter().stream()
+        .anyMatch(candidate ->
+            candidate.provenance().input().equals("CLIENT_MOVEMENT_BOOTSTRAP_OBSERVED")),
+        report.frames().getFirst().toString());
+    assertTrue(report.frames().get(1).trace().stream()
+        .anyMatch(line -> line.contains("FRONTIER_COMMITTED")
+            || line.contains("FRONTIER_RETAINED")),
+        report.frames().get(1).trace().toString());
+  }
+
+  @Test
   void stalePredictionFrontierCannotTurnRotationOnlyPacketsIntoImpossible() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     WorldSnapshot world = floorWorld();
