@@ -17,21 +17,47 @@ import java.util.OptionalLong;
 import static org.junit.jupiter.api.Assertions.*;
 
 class HardeningRegressionTest {
-  @Test void oneImpossibleObservationAlertsWithDefaultConfig() {
+  @Test void oneImpossibleObservationDoesNotAlertWithDefaultConfig() {
     Evidence impossible = evidence(Verdict.IMPOSSIBLE, 10);
-    var result = Phase8MovementValidation.Accumulator.empty().accept(impossible, Phase8MovementValidation.Config.defaults());
-    assertTrue(result.alert().isPresent(), "one impossible observation must not be silently ignored");
+    var result = Phase8MovementValidation.Accumulator.empty().accept(
+        impossible, Phase8MovementValidation.Config.defaults());
+    assertTrue(result.alert().isEmpty(), "a single hard mismatch must not alert by default");
   }
 
-  @Test void alternatingImpossibleAndPossibleRetainsImpossibleEvidence() {
+  @Test void defaultConfigRequiresThreeConsecutiveImpossibleObservations() {
+    var accumulator = Phase8MovementValidation.Accumulator.empty();
+    var config = Phase8MovementValidation.Config.defaults();
+
+    var first = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 10), config);
+    accumulator = first.state();
+    assertTrue(first.alert().isEmpty());
+
+    var second = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 11), config);
+    accumulator = second.state();
+    assertTrue(second.alert().isEmpty());
+
+    var third = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 12), config);
+    assertTrue(third.alert().isPresent(), "three consecutive exhaustive mismatches should reach the default alert gate");
+  }
+
+  @Test void possibleObservationBreaksTheImpossibleAlertEpisodeEvenWhenVlPersists() {
     var accumulator = Phase8MovementValidation.Accumulator.empty();
     var config = new Phase8MovementValidation.Config(2, 0, true, true);
+
     accumulator = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 1), config).state();
     accumulator = accumulator.accept(evidence(Verdict.POSSIBLE, 2), config).state();
-    var third = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 3), config);
-    accumulator = third.state();
-    assertEquals(2, accumulator.players().get("player/MOVEMENT_REACHABILITY").supportingImpossible());
-    assertTrue(third.alert().isPresent());
+
+    var freshImpossible = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 3), config);
+    accumulator = freshImpossible.state();
+
+    assertTrue(freshImpossible.alert().isEmpty(),
+        "persisted VL must not bypass the consecutive-impossible episode gate");
+    assertEquals(1,
+        accumulator.players().get("player/MOVEMENT_REACHABILITY").consecutiveImpossible());
+
+    var secondFreshImpossible = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 4), config);
+    assertTrue(secondFreshImpossible.alert().isPresent(),
+        "the second consecutive impossible observation should satisfy the explicit gate");
   }
 
   @Test void velocityPacketReplacesVelocity() {

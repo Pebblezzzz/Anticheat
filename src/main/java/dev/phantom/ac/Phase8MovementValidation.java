@@ -44,7 +44,7 @@ public final class Phase8MovementValidation {
       this(minimumImpossibleObservations, alertDebounceTicks, alertsEnabled, observationOnly,
           1.0, 0.005, 100.0, minimumImpossibleObservations);
     }
-    public static Config defaults() { return new Config(1, 20, true, true); }
+    public static Config defaults() { return new Config(3, 20, true, true); }
     public double alertThreshold() { return minimumImpossibleObservations; }
   }
 
@@ -300,13 +300,22 @@ public final class Phase8MovementValidation {
       Map<String, State> updated = new LinkedHashMap<>(players); updated.put(key, next);
       Optional<Alert> alert = Optional.empty();
       double threshold = config.alertThreshold();
-      double previousLevel = old.decayTo(evidence.serverTick(), config);
+      boolean repeatedEvidenceReached =
+          next.consecutiveImpossible() >= config.minimumImpossibleObservations();
       boolean thresholdReached = next.violationLevel() >= threshold;
       boolean crossedNextInterval = next.violationLevel() + 1e-9 >= next.lastAlertViolationLevel() + config.alertInterval();
       boolean debounceSatisfied = next.lastAlertTick() < 0
           || evidence.serverTick() - next.lastAlertTick() >= config.alertDebounceTicks();
+      /*
+       * VL is a persistence/severity signal, not a substitute for the configured
+       * repeated-evidence gate. A POSSIBLE or UNCERTAIN observation must break the
+       * current impossible episode; otherwise old VL could make a fresh isolated
+       * mismatch alert immediately after a recovery. This mirrors Grim's
+       * persistence/decay model while keeping Phantom's explicit hard-evidence gate.
+       */
       if (config.alertsEnabled() && evidence.verdict() == Verdict.IMPOSSIBLE
-          && thresholdReached && (next.lastAlertTick() < 0 || crossedNextInterval) && debounceSatisfied) {
+          && repeatedEvidenceReached && thresholdReached
+          && (next.lastAlertTick() < 0 || crossedNextInterval) && debounceSatisfied) {
         double confidence = Math.min(1.0, next.violationLevel() / threshold);
         alert = Optional.of(new Alert(evidence.playerId(), evidence.serverTick(), evidence.firstInconsistentTick().orElse(evidence.serverTick()),
             evidence.rule(), evidence.eliminationReason(), confidence, next.supportingImpossible(), next.violationLevel(), evidence.replayReference()));

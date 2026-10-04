@@ -26,8 +26,8 @@ enforcement:
   kick-enabled: false
   punishment-enabled: false
   punishment-command: "warn {player} Phantom movement evidence"
-  # A movement IMPOSSIBLE result must be supported by repeated exhaustive evidence.
-  minimum-impossible-observations: 2
+  # A movement IMPOSSIBLE result must be supported by repeated consecutive exhaustive evidence.
+  minimum-impossible-observations: 3
   minimum-confidence: 1.0
   only-when-exhaustive: true
   permission-exempt: true
