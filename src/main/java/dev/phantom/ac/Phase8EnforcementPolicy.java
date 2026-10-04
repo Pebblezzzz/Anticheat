@@ -98,7 +98,8 @@ public final class Phase8EnforcementPolicy {
       return new Decision(false, 0.0, Set.of(), "evidence has no first inconsistent tick");
     }
     double violationLevel = episode.violationLevel();
-    double confidence = Math.min(1.0, violationLevel / Math.max(1.0, config.minimumPunishmentViolationLevel()));
+    double confidence = Math.min(1.0,
+        violationLevel / Math.max(1.0, config.minimumSetbackViolationLevel()));
     if (violationLevel < config.minimumSetbackViolationLevel()
         && violationLevel < config.minimumKickViolationLevel()
         && violationLevel < config.minimumPunishmentViolationLevel()) {
