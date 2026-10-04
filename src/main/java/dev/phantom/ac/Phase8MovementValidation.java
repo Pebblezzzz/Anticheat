@@ -43,6 +43,15 @@ public final class Phase8MovementValidation {
       Objects.requireNonNull(alertPolicy);
     }
     public Config(double alertViolationThreshold, int alertDebounceTicks,
+                  boolean alertsEnabled, boolean observationOnly,
+                  double violationIncrement, double violationDecayPerTick,
+                  double maximumViolationLevel, double alertInterval) {
+      this(alertViolationThreshold, alertDebounceTicks, alertsEnabled, observationOnly,
+          violationIncrement, violationDecayPerTick, maximumViolationLevel, alertInterval,
+          GrimAlertPolicy.Config.defaults());
+    }
+
+    public Config(double alertViolationThreshold, int alertDebounceTicks,
                   boolean alertsEnabled, boolean observationOnly) {
       this(alertViolationThreshold, alertDebounceTicks, alertsEnabled, observationOnly,
           1.0, 0.005, 100.0, 40.0, GrimAlertPolicy.Config.defaults());
