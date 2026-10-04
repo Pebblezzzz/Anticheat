@@ -2,6 +2,7 @@ package dev.phantom.ac;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import dev.phantom.ac.world.BlockState;
 import dev.phantom.ac.world.Chunk;
@@ -51,10 +52,11 @@ class PingPongSandwichTest {
     world.queue(new CompensatedClientWorld.Mutation.ChunkSnapshot(
         chunk, Map.of(position, stone())));
     world.openBarrier(secondBoundary);
+    Packets.PlayerContext pendingContext = playerState.pendingAuthoritativeContext();
+    assertNotNull(pendingContext);
     playerState.markBarrierSent(
         secondBoundary,
-        playerState.pendingAuthoritativeContext().orElseThrow()
-            .withTransactionBarrier(secondBoundary));
+        pendingContext.withTransactionBarrier(secondBoundary));
     playerState.markContextPublished();
 
     assertEquals(Coverage.UNLOADED, world.snapshot().coverageAt(1, 64, 1));
@@ -71,6 +73,6 @@ class PingPongSandwichTest {
     // for boundary 3.
     world.queue(new CompensatedClientWorld.Mutation.Block(position, stone()));
     assertEquals(Coverage.KNOWN, world.snapshot().coverageAt(1, 64, 1));
-    assertTrue(world.hasPendingTransaction(secondBoundary) == false);
+    assertTrue(!world.hasPendingTransaction(secondBoundary));
   }
 }
