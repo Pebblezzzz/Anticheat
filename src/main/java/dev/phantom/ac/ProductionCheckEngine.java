@@ -135,7 +135,7 @@ public final class ProductionCheckEngine {
       List<Long> active = new ArrayList<>();
       for (long timestamp : violationTimesMillis) if (timestamp > cutoff) active.add(timestamp);
       active.add(nowMillis);
-      double level = Math.min(config.maximumViolationLevel(), active.size() * config.violationIncrement());
+      double level = active.size() * config.violationIncrement();
       return new State(supportingEvents + 1, tick, lastAlertTick, level,
           lastAlertViolationLevel, active);
     }
@@ -144,7 +144,7 @@ public final class ProductionCheckEngine {
       GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(rule);
       long cutoff = Math.max(0L, nowMillis - policy.removeViolationsAfterMillis());
       List<Long> active = violationTimesMillis.stream().filter(timestamp -> timestamp > cutoff).toList();
-      double level = Math.min(config.maximumViolationLevel(), active.size() * config.violationIncrement());
+      double level = active.size() * config.violationIncrement();
       return new State(supportingEvents, tick, lastAlertTick, level,
           lastAlertViolationLevel, active);
     }
@@ -176,20 +176,18 @@ public final class ProductionCheckEngine {
 
       GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(finding.rule());
       int activeCount = next.violationTimesMillis().size();
-      double level = Math.min(config.maximumViolationLevel(), activeCount * config.violationIncrement());
+      double level = activeCount * config.violationIncrement();
       next = new State(next.supportingEvents(), next.lastObservationTick(),
           next.lastAlertTick(), level, next.lastAlertViolationLevel(), next.violationTimesMillis());
 
       Optional<Finding> alert = Optional.empty();
       Optional<Finding> log = Optional.empty();
 
-      boolean thresholdReached = thresholdReached(activeCount, policy.alert());
-      boolean crossedNextInterval = boundaryCrossed(activeCount, policy.alert(), next.lastAlertViolationLevel());
-      boolean debounceSatisfied = next.lastAlertTick() < 0L
-          || finding.serverTick() - next.lastAlertTick() >= config.alertDebounceTicks();
+      boolean thresholdReached = thresholdReached(level, policy.alert());
+      boolean crossedNextInterval = boundaryCrossed(level, policy.alert(), next.lastAlertViolationLevel());
 
       if (finding.verdict() == Verdict.IMPOSSIBLE
-          && thresholdReached && crossedNextInterval && debounceSatisfied) {
+          && thresholdReached && crossedNextInterval) {
         alert = Optional.of(finding);
         next = next.alerted(finding.serverTick(), level);
       }
@@ -204,16 +202,16 @@ public final class ProductionCheckEngine {
       return new Result(new Accumulator(updated), alert, log);
     }
 
-    private static boolean thresholdReached(int count, GrimAlertPolicy.CommandRule rule) {
-      return count + 1e-9 >= rule.threshold();
+    private static boolean thresholdReached(double level, GrimAlertPolicy.CommandRule rule) {
+      return level + 1e-9 >= rule.threshold();
     }
 
-    private static boolean boundaryCrossed(int count, GrimAlertPolicy.CommandRule rule, double lastLevel) {
+    private static boolean boundaryCrossed(double level, GrimAlertPolicy.CommandRule rule, double lastLevel) {
       if (rule.interval() == 0.0) {
-        return count >= rule.threshold() && lastLevel < rule.threshold();
+        return level >= rule.threshold() && lastLevel < rule.threshold();
       }
-      if (lastLevel <= 0.0) return count + 1e-9 >= rule.threshold();
-      return count + 1e-9 >= lastLevel + rule.interval();
+      if (lastLevel <= 0.0) return level + 1e-9 >= rule.threshold();
+      return level + 1e-9 >= lastLevel + rule.interval();
     }
   }
 
