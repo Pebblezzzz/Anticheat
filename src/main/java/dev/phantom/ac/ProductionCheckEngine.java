@@ -693,7 +693,7 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
               || "adventure".equalsIgnoreCase(after.gamemode()))
           && after.onGround()
           && (after.environment() == dev.phantom.ac.State.Environment.WATER
-              || after.environment() == dev.phantom.ac.dev.phantom.ac.State.Environment.LAVA)) {
+              || after.environment() == dev.phantom.ac.State.Environment.LAVA)) {
         int bx = (int) Math.floor(after.position().x());
         int by = (int) Math.floor(after.position().y());
         int bz = (int) Math.floor(after.position().z());
