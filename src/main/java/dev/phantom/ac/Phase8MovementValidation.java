@@ -25,12 +25,13 @@ public final class Phase8MovementValidation {
 
   public enum Verdict { POSSIBLE, UNCERTAIN, IMPOSSIBLE }
 
-  public record Config(int minimumImpossibleObservations, int alertDebounceTicks,
+  public record Config(double alertViolationThreshold, int alertDebounceTicks,
                        boolean alertsEnabled, boolean observationOnly,
                        double violationIncrement, double violationDecayPerTick,
                        double maximumViolationLevel, double alertInterval) implements Serializable {
     public Config {
-      if (minimumImpossibleObservations < 1) throw new IllegalArgumentException("minimumImpossibleObservations must be positive");
+      if (!Double.isFinite(alertViolationThreshold) || alertViolationThreshold <= 0.0)
+        throw new IllegalArgumentException("alertViolationThreshold must be finite and positive");
       if (alertDebounceTicks < 0) throw new IllegalArgumentException("alertDebounceTicks must be non-negative");
       if (!observationOnly) throw new IllegalArgumentException("Phase 8 is observation-only; punishment is not part of this phase");
       if (!Double.isFinite(violationIncrement) || violationIncrement <= 0) throw new IllegalArgumentException("violationIncrement must be finite and positive");
@@ -41,11 +42,11 @@ public final class Phase8MovementValidation {
     }
     public Config(int minimumImpossibleObservations, int alertDebounceTicks,
                   boolean alertsEnabled, boolean observationOnly) {
-      this(minimumImpossibleObservations, alertDebounceTicks, alertsEnabled, observationOnly,
-          1.0, 0.005, 100.0, minimumImpossibleObservations);
+      this(alertViolationThreshold, alertDebounceTicks, alertsEnabled, observationOnly,
+          1.0, 0.005, 100.0, 40.0);
     }
-    public static Config defaults() { return new Config(3, 20, true, true); }
-    public double alertThreshold() { return minimumImpossibleObservations; }
+    public static Config defaults() { return new Config(100.0, 0, true, true); }
+    public double alertThreshold() { return alertViolationThreshold; }
   }
 
   public record Evidence(
@@ -300,22 +301,20 @@ public final class Phase8MovementValidation {
       Map<String, State> updated = new LinkedHashMap<>(players); updated.put(key, next);
       Optional<Alert> alert = Optional.empty();
       double threshold = config.alertThreshold();
-      boolean repeatedEvidenceReached =
-          next.consecutiveImpossible() >= config.minimumImpossibleObservations();
       boolean thresholdReached = next.violationLevel() >= threshold;
-      boolean crossedNextInterval = next.violationLevel() + 1e-9 >= next.lastAlertViolationLevel() + config.alertInterval();
-      boolean debounceSatisfied = next.lastAlertTick() < 0
-          || evidence.serverTick() - next.lastAlertTick() >= config.alertDebounceTicks();
+      boolean crossedNextInterval = next.lastAlertTick() < 0
+          ? thresholdReached
+          : next.violationLevel() + 1e-9 >= next.lastAlertViolationLevel() + config.alertInterval();
       /*
-       * VL is a persistence/severity signal, not a substitute for the configured
-       * repeated-evidence gate. A POSSIBLE or UNCERTAIN observation must break the
-       * current impossible episode; otherwise old VL could make a fresh isolated
-       * mismatch alert immediately after a recovery. This mirrors Grim's
-       * persistence/decay model while keeping Phantom's explicit hard-evidence gate.
+       * Every exhaustive IMPOSSIBLE observation is a real flag and immediately adds
+       * violation level. Grim does not require three consecutive flags before a check
+       * becomes a flag; alert commands are a separate threshold over active violations.
+       * POSSIBLE/UNCERTAIN evidence may reduce VL through decay, but does not erase the
+       * already-recorded flag history.
        */
       if (config.alertsEnabled() && evidence.verdict() == Verdict.IMPOSSIBLE
-          && repeatedEvidenceReached && thresholdReached
-          && (next.lastAlertTick() < 0 || crossedNextInterval) && debounceSatisfied) {
+          && thresholdReached
+          && (next.lastAlertTick() < 0 || crossedNextInterval)) {
         double confidence = Math.min(1.0, next.violationLevel() / threshold);
         alert = Optional.of(new Alert(evidence.playerId(), evidence.serverTick(), evidence.firstInconsistentTick().orElse(evidence.serverTick()),
             evidence.rule(), evidence.eliminationReason(), confidence, next.supportingImpossible(), next.violationLevel(), evidence.replayReference()));
