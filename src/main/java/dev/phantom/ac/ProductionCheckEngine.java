@@ -642,10 +642,14 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
                 previous.observedAfter().position().x() - previous.observedBefore().position().x(),
                 previous.observedAfter().position().y() - previous.observedBefore().position().y(),
                 previous.observedAfter().position().z() - previous.observedBefore().position().z());
-            if (Math.abs(previousDelta.y()) <= 0.01
+            boolean currentHover = Math.abs(delta.y()) <= 0.02
+                && Math.abs(after.velocity().y()) <= 0.02;
+            boolean previousHover = Math.abs(previousDelta.y()) <= 0.02
+                && Math.abs(previous.observedAfter().velocity().y()) <= 0.02;
+            if (currentHover && previousHover
                 && (horizontal > 0.05 || Math.hypot(previousDelta.x(), previousDelta.z()) > 0.05)) {
               findings.add(finding(playerId, tick, "Flight",
-                  "airborne vertical displacement remained essentially zero across consecutive gravity ticks",
+                  "airborne vertical velocity remained near zero across consecutive movement ticks without a vertical effect",
                   1.0, sequence));
             }
           }
