@@ -22,6 +22,8 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientTe
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerBlockPlacement;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientVehicleMove;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientHeldItemChange;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientEntityAction;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChunkData;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityVelocity;
@@ -226,8 +228,29 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         record(capture,clientInput);
         if(debugLevel(capture.playerId).trace())
           logClientInputDebug(capture.playerName,capture.sequence.get(),clientInput);
+      }else if(event.getPacketType()==PacketType.Play.Client.HELD_ITEM_CHANGE){
+        var held=new WrapperPlayClientHeldItemChange(event);
+        Packets.HeldItemChange packet=new Packets.HeldItemChange(held.getSlot());
+        record(capture,packet);
+        schedulePredictionValidation(capture);
+      }else if(event.getPacketType()==PacketType.Play.Client.ENTITY_ACTION){
+        var action=new WrapperPlayClientEntityAction(event);
+        if(action.getAction()!=null){
+          Packets.EntityAction packet=new Packets.EntityAction(action.getAction().name(),action.getJumpBoost());
+          record(capture,packet);
+          schedulePredictionValidation(capture);
+        }
       }else if(event.getPacketType()==PacketType.Play.Client.PLAYER_DIGGING){
         WrapperPlayClientPlayerDigging digging=new WrapperPlayClientPlayerDigging(event);
+        var blockPosition=digging.getBlockPosition();
+        if(blockPosition!=null){
+          int diggingSequence=digging.getSequence();
+          Packets.DigAction digAction=new Packets.DigAction(
+              digging.getAction().name(),
+              new dev.phantom.ac.world.Pos(blockPosition.x,blockPosition.y,blockPosition.z),
+              diggingSequence);
+          record(capture,digAction);
+        }
         if(digging.getAction()==DiggingAction.FINISHED_DIGGING){
           var blockPosition=digging.getBlockPosition();
           var position=new dev.phantom.ac.world.Pos(
