@@ -2806,7 +2806,7 @@ public final class CausalMovementPipeline {
         amplifier(player.effects(), "speed", "minecraft:speed"),
         amplifier(player.effects(), "slowness", "minecraft:slowness"),
         amplifier(player.effects(), "jump_boost", "minecraft:jump_boost"),
-        amplifier(player.effects(), "levitation", "minecraft:levitation"),
+        player.effects().containsKey("levitation") || player.effects().containsKey("minecraft:levitation"),
         player.effects().keySet().stream().anyMatch(id ->
             id.equals("slow_falling") || id.equals("minecraft:slow_falling")));
   }

@@ -56,4 +56,39 @@ class Phase5MechanicsTest {
     var climb=physics.step(new PhysicsContext(6,state,new AdvancedInput(0,0,false),air(),Simulation.Environment.CLIMBABLE,Attributes.DEFAULT));
     assertFalse(water.state().uncertain()); assertFalse(climb.state().uncertain());
   }
+  @Test void modernMovementModifiersAreExplicit() {
+    var effects = Phase5Mechanics.MovementEffects.fromStateEffects(
+        java.util.Map.of(
+            "phantom:swift_sneak", 3,
+            "phantom:depth_strider", 3,
+            "phantom:soul_speed", 1,
+            "minecraft:dolphins_grace", 0));
+    assertEquals(0.75, effects.sneakingSpeedMultiplier(), 1e-12);
+    assertEquals(1.0, effects.depthStriderFraction(), 1e-12);
+    assertTrue(effects.soulSpeedActive());
+    assertTrue(effects.dolphinsGrace());
+  }
+
+  @Test void depthStriderAndDolphinsGraceExpandWaterMovementEnvelope() {
+    var physics = new Vanilla12111Physics();
+    var state = Player.initial(Vec3.ZERO);
+    var baseEffects = Phase5Mechanics.MovementEffects.NONE;
+    var enhancedEffects = Phase5Mechanics.MovementEffects.fromStateEffects(
+        java.util.Map.of("phantom:depth_strider", 3, "minecraft:dolphins_grace", 0));
+
+    var base = physics.step(new PhysicsContext(
+        7, state, new AdvancedInput(1, 0, false), air(),
+        Simulation.Environment.WATER, new Attributes(.1), baseEffects,
+        Phase5Mechanics.Pose.SWIMMING,
+        Phase5Mechanics.MovementEnvironment.vanillaWater(false, false, false, true)));
+    var enhanced = physics.step(new PhysicsContext(
+        7, state, new AdvancedInput(1, 0, false), air(),
+        Simulation.Environment.WATER, new Attributes(.1), enhancedEffects,
+        Phase5Mechanics.Pose.SWIMMING,
+        Phase5Mechanics.MovementEnvironment.vanillaWater(false, false, false, true)));
+
+    assertTrue(Math.abs(enhanced.state().velocity().z()) > Math.abs(base.state().velocity().z()));
+  }
+
+
 }

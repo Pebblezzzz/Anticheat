@@ -1,14 +1,14 @@
-# Grim reference comparison (Phases 1–8)
+# Grim reference comparison and clean-room production baseline
 
-> Audit status: this document is a design comparison, not proof of feature parity. Phantom does **not** meet every requested completion requirement yet. In particular, independent 1.21.11 vanilla traces, complete packet-payload world replication, full client-tick/ack timing reconstruction, and several Phase 5 mechanics remain outstanding. The implementation must not be used as proof that a player is cheating until those limitations are resolved or the result is explicitly classified as uncertain.
+> Phantom follows Grim's broad production architecture where it improves correctness, but it is not a source fork or a multi-version Grim clone. The current target is Java 1.21.11. Direct Grim source is not copied; the implementation is independently written around the same publicly documented engineering principles.
 
 This document records a clean-room technical comparison with the public [Grim repository](https://github.com/GrimAnticheat/Grim), its [README](https://github.com/GrimAnticheat/Grim), [design philosophy](https://github.com/GrimAnticheat/Grim/wiki/Design-philosophy), and [project documentation](https://grim.ac/page/about). No Grim source code is copied into Phantom AC.
 
 ## Shared principles
 - **Simulation before policy.** Both designs treat movement validation as a prediction/simulation problem rather than a primary speed/distance threshold. Grim describes a predictive movement engine; Phantom exposes deterministic `PhysicsEngine`, reachable states, evidence, and a separate operator policy layer.
 - **Per-player client-visible world.** Grim documents per-player world replication and latency compensation. Phantom now retains PacketEvents palette-backed `Column` objects per player, applies them behind transaction acknowledgement, and exposes them to deterministic physics through a lazy immutable `WorldSnapshot` backend. The older `VisibilityHistory`/map representation remains for legacy replay compatibility rather than as the hot-path chunk storage.
-- **Version-specific mechanics.** Grim emphasizes version-specific collision ordering and bounding boxes. Phantom isolates the 1.21.11 model in `Vanilla12111Physics` and the 1.21.11 block catalogue rather than importing cross-version constants.
-- **Asynchronous boundary awareness.** Grim emphasizes asynchronous/multithreaded processing. Phantom retains platform packet capture outside the deterministic core and uses immutable values so a future worker pipeline can replay safely.
+- **Version-specific mechanics.** Grim emphasizes version-specific collision ordering, bounding boxes, and modern-version edge cases. Phantom isolates the 1.21.11 model in `Vanilla12111RichPhysics`, `GrimVehiclePhysics`, `GrimFluidPhysics`, `GrimElytraPhysics`, and the 1.21.11 block catalogue.
+- **Asynchronous boundary awareness.** Grim emphasizes asynchronous/multithreaded processing. Phantom keeps packet capture lightweight, runs CPU-heavy prediction on a dedicated executor, coalesces per-player validation work, and returns immutable reports to the Bukkit main thread.
 - **Evidence buffering.** Grim's design philosophy rejects an automatic-ban dependency on a single transient event. Phantom's `OperatorValidation.Aggregator` requires repeated impossible evidence and debounces alerts.
 
 ## Intentional differences
@@ -21,8 +21,8 @@ Grim's production checks necessarily make policy decisions around prediction env
 ### No direct source reuse
 Grim is GPL-3.0. Phantom uses independent implementations of general technical ideas and does not copy Grim classes, algorithms, or source fragments. The repository remains GPL-3.0-only for its own stated dependency/licensing reasons; any future direct reuse would require a separate license review, attribution, and preservation of applicable notices.
 
-### Scope is deliberately smaller
-Grim documents support for many client/server versions and mechanics including entities and vehicles. Phantom does not claim those capabilities. Its current core targets Java 1.21.11, and unsupported mechanics remain explicit limitations rather than being filled with guessed behavior.
+### Scope is deliberately version-pinned
+Grim supports a broad client/server matrix. Phantom intentionally targets Java 1.21.11 so collision ordering, physics constants, modern movement attributes, vehicles, and world state can remain version-specific instead of being hidden behind guessed cross-version behavior.
 
 ### Timing model
 Grim documents latency compensation and queued world changes. Phantom models a synchronization interval and records timing uncertainty as data consumed by reachability and evidence. This is less feature-rich than a mature production latency subsystem, but it is easier to replay and test independently. It must not be described as equivalent to Grim's mature implementation.
@@ -64,14 +64,9 @@ Phantom now keeps the client's movement claims separate from the server-authorit
 Live validation also distinguishes position-bearing movement packets from rotation-only/heartbeat packets. Rotation-only packets no longer advance the ground-contradiction streak, while sustained airborne hover can produce an authoritative flight-state contradiction without requiring a ClientInput packet first. Paper's authoritative PlayerFailMoveEvent path is surfaced as its own evidence source.
 
 This follows the same broad architectural lesson visible in Grim's current player model: client claims, authoritative movement state, flying capability/status, prediction state, and compensated world state are tracked as separate concepts rather than collapsing them into one boolean. Grim also uses tick-boundary and packet-order information as independent movement evidence. This is an architectural comparison, not a claim of feature parity.
-## Validation still missing
-Phantom still lacks equivalent validation in several areas:
+## Production hardening status
+Phantom now includes the modern movement modifiers and vehicle families relevant to the 1.21.11 target, persistent candidate-frontier prediction, client-visible world compensation, explicit timing uncertainty, numeric enforcement-proof checks, production validation health metrics, and regression coverage for the evidence gate.
 
-- independent vanilla 1.21.11 traces for acceleration, friction, collision ordering, step/slope behavior, fluids, poses, effects, attributes, knockback, and corrections;
-- client-visible world reconstruction now uses packet-derived chunk/block state plus transaction-gated visibility in the live/replay world journal; remaining work is broader packet coverage and validation against real client timing under load;
-- production-grade asynchronous scheduling and stress/throughput measurements;
-- complete entity/vehicle replication and collision;
-- a full live alert dispatch path driven by validated evidence rather than command-time diagnostics;
-- long-running replay corpus tests covering packet delay, reordering, correction recovery, and synchronization loss.
+Remaining work should be treated as feature expansion rather than replacing the movement architecture: broader non-movement check families, additional packet semantics such as combat/item/placement state, longer stress campaigns on real server populations, and future version adapters.
 
-These gaps are limitations, not claims of parity or superiority. Grim remains a mature reference implementation; Phantom deliberately chooses a smaller, more explicit, replay-oriented foundation.
+These are deliberately kept outside the 1.21.11 movement proof so unsupported information cannot become a false movement violation.

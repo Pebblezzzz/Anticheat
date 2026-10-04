@@ -53,16 +53,31 @@ public final class Phase5Mechanics {
       int slownessAmplifier,
       int jumpBoostAmplifier,
       int levitationAmplifier,
-      boolean slowFalling) implements Serializable {
+      boolean slowFalling,
+      int depthStriderLevel,
+      int soulSpeedLevel,
+      int swiftSneakLevel,
+      boolean dolphinsGrace) implements Serializable {
     public MovementEffects {
-      if (speedAmplifier < -1 || slownessAmplifier < -1 || jumpBoostAmplifier < -1 || levitationAmplifier < -1)
-        throw new IllegalArgumentException("effect amplifier must be -1 or greater");
+      if (speedAmplifier < -1 || slownessAmplifier < -1 || jumpBoostAmplifier < -1 || levitationAmplifier < -1
+          || depthStriderLevel < -1 || soulSpeedLevel < -1 || swiftSneakLevel < -1) {
+        throw new IllegalArgumentException("effect/enchantment level must be -1 or greater");
+      }
     }
+    /** Backward-compatible constructor used by legacy traces that store the levitation amplifier directly. */
+    public MovementEffects(int speedAmplifier, int slownessAmplifier, int jumpBoostAmplifier,
+                           int levitationAmplifier, boolean slowFalling) {
+      this(speedAmplifier, slownessAmplifier, jumpBoostAmplifier, levitationAmplifier,
+          slowFalling, -1, -1, -1, false);
+    }
+
+    /** Backward-compatible boolean convenience constructor. */
     public MovementEffects(int speedAmplifier, int slownessAmplifier, int jumpBoostAmplifier,
                            boolean levitation, boolean slowFalling) {
-      this(speedAmplifier, slownessAmplifier, jumpBoostAmplifier, levitation ? 0 : -1, slowFalling);
+      this(speedAmplifier, slownessAmplifier, jumpBoostAmplifier, levitation ? 0 : -1,
+          slowFalling, -1, -1, -1, false);
     }
-    public static final MovementEffects NONE = new MovementEffects(-1, -1, -1, -1, false);
+    public static final MovementEffects NONE = new MovementEffects(-1, -1, -1, -1, false, -1, -1, -1, false);
 
     public static MovementEffects fromStateEffects(Map<String, Integer> effects) {
       Objects.requireNonNull(effects, "effects");
@@ -71,7 +86,11 @@ public final class Phase5Mechanics {
           amplifier(effects, "minecraft:slowness", "slowness"),
           amplifier(effects, "minecraft:jump_boost", "jump_boost"),
           amplifier(effects, "minecraft:levitation", "levitation"),
-          contains(effects, "minecraft:slow_falling", "slow_falling"));
+          contains(effects, "minecraft:slow_falling", "slow_falling"),
+          level(effects, "phantom:depth_strider"),
+          level(effects, "phantom:soul_speed"),
+          level(effects, "phantom:swift_sneak"),
+          contains(effects, "minecraft:dolphins_grace", "dolphins_grace"));
     }
 
     private static int amplifier(Map<String, Integer> effects, String... ids) {
@@ -80,6 +99,10 @@ public final class Phase5Mechanics {
         if (value != null) return value;
       }
       return -1;
+    }
+
+    private static int level(Map<String, Integer> effects, String... ids) {
+      return amplifier(effects, ids);
     }
 
     private static boolean contains(Map<String, Integer> effects, String... ids) {
@@ -93,10 +116,32 @@ public final class Phase5Mechanics {
       if (slownessAmplifier >= 0) value *= Math.max(0.0, 1.0 - 0.15 * (slownessAmplifier + 1));
       return value;
     }
+
+    /**
+     * Modern 1.21 sneaking speed is an attribute-like multiplier. Swift Sneak
+     * increases the vanilla 0.30 baseline by 0.15 per enchantment level and is
+     * clamped to the valid movement range.
+     */
+    public double sneakingSpeedMultiplier() {
+      return swiftSneakLevel < 0
+          ? 0.3
+          : Math.max(0.0, Math.min(1.0, 0.3 + swiftSneakLevel * 0.15));
+    }
+
+    /**
+     * Grim's current 1.21 movement model represents Depth Strider as a water
+     * movement-efficiency interpolation from the base 0.02 swim speed toward
+     * normal movement speed, capped at level III.
+     */
+    public double depthStriderFraction() {
+      return depthStriderLevel <= 0 ? 0.0 : Math.min(3.0, depthStriderLevel) / 3.0;
+    }
+
     public double jumpVelocityAdd() { return jumpBoostAmplifier >= 0 ? 0.1 * (jumpBoostAmplifier + 1) : 0.0; }
     public boolean levitation() { return levitationAmplifier >= 0; }
     public double levitationVelocity() { return 0.05 * (levitationAmplifier + 1); }
     public double fallGravityMultiplier() { return slowFalling ? 0.2 : 1.0; }
+    public boolean soulSpeedActive() { return soulSpeedLevel > 0; }
   }
 
   /**
