@@ -26,6 +26,22 @@ punishments:
   # Each group supplies the checks it owns plus threshold:interval rules.
   # [alert] uses the first rule; [log] records every hard IMPOSSIBLE flag by default.
   groups:
+    Blatant:
+      remove-violations-after-seconds: 300
+      # These are independently deterministic contradictions, not probabilistic
+      # movement reachability. Keep their operator alert path immediate while
+      # preserving Grim's higher Simulation threshold for ordinary reachability.
+      checks:
+        - "Flight"
+        - "Step"
+        - "Speed"
+        - "Jesus"
+        - "NoFall"
+        - "FastBreak"
+        - "FarBreak"
+        - "FarPlace"
+      alert: "1:1"
+      log: "1:1"
     Simulation:
       remove-violations-after-seconds: 300
       checks:
