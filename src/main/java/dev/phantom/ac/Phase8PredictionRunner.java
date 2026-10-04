@@ -898,6 +898,36 @@ public final class Phase8PredictionRunner {
          */
         Set<Candidate> observationCandidates;
         boolean possibleObservation;
+        if (positionlessRotationObservation
+            && predictionFrontierTemporallyStale(prediction, tick)) {
+          /*
+           * A rotation-only packet does not advance physics. If the retained
+           * frontier is already outside the bounded incremental horizon, there
+           * is no sound trajectory from which to prove a rotation contradiction.
+           * Treat the observation as UNCERTAIN until a position-bearing packet
+           * re-establishes a current client-tick physics root.
+           */
+          String reason =
+              "rotation-only observation arrived after the retained prediction "
+                  + "frontier fell outside the bounded incremental horizon";
+          List<String> observationUncertainty = List.of(reason);
+          trace.add("ROTATION_OBSERVATION_STALE_FRONTIER"
+              + " predictionTick=" + predictionTick
+              + " clientTick=" + tick.clientTick()
+              + " action=UNCERTAIN_UNTIL_POSITION_MOVEMENT");
+          latestContinuation = Continuation.UNCERTAIN;
+          SearchResult staleSearch = uncertainSearch(
+              prediction, String.join("; ", observationUncertainty));
+          Phase8MovementValidation.Result result = validate(
+              playerId, packet, move, observedBefore, observedAfter, world,
+              tick, observationUncertainty, staleSearch, false, observedFieldsFor(move));
+          results.add(result);
+          uncertain++;
+          frames.add(frame(
+              sequence, packet, tick, move, observedBefore, observedAfter,
+              predictedBefore, prediction, world, observationUncertainty, trace));
+          continue;
+        }
         if (positionlessRotationObservation) {
           observationCandidates = retargetRotation(prediction, move, maximumCandidates);
           possibleObservation = !observationCandidates.isEmpty();
@@ -3192,6 +3222,23 @@ public final class Phase8PredictionRunner {
             1,
             List.of()));
     return candidate;
+  }
+
+  private static boolean predictionFrontierTemporallyStale(
+      Set<Candidate> candidates,
+      TickResolution tick) {
+    if (!tick.known() || candidates.isEmpty()) {
+      return false;
+    }
+
+    long currentTick = tick.clientTick();
+    return candidates.stream().allMatch(candidate -> {
+      long candidateTick = candidate.context().simulationTick();
+      if (candidateTick < 0L || candidateTick > currentTick) {
+        return false;
+      }
+      return currentTick - candidateTick > MAX_INCREMENTAL_HORIZON;
+    });
   }
 
   private static boolean predictionRootDisconnectedFromObservedBefore(
