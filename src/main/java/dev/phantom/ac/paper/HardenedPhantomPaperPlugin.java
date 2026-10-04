@@ -402,6 +402,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           var velocity=packet.getVelocity();
           record(capture,new Packets.Velocity(vector(velocity.getX(),velocity.getY(),velocity.getZ())));
         }
+      }else if(event.getPacketType()==PacketType.Play.Server.ACKNOWLEDGE_BLOCK_CHANGES){
+        var ack=new WrapperPlayServerAcknowledgeBlockChanges(event);
+        Packets.BlockAck packet=new Packets.BlockAck(ack.getSequence());
+        record(capture,packet);
       }else if(event.getPacketType()==PacketType.Play.Server.BLOCK_CHANGE){
         var packet=new WrapperPlayServerBlockChange(event);
         var blockPosition=packet.getBlockPosition();
