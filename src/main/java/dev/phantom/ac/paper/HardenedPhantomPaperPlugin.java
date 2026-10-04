@@ -470,7 +470,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         capture.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.BlockChange(
               new dev.phantom.ac.Phase4WorldReplica.Order(authoritativeTick(capture)==null?0:authoritativeTick(capture),receivedNanos,sequence,sequence),
               new dev.phantom.ac.Phase4WorldReplica.Provenance("paper-block-change","BLOCK_CHANGE",sequence,authoritativeTick(capture)==null?0:authoritativeTick(capture),null,false,"clientbound"),pos,state));
-        warmStateAsync(capture,state);
         Packets.Packet blockChange=blockStatePacket(pos,state);
         appendPacket(capture,new RawPacket(sequence,receivedNanos,blockChange,
             Packets.CaptureProvenance.fromAdapter("paper-block-change",blockChange,null)));
@@ -485,7 +484,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           capture.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.BlockChange(
               new dev.phantom.ac.Phase4WorldReplica.Order(authoritativeTick(capture)==null?0:authoritativeTick(capture),receivedNanos,sequence,sequence),
               new dev.phantom.ac.Phase4WorldReplica.Provenance("paper-multi-block-change","MULTI_BLOCK_CHANGE",sequence,authoritativeTick(capture)==null?0:authoritativeTick(capture),null,false,"clientbound"),pos,state));
-          warmStateAsync(capture,state);
           Packets.Packet blockChange=blockStatePacket(pos,state);
           appendPacket(capture,new RawPacket(sequence,receivedNanos,blockChange,
               Packets.CaptureProvenance.fromAdapter("paper-multi-block-change",blockChange,null)));
@@ -856,6 +854,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           "[PhantomAC][WORLD] transaction send failed for "+capture.playerId,
           failure);
     }
+  }
+
+  private static Long authoritativeTick(Capture capture){
+    return null;
   }
 
   private static boolean isNearChunk(Capture capture,Column column){
