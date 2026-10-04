@@ -1,6 +1,5 @@
 package dev.phantom.ac.paper;
 
-import io.papermc.paper.event.player.PlayerFailMoveEvent;
 import io.netty.channel.Channel;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
@@ -1738,11 +1737,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
                 new dev.phantom.ac.Phase4WorldReplica.PackedChunkData(
                     order,provenance,new dev.phantom.ac.world.Chunk(work.column().getX(),work.column().getZ()),
                     decoded.sections(),work.column().isFullChunk());
-            Bukkit.getScheduler().runTask(this, () -> {
-              Player player=Bukkit.getPlayer(target.playerId);
-              if(player!=null) PaperVanillaCollision.warm(player.getWorld(),decoded.statesToWarm());
-              target.clientWorld.queue(worldEvent);
-            });
+            target.clientWorld.queue(worldEvent);
           }catch(RuntimeException failure){
             getLogger().log(java.util.logging.Level.WARNING,
                 "[PhantomAC][CHUNK] asynchronous client chunk decode failed player="+target.playerId
@@ -1763,8 +1758,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   private record PendingChunk(long sequence,long receivedNanos,long serverTick,Column column,ClientVersion clientVersion,int minY,int maxY){}
   private record DecodedChunk(
-      Map<Integer,dev.phantom.ac.Phase4WorldReplica.PackedSection> sections,
-      Set<BlockState> statesToWarm){}
+      Map<Integer,dev.phantom.ac.Phase4WorldReplica.PackedSection> sections){}
 
 
   private static DecodedChunk decodeChunk(PendingChunk pending){
@@ -1843,15 +1837,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       sections.put(sectionIndex,
           dev.phantom.ac.Phase4WorldReplica.PackedSection.fromStates(sectionY,states));
     }
-    Set<BlockState> statesToWarm=new HashSet<>();
-    for(var section:sections.values()){
-      for(int i=0;i<4096;i++){
-        BlockState state=section.stateAt(i);
-        if(!state.isUnsupported())statesToWarm.add(state);
-      }
-    }
-    return new DecodedChunk(Map.copyOf(sections),Set.copyOf(statesToWarm));
-  }
+    return new DecodedChunk(Map.copyOf(sections));  }
 
   private static int readPackedValue(long[] data,int bits,int index){
     if(bits==0)return 0;
@@ -1963,13 +1949,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       // Movement collision is resolved from the immutable packet-visible world.
       // No live Bukkit/Paper collision shape is installed here.
       clientWorld.markEntityTrackingIncomplete();
-    }
-
-    void updateServerPosition(Player player){
-      org.bukkit.Location location=player.getLocation();
-      lastServerX=location.getX();
-      lastServerY=location.getY();
-      lastServerZ=location.getZ();
     }
 
     short nextWorldTransaction(){
