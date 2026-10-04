@@ -334,7 +334,7 @@ public final class Phase8MovementValidation {
 
       GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(evidence.rule());
       int activeCount = next.violationTimesMillis().size();
-      double level = Math.min(config.maximumViolationLevel(), activeCount * config.violationIncrement());
+      double level = activeCount * config.violationIncrement();
       next = new State(next.consecutiveImpossible(), next.supportingImpossible(),
           next.uncertaintyPeriods(), next.recoveries(), next.lastObservationTick(),
           next.lastAlertTick(), level, next.lastAlertViolationLevel(),
@@ -343,26 +343,26 @@ public final class Phase8MovementValidation {
       Optional<Alert> alert = Optional.empty();
       Optional<Alert> log = Optional.empty();
 
-      boolean thresholdReached = findingThresholdReached(activeCount, policy.alert());
-      boolean crossedNextInterval = commandBoundaryCrossed(activeCount, policy.alert(), next.lastAlertViolationLevel());
+      boolean thresholdReached = findingThresholdReached(level, policy.alert());
+      boolean crossedNextInterval = commandBoundaryCrossed(level, policy.alert(), next.lastAlertViolationLevel());
       if (config.alertsEnabled() && evidence.verdict() == Verdict.IMPOSSIBLE
           && thresholdReached && crossedNextInterval) {
         Alert emitted = new Alert(evidence.playerId(), evidence.serverTick(),
             evidence.firstInconsistentTick().orElse(evidence.serverTick()),
             evidence.rule(), evidence.eliminationReason(),
-            Math.min(1.0, activeCount / Math.max(1.0, policy.alert().threshold())),
+            Math.min(1.0, level / Math.max(1.0, policy.alert().threshold())),
             next.supportingImpossible(), level, evidence.replayReference());
         alert = Optional.of(emitted);
         next = next.alerted(evidence.serverTick(), level);
       }
 
       if (evidence.verdict() == Verdict.IMPOSSIBLE
-          && findingThresholdReached(activeCount, policy.log())
-          && commandBoundaryCrossed(activeCount, policy.log(), 0.0)) {
+          && findingThresholdReached(level, policy.log())
+          && commandBoundaryCrossed(level, policy.log(), 0.0)) {
         Alert emitted = new Alert(evidence.playerId(), evidence.serverTick(),
             evidence.firstInconsistentTick().orElse(evidence.serverTick()),
             evidence.rule(), evidence.eliminationReason(),
-            Math.min(1.0, activeCount / Math.max(1.0, policy.log().threshold())),
+            Math.min(1.0, level / Math.max(1.0, policy.log().threshold())),
             next.supportingImpossible(), level, evidence.replayReference());
         log = Optional.of(emitted);
       }
@@ -372,17 +372,16 @@ public final class Phase8MovementValidation {
       return new Accumulated(new Accumulator(updated), alert, log);
     }
 
-    private static boolean findingThresholdReached(int count, GrimAlertPolicy.CommandRule rule) {
-      return count + 1e-9 >= rule.threshold();
+    private static boolean findingThresholdReached(double level, GrimAlertPolicy.CommandRule rule) {
+      return level + 1e-9 >= rule.threshold();
     }
 
-    private static boolean commandBoundaryCrossed(int count, GrimAlertPolicy.CommandRule rule, double lastLevel) {
+    private static boolean commandBoundaryCrossed(double level, GrimAlertPolicy.CommandRule rule, double lastLevel) {
       if (rule.interval() == 0.0) {
-        return count >= rule.threshold() && lastLevel < rule.threshold();
+        return level >= rule.threshold() && lastLevel < rule.threshold();
       }
-      if (lastLevel <= 0.0) return count + 1e-9 >= rule.threshold();
-      double nextBoundary = lastLevel + rule.interval();
-      return count + 1e-9 >= nextBoundary;
+      if (lastLevel <= 0.0) return level + 1e-9 >= rule.threshold();
+      return level + 1e-9 >= lastLevel + rule.interval();
     }
   }
 
@@ -427,7 +426,7 @@ public final class Phase8MovementValidation {
       List<Long> active = new ArrayList<>();
       for (long timestamp : violationTimesMillis) if (timestamp > cutoff) active.add(timestamp);
       active.add(nowMillis);
-      double level = Math.min(config.maximumViolationLevel(), active.size() * config.violationIncrement());
+      double level = active.size() * config.violationIncrement();
       return new State(consecutiveImpossible + 1, supportingImpossible + 1, uncertaintyPeriods, recoveries,
           tick, lastAlertTick, level, lastAlertViolationLevel, active);
     }
@@ -470,8 +469,7 @@ public final class Phase8MovementValidation {
     }
 
     double activeLevel(long nowMillis, Config config, String rule) {
-      return Math.min(config.maximumViolationLevel(),
-          activeViolations(nowMillis, config, rule).size() * config.violationIncrement());
+      return activeViolations(nowMillis, config, rule).size() * config.violationIncrement();
     }
   }
 
