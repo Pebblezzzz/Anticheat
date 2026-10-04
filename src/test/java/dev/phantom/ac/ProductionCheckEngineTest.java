@@ -216,5 +216,73 @@ class ProductionCheckEngineTest {
     assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("InventorySlot")));
   }
 
+  @Test
+  void illegalEntityActionOpcodeIsDetected() {
+    var result = ProductionCheckEngine.analyze(
+        "p",
+        List.of(new Packets.RawPacket(1, 1, new Packets.EntityAction("NOT_A_CLIENT_ACTION", 0))),
+        report(),
+        CONFIG);
+
+    assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("EntityAction")));
+    assertEquals(ProductionCheckEngine.Verdict.IMPOSSIBLE,
+        result.findings().stream().filter(f -> f.rule().equals("EntityAction")).findFirst().orElseThrow().verdict());
+  }
+
+  @Test
+  void nonHorseEntityActionCannotCarryJumpBoost() {
+    var result = ProductionCheckEngine.analyze(
+        "p",
+        List.of(new Packets.RawPacket(1, 1, new Packets.EntityAction("START_SPRINTING", 1))),
+        report(),
+        CONFIG);
+
+    assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("EntityAction")));
+  }
+
+  @Test
+  void oversizedHorseJumpBoostIsDetected() {
+    var result = ProductionCheckEngine.analyze(
+        "p",
+        List.of(new Packets.RawPacket(1, 1, new Packets.EntityAction("START_JUMPING_WITH_HORSE", 101))),
+        report(),
+        CONFIG);
+
+    assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("EntityAction")));
+  }
+
+  @Test
+  void invalidInventoryButtonIsDetected() {
+    var result = ProductionCheckEngine.analyze(
+        "p",
+        List.of(new Packets.RawPacket(
+            1, 1, new Packets.InventoryClick(0, 5, 4, "PICKUP"))),
+        report(),
+        CONFIG);
+
+    assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("InventoryButton")));
+  }
+
+  @Test
+  void heuristicFindingsRemainNonPunitive() {
+    BlockBox target = new BlockBox(-0.5, 1.0, 9.5, 0.5, 2.0, 10.5);
+    List<Packets.RawPacket> packets = List.of(
+        new Packets.RawPacket(1, 1, new Packets.EntitySpawn(10, target)),
+        new Packets.RawPacket(2, 2, new Packets.InteractEntity(10, Packets.InteractAction.ATTACK)));
+
+    var result = ProductionCheckEngine.analyze("p", packets, report(frame(2, player(0, 0))), CONFIG);
+
+    assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("Reach")));
+    assertTrue(result.findings().stream().filter(f -> f.rule().equals("Reach"))
+        .allMatch(f -> f.verdict() == ProductionCheckEngine.Verdict.UNCERTAIN));
+
+    var accumulator = ProductionCheckEngine.Accumulator.empty();
+    for (var finding : result.findings()) {
+      var accepted = accumulator.accept(finding, CONFIG);
+      assertTrue(accepted.alert().isEmpty());
+      accumulator = accepted.state();
+    }
+  }
+
 
 }

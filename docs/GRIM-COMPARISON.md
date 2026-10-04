@@ -67,6 +67,6 @@ This follows the same broad architectural lesson visible in Grim's current playe
 ## Production hardening status
 Phantom now includes the modern movement modifiers and vehicle families relevant to the 1.21.11 target, persistent candidate-frontier prediction, client-visible world compensation, explicit timing uncertainty, numeric enforcement-proof checks, production validation health metrics, interaction/reach evidence, packet-integrity checks, timer-burst evidence, conservative FastBreak evidence, and regression coverage for the evidence gate.
 
-Remaining work is feature expansion rather than a movement rewrite: deeper combat/aim heuristics, broader inventory/item semantics, more sophisticated scaffold/build analysis, long-running server soak measurements, and future version adapters. Those should continue to use the same evidence/uncertainty contract.
+Remaining work is feature expansion rather than a movement rewrite: deeper causal combat/reach/aim modeling, broader inventory/item semantics, more sophisticated scaffold/build analysis, long-running server soak measurements, and future version adapters. Heuristic packet evidence stays non-punitive until its missing causal state can be modeled. Those additions should continue to use the same evidence/uncertainty contract.
 
 These are deliberately kept outside the 1.21.11 movement proof so unsupported information cannot become a false movement violation.
