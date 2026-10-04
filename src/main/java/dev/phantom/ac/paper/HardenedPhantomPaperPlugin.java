@@ -387,7 +387,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     punishmentEnabled=getConfig().getBoolean("enforcement.punishment-enabled",false);
     enforcementOnlyExhaustive=getConfig().getBoolean("enforcement.only-when-exhaustive",true);
     permissionExempt=getConfig().getBoolean("enforcement.permission-exempt",true);
-    minimumImpossibleObservations=Math.max(1,getConfig().getInt("enforcement.minimum-impossible-observations",2));
+    minimumImpossibleObservations=Math.max(1,getConfig().getInt("enforcement.minimum-impossible-observations",3));
     minimumEnforcementConfidence=Math.max(0.0,Math.min(1.0,getConfig().getDouble("enforcement.minimum-confidence",1.0)));
     punishmentCommand=getConfig().getString("enforcement.punishment-command","warn {player} Phantom movement evidence");
     exemptionPermission=getConfig().getString("enforcement.permission","phantom.exempt");
