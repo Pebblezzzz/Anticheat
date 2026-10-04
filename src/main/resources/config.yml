@@ -8,7 +8,8 @@ alerts:
   alert-interval-ticks: 0
   # VL added by each exhaustively-impossible observation.
   violation-increment: 1.0
-  # VL decays continuously with server time; 0.005 is 1 VL per 200 ticks.
+  # Kept for backward compatibility with older configs. Active violations now use
+  # Grim-style timestamped expiry from punishments.groups.*.
   violation-decay-per-tick: 0.005
   # Prevent unbounded VL growth during long sessions.
   maximum-violation-level: 100.0
@@ -17,6 +18,103 @@ alerts:
   # "N impossible packets" alert gate.
   violation-alert-threshold: 100.0
   violation-alert-interval: 40.0
+
+punishments:
+  # Grim-style active violation window. A violation is removed after this many seconds
+  # for every check group unless the group overrides it.
+  remove-violations-after-seconds: 300
+  # Each group supplies the checks it owns plus threshold:interval rules.
+  # [alert] uses the first rule; [log] records every hard IMPOSSIBLE flag by default.
+  groups:
+    Simulation:
+      remove-violations-after-seconds: 300
+      checks:
+        - "MOVEMENT_REACHABILITY"
+        - "GroundSpoof"
+        - "Flight"
+        - "Jesus"
+        - "Step"
+        - "Speed"
+        - "TimerBurst"
+        - "TimerLimit"
+        - "NoFall"
+      alert: "100:40"
+      log: "1:1"
+    Knockback:
+      remove-violations-after-seconds: 300
+      checks:
+        - "Knockback"
+        - "Explosion"
+      alert: "5:5"
+      log: "1:1"
+    Post:
+      remove-violations-after-seconds: 300
+      checks:
+        - "Post"
+      alert: "20:20"
+      log: "1:1"
+    BadPackets:
+      remove-violations-after-seconds: 300
+      checks:
+        - "BadPackets"
+        - "PacketPosition"
+        - "PacketRotation"
+        - "EntityAction"
+        - "HeldItemSlot"
+        - "InventorySlot"
+        - "InventoryClickType"
+        - "InventoryButton"
+        - "BlockPlaceCursor"
+        - "BlockPlaceFace"
+        - "PacketOrder"
+        - "Crash"
+      alert: "20:20"
+      log: "1:1"
+    Reach:
+      remove-violations-after-seconds: 300
+      checks:
+        - "Reach"
+      alert: "1:1"
+      log: "1:1"
+    Hitboxes:
+      remove-violations-after-seconds: 300
+      checks:
+        - "Hitboxes"
+      alert: "5:3"
+      log: "1:1"
+    Misc:
+      remove-violations-after-seconds: 300
+      checks:
+        - "Vehicle"
+        - "NoSlow"
+        - "Sprint"
+        - "MultiActions"
+        - "Place"
+        - "Baritone"
+        - "Break"
+        - "TransactionOrder"
+        - "Elytra"
+        - "Chat"
+        - "Exploit"
+        - "FarBreak"
+        - "FarPlace"
+        - "FastBreak"
+      alert: "10:5"
+      log: "1:1"
+    Combat:
+      remove-violations-after-seconds: 300
+      checks:
+        - "Interact"
+        - "Aim"
+        - "AimModulo360"
+      alert: "20:40"
+      log: "1:1"
+    Autoclicker:
+      remove-violations-after-seconds: 300
+      checks:
+        - "Autoclicker"
+      alert: "20:40"
+      log: "1:1"
 
 debug:
   # Targeted Phase 8 diagnostics are disabled by default. Use /phantom debug <player> at runtime.
@@ -49,7 +147,8 @@ setbacks:
   only-when-exhaustive: true
 
 checks:
-  # Packet checks are evidence-only and use the same VL persistence model as Grim.
+  # Packet checks are evidence-only. Punishment groups above control the active
+  # violation window and alert/log thresholds.
   enabled: true
   alert-violation-threshold: 100.0
   violation-increment: 1.0
