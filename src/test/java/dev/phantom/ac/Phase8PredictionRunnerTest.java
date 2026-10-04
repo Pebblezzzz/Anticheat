@@ -773,7 +773,7 @@ class Phase8PredictionRunnerTest {
         report.results().getFirst().verdict(),
         report.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.UNCERTAIN,
+        Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getLast().verdict(),
         report.results().toString());
     assertEquals(groundedStep.position(),
@@ -1410,7 +1410,7 @@ class Phase8PredictionRunnerTest {
         report.results().getLast().verdict(),
         report.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.POSSIBLE,
+        Phase8MovementValidation.Verdict.UNCERTAIN,
         report.results().getLast().verdict(),
         report.results().toString());
     assertTrue(
