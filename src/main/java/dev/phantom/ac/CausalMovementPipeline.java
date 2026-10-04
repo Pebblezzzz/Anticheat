@@ -358,41 +358,102 @@ public final class CausalMovementPipeline {
 
 
 
-      // Rotation-only packets are observations, not physics ticks. They may update
-      // candidate rotation for the next real simulation tick, but never establish
-      // a new ground/position trajectory.
+      /*
+       * Movement packets without a position are observations, not physics ticks.
+       * Their exact payload matters:
+       *   ROTATION -> validate only rotation
+       *   STATUS   -> validate only the on-ground claim
+       * They must not be forced through a missing prediction frontier and turned
+       * into permanent UNCERTAIN evidence when a causal server witness exists.
+       */
       if (movement.move().position() == null) {
-        if (frontier.candidates().isEmpty() || frontier.lastMovementTick() < 0) {
-          SearchResult uncertain = uncertainSearch(frontier.candidates(),
-              "rotation-only movement packet has no established deterministic frontier");
-          results.add(Phase8MovementValidation.validate(
-              playerId, serverTick, observedBefore, observedAfter, movement.world(),
-              worldReference, sync, assumptions, uncertain, replayReference, false,
-              EnumSet.of(Phase6Reachability.ObservedField.ROTATION)));
+        boolean statusObservation =
+            movement.move().movementKind() == Packets.MovementKind.STATUS;
+        if (statusObservation) {
+          Optional<Candidate> statusWitness =
+              statusObservationWitness(movement, movementTickForObservation(eventTiming));
+
+          if (statusWitness.isPresent()) {
+            Candidate witness = statusWitness.orElseThrow();
+            SearchResult statusSearch = new SearchResult(
+                Verdict.POSSIBLE,
+                Set.of(witness),
+                0,
+                1,
+                0, 0, 0, 0,
+                List.of("status packet on-ground claim compared against a causally aligned authoritative witness"));
+            Set<Phase6Reachability.ObservedField> fields =
+                EnumSet.of(Phase6Reachability.ObservedField.GROUND);
+            Phase8MovementValidation.Result result = Phase8MovementValidation.validate(
+                playerId, serverTick, observedBefore, observedAfter, movement.world(),
+                worldReference, sync, assumptions, statusSearch, replayReference,
+                !eventTiming.uncertain() && movement.chronologyClean(), fields);
+            results.add(result);
+            switch (result.verdict()) {
+              case POSSIBLE -> {
+                possible++;
+                contradictionActive = false;
+              }
+              case UNCERTAIN -> {
+                uncertain++;
+                recoveryRequired = true;
+              }
+              case IMPOSSIBLE -> {
+                impossible++;
+                contradictionActive = true;
+              }
+            }
+            trace.add("EVIDENCE " + result.verdict()
+                + " reason=STATUS_GROUND_CLAIM"
+                + " authoritativeGround=" + witness.context().player().onGround()
+                + " clientGround=" + observedAfter.onGround());
+            frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+                assumptions, uncertainty, trace));
+          } else {
+            SearchResult uncertain = uncertainSearch(frontier.candidates(),
+                "status movement packet has no causally aligned authoritative ground witness");
+            results.add(Phase8MovementValidation.validate(
+                playerId, serverTick, observedBefore, observedAfter, movement.world(),
+                worldReference, sync, assumptions, uncertain, replayReference, false,
+                EnumSet.of(Phase6Reachability.ObservedField.GROUND)));
+            uncertain++;
+            recoveryRequired = true;
+            frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+                assumptions, uncertainty, trace));
+          }
         } else {
-          Set<Candidate> rotated = retargetRotation(
-              frontier.candidates(), movement.move(), maximumCandidates);
-          boolean exact = eventTiming.simulationClientTicks().isExact()
-              && movement.chronologyClean();
-          SearchResult rotation = new SearchResult(
-              exact ? Verdict.POSSIBLE : Verdict.UNCERTAIN,
-              rotated,
-              0,
-              rotated.size(),
-              0, 0,
-              exact ? 0 : 1,
-              0,
-              exact ? List.of("rotation observation retained without advancing a physics tick")
-                  : List.of("rotation chronology is not exact"));
-          results.add(Phase8MovementValidation.validate(
-              playerId, serverTick, observedBefore, observedAfter, movement.world(),
-              worldReference, sync, assumptions, rotation, replayReference,
-              exact && !recoveryRequired,
-              EnumSet.of(Phase6Reachability.ObservedField.ROTATION)));
-          if (exact) frontier = new Frontier(rotated, frontier.lastMovementTick(), frontier.anchored());
+          if (frontier.candidates().isEmpty() || frontier.lastMovementTick() < 0) {
+            SearchResult uncertain = uncertainSearch(frontier.candidates(),
+                "rotation-only movement packet has no established deterministic frontier");
+            results.add(Phase8MovementValidation.validate(
+                playerId, serverTick, observedBefore, observedAfter, movement.world(),
+                worldReference, sync, assumptions, uncertain, replayReference, false,
+                EnumSet.of(Phase6Reachability.ObservedField.ROTATION)));
+          } else {
+            Set<Candidate> rotated = retargetRotation(
+                frontier.candidates(), movement.move(), maximumCandidates);
+            boolean exact = eventTiming.simulationClientTicks().isExact()
+                && movement.chronologyClean();
+            SearchResult rotation = new SearchResult(
+                exact ? Verdict.POSSIBLE : Verdict.UNCERTAIN,
+                rotated,
+                0,
+                rotated.size(),
+                0, 0,
+                exact ? 0 : 1,
+                0,
+                exact ? List.of("rotation observation retained without advancing a physics tick")
+                    : List.of("rotation chronology is not exact"));
+            results.add(Phase8MovementValidation.validate(
+                playerId, serverTick, observedBefore, observedAfter, movement.world(),
+                worldReference, sync, assumptions, rotation, replayReference,
+                exact && !recoveryRequired,
+                EnumSet.of(Phase6Reachability.ObservedField.ROTATION)));
+            if (exact) frontier = new Frontier(rotated, frontier.lastMovementTick(), frontier.anchored());
+          }
+          frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
+              assumptions, uncertainty, trace));
         }
-        frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
-            assumptions, uncertainty, trace));
         continue;
       }
 
