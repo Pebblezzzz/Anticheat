@@ -128,7 +128,7 @@ class Phase8PredictionRunnerTest {
         new Maths.Vec3(1.4, 64.0, .5), 0f, 0f, false, 6723L);
     Move secondMovement = new Move(
         new Maths.Vec3(1.8914000141620635, 63.92159999847412, .5),
-        0f, 0f, false, 2L);
+        0f, 0f, false, 6724L);
 
     var report = runner.process(
         "stale-correction-packet-bootstrap",
@@ -228,7 +228,7 @@ class Phase8PredictionRunnerTest {
         report.results().get(2).verdict(),
         report.results().toString());
     assertTrue(report.frames().get(1).trace().stream()
-        .anyMatch(line -> line.contains("rotation is a retained client-state observation")),
+        .anyMatch(line -> line.startsWith("OBSERVATION rotation-only")),
         report.frames().get(1).trace().toString());
     assertTrue(report.frames().get(2).trace().stream()
         .anyMatch(line -> line.contains("rotation is a retained client-state observation")),
