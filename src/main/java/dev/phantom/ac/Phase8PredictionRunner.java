@@ -452,13 +452,6 @@ public final class Phase8PredictionRunner {
       initialAnchorReceivedNanos = currentAnchorReceivedNanos;
     }
 
-    if (clientState == null) {
-      latestContinuation = Continuation.UNANCHORED;
-      return new Report(
-          List.of(), 0, 0, 0, 0, 0,
-          lastProcessedSequence, relativeClientTick, latestContinuation, false, List.of());
-    }
-
     List<Packets.RawPacket> packets = raw.stream()
         .filter(packet -> packet.sequence() > lastProcessedSequence)
         .sorted(Comparator.comparingLong(Packets.RawPacket::sequence)
@@ -470,6 +463,23 @@ public final class Phase8PredictionRunner {
           List.of(), 0, 0, 0, 0, 0,
           lastProcessedSequence, relativeClientTick, latestContinuation,
           !prediction.isEmpty(), List.of());
+    }
+
+    if (clientState == null) {
+      Packets.RawPacket firstMovement = packets.stream()
+          .filter(packet -> packet.packet() instanceof Packets.Move move && move.position() != null)
+          .findFirst()
+          .orElse(null);
+      if (firstMovement == null) {
+        latestContinuation = Continuation.UNANCHORED;
+        return new Report(
+            List.of(), packets.size(), 0, 0, 0, 0,
+            lastProcessedSequence, relativeClientTick, latestContinuation, false, List.of());
+      }
+      clientState = State.Player.initial(((Packets.Move) firstMovement.packet()).position());
+      initialAnchor = clientState;
+      initialAnchorReceivedNanos = firstMovement.receivedNanos();
+      latestContinuation = Continuation.ACTIVE;
     }
 
     /*
@@ -787,7 +797,7 @@ public final class Phase8PredictionRunner {
         trace.add("FRONTIER_ROOT_SUPPRESSED reason=authoritative-observation-witness"
             + " positionBearing=" + (move.position() != null));
       } else {
-        ensureRoot(playerId, packet, move, observedBefore, tick, trace);
+        ensureRoot(playerId, packet, move, observedBefore, tick, world, trace);
         rootRebasedForMovement =
             refreshFromCausalAuthorityIfStale(packet, move, observedBefore, tick, world, trace);
       }
@@ -2039,6 +2049,7 @@ public final class Phase8PredictionRunner {
       Packets.Move move,
       Player observedBefore,
       TickResolution tick,
+      WorldSnapshot world,
       List<String> trace) {
     if (!prediction.isEmpty()) return;
     long targetTick = tick.clientTick();
@@ -2070,6 +2081,27 @@ public final class Phase8PredictionRunner {
           authority.context().movementEnvironment()));
       predictionTick = rootTick;
       latestContinuation = Continuation.ACTIVE;
+      return;
+    }
+
+    if (world != null) {
+      MovementEnvironment packetEnvironment =
+          packetMovementEnvironment(observedBefore, world);
+      Player packetRoot = withPacketEnvironment(observedBefore, packetEnvironment);
+      rootTick = Math.max(0L, targetTick - 1L);
+      prediction = Set.of(candidateFromPlayer(
+          packetRoot,
+          rootTick,
+          "PACKET_CLIENT_ROOT",
+          -1L,
+          EntityCollisions.NONE_TRACKED,
+          packetEnvironment));
+      predictionTick = rootTick;
+      latestContinuation = Continuation.ACTIVE;
+      trace.add("ROOT source=PACKET_CLIENT_STATE"
+          + " rootTick=" + rootTick
+          + " environment=" + packetEnvironment
+          + " entityCollisions=UNKNOWN");
       return;
     }
 
@@ -3003,6 +3035,66 @@ public final class Phase8PredictionRunner {
 
   private long nextWitnessCandidateId() {
     return nextCandidateId++;
+  }
+
+  private static MovementEnvironment packetMovementEnvironment(
+      Player player,
+      WorldSnapshot world) {
+    dev.phantom.ac.Maths.Aabb box =
+        dev.phantom.ac.Maths.Aabb.playerAt(player.position(), player.pose());
+    dev.phantom.ac.geometry.BlockBox blockBox =
+        new dev.phantom.ac.geometry.BlockBox(
+            box.minX(), box.minY(), box.minZ(),
+            box.maxX(), box.maxY(), box.maxZ());
+    var sample = dev.phantom.ac.world.WorldQueries.environment(world, blockBox);
+    boolean sprint = player.input().map(Simulation.AdvancedInput::sprint).orElse(false);
+    boolean sneak = player.input().map(Simulation.AdvancedInput::sneak).orElse(false);
+    boolean swimming = player.pose() == Pose.SWIMMING;
+
+    if (sample.water()) {
+      return Phase5Mechanics.MovementEnvironment.vanillaWater(
+          player.onGround(), sprint, sneak, swimming);
+    }
+    if (sample.lava()) {
+      return Phase5Mechanics.MovementEnvironment.vanillaLava(
+          player.onGround(), sprint, sneak);
+    }
+    if (sample.climbable()) {
+      return Phase5Mechanics.MovementEnvironment.vanillaClimbable(
+          player.onGround(), sprint, sneak);
+    }
+    return Phase5Mechanics.MovementEnvironment.dry(
+        player.onGround(), sprint, sneak);
+  }
+
+  private static Player withPacketEnvironment(
+      Player player,
+      MovementEnvironment environment) {
+    State.Environment stateEnvironment =
+        environment.fluid() == Fluid.WATER
+            ? State.Environment.WATER
+            : environment.fluid() == Fluid.LAVA
+                ? State.Environment.LAVA
+                : environment.climbable()
+                    ? State.Environment.CLIMBABLE
+                    : State.Environment.DRY;
+    return new Player(
+        player.position(),
+        player.velocity(),
+        player.yaw(),
+        player.pitch(),
+        player.onGround(),
+        player.gamemode(),
+        player.effects(),
+        player.awaitingTeleport(),
+        player.uncertain(),
+        player.input(),
+        player.attributes(),
+        Phase5Mechanics.nextPose(player.pose(), environment),
+        stateEnvironment,
+        player.clientTickRange(),
+        player.provenance(),
+        player.uncertaintyReasons());
   }
 
   private static Player playerFromAuthority(Packets.PlayerContext context) {

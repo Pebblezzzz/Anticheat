@@ -1,6 +1,5 @@
 package dev.phantom.ac.paper;
 
-import io.papermc.paper.event.player.PlayerFailMoveEvent;
 import io.netty.channel.Channel;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
@@ -200,6 +199,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             packet.isOnGround(),
             clientTick,
             movementKind);
+        if (move.position()!=null) {
+          capture.lastServerX=move.position().x();
+          capture.lastServerY=move.position().y();
+          capture.lastServerZ=move.position().z();
+        }
         String sourceId=tickObservation.hasSeenTickEnd()?"paper-client-tick-boundary":"paper-relative-first-tick";
         long sequence=capture.sequence.incrementAndGet();
         long receivedNanos=System.nanoTime();
@@ -376,6 +380,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         RelativeFlag flags=packet.getRelativeFlags();
         record(capture,new Packets.Teleport(packet.getTeleportId(),vector(packet.getX(),packet.getY(),packet.getZ()),packet.getYaw(),packet.getPitch(),
             flags.has(RelativeFlag.X),flags.has(RelativeFlag.Y),flags.has(RelativeFlag.Z),flags.has(RelativeFlag.YAW),flags.has(RelativeFlag.PITCH)));
+        if (!flags.has(RelativeFlag.X) && !flags.has(RelativeFlag.Y) && !flags.has(RelativeFlag.Z)) {
+          capture.lastServerX=packet.getX();
+          capture.lastServerY=packet.getY();
+          capture.lastServerZ=packet.getZ();
+        }
       }else if(event.getPacketType()==PacketType.Play.Server.SPAWN_ENTITY){
         var packet=new WrapperPlayServerSpawnEntity(event);
         recordEntitySpawn(capture,packet.getEntityId(),vector(packet.getPosition().x,packet.getPosition().y,packet.getPosition().z));
@@ -403,8 +412,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         var pos=packet.getPosition();
         recordEntityTeleport(capture,packet.getEntityId(),new Vec3(pos.getX(),pos.getY(),pos.getZ()));
       }else if(event.getPacketType()==PacketType.Play.Server.ENTITY_METADATA){
-        var packet=new WrapperPlayServerEntityMetadata(event);
-        refreshEntityShape(capture,packet.getEntityId());
+        capture.clientWorld.markEntityTrackingIncomplete();
       }else if(event.getPacketType()==PacketType.Play.Server.DESTROY_ENTITIES){
         var packet=new WrapperPlayServerDestroyEntities(event);
         for(int entityId:packet.getEntityIds()) recordEntityDespawn(capture,entityId);
@@ -461,7 +469,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         capture.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.BlockChange(
               new dev.phantom.ac.Phase4WorldReplica.Order(authoritativeTick(capture)==null?0:authoritativeTick(capture),receivedNanos,sequence,sequence),
               new dev.phantom.ac.Phase4WorldReplica.Provenance("paper-block-change","BLOCK_CHANGE",sequence,authoritativeTick(capture)==null?0:authoritativeTick(capture),null,false,"clientbound"),pos,state));
-        warmStateAsync(capture,state);
         Packets.Packet blockChange=blockStatePacket(pos,state);
         appendPacket(capture,new RawPacket(sequence,receivedNanos,blockChange,
             Packets.CaptureProvenance.fromAdapter("paper-block-change",blockChange,null)));
@@ -476,7 +483,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           capture.clientWorld.queue(new dev.phantom.ac.Phase4WorldReplica.BlockChange(
               new dev.phantom.ac.Phase4WorldReplica.Order(authoritativeTick(capture)==null?0:authoritativeTick(capture),receivedNanos,sequence,sequence),
               new dev.phantom.ac.Phase4WorldReplica.Provenance("paper-multi-block-change","MULTI_BLOCK_CHANGE",sequence,authoritativeTick(capture)==null?0:authoritativeTick(capture),null,false,"clientbound"),pos,state));
-          warmStateAsync(capture,state);
           Packets.Packet blockChange=blockStatePacket(pos,state);
           appendPacket(capture,new RawPacket(sequence,receivedNanos,blockChange,
               Packets.CaptureProvenance.fromAdapter("paper-multi-block-change",blockChange,null)));
@@ -574,7 +580,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       thread.setDaemon(true);
       return thread;
     });
-    stateTask=getServer().getScheduler().runTaskTimer(this,()->{drainChunkQueues();captureLiveContext();},1L,1L);
+    stateTask=getServer().getScheduler().runTaskTimer(this,this::drainChunkQueues,1L,1L);
     getLogger().info("[PhantomAC] Hardened Phase 8 adapter enabled; movement validation runs on per-connection Netty EventLoops");
   }
 
@@ -595,69 +601,22 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   @EventHandler public void onJoin(PlayerJoinEvent event){
-    Player player=event.getPlayer();
-    captures.compute(player.getUniqueId(),(id,existing)->{
-      if(existing!=null){
-        existing.updateServerPosition(player);
-        return existing;
-      }
-      Capture capture=new Capture(id,System.nanoTime(),validationBudget);
-      capture.updateServerPosition(player);
-      return capture;
-    });
+    UUID playerId=event.getPlayer().getUniqueId();
+    captures.computeIfAbsent(playerId,id->new Capture(id,System.nanoTime(),validationBudget));
   }
 
-  @EventHandler public void onTeleport(PlayerTeleportEvent event){
-    Player player=event.getPlayer();
-    Capture capture=captures.get(player.getUniqueId());
-    if(capture==null || event.getTo()==null)return;
-
-    /*
-     * PlayerTeleportEvent supplies a server-authoritative destination. Re-anchor
-     * the prediction epoch from that destination after the event rather than
-     * copying the client's next reported position into the baseline.
-     */
-    getServer().getScheduler().runTask(this,()->{
-      if(!player.isOnline() || !captures.containsKey(player.getUniqueId()))return;
-      State.Player template=capture.playerState.initialState();
-      if(template==null)return;
-      org.bukkit.Location location=player.getLocation();
-      org.bukkit.util.Vector velocity=player.getVelocity();
-      State.Player authoritativeAnchor=new State.Player(
-          new Vec3(location.getX(),location.getY(),location.getZ()),
-          new Vec3(velocity.getX(),velocity.getY(),velocity.getZ()),
-          location.getYaw(),location.getPitch(),player.isOnGround(),
-          player.getGameMode().name().toLowerCase(Locale.ROOT),
-          template.effects(),OptionalInt.empty(),false,Optional.empty(),
-          template.attributes(),template.pose(),template.environment(),
-          State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
-      long receivedNanos=System.nanoTime();
-      capture.playerState.beginResync(authoritativeAnchor,receivedNanos);
-      if (debugLevel(player.getUniqueId()).trace()) {
-        getLogger().info("[PhantomAC][PHASE8][REANCHOR] player="+player.getName()
-            +" reason=PLAYER_TELEPORT_EVENT"
-            +" sequenceBoundary="+capture.sequence.get()
-            +" position="+authoritativeAnchor.position());
-      }
-    });
-  }
+  // Re-anchoring is driven by the clientbound position-correction packet.
+  // Bukkit teleport events never enter movement detection state.
 
   @EventHandler public void onRespawn(PlayerRespawnEvent event){
-    Player player=event.getPlayer();
-    getServer().getScheduler().runTask(this,()->{
-      Capture capture=new Capture(player.getUniqueId(),System.nanoTime(),validationBudget);
-      captures.put(player.getUniqueId(),capture);
-      State.Player anchor=State.Player.initial(
-          new Vec3(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()));
-      capture.playerState.activate(anchor,System.nanoTime());
-    });
+    UUID playerId=event.getPlayer().getUniqueId();
+    captures.put(playerId,new Capture(playerId,System.nanoTime(),validationBudget));
   }
 
   @EventHandler public void onWorldChange(PlayerChangedWorldEvent event){
-    Capture capture=new Capture(event.getPlayer().getUniqueId(),System.nanoTime(),validationBudget);
-    capture.updateServerPosition(event.getPlayer());
-    captures.put(event.getPlayer().getUniqueId(),capture);
-    setbackOverrides.remove(event.getPlayer().getUniqueId());
+    UUID playerId=event.getPlayer().getUniqueId();
+    captures.put(playerId,new Capture(playerId,System.nanoTime(),validationBudget));
+    setbackOverrides.remove(playerId);
   }
 
   @EventHandler public void onQuit(PlayerQuitEvent event){
@@ -666,104 +625,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     captures.remove(event.getPlayer().getUniqueId());
     debugPlayers.remove(event.getPlayer().getUniqueId());
     setbackOverrides.remove(event.getPlayer().getUniqueId());
-  }
-
-  /**
-   * Paper has already performed its authoritative movement validation when this
-   * event fires. Keep the rejection as corroboration/telemetry only; Phantom
-   * must not manufacture an IMPOSSIBLE verdict from Paper's own rejection.
-   */
-  @EventHandler public void onPlayerToggleFlight(org.bukkit.event.player.PlayerToggleFlightEvent event){
-    Player player=event.getPlayer();
-    Capture capture=captures.computeIfAbsent(player.getUniqueId(),
-        ignored->new Capture(player.getUniqueId(),System.nanoTime(),validationBudget));
-    boolean attemptedFlying=event.isFlying();
-    Long authoritativeTick=capture.authoritativeServerTick.get()>=0
-        ?capture.authoritativeServerTick.get():null;
-    Packets.FlightToggle toggle=new Packets.FlightToggle(attemptedFlying,event.isCancelled());
-    long sequence=capture.sequence.incrementAndGet();
-    long receivedNanos=System.nanoTime();
-    if (debugLevel(capture.playerId).summary()) {
-      getLogger().info("[PhantomAC][PHASE8][FLIGHT_TOGGLE] player="+player.getName()
-          +" attemptedFlying="+attemptedFlying
-          +" cancelled="+event.isCancelled()
-          +" canFly="+player.getAllowFlight()
-          +" flyingNow="+player.isFlying()
-          +" gamemode="+player.getGameMode()
-          +" authorityTick="+authoritativeTick);
-    }
-    appendPacket(capture,new RawPacket(sequence,receivedNanos,toggle,
-        Packets.CaptureProvenance.fromAdapter("paper-flight-toggle",toggle,authoritativeTick)));
-  }
-
-  @EventHandler public void onPlayerFailMove(PlayerFailMoveEvent event){
-    Player player=event.getPlayer();
-    if (debugLevel(player.getUniqueId()).trace()) {
-      getLogger().info("[PhantomAC][PHASE8][PAPER_MOVE_EVENT] player="+player.getName()
-          +" reason="+event.getFailReason()
-          +" allowed="+event.isAllowed()
-          +" from="+event.getFrom()
-          +" to="+event.getTo()
-          +" logWarning="+event.getLogWarning());
-    }
-    if(event.isAllowed())return;
-    PlayerFailMoveEvent.FailReason reason=event.getFailReason();
-    if(reason!=PlayerFailMoveEvent.FailReason.MOVED_TOO_QUICKLY
-        &&reason!=PlayerFailMoveEvent.FailReason.MOVED_WRONGLY)return;
-
-    Capture capture=captures.computeIfAbsent(player.getUniqueId(),
-        ignored->new Capture(player.getUniqueId(),System.nanoTime(),validationBudget));
-    long now=System.nanoTime();
-    if(capture.paperMoveFailureWindowStartNanos<0L
-        ||now-capture.paperMoveFailureWindowStartNanos>PAPER_MOVE_FAILURE_WINDOW_NANOS){
-      capture.paperMoveFailureWindowStartNanos=now;
-      capture.paperMoveFailureCount=1;
-    }else{
-      capture.paperMoveFailureCount++;
-    }
-
-    Packets.PaperMovementRejection corroboration =
-        new Packets.PaperMovementRejection(reason.name(),event.isAllowed());
-    long telemetrySequence=capture.sequence.incrementAndGet();
-    appendPacket(capture,new RawPacket(
-        telemetrySequence,now,corroboration,
-        Packets.CaptureProvenance.fromAdapter("paper-move-rejection",corroboration,authoritativeTick(capture))));
-
-    if (debugLevel(capture.playerId).summary()) {
-      getLogger().info("[PhantomAC][PHASE8][PAPER_MOVE_FAIL] player="+player.getName()
-          +" reason="+reason
-          +" allowed="+event.isAllowed()
-          +" failuresInWindow="+capture.paperMoveFailureCount
-          +" from="+event.getFrom()
-          +" to="+event.getTo()
-          +" logWarning="+event.getLogWarning());
-    }
-
-    if(capture.paperMoveFailureCount>=PAPER_MOVE_FAILURE_THRESHOLD
-        &&debugLevel(capture.playerId).summary()){
-      getLogger().warning("[PhantomAC][PHASE8][PAPER_CORROBORATION_ONLY] player="+player.getName()
-          +" reason="+reason
-          +" rejectedAttemptsIn1s="+capture.paperMoveFailureCount
-          +" from="+event.getFrom()
-          +" to="+event.getTo()
-          +" NOTE=Paper rejection is telemetry only; Phantom will not emit an IMPOSSIBLE result from this event");
-    }
-  }
-
-  private static Long authoritativeTick(Capture capture){
-    long tick=capture.authoritativeServerTick.get();
-    return tick>=0 ? tick : null;
-  }
-
-  private State.Player paperMovementState(State.Player template,org.bukkit.Location location,Player player){
-    org.bukkit.util.Vector velocity=player.getVelocity();
-    return new State.Player(
-        vector(location.getX(),location.getY(),location.getZ()),
-        vector(velocity.getX(),velocity.getY(),velocity.getZ()),
-        location.getYaw(),location.getPitch(),player.isOnGround(),
-        template.gamemode(),template.effects(),java.util.OptionalInt.empty(),false,
-        template.input(),template.attributes(),template.pose(),template.environment(),
-        State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
   }
 
   private void applyAuthoritativeEventResult(Capture capture,Phase8MovementValidation.Result result){
@@ -994,6 +855,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
   }
 
+  private static Long authoritativeTick(Capture capture){
+    return null;
+  }
+
   private static boolean isNearChunk(Capture capture,Column column){
     double chunkCenterX=column.getX()*16.0+8.0;
     double chunkCenterZ=column.getZ()*16.0+8.0;
@@ -1010,240 +875,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     return Math.abs(capture.lastServerX-position.x())<16.0
         &&Math.abs(capture.lastServerY-position.y())<16.0
         &&Math.abs(capture.lastServerZ-position.z())<16.0;
-  }
-
-  /**
-   * Observe the currently ridden entity as a compact equivalent of Grim's
-   * vehicle packet-entity state. Unknown vehicle details are left conservative.
-   */
-  private static Phase5Mechanics.VehicleState observeVehicleState(Player player){
-    Entity vehicle=player.getVehicle();
-    if(vehicle==null)return Phase5Mechanics.VehicleState.NONE;
-
-    String typeName=vehicle.getType().name().toLowerCase(Locale.ROOT);
-    Phase5Mechanics.VehicleType type;
-    if(typeName.contains("chest_boat")) type=Phase5Mechanics.VehicleType.CHEST_BOAT;
-    else if(typeName.equals("boat")) type=Phase5Mechanics.VehicleType.BOAT;
-    else if(typeName.contains("minecart")) type=Phase5Mechanics.VehicleType.MINECART;
-    else if(typeName.equals("pig")) type=Phase5Mechanics.VehicleType.PIG;
-    else if(typeName.equals("strider")) type=Phase5Mechanics.VehicleType.STRIDER;
-    else if(typeName.equals("camel")) type=Phase5Mechanics.VehicleType.CAMEL;
-    else if(typeName.equals("horse")||typeName.equals("donkey")||typeName.equals("mule"))
-      type=Phase5Mechanics.VehicleType.HORSE;
-    else if(typeName.contains("nautilus")) type=Phase5Mechanics.VehicleType.NAUTILUS;
-    else if(typeName.contains("happy_ghast")) type=Phase5Mechanics.VehicleType.HAPPY_GHAST;
-    else type=Phase5Mechanics.VehicleType.OTHER;
-
-    boolean controlling=!vehicle.getPassengers().isEmpty()
-        &&vehicle.getPassengers().getFirst().getEntityId()==player.getEntityId();
-    org.bukkit.util.Vector velocity=vehicle.getVelocity();
-    org.bukkit.Location location=vehicle.getLocation();
-
-    double movementSpeed=0.1;
-    if(vehicle instanceof org.bukkit.attribute.Attributable attributable){
-      AttributeInstance speed=attributable.getAttribute(Attribute.MOVEMENT_SPEED);
-      if(speed!=null)movementSpeed=speed.getValue();
-      if(type==Phase5Mechanics.VehicleType.HAPPY_GHAST){
-        try{
-          Attribute flying=Attribute.valueOf("FLYING_SPEED");
-          AttributeInstance flyingSpeed=attributable.getAttribute(flying);
-          if(flyingSpeed!=null)movementSpeed=flyingSpeed.getValue();
-        }catch(IllegalArgumentException ignored){}
-      }
-    }
-
-    boolean cold=false;
-    if(type==Phase5Mechanics.VehicleType.STRIDER){
-      org.bukkit.block.Block below=vehicle.getWorld().getBlockAt(
-          location.getBlockX(),location.getBlockY()-1,location.getBlockZ());
-      String material=below.getType().name();
-      cold=!(material.equals("LAVA")||material.contains("MAGMA")||material.contains("FIRE"));
-    }
-
-    boolean dashReady=type==Phase5Mechanics.VehicleType.CAMEL
-        &&invokeBoolean(vehicle,"isDashing")
-        &&invokeInt(vehicle,"getDashCooldown",-1)<=0;
-
-    return new Phase5Mechanics.VehicleState(
-        type,
-        controlling,
-        new Phase5Mechanics.Vec3Like(velocity.getX(),velocity.getY(),velocity.getZ()),
-        location.getYaw(),
-        location.getPitch(),
-        vehicle.isOnGround(),
-        movementSpeed,
-        cold,
-        dashReady);
-  }
-
-  private static boolean invokeBoolean(Entity entity,String method){
-    try{
-      Object value=entity.getClass().getMethod(method).invoke(entity);
-      return value instanceof Boolean b && b;
-    }catch(ReflectiveOperationException|SecurityException ignored){
-      return false;
-    }
-  }
-
-  private static int invokeInt(Entity entity,String method,int fallback){
-    try{
-      Object value=entity.getClass().getMethod(method).invoke(entity);
-      return value instanceof Number n?n.intValue():fallback;
-    }catch(ReflectiveOperationException|SecurityException ignored){
-      return fallback;
-    }
-  }
-
-  private void captureLiveContext(){
-    for(Capture capture:captures.values()){
-      Player player=getServer().getPlayer(capture.playerId);
-      if(player==null)continue;
-      long authoritativeTick=capture.authoritativeServerTick.incrementAndGet();
-      Long authoritativeClientTick=capture.clientTickTracker.hasObservedBoundary()
-          ?capture.clientTickTracker.clientTickForMovement():null;
-      capture.updateServerPosition(player);
-      capture.lastAuthoritativePosition=new Vec3(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ());
-      org.bukkit.util.Vector authoritativeVelocity=player.getVelocity();
-      capture.lastAuthoritativeVelocity=new Vec3(authoritativeVelocity.getX(),authoritativeVelocity.getY(),authoritativeVelocity.getZ());
-      capture.lastAuthoritativeOnGround=player.isOnGround();
-      capture.lastAuthoritativeCanFly=player.getAllowFlight();
-      capture.lastAuthoritativeFlying=player.isFlying();
-      capture.minY=player.getWorld().getMinHeight();
-      capture.maxY=player.getWorld().getMaxHeight();
-
-      AttributeInstance movement=player.getAttribute(Attribute.MOVEMENT_SPEED);
-      double rawMovementSpeed=movement==null?0.1:movement.getValue();
-      boolean sprint=player.isSprinting(),sneak=player.isSneaking();
-      /*
-       * Paper's effective attribute value already includes vanilla's sprint
-       * movement-speed modifier while the player is sprinting. Phantom's
-       * canonical physics applies sprinting as a separate 1.3 multiplier, so
-       * feeding the sprint-adjusted Bukkit value into that model double-counts
-       * sprint and produces a systematic horizontal overshoot.
-       *
-       * Normalize back to the pre-sprint effective value while preserving other
-       * attribute modifiers. Sprint remains a separate physical movement state.
-       */
-      double movementSpeed = sprint
-          ? rawMovementSpeed / dev.phantom.ac.Vanilla12111RichPhysics.SPRINTING_SPEED_MULTIPLIER
-          : rawMovementSpeed;
-      Map<String,Integer> effects=new LinkedHashMap<>();
-      for(PotionEffect effect:player.getActivePotionEffects())
-        if(effect.getType().getKey()!=null)
-          effects.put(effect.getType().getKey().toString(),effect.getAmplifier());
-
-      /*
-       * Modern 1.21 movement uses enchantment-backed attributes for several
-       * movement modifiers. Packet capture does not reliably expose those
-       * values on the movement stream, so the Bukkit main-thread snapshot
-       * records the compensated player equipment as explicit core state.
-       */
-      int depthStrider = enchantmentLevel(
-          player.getInventory().getBoots(), "depth_strider");
-      int soulSpeed = enchantmentLevel(
-          player.getInventory().getBoots(), "soul_speed");
-      int swiftSneak = enchantmentLevel(
-          player.getInventory().getLeggings(), "swift_sneak");
-      if (depthStrider >= 0) effects.put("phantom:depth_strider", depthStrider);
-      if (soulSpeed >= 0) effects.put("phantom:soul_speed", soulSpeed);
-      if (swiftSneak >= 0) effects.put("phantom:swift_sneak", swiftSneak);
-
-      Phase5Mechanics.Pose pose=
-          player.isSleeping()?Phase5Mechanics.Pose.SLEEPING:
-          player.isGliding()?Phase5Mechanics.Pose.FALL_FLYING:
-          player.isSwimming()?Phase5Mechanics.Pose.SWIMMING:
-          player.isSneaking()?Phase5Mechanics.Pose.CROUCHING:
-          Phase5Mechanics.Pose.STANDING;
-
-      boolean water=false,lava=false,climb=false;
-      org.bukkit.util.BoundingBox box=player.getBoundingBox();
-      int minX=(int)Math.floor(box.getMinX()),maxX=(int)Math.floor(Math.nextDown(box.getMaxX()));
-      int minY=(int)Math.floor(box.getMinY()),maxY=(int)Math.floor(Math.nextDown(box.getMaxY()));
-      int minZ=(int)Math.floor(box.getMinZ()),maxZ=(int)Math.floor(Math.nextDown(box.getMaxZ()));
-
-      for(int y=minY;y<=maxY;y++)for(int x=minX;x<=maxX;x++)for(int z=minZ;z<=maxZ;z++){
-        Material material=player.getWorld().getBlockAt(x,y,z).getType();
-        if(material==Material.WATER||material==Material.BUBBLE_COLUMN)water=true;
-        if(material==Material.LAVA)lava=true;
-        if(material==Material.LADDER||material==Material.VINE||material==Material.SCAFFOLDING)climb=true;
-      }
-
-      if (debugLevel(capture.playerId).trace() && Math.abs(rawMovementSpeed - movementSpeed) > 1.0E-9) {
-        getLogger().info("[PhantomAC][AUTHORITY_SPEED] player="+capture.playerName
-            +" rawEffective="+rawMovementSpeed
-            +" normalizedPreSprint="+movementSpeed
-            +" sprint="+sprint
-            +" multiplier="+dev.phantom.ac.Vanilla12111RichPhysics.SPRINTING_SPEED_MULTIPLIER);
-      }
-
-      Phase5Mechanics.MovementEnvironment baseEnvironment=
-          water?Phase5Mechanics.MovementEnvironment.vanillaWater(player.isOnGround(),sprint,sneak,player.isSwimming()):
-          lava?Phase5Mechanics.MovementEnvironment.vanillaLava(player.isOnGround(),sprint,sneak):
-          climb?Phase5Mechanics.MovementEnvironment.vanillaClimbable(player.isOnGround(),sprint,sneak):
-          Phase5Mechanics.MovementEnvironment.dry(player.isOnGround(),sprint,sneak);
-      Phase5Mechanics.VehicleState vehicleState=observeVehicleState(player);
-      Phase5Mechanics.MovementEnvironment env=new Phase5Mechanics.MovementEnvironment(
-          baseEnvironment.fluid(),baseEnvironment.submerged(),baseEnvironment.climbable(),
-          baseEnvironment.onGround(),baseEnvironment.sprinting(),baseEnvironment.sneaking(),
-          baseEnvironment.swimmingInput(),baseEnvironment.gliding(),
-          baseEnvironment.fluidSpeedMultiplier(),baseEnvironment.fluidDrag(),
-          baseEnvironment.gravityMultiplier(),vehicleState);
-
-      /*
-       * Entity collision state is already captured from the clientbound packet
-       * stream into the per-player ClientEntityTrack map. Do not query Bukkit's
-       * live entity index here: this method runs once per tracked player every
-       * server tick, and the packet-backed view is both cheaper and closer to
-       * what that player can actually see.
-       *
-       * The 6-block expansion is retained so the candidate set has the same
-       * collision volume as the previous live-world query. Entity boxes remain
-       * sorted by entity id for deterministic replay/validation.
-       */
-      dev.phantom.ac.geometry.BlockBox relevantEntityRegion=new dev.phantom.ac.geometry.BlockBox(
-          box.getMinX()-6.0,box.getMinY()-6.0,box.getMinZ()-6.0,
-          box.getMaxX()+6.0,box.getMaxY()+6.0,box.getMaxZ()+6.0);
-      List<EntityCollisions.EntityBox> entityBoxes=new ArrayList<>();
-      for(ClientEntityTrack tracked:capture.clientEntities.values()){
-        if(tracked.entityId()==player.getEntityId())continue;
-        if(tracked.box().intersects(relevantEntityRegion))
-          entityBoxes.add(new EntityCollisions.EntityBox(tracked.entityId(),tracked.box()));
-      }
-      entityBoxes.sort(Comparator.comparingInt(EntityCollisions.EntityBox::entityId));
-
-      Packets.PlayerContext context=new Packets.PlayerContext(
-          player.getGameMode().name().toLowerCase(Locale.ROOT),
-          new dev.phantom.ac.Simulation.Attributes(movementSpeed),
-          effects,pose,env,
-          new Vec3(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()),
-          new Vec3(authoritativeVelocity.getX(),authoritativeVelocity.getY(),authoritativeVelocity.getZ()),
-          player.getAllowFlight(),player.isFlying(),player.isSleeping(),entityBoxes,vehicleState);
-
-      if(capture.playerState.initialState()==null){
-        long anchorReceivedNanos=System.nanoTime();
-        State.Environment stateEnvironment=switch(env.fluid()){
-          case WATER -> State.Environment.WATER;
-          case LAVA -> State.Environment.LAVA;
-          case NONE -> env.climbable()?State.Environment.CLIMBABLE:State.Environment.DRY;
-        };
-        capture.playerState.activate(
-            new State.Player(
-                vector(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()),
-                vector(authoritativeVelocity.getX(),authoritativeVelocity.getY(),authoritativeVelocity.getZ()),player.getLocation().getYaw(),player.getLocation().getPitch(),player.isOnGround(),
-                player.getGameMode().name().toLowerCase(Locale.ROOT),effects,java.util.OptionalInt.empty(),false,
-                java.util.Optional.empty(),new dev.phantom.ac.Simulation.Attributes(movementSpeed),pose,stateEnvironment,
-                State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of()),
-            anchorReceivedNanos);
-      }
-
-      /*
-       * The boundary ping closes the previous client-tick sandwich and becomes
-       * the opening marker for the next one. Capture the newly observed
-       * authority only after that ping so it is released by the next boundary.
-       */
-      requestStateBarrier(player,capture);
-      capture.playerState.observeAuthoritativeContext(context);
-    }
   }
 
   private WorldSnapshot validationSnapshot(Capture capture,double centerX,double centerZ,
@@ -1364,7 +995,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       if(raw.isEmpty())return;
 
       String playerName=capture.playerName==null?capture.playerId.toString():capture.playerName;
-      State.Player anchor=capture.playerState.initialState();
+      State.Player anchor=null;
       if(debugLevel(capture.playerId).trace()){
         getLogger().info("[PhantomAC][PHASE8][PREDICT_START] player="+playerName
             +" thread="+Thread.currentThread().getName()
@@ -1379,7 +1010,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           raw,
           sequence->clientWorldForMovement(capture,sequence),
           anchor,
-          capture.playerState.initialStateReceivedNanos());
+          -1L);
 
       Phase8PredictionRunner.Report report=incremental;
       ProductionCheckEngine.Report productionChecks =
@@ -2014,27 +1645,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       implements Serializable {}
 
   private void recordEntitySpawn(Capture capture,int entityId,Vec3 packetPosition){
-    long sequence=capture.sequence.incrementAndGet();
-    long receivedNanos=System.nanoTime();
+    // Entity dimensions are intentionally not sourced from Bukkit. Until the
+    // packet metadata/entity-type hitbox catalogue is complete, keep collision
+    // state explicitly incomplete so dependent checks become UNCERTAIN.
     capture.clientEntities.remove(entityId);
-    Bukkit.getScheduler().runTask(this,()->{
-      Player viewer=Bukkit.getPlayer(capture.playerId);
-      Entity entity=viewer==null?null:findWorldEntity(viewer,entityId);
-      if(entity==null){
-        capture.clientWorld.markEntityTrackingIncomplete();
-        return;
-      }
-      dev.phantom.ac.geometry.BlockBox box=alignServerEntityBox(entity,packetPosition);
-      capture.clientEntities.put(entityId,new ClientEntityTrack(entityId,packetPosition,box));
-      var event=new dev.phantom.ac.Phase4WorldReplica.EntitySpawn(
-          new dev.phantom.ac.Phase4WorldReplica.Order(authoritativeTick(capture)==null?0:authoritativeTick(capture),receivedNanos,sequence,sequence),
-          new dev.phantom.ac.Phase4WorldReplica.Provenance("paper-entity-spawn","ENTITY_SPAWN",sequence,authoritativeTick(capture)==null?0:authoritativeTick(capture),null,true,"clientbound"),
-          new EntityCollisions.EntityBox(entityId,box));
-      capture.clientWorld.queue(event);
-      var packet=new Packets.EntitySpawn(entityId,box);
-      appendPacket(capture,new RawPacket(sequence,receivedNanos,packet,
-          Packets.CaptureProvenance.fromAdapter("paper-entity-spawn",packet,authoritativeTick(capture))));
-    });
+    capture.clientWorld.markEntityTrackingIncomplete();
   }
 
   private void recordEntityRelativeMove(Capture capture,int entityId,double dx,double dy,double dz){
@@ -2091,51 +1706,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         Packets.CaptureProvenance.fromAdapter("paper-entity-despawn",packet,authoritativeTick(capture))));
   }
 
-  private void refreshEntityShape(Capture capture,int entityId){
-    ClientEntityTrack prior=capture.clientEntities.get(entityId);
-    if(prior==null){
-      capture.clientWorld.markEntityTrackingIncomplete();
-      return;
-    }
-    Bukkit.getScheduler().runTask(this,()->{
-      Player viewer=Bukkit.getPlayer(capture.playerId);
-      Entity entity=viewer==null?null:findWorldEntity(viewer,entityId);
-      if(entity==null){
-        capture.clientWorld.markEntityTrackingIncomplete();
-        return;
-      }
-      dev.phantom.ac.geometry.BlockBox box=alignServerEntityBox(entity,prior.packetPosition());
-      capture.clientEntities.put(entityId,new ClientEntityTrack(entityId,prior.packetPosition(),box));
-      recordEntityMove(capture,entityId,box);
-    });
-  }
-
-  private static Entity findWorldEntity(Player viewer,int entityId){
-    for(Entity entity:viewer.getWorld().getEntities())
-      if(entity.getEntityId()==entityId)return entity;
-    return null;
-  }
-
-  private static dev.phantom.ac.geometry.BlockBox alignServerEntityBox(Entity entity,Vec3 packetPosition){
-    org.bukkit.Location location=entity.getLocation();
-    org.bukkit.util.BoundingBox box=entity.getBoundingBox();
-    return new dev.phantom.ac.geometry.BlockBox(
-        box.getMinX()+packetPosition.x()-location.getX(),
-        box.getMinY()+packetPosition.y()-location.getY(),
-        box.getMinZ()+packetPosition.z()-location.getZ(),
-        box.getMaxX()+packetPosition.x()-location.getX(),
-        box.getMaxY()+packetPosition.y()-location.getY(),
-        box.getMaxZ()+packetPosition.z()-location.getZ());
-  }
-
-  private void warmStateAsync(Capture capture, BlockState state){
-    if(state==null||state.isUnsupported())return;
-    Bukkit.getScheduler().runTask(this, () -> {
-      Player player=Bukkit.getPlayer(capture.playerId);
-      if(player!=null)PaperVanillaCollision.warm(player.getWorld(),state);
-    });
-  }
-
   private static void appendPacket(Capture capture,RawPacket packet){
     capture.packets.addLast(packet);
     while(capture.packets.size()>MAX_CAPTURE_PACKETS)capture.packets.pollFirst();
@@ -2167,11 +1737,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
                 new dev.phantom.ac.Phase4WorldReplica.PackedChunkData(
                     order,provenance,new dev.phantom.ac.world.Chunk(work.column().getX(),work.column().getZ()),
                     decoded.sections(),work.column().isFullChunk());
-            Bukkit.getScheduler().runTask(this, () -> {
-              Player player=Bukkit.getPlayer(target.playerId);
-              if(player!=null) PaperVanillaCollision.warm(player.getWorld(),decoded.statesToWarm());
-              target.clientWorld.queue(worldEvent);
-            });
+            target.clientWorld.queue(worldEvent);
           }catch(RuntimeException failure){
             getLogger().log(java.util.logging.Level.WARNING,
                 "[PhantomAC][CHUNK] asynchronous client chunk decode failed player="+target.playerId
@@ -2192,8 +1758,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   private record PendingChunk(long sequence,long receivedNanos,long serverTick,Column column,ClientVersion clientVersion,int minY,int maxY){}
   private record DecodedChunk(
-      Map<Integer,dev.phantom.ac.Phase4WorldReplica.PackedSection> sections,
-      Set<BlockState> statesToWarm){}
+      Map<Integer,dev.phantom.ac.Phase4WorldReplica.PackedSection> sections){}
 
 
   private static DecodedChunk decodeChunk(PendingChunk pending){
@@ -2272,15 +1837,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       sections.put(sectionIndex,
           dev.phantom.ac.Phase4WorldReplica.PackedSection.fromStates(sectionY,states));
     }
-    Set<BlockState> statesToWarm=new HashSet<>();
-    for(var section:sections.values()){
-      for(int i=0;i<4096;i++){
-        BlockState state=section.stateAt(i);
-        if(!state.isUnsupported())statesToWarm.add(state);
-      }
-    }
-    return new DecodedChunk(Map.copyOf(sections),Set.copyOf(statesToWarm));
-  }
+    return new DecodedChunk(Map.copyOf(sections));  }
 
   private static int readPackedValue(long[] data,int bits,int index){
     if(bits==0)return 0;
@@ -2389,14 +1946,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       playerId=id;epochNanos=epoch;
       movementRunner=new Phase8PredictionRunner(candidateBudget);
       playerState=new PhantomPlayerState(id);
-      clientWorld.setCollisionResolver((snapshot,state,x,y,z)->PaperVanillaCollision.resolve(state,x,y,z));      clientWorld.markEntityTrackingComplete();
-    }
-
-    void updateServerPosition(Player player){
-      org.bukkit.Location location=player.getLocation();
-      lastServerX=location.getX();
-      lastServerY=location.getY();
-      lastServerZ=location.getZ();
+      // Movement collision is resolved from the immutable packet-visible world.
+      // No live Bukkit/Paper collision shape is installed here.
+      clientWorld.markEntityTrackingIncomplete();
     }
 
     short nextWorldTransaction(){
