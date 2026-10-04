@@ -122,12 +122,13 @@ class Phase8PredictionRunnerTest {
     WorldSnapshot world = floorWorld();
     Player start = anchor();
 
-    Maths.Vec3 correctedPosition = new Maths.Vec3(8.5, 64.0, 8.5);
-    Teleport correction = new Teleport(77, correctedPosition, 15f, 4f);
+    Maths.Vec3 correctedPosition = new Maths.Vec3(.5, 64.0, .5);
+    Teleport correction = new Teleport(77, correctedPosition, 0f, 0f);
     Move firstMovement = new Move(
-        new Maths.Vec3(8.42, 64.0, 8.18), 15f, 4f, true, 6723L);
+        new Maths.Vec3(1.4, 64.0, .5), 0f, 0f, false, 1L);
     Move secondMovement = new Move(
-        new Maths.Vec3(8.31, 64.0, 7.88), 15f, 4f, true, 6724L);
+        new Maths.Vec3(1.8914000141620635, 63.92159999847412, .5),
+        0f, 0f, false, 2L);
 
     var report = runner.process(
         "stale-correction-packet-bootstrap",
