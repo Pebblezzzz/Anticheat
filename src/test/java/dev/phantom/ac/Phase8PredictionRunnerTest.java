@@ -55,7 +55,7 @@ class Phase8PredictionRunnerTest {
             new Maths.Vec3(1.4, 64.0, .5), 0f, 0f, false, 1L)),
         new RawPacket(3, 30, new Move(
             new Maths.Vec3(1.8914000141620635, 63.92159999847412, .5),
-            0f, 0f, false, 6724L)));
+            0f, 0f, false, 2L)));
 
     var report = runner.process(
         "edge-fall",
