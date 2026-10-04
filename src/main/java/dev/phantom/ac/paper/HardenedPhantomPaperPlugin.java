@@ -19,6 +19,9 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPl
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPong;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientTeleportConfirm;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerBlockPlacement;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientVehicleMove;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChunkData;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityVelocity;
@@ -182,6 +185,37 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         appendPacket(capture,new RawPacket(sequence,receivedNanos,move,
             Packets.CaptureProvenance.fromAdapter(sourceId,move,authoritativeTick)));
         schedulePredictionValidation(capture);
+      }else if(event.getPacketType()==PacketType.Play.Client.INTERACT_ENTITY){
+        var interaction=new WrapperPlayClientInteractEntity(event);
+        if(interaction.getAction()!=null){
+          Packets.InteractAction action=switch(interaction.getAction()){
+            case ATTACK -> Packets.InteractAction.ATTACK;
+            case INTERACT -> Packets.InteractAction.INTERACT;
+            case INTERACT_AT -> Packets.InteractAction.INTERACT_AT;
+          };
+          Packets.InteractEntity packet=new Packets.InteractEntity(interaction.getEntityId(),action);
+          record(capture,packet);
+          schedulePredictionValidation(capture);
+        }
+      }else if(event.getPacketType()==PacketType.Play.Client.PLAYER_BLOCK_PLACEMENT){
+        var placement=new WrapperPlayClientPlayerBlockPlacement(event);
+        var position=placement.getBlockPosition();
+        if(position!=null){
+          Packets.BlockPlace packet=new Packets.BlockPlace(
+              new dev.phantom.ac.world.Pos(position.x,position.y,position.z));
+          record(capture,packet);
+          schedulePredictionValidation(capture);
+        }
+      }else if(event.getPacketType()==PacketType.Play.Client.VEHICLE_MOVE){
+        var vehicle=new WrapperPlayClientVehicleMove(event);
+        var position=vehicle.getPosition();
+        if(position!=null){
+          Packets.VehicleMove packet=new Packets.VehicleMove(
+              vector(position.x,position.y,position.z),
+              vehicle.getYaw(),vehicle.getPitch(),vehicle.isOnGround());
+          record(capture,packet);
+          schedulePredictionValidation(capture);
+        }
       }else if(event.getPacketType()==PacketType.Play.Client.PLAYER_INPUT){
         var input=new WrapperPlayClientPlayerInput(event);
         Packets.ClientInput clientInput=new Packets.ClientInput(
