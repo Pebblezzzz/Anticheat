@@ -2957,7 +2957,13 @@ public final class Phase8PredictionRunner {
     if (priorPhysical.isPresent()) {
       physicalGroundOptions.add(priorPhysical.orElseThrow().context().player().onGround());
     } else {
-      physicalGroundOptions.add(observedBefore.onGround());
+      /*
+       * A stale correction can leave the retained packet ground bit behind the
+       * actual client physics boundary. Keep both physical hypotheses bounded
+       * until the next successful movement replay disambiguates them.
+       */
+      physicalGroundOptions.add(false);
+      physicalGroundOptions.add(true);
     }
 
     Vec3 observedDelta = new Vec3(
