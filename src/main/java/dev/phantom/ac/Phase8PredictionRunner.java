@@ -46,6 +46,68 @@ public final class Phase8PredictionRunner {
     IMPOSSIBLE
   }
 
+  public record PredictionOffset(
+      boolean evaluated,
+      long bestCandidateId,
+      double deltaX,
+      double deltaY,
+      double deltaZ,
+      double horizontal,
+      double vertical,
+      double total) {
+    public PredictionOffset {
+      if (evaluated) {
+        if (bestCandidateId < 0L
+            || !Double.isFinite(deltaX)
+            || !Double.isFinite(deltaY)
+            || !Double.isFinite(deltaZ)
+            || !Double.isFinite(horizontal)
+            || !Double.isFinite(vertical)
+            || !Double.isFinite(total)
+            || horizontal < 0.0
+            || vertical < 0.0
+            || total < 0.0) {
+          throw new IllegalArgumentException("invalid evaluated prediction offset");
+        }
+      }
+    }
+
+    public static PredictionOffset unknown() {
+      return new PredictionOffset(false, -1L, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    }
+
+    public static PredictionOffset from(Set<Candidate> candidates, Vec3 observedPosition) {
+      Objects.requireNonNull(candidates, "candidates");
+      Objects.requireNonNull(observedPosition, "observedPosition");
+      if (candidates.isEmpty()) return unknown();
+
+      Candidate best = null;
+      double bestDistanceSquared = Double.POSITIVE_INFINITY;
+      for (Candidate candidate : candidates) {
+        Vec3 predicted = candidate.context().player().position();
+        double dx = observedPosition.x() - predicted.x();
+        double dy = observedPosition.y() - predicted.y();
+        double dz = observedPosition.z() - predicted.z();
+        double distanceSquared = dx * dx + dy * dy + dz * dz;
+        if (!Double.isFinite(distanceSquared)) continue;
+        if (best == null || distanceSquared < bestDistanceSquared) {
+          best = candidate;
+          bestDistanceSquared = distanceSquared;
+        }
+      }
+      if (best == null) return unknown();
+
+      Vec3 predicted = best.context().player().position();
+      double dx = observedPosition.x() - predicted.x();
+      double dy = observedPosition.y() - predicted.y();
+      double dz = observedPosition.z() - predicted.z();
+      double horizontal = Math.hypot(dx, dz);
+      double vertical = Math.abs(dy);
+      double total = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      return new PredictionOffset(true, best.id(), dx, dy, dz, horizontal, vertical, total);
+    }
+  }
+
   public record PredictionFrame(
       long sequence,
       long receivedNanos,
@@ -58,7 +120,8 @@ public final class Phase8PredictionRunner {
       Set<Candidate> predictedAfter,
       WorldSnapshot world,
       List<String> uncertaintySources,
-      List<String> trace) {
+      List<String> trace,
+      PredictionOffset predictionOffset) {
     public PredictionFrame {
       if (sequence < 0 || receivedNanos < 0 || serverTick < 0 || clientTick < 0) {
         throw new IllegalArgumentException("invalid prediction-frame provenance");
@@ -71,6 +134,36 @@ public final class Phase8PredictionRunner {
       Objects.requireNonNull(world);
       uncertaintySources = List.copyOf(uncertaintySources);
       trace = List.copyOf(trace);
+      Objects.requireNonNull(predictionOffset);
+    }
+
+    public PredictionFrame(
+        long sequence,
+        long receivedNanos,
+        long serverTick,
+        long clientTick,
+        Packets.Move movement,
+        Player observedBefore,
+        Player observedAfter,
+        Set<Candidate> predictedBefore,
+        Set<Candidate> predictedAfter,
+        WorldSnapshot world,
+        List<String> uncertaintySources,
+        List<String> trace) {
+      this(
+          sequence,
+          receivedNanos,
+          serverTick,
+          clientTick,
+          movement,
+          observedBefore,
+          observedAfter,
+          predictedBefore,
+          predictedAfter,
+          world,
+          uncertaintySources,
+          trace,
+          PredictionOffset.from(predictedAfter, observedAfter.position()));
     }
   }
 
@@ -4612,6 +4705,16 @@ public final class Phase8PredictionRunner {
     mergedTrace.add("FRONTIER candidates=" + predictedAfter.size()
         + " predictionTick=" + predictionTick
         + " retained=" + !predictedAfter.isEmpty());
+    PredictionOffset predictionOffset =
+        PredictionOffset.from(predictedAfter, observedAfter.position());
+    mergedTrace.add("PREDICTION_OFFSET evaluated=" + predictionOffset.evaluated()
+        + " candidate=" + predictionOffset.bestCandidateId()
+        + " dx=" + predictionOffset.deltaX()
+        + " dy=" + predictionOffset.deltaY()
+        + " dz=" + predictionOffset.deltaZ()
+        + " horizontal=" + predictionOffset.horizontal()
+        + " vertical=" + predictionOffset.vertical()
+        + " total=" + predictionOffset.total());
     return new PredictionFrame(
         sequence,
         packet.receivedNanos(),
@@ -4624,7 +4727,8 @@ public final class Phase8PredictionRunner {
         predictedAfter,
         world,
         uncertaintySources,
-        mergedTrace);
+        mergedTrace,
+        predictionOffset);
   }
 
   private static Player withClientRotation(Player player, float yaw, float pitch) {

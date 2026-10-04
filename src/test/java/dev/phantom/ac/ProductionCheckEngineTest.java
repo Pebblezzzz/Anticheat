@@ -361,4 +361,65 @@ class ProductionCheckEngineTest {
   }
 
 
+  @Test
+  void bestPredictionResidualDetectsSubBlockSpeed() {
+    State.Player before = player(0, 0);
+    State.Player predictedAfter = new State.Player(
+        new Vec3(0.30, 0, 0), before.velocity(), before.yaw(), before.pitch(), true,
+        before.gamemode(), before.effects(), before.awaitingTeleport(), before.uncertain(),
+        before.input(), before.attributes(), before.pose(), before.environment(),
+        before.clientTickRange(), before.provenance(), before.uncertaintyReasons());
+    State.Player observedAfter = new State.Player(
+        new Vec3(0.40, 0, 0), before.velocity(), before.yaw(), before.pitch(), true,
+        before.gamemode(), before.effects(), before.awaitingTeleport(), before.uncertain(),
+        before.input(), before.attributes(), before.pose(), before.environment(),
+        before.clientTickRange(), before.provenance(), before.uncertaintyReasons());
+
+    Phase6Reachability.Candidate beforeCandidate = candidate(before, 1L);
+    Phase6Reachability.Candidate afterCandidate = candidate(predictedAfter, 2L);
+    Packets.Move move = new Packets.Move(observedAfter.position(), 0f, 0f, true, 1L);
+    PredictionFrame frame = new PredictionFrame(
+        1L, 1L, 1L, 1L, move, before, observedAfter,
+        Set.of(beforeCandidate), Set.of(afterCandidate),
+        WorldSnapshot.emptyOverworld12111(), List.of(), List.of());
+
+    assertTrue(frame.predictionOffset().evaluated());
+    assertEquals(0.10, frame.predictionOffset().horizontal(), 1.0e-9);
+
+    var result = ProductionCheckEngine.analyze(
+        "p", List.of(new Packets.RawPacket(1L, 1L, move)), report(frame), CONFIG);
+
+    assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("Speed")));
+  }
+
+  @Test
+  void smallPredictionResidualDoesNotCreateSpeedEvidence() {
+    State.Player before = player(0, 0);
+    State.Player predictedAfter = new State.Player(
+        new Vec3(0.39, 0, 0), before.velocity(), before.yaw(), before.pitch(), true,
+        before.gamemode(), before.effects(), before.awaitingTeleport(), before.uncertain(),
+        before.input(), before.attributes(), before.pose(), before.environment(),
+        before.clientTickRange(), before.provenance(), before.uncertaintyReasons());
+    State.Player observedAfter = new State.Player(
+        new Vec3(0.40, 0, 0), before.velocity(), before.yaw(), before.pitch(), true,
+        before.gamemode(), before.effects(), before.awaitingTeleport(), before.uncertain(),
+        before.input(), before.attributes(), before.pose(), before.environment(),
+        before.clientTickRange(), before.provenance(), before.uncertaintyReasons());
+
+    Phase6Reachability.Candidate beforeCandidate = candidate(before, 1L);
+    Phase6Reachability.Candidate afterCandidate = candidate(predictedAfter, 2L);
+    Packets.Move move = new Packets.Move(observedAfter.position(), 0f, 0f, true, 1L);
+    PredictionFrame frame = new PredictionFrame(
+        1L, 1L, 1L, 1L, move, before, observedAfter,
+        Set.of(beforeCandidate), Set.of(afterCandidate),
+        WorldSnapshot.emptyOverworld12111(), List.of(), List.of());
+
+    assertEquals(0.01, frame.predictionOffset().horizontal(), 1.0e-9);
+
+    var result = ProductionCheckEngine.analyze(
+        "p", List.of(new Packets.RawPacket(1L, 1L, move)), report(frame), CONFIG);
+
+    assertTrue(result.findings().stream().noneMatch(f -> f.rule().equals("Speed")));
+  }
+
 }

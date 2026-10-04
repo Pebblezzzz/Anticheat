@@ -93,6 +93,16 @@ public final class PhantomDebugFormatter {
         + " observed=" + vec(frame.observedAfter().position())
         + " observedVel=" + vec(frame.observedAfter().velocity())
         + " closest=" + closest
+        + " predictionOffset=" + (frame.predictionOffset().evaluated()
+            ? String.format(Locale.ROOT, "(candidate=%d dx=%.6f dy=%.6f dz=%.6f h=%.6f v=%.6f total=%.6f)",
+                frame.predictionOffset().bestCandidateId(),
+                frame.predictionOffset().deltaX(),
+                frame.predictionOffset().deltaY(),
+                frame.predictionOffset().deltaZ(),
+                frame.predictionOffset().horizontal(),
+                frame.predictionOffset().vertical(),
+                frame.predictionOffset().total())
+            : "unknown")
         + " reasons=" + reasons;
   }
 
