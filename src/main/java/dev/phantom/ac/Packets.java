@@ -9,7 +9,8 @@ public final class Packets {
 
   public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm,
       Velocity, Effect, Gamemode, PlayerContext, FlightToggle, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange,
-      WorldTransactionSend, WorldTransactionAck, PaperMovementRejection, ClientBlockBreak, EntitySpawn, EntityMove, EntityDespawn {
+      WorldTransactionSend, WorldTransactionAck, PaperMovementRejection, ClientBlockBreak, EntitySpawn, EntityMove, EntityDespawn,
+      InteractEntity, BlockPlace, VehicleMove {
     default boolean mutatesWorld() {
       return this instanceof ChunkData || this instanceof ChunkUnload
           || this instanceof BlockChange || this instanceof ChunkStates || this instanceof BlockStateChange || this instanceof UnsupportedBlockStateChange
@@ -29,6 +30,32 @@ public final class Packets {
       Objects.requireNonNull(position, "position");
       if (actionSequence < 0) throw new IllegalArgumentException("actionSequence must be non-negative");
       if (clientTick != null && clientTick < 0) throw new IllegalArgumentException("clientTick must be non-negative");
+    }
+  }
+
+  public enum InteractAction { INTERACT, ATTACK, INTERACT_AT }
+
+  public record InteractEntity(int entityId, InteractAction action) implements Packet {
+    public InteractEntity {
+      if (entityId < 0) throw new IllegalArgumentException("entityId must be non-negative");
+      Objects.requireNonNull(action, "action");
+    }
+  }
+
+  /** Client block-use intent used by far-place and scaffolding/aim corroboration. */
+  public record BlockPlace(dev.phantom.ac.world.Pos position) implements Packet {
+    public BlockPlace {
+      Objects.requireNonNull(position, "position");
+    }
+  }
+
+  /** Client vehicle movement packet, kept separate from player movement claims. */
+  public record VehicleMove(Vec3 position, float yaw, float pitch, boolean onGround) implements Packet {
+    public VehicleMove {
+      Objects.requireNonNull(position, "position");
+      if (!Float.isFinite(yaw) || !Float.isFinite(pitch)) {
+        throw new IllegalArgumentException("vehicle rotation must be finite");
+      }
     }
   }
 
@@ -138,7 +165,9 @@ public final class Packets {
     public static CaptureProvenance fromAdapter(String sourceId,Packet packet,Long authoritativeServerTick){Objects.requireNonNull(packet);return new CaptureProvenance(sourceId,directionFor(packet),packet.getClass().getSimpleName(),authoritativeServerTick,null);}
     public static CaptureProvenance fromAdapter(String sourceId,Packet packet,Long authoritativeServerTick,Long authoritativeClientTick){Objects.requireNonNull(packet);return new CaptureProvenance(sourceId,directionFor(packet),packet.getClass().getSimpleName(),authoritativeServerTick,authoritativeClientTick);}
     public static String directionFor(Packet packet){
-      if(packet instanceof Move||packet instanceof ClientInput||packet instanceof ClientTickEnd||packet instanceof TeleportConfirm||packet instanceof WorldTransactionAck||packet instanceof FlightToggle||packet instanceof ClientBlockBreak)return "CLIENT_TO_SERVER";
+      if(packet instanceof Move||packet instanceof ClientInput||packet instanceof ClientTickEnd||packet instanceof TeleportConfirm
+          ||packet instanceof WorldTransactionAck||packet instanceof FlightToggle||packet instanceof ClientBlockBreak
+          ||packet instanceof InteractEntity||packet instanceof BlockPlace||packet instanceof VehicleMove)return "CLIENT_TO_SERVER";
       if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof Effect||packet instanceof Gamemode||packet instanceof PlayerContext||packet instanceof WorldTransactionSend||packet.mutatesWorld())return "SERVER_TO_CLIENT";
       return "UNKNOWN";
     }
