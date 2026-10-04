@@ -54,9 +54,17 @@ public final class Phase8MovementValidation {
     public Config(double alertViolationThreshold, int alertDebounceTicks,
                   boolean alertsEnabled, boolean observationOnly) {
       this(alertViolationThreshold, alertDebounceTicks, alertsEnabled, observationOnly,
+          1.0, 0.005, 100.0, 40.0,
+          new GrimAlertPolicy.Config(
+              List.of(),
+              new GrimAlertPolicy.CommandRule(alertViolationThreshold, 40.0),
+              GrimAlertPolicy.CommandRule.parse("1:1"),
+              300_000L));
+    }
+    public static Config defaults() {
+      return new Config(100.0, 0, true, true,
           1.0, 0.005, 100.0, 40.0, GrimAlertPolicy.Config.defaults());
     }
-    public static Config defaults() { return new Config(100.0, 0, true, true); }
     public double alertThreshold() { return alertViolationThreshold; }
   }
 
@@ -431,7 +439,7 @@ public final class Phase8MovementValidation {
 
     State impossible(long tick, long nowMillis, Config config, String rule) {
       GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(rule);
-      long cutoff = Math.max(0L, nowMillis - policy.removeViolationsAfterMillis());
+      long cutoff = nowMillis - policy.removeViolationsAfterMillis();
       List<Long> active = new ArrayList<>();
       for (long timestamp : violationTimesMillis) if (timestamp > cutoff) active.add(timestamp);
       active.add(nowMillis);
