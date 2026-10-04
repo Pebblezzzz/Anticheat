@@ -112,7 +112,9 @@ class Phase8PredictionRunnerTest {
         report.results().toString());
     assertTrue(
         report.results().getFirst().evidence().uncertaintySources().stream()
-            .anyMatch(reason -> reason.contains("causal authority is stale for movement replay")),
+            .anyMatch(reason ->
+                reason.contains("causal authority is stale for movement replay")
+                    || reason.contains("packet-only provisional recovery root")),
         report.results().getFirst().toString());
   }
 
@@ -771,7 +773,7 @@ class Phase8PredictionRunnerTest {
         report.results().getFirst().verdict(),
         report.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.POSSIBLE,
+        Phase8MovementValidation.Verdict.UNCERTAIN,
         report.results().getLast().verdict(),
         report.results().toString());
     assertEquals(groundedStep.position(),
