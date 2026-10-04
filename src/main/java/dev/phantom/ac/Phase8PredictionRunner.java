@@ -1215,6 +1215,9 @@ public final class Phase8PredictionRunner {
             packet, move, observedBefore, observedAfter, tick, world, trace);
         if (bootstrap.isPresent()) {
           Set<Candidate> bootstrapCandidates = bootstrap.orElseThrow();
+          boolean packetOnlyBootstrap = bootstrapCandidates.stream()
+              .allMatch(candidate ->
+                  "CLIENT_MOVEMENT_BOOTSTRAP_OBSERVED".equals(candidate.provenance().input()));
           prediction = Set.copyOf(bootstrapCandidates);
           predictionTick = tick.clientTick();
           physicsFrontierSuppressedUntilPositionMovement = false;
@@ -1231,11 +1234,17 @@ public final class Phase8PredictionRunner {
                   "client movement bootstrap reconstructed the hidden start velocity from the observed tick",
                   "canonical Phase 5 replay reproduced the observed movement exactly",
                   "physical sprint/sneak state was preserved as explicit candidate alternatives when key-state and server movement-state evidence disagreed"));
-          List<String> bootstrapUncertainty = List.of(
+          List<String> bootstrapUncertainty = new ArrayList<>();
+          bootstrapUncertainty.add(
               "client-side starting velocity was reconstructed from observed movement because the server velocity is not an atomic client-tick state");
+          if (packetOnlyBootstrap) {
+            bootstrapUncertainty.add(
+                "packet-only recovery root is provisional because no fresh causal server authority was available");
+          }
           Phase7Timing.EventTiming bootstrapTiming = phase7TimingBySequence.get(sequence);
           boolean bootstrapTimingExhaustive =
-              explicitTimingRangeIsExhaustive(move, bootstrapTiming)
+              !packetOnlyBootstrap
+                  && explicitTimingRangeIsExhaustive(move, bootstrapTiming)
                   && !phase7TimingHasUnmodeledChronology(bootstrapTiming, move.clientTick() != null);
           TickResolution bootstrapValidationTick = bootstrapTimingExhaustive
               ? tick.withTimingUncertaintyResolved(
@@ -1319,8 +1328,13 @@ public final class Phase8PredictionRunner {
                 + " tick=" + tick.clientTick());
           }
 
-          trace.add("EVIDENCE POSSIBLE reason=CLIENT_MOVEMENT_BOOTSTRAP"
+          trace.add("EVIDENCE "
+              + (result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE
+                  ? "POSSIBLE"
+                  : result.verdict())
+              + " reason=CLIENT_MOVEMENT_BOOTSTRAP"
               + " reconstructedStartVelocityVerified=true"
+              + " packetOnly=" + packetOnlyBootstrap
               + " candidateLocomotionAlternatives=" + bootstrapCandidates.size()
               + " timingExhaustive=" + bootstrapTimingExhaustive
               + " validationVerdict=" + result.verdict());
@@ -2682,7 +2696,16 @@ public final class Phase8PredictionRunner {
     }
 
     AuthorityAnchor authority = freshCausalAuthority(movementPacket);
-    if (authority == null) return Optional.empty();
+    if (authority == null) {
+      Optional<Set<Candidate>> observedBootstrap =
+          bootstrapPredictionFromObservedMovementWithoutAuthority(
+              movementPacket, move, observedBefore, observedAfter, tick, world, trace);
+      if (observedBootstrap.isPresent()) {
+        trace.add("BOOTSTRAP_AUTHORITY_FALLBACK source=PACKET_OBSERVED_MOVEMENT"
+            + " reason=no-fresh-causal-authority");
+      }
+      return observedBootstrap;
+    }
 
     boolean authorityMatchesObservedBefore =
         positionsMatch(authority.context().serverPosition(), observedBefore.position());
@@ -2905,6 +2928,81 @@ public final class Phase8PredictionRunner {
   }
 
     return candidates.isEmpty() ? Optional.empty() : Optional.of(Set.copyOf(candidates));
+  }
+
+  private Optional<Set<Candidate>> bootstrapPredictionFromObservedMovementWithoutAuthority(
+      Packets.RawPacket movementPacket,
+      Packets.Move move,
+      Player observedBefore,
+      Player observedAfter,
+      TickResolution tick,
+      WorldSnapshot world,
+      List<String> trace) {
+    if (!tick.known() || move.position() == null || tick.clientTick() <= 0L) {
+      return Optional.empty();
+    }
+    if (world == null) {
+      trace.add("BOOTSTRAP_REJECTED reason=packet-world-unavailable");
+      return Optional.empty();
+    }
+
+    Vec3 observedDelta = new Vec3(
+        observedAfter.position().x() - observedBefore.position().x(),
+        observedAfter.position().y() - observedBefore.position().y(),
+        observedAfter.position().z() - observedBefore.position().z());
+    double horizontalSpeed = Math.hypot(observedDelta.x(), observedDelta.z());
+    if (!Double.isFinite(horizontalSpeed)
+        || horizontalSpeed > 1.25
+        || !Double.isFinite(observedDelta.y())
+        || Math.abs(observedDelta.y()) > 4.0) {
+      trace.add("BOOTSTRAP_REJECTED reason=packet-observed-displacement-outside-conservative-bound"
+          + " observedDelta=" + observedDelta);
+      return Optional.empty();
+    }
+
+    MovementEnvironment environment = packetMovementEnvironment(observedAfter, world);
+    /*
+     * The movement packet is now a new client-physics boundary. Do not carry the
+     * correction packet's uncertainty/awaiting-teleport metadata into that root;
+     * those fields describe the old transition, not the observed post-movement
+     * physics state. The uncertainty is represented by the recovery evidence,
+     * not by poisoning the candidate so the next physics step can never become
+     * exhaustive.
+     */
+    Player provisionalState = new Player(
+        observedAfter.position(),
+        observedDelta,
+        observedAfter.yaw(),
+        observedAfter.pitch(),
+        observedAfter.onGround(),
+        observedAfter.gamemode(),
+        observedAfter.effects(),
+        OptionalInt.empty(),
+        false,
+        observedAfter.input(),
+        observedAfter.attributes(),
+        observedAfter.pose(),
+        observedAfter.environment(),
+        observedAfter.clientTickRange(),
+        State.Provenance.UNKNOWN,
+        Set.of());
+    Candidate provisional = candidateFromPlayer(
+        provisionalState,
+        tick.clientTick(),
+        "CLIENT_MOVEMENT_BOOTSTRAP_OBSERVED",
+        -1L,
+        EntityCollisions.NONE_TRACKED,
+        environment,
+        observedDelta);
+
+    trace.add("BOOTSTRAP_PROVISIONAL source=PACKET_OBSERVED_MOVEMENT"
+        + " sequence=" + movementPacket.sequence()
+        + " simulationTick=" + (tick.clientTick() - 1L)
+        + " observedDelta=" + observedDelta
+        + " retainedTick=" + tick.clientTick()
+        + " reason=no-fresh-causal-authority"
+        + " entityCollisionState=none-tracked");
+    return Optional.of(Set.of(provisional));
   }
 
   private Optional<Vec3> reconstructCollisionFreeStartVelocity(
