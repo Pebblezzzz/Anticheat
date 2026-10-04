@@ -17,6 +17,12 @@ import static dev.phantom.ac.Maths.Vec3;
  */
 public final class ProductionCheckEngine {
   private static final double WORLD_BORDER = 29_999_999.0;
+  private static final Set<String> ENTITY_ACTIONS = Set.of(
+      "START_SPRINTING", "STOP_SPRINTING",
+      "START_SNEAKING", "STOP_SNEAKING",
+      "START_FLYING_WITH_ELYTRA", "START_JUMPING_WITH_HORSE");
+  private static final Set<String> WINDOW_CLICK_TYPES = Set.of(
+      "PICKUP", "QUICK_MOVE", "SWAP", "CLONE", "THROW", "QUICK_CRAFT", "PICKUP_ALL");
 
   private ProductionCheckEngine() {}
 
@@ -183,7 +189,7 @@ public final class ProductionCheckEngine {
           if (elapsed >= 0L && elapsed <= config.timerWindowNanos()) {
             double severity = Math.min(1.0,
                 (double) config.timerWindowNanos() / Math.max(1L, elapsed) / 4.0);
-            findings.add(finding(playerId, serverTick, "TimerBurst",
+            findings.add(uncertainFinding(playerId, serverTick, "TimerBurst",
                 "client tick-boundary packets arrived materially faster than 20 TPS",
                 severity, sequence));
           }
@@ -201,6 +207,20 @@ public final class ProductionCheckEngine {
       if (packet instanceof Packets.EntityDespawn despawn) {
         entities.remove(despawn.entityId());
         continue;
+      }
+
+      if (packet instanceof Packets.EntityAction entityAction) {
+        if (!ENTITY_ACTIONS.contains(entityAction.action())) {
+          findings.add(finding(playerId, serverTick, "EntityAction",
+              "entity-action opcode is outside the 1.21.11 client action set",
+              1.0, sequence));
+        } else if (entityAction.jumpBoost() != 0
+            && (!"START_JUMPING_WITH_HORSE".equals(entityAction.action())
+                || Math.abs(entityAction.jumpBoost()) > 100)) {
+          findings.add(finding(playerId, serverTick, "EntityAction",
+              "jump boost is non-zero for a non-horse action or exceeds the protocol safety envelope",
+              1.0, sequence));
+        }
       }
 
       if (packet instanceof Packets.HeldItemChange heldItem) {
@@ -247,7 +267,7 @@ public final class ProductionCheckEngine {
               modulo360Streak = 0;
             }
             if (modulo360Streak >= 3) {
-              findings.add(finding(playerId, serverTick, "AimModulo360",
+              findings.add(uncertainFinding(playerId, serverTick, "AimModulo360",
                   "repeated yaw changes collapse modulo 360", Math.min(1.0, modulo360Streak / 10.0), sequence));
             }
           }
@@ -256,6 +276,33 @@ public final class ProductionCheckEngine {
         } else if (move.yaw() != null && !Float.isFinite(move.yaw())) {
           findings.add(finding(playerId, serverTick, "PacketRotation",
               "non-finite yaw", 1.0, sequence));
+        }
+      }
+
+      if (packet instanceof Packets.InventoryClick click) {
+        if (click.slot() < -999 || click.slot() > 127) {
+          findings.add(finding(playerId, serverTick, "InventorySlot",
+              "container click slot is outside the protocol slot envelope",
+              1.0, sequence));
+        }
+        if (!WINDOW_CLICK_TYPES.contains(click.clickType())) {
+          findings.add(finding(playerId, serverTick, "InventoryClickType",
+              "container click type is not a legal 1.21.11 protocol value",
+              1.0, sequence));
+        } else {
+          boolean invalidButton = switch (click.clickType()) {
+            case "PICKUP", "QUICK_MOVE", "CLONE" -> click.button() < 0 || click.button() > 2;
+            case "SWAP" -> (click.button() < 0 || click.button() > 8) && click.button() != 40;
+            case "THROW" -> click.button() != 0 && click.button() != 1;
+            case "QUICK_CRAFT" -> click.button() < 0 || click.button() == 3 || click.button() == 7 || click.button() > 10;
+            case "PICKUP_ALL" -> click.button() != 0;
+            default -> false;
+          };
+          if (invalidButton) {
+            findings.add(finding(playerId, serverTick, "InventoryButton",
+                "container click button is invalid for its click type",
+                1.0, sequence));
+          }
         }
       }
 
@@ -273,7 +320,7 @@ public final class ProductionCheckEngine {
         // entity box and a conservative 4-block interaction envelope.
         if (!Double.isFinite(hitDistance)
             && fallbackDistance > config.attackReach() + 0.25) {
-          findings.add(finding(playerId, serverTick, "Reach",
+          findings.add(uncertainFinding(playerId, serverTick, "Reach",
               "attack ray does not intersect the compensated target within the interaction envelope",
               Math.min(1.0, Math.max(0.0, (fallbackDistance - config.attackReach()) / 2.0)),
               sequence));
@@ -285,7 +332,7 @@ public final class ProductionCheckEngine {
         BlockBox block = new BlockBox(pos.x(), pos.y(), pos.z(), pos.x() + 1.0, pos.y() + 1.0, pos.z() + 1.0);
         double distance = pointAabbDistance(eyePosition(frame.observedAfter()), block);
         if (distance > config.blockInteractionReach()) {
-          findings.add(finding(playerId, serverTick, "FarBreak",
+          findings.add(uncertainFinding(playerId, serverTick, "FarBreak",
               String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
               Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
               sequence));
@@ -314,7 +361,7 @@ public final class ProductionCheckEngine {
           BlockBox block = new BlockBox(pos.x(), pos.y(), pos.z(), pos.x() + 1.0, pos.y() + 1.0, pos.z() + 1.0);
           double distance = pointAabbDistance(eyePosition(frame.observedAfter()), block);
           if (distance > config.blockInteractionReach()) {
-            findings.add(finding(playerId, serverTick, "FarPlace",
+            findings.add(uncertainFinding(playerId, serverTick, "FarPlace",
                 String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
                 Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
                 sequence));
@@ -361,7 +408,7 @@ public final class ProductionCheckEngine {
                 && !state.isAir()
                 && !state.isUnsupported()
                 && isSlowBreakBlock(state.blockId())) {
-              findings.add(finding(playerId, serverTick, "FastBreak",
+              findings.add(uncertainFinding(playerId, serverTick, "FastBreak",
                   "a slow-to-break block reached FINISHED_DIGGING within 35 ms of STARTED_DIGGING",
                   1.0, sequence));
             }
@@ -386,6 +433,13 @@ public final class ProductionCheckEngine {
                                  String reason, double severity, long sequence) {
     return new Finding(
         playerId, serverTick, rule, Verdict.IMPOSSIBLE, reason, severity,
+        "production-check:" + playerId + ":" + rule + ":" + sequence);
+  }
+
+  private static Finding uncertainFinding(String playerId, long serverTick, String rule,
+                                          String reason, double severity, long sequence) {
+    return new Finding(
+        playerId, serverTick, rule, Verdict.UNCERTAIN, reason, severity,
         "production-check:" + playerId + ":" + rule + ":" + sequence);
   }
 
