@@ -169,11 +169,12 @@ class Phase8MovementValidationTest {
     var recoveredEvidence = Phase8MovementValidation.validate("alice", 50, p, p, world(),
         "world:test:50", stable(), List.of("input known"), possible(p), "replay:50").evidence();
     var recovered = second.state().accept(recoveredEvidence, config);
-    assertEquals(0.0, recovered.state().players().get("alice/MOVEMENT_REACHABILITY").violationLevel());
+    assertEquals(2.0, recovered.state().players().get("alice/MOVEMENT_REACHABILITY").violationLevel(),
+        "a possible observation must not erase active Grim-style violation history");
 
     var third = recovered.state().accept(evidence, config);
-    assertTrue(third.alert().isEmpty(), "decay should require fresh evidence to rebuild VL");
-    assertEquals(1.0, third.state().players().get("alice/MOVEMENT_REACHABILITY").violationLevel());
+    assertTrue(third.alert().isEmpty(), "the third flag is below the next threshold+interval boundary");
+    assertEquals(3.0, third.state().players().get("alice/MOVEMENT_REACHABILITY").violationLevel());
   }
 
   @Test void replayReproducesSameResultAndEvidence() {
