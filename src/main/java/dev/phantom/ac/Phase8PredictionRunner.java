@@ -3195,7 +3195,7 @@ public final class Phase8PredictionRunner {
         amplifier(player.effects(), "minecraft:speed", "speed"),
         amplifier(player.effects(), "minecraft:slowness", "slowness"),
         amplifier(player.effects(), "minecraft:jump_boost", "jump_boost"),
-        amplifier(player.effects(), "minecraft:levitation", "levitation"),
+        player.effects().containsKey("minecraft:levitation") || player.effects().containsKey("levitation"),
         player.effects().containsKey("minecraft:slow_falling")
             || player.effects().containsKey("slow_falling"));
   }
