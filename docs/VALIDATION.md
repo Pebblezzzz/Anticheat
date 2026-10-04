@@ -1,21 +1,36 @@
-# Validation report
+# Validation and production hardening
 
-Phase 0 architecture and Phases 1–7 have deterministic code paths in `src/main/java/dev/phantom/ac`. Phase 8 policy/enforcement remains a separate milestone.
+Phantom uses a version-pinned 1.21.11 deterministic movement authority, persistent live prediction, compensated world/timing state, and explicit `POSSIBLE`, `UNCERTAIN`, and exhaustive `IMPOSSIBLE` verdicts.
 
-The implementation records explicit limitations and does not claim vanilla parity where independent real-client traces are absent.
+## Current build gate
 
-- 0: immutable component contracts and deterministic data flow;
-- 1–2: normalized packet/timeline events and explicit uncertain state reconstruction;
-- 3: serializable timeline and deterministic replay;
-- 4: immutable block snapshots and independently exercised AABB collision;
-- 5: `Vanilla12111Physics` plus trace-comparison tooling;
-- 6: finite rich-context input reachability with explicit uncertainty and provenance;
-- 7: client/server timing reconstruction, latency/jitter bounds, synchronization state/recovery, deterministic timing replay, and Phase 6 timing integration;
-- 8: not advanced by this work.
+The repository build gate is the Java 21 Maven suite plus the dedicated Phase 5 validation harness and the Phase 1–7 hardening workflow. Phase 8 adds adversarial, persistence, reconciliation, timing, and enforcement-policy regression coverage.
 
-The repository contains unit and integration coverage across these layers. Current CI runs the Java 21 Maven suite and the observation-only 1.21.11 capture harness. A local fresh Maven run is only considered valid when Maven/JDK are available in the execution environment.
+The live adapter runs expensive prediction on a dedicated validation executor and coalesces work per player so bursts of movement packets do not become an unbounded task queue.
 
-The simulator has no independent real vanilla-client corpus in this repository. Consequently, deterministic code behavior, replay fidelity, and synthetic timing scenarios are internally testable, while exact 1.21.11 movement parity and empirical client/network timing remain unverified.
+## Movement correctness contract
+
+The canonical 1.21.11 path represents normal walking/sprinting/sneaking/jumping, jump delay, step/collision resolution, fluids, climbing, Elytra/fall-flying, creative/spectator movement, velocity/knockback, corrections, entity collision state, rideable vehicle branches, and modern movement modifiers including Depth Strider, Swift Sneak, Soul Speed, and Dolphin's Grace.
+
+A missing world/entity/timing fact is never silently converted into air, zero velocity, neutral input, or a hard movement violation.
+
+## Evidence and enforcement
+
+`POSSIBLE` means at least one complete candidate explains the observation.
+
+`UNCERTAIN` means the causal envelope is incomplete, ambiguous, unsupported, stale, or budget-limited.
+
+`IMPOSSIBLE` means the complete reachable candidate set for the declared envelope has been eliminated.
+
+Production enforcement additionally requires repeated consecutive impossible evidence and numeric proof that a non-empty candidate set has zero matches and has been completely eliminated.
+
+## External conformance
+
+Real-client sessions are useful as an external conformance dataset for operators who want to compare a deployment against a live vanilla client. The repository does not label synthetic fixtures as real-client measurements; external captures are an optional validation layer rather than a fabricated build prerequisite.
+
+## Operational diagnostics
+
+`/phantom status` reports captures, compensated-world pressure, validation queue depth, validation throughput, average validation time, slow validation runs, and verdict counts. Targeted debug modes expose replay references and closest-candidate evidence for forensic analysis.
 
 ## Phase 7 implementation status
 
