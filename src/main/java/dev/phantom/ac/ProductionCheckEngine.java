@@ -69,7 +69,12 @@ public final class ProductionCheckEngine {
         double blockInteractionReach) {
       this(enabled, alertViolationThreshold, resetAfterTicks, alertDebounceTicks,
           attackReach, blockInteractionReach, true, 20, 250_000_000L,
-          1.0, 0.005, 100.0, 40.0, GrimAlertPolicy.Config.defaults());
+          1.0, 0.005, 100.0, 40.0,
+          new GrimAlertPolicy.Config(
+              List.of(),
+              new GrimAlertPolicy.CommandRule(alertViolationThreshold, 40.0),
+              GrimAlertPolicy.CommandRule.parse("1:1"),
+              300_000L));
     }
   }
 
@@ -424,14 +429,10 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
         // entity box and a conservative 4-block interaction envelope.
         if (!Double.isFinite(hitDistance)
             && fallbackDistance > config.attackReach() + 0.25) {
-          findings.add((fallbackDistance > config.attackReach() + 1.0)
-              ? finding(playerId, serverTick, "Reach",
-                  "attack target is more than 1 block beyond the configured interaction envelope",
-                  Math.min(1.0, (fallbackDistance - config.attackReach()) / 2.0), sequence)
-              : uncertainFinding(playerId, serverTick, "Reach",
-                  "attack ray does not intersect the compensated target within the interaction envelope",
-                  Math.min(1.0, Math.max(0.0, (fallbackDistance - config.attackReach()) / 2.0)),
-                  sequence));
+          findings.add(uncertainFinding(playerId, serverTick, "Reach",
+              "attack ray does not intersect the compensated target within the interaction envelope",
+              Math.min(1.0, Math.max(0.0, (fallbackDistance - config.attackReach()) / 2.0)),
+              sequence));
         }
       }
 
@@ -636,7 +637,6 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
           PredictionFrame previous = frames.get(index - 1);
           if (previous.movement().position() != null
               && isNormalSurvivalMovement(previous)
-              && !previous.observedBefore().onGround()
               && !previous.observedAfter().onGround()) {
             Vec3 previousDelta = new Vec3(
                 previous.observedAfter().position().x() - previous.observedBefore().position().x(),
