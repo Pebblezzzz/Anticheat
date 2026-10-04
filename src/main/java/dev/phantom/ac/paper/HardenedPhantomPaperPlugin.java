@@ -1645,6 +1645,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private record ClientEntityTrack(int entityId, Vec3 packetPosition, dev.phantom.ac.geometry.BlockBox box)
       implements Serializable {}
 
+  private void recordEntitySpawn(Capture capture,int entityId,Vec3 packetPosition){
+    // Entity dimensions are intentionally not sourced from Bukkit. Until the
+    // packet metadata/entity-type hitbox catalogue is complete, keep collision
+    // state explicitly incomplete so dependent checks become UNCERTAIN.
+    capture.clientEntities.remove(entityId);
+    capture.clientWorld.markEntityTrackingIncomplete();
+  }
+
   private void recordEntityRelativeMove(Capture capture,int entityId,double dx,double dy,double dz){
     ClientEntityTrack prior=capture.clientEntities.get(entityId);
     if(prior==null){
