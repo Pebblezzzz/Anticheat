@@ -52,10 +52,7 @@ class ProductionMovementAnomalyTest {
   private static ProductionCheckEngine.Report analyze(List<PredictionFrame> frames) {
     List<Packets.RawPacket> packets = frames.stream()
         .map(frame -> new Packets.RawPacket(
-            frame.sequence(), frame.receivedNanos(), frame.movement(),
-            java.util.EnumSet.of(Packets.PacketFlag.NORMAL),
-            Packets.CaptureProvenance.fromAdapter(
-                "test", frame.movement(), frame.serverTick())))
+            frame.sequence(), frame.receivedNanos(), frame.movement()))
         .toList();
 
     Phase8PredictionRunner.Report report = new Phase8PredictionRunner.Report(
