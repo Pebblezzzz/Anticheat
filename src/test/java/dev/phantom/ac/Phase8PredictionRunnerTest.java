@@ -117,6 +117,59 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void stalePredictionFrontierCannotTurnRotationOnlyPacketsIntoImpossible() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+    Player start = anchor();
+
+    Maths.Vec3 correctedPosition = new Maths.Vec3(8.5, 64.0, 8.5);
+    Teleport correction = new Teleport(77, correctedPosition, 15f, 4f);
+    Move currentPosition = new Move(
+        new Maths.Vec3(8.4819, 64.0, 8.5010), 15f, 4f, true, 6723L);
+    Move rotationOne = new Move(null, 100f, 12f, true, 6727L);
+    Move rotationTwo = new Move(null, -80f, -7f, true, 6728L);
+
+    var report = runner.process(
+        "stale-rotation-frontier",
+        List.of(
+            new RawPacket(
+                1L, 10L, correction,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-correction", correction, 0L, 0L)),
+            new RawPacket(
+                2L, 20L, currentPosition,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-movement", currentPosition, 1L, 6723L)),
+            new RawPacket(
+                3L, 30L, rotationOne,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-rotation", rotationOne, 1L, 6727L)),
+            new RawPacket(
+                4L, 40L, rotationTwo,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-rotation", rotationTwo, 1L, 6728L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(3, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.UNCERTAIN,
+        report.results().get(1).verdict(),
+        report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.UNCERTAIN,
+        report.results().get(2).verdict(),
+        report.results().toString());
+    assertTrue(report.frames().get(1).trace().stream()
+        .anyMatch(line -> line.startsWith("ROTATION_OBSERVATION_STALE_FRONTIER")),
+        report.frames().get(1).trace().toString());
+    assertTrue(report.frames().get(2).trace().stream()
+        .anyMatch(line -> line.startsWith("ROTATION_OBSERVATION_STALE_FRONTIER")),
+        report.frames().get(2).trace().toString());
+  }
+
+  @Test
   void groundClaimMismatchDoesNotBecomeMovementImpossible() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 
