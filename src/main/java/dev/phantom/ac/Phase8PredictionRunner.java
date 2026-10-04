@@ -792,8 +792,28 @@ public final class Phase8PredictionRunner {
       boolean bootstrapRecoveryRequired =
           physicsFrontierSuppressedUntilPositionMovement;
       boolean rootRebasedForMovement = false;
+      boolean temporallyStaleFrontierBeforeRoot =
+          move.position() != null
+              && predictionFrontierTemporallyStale(prediction, tick);
 
-      if (bootstrapRecoveryRequired) {
+      if (temporallyStaleFrontierBeforeRoot) {
+        /*
+         * Do not let ensureRoot() manufacture a fresh PACKET_CLIENT_ROOT from
+         * the current observation after an older correction frontier has already
+         * fallen outside the bounded horizon. The stale frontier must be
+         * discarded before any root creation; otherwise the new root would hide
+         * the state discontinuity and rotation-only packets could appear
+         * kinematically proven from an observation-only state.
+         */
+        trace.add("FRONTIER_TEMPORALLY_STALE"
+            + " predictionTick=" + predictionTick
+            + " clientTick=" + tick.clientTick()
+            + " action=CLEAR_AND_REBASE_FROM_OBSERVATION");
+        prediction = Set.of();
+        predictionTick = -1L;
+        rootRebasedForMovement = true;
+        physicsFrontierSuppressedUntilPositionMovement = false;
+      } else if (bootstrapRecoveryRequired) {
         trace.add("FRONTIER_ROOT_SUPPRESSED reason=authoritative-observation-witness"
             + " positionBearing=" + (move.position() != null));
       } else {
@@ -1086,28 +1106,6 @@ public final class Phase8PredictionRunner {
       }
       if (tick.timingUncertain() && !explicitTimingFullyRepresented) {
         uncertaintySources.add(tick.uncertaintyReason());
-      }
-
-      boolean temporallyStaleFrontier =
-          move.position() != null
-              && predictionFrontierTemporallyStale(prediction, tick);
-      if (temporallyStaleFrontier) {
-        /*
-         * A position-bearing packet is the first packet that can establish a new
-         * client-state boundary after an unbridgeable prediction gap. Never carry
-         * a correction root from tick 0 (or any other bounded-horizon-expired
-         * tick) into that new trajectory. Clearing it is deliberately conservative:
-         * without a fresh causal authority or an observed-boundary bootstrap, the
-         * current packet is UNCERTAIN rather than a proof of reachability.
-         */
-        trace.add("FRONTIER_TEMPORALLY_STALE"
-            + " predictionTick=" + predictionTick
-            + " clientTick=" + tick.clientTick()
-            + " action=CLEAR_AND_REBASE_FROM_OBSERVATION");
-        prediction = Set.of();
-        predictionTick = -1L;
-        rootRebasedForMovement = true;
-        physicsFrontierSuppressedUntilPositionMovement = false;
       }
 
       SpatialRebaseResult spatialRebase = rebasePredictionToObservedBefore(
