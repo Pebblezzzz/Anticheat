@@ -4,7 +4,6 @@ import dev.phantom.ac.Phase8PredictionRunner.PredictionFrame;
 import dev.phantom.ac.Phase5Mechanics.Pose;
 import dev.phantom.ac.geometry.BlockBox;
 import dev.phantom.ac.world.Pos;
-import dev.phantom.ac.Player;
 import dev.phantom.ac.world.BlockState;
 
 import java.util.*;
@@ -779,7 +778,7 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
     return Double.isFinite(v.x()) && Double.isFinite(v.y()) && Double.isFinite(v.z());
   }
 
-  private static Vec3 eyePosition(dev.phantom.ac.Player player) {
+  private static Vec3 eyePosition(dev.phantom.ac.State.Player player) {
     double eye = switch (player.pose()) {
       case CROUCHING -> 1.27;
       case SWIMMING, FALL_FLYING, SLEEPING -> 0.4;
