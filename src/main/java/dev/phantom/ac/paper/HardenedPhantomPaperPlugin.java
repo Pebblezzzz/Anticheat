@@ -25,6 +25,13 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientVe
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientHeldItemChange;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientEntityAction;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientClickWindow;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUseItem;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientSlotStateChange;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetSlot;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerWindowItems;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetPlayerInventory;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetCursorItem;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerAcknowledgeBlockChanges;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChunkData;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityVelocity;
@@ -178,19 +185,33 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             :null;
         Long authoritativeTick=capture.authoritativeServerTick.get()>=0
             ?capture.authoritativeServerTick.get():null;
+        Packets.MovementKind movementKind =
+            packet.hasPositionChanged() && packet.hasRotationChanged()
+                ? Packets.MovementKind.POSITION_ROTATION
+                : packet.hasPositionChanged()
+                    ? Packets.MovementKind.POSITION
+                    : packet.hasRotationChanged()
+                        ? Packets.MovementKind.ROTATION
+                        : Packets.MovementKind.STATUS;
         Packets.Move move=new Packets.Move(
             packet.hasPositionChanged()?vector(location.getX(),location.getY(),location.getZ()):null,
             packet.hasRotationChanged()?location.getYaw():null,
             packet.hasRotationChanged()?location.getPitch():null,
             packet.isOnGround(),
-            clientTick);
+            clientTick,
+            movementKind);
         String sourceId=tickObservation.hasSeenTickEnd()?"paper-client-tick-boundary":"paper-relative-first-tick";
         long sequence=capture.sequence.incrementAndGet();
         long receivedNanos=System.nanoTime();
         if(debugLevel(capture.playerId).trace())
           logMovementPacketDebug(capture.playerName,capture,sequence,receivedNanos,event.getPacketType().toString(),packet,move,tickObservation);
         appendPacket(capture,new RawPacket(sequence,receivedNanos,move,
-            Packets.CaptureProvenance.fromAdapter(sourceId,move,authoritativeTick)));
+            new Packets.CaptureProvenance(
+                sourceId,
+                "CLIENT_TO_SERVER",
+                event.getPacketType().toString(),
+                authoritativeTick,
+                clientTick)));
         schedulePredictionValidation(capture);
       }else if(event.getPacketType()==PacketType.Play.Client.INTERACT_ENTITY){
         var interaction=new WrapperPlayClientInteractEntity(event);
@@ -245,6 +266,18 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         record(capture,clientInput);
         if(debugLevel(capture.playerId).trace())
           logClientInputDebug(capture.playerName,capture.sequence.get(),clientInput);
+      }else if(event.getPacketType()==PacketType.Play.Client.SLOT_STATE_CHANGE){
+        var slotState=new WrapperPlayClientSlotStateChange(event);
+        Packets.SlotStateChange packet=new Packets.SlotStateChange(
+            slotState.getWindowId(),slotState.getSlot(),slotState.isState());
+        record(capture,packet);
+        schedulePredictionValidation(capture);
+      }else if(event.getPacketType()==PacketType.Play.Client.USE_ITEM){
+        var useItem=new WrapperPlayClientUseItem(event);
+        Packets.UseItem packet=new Packets.UseItem(
+            useItem.getHand().getId(), useItem.getSequence(), useItem.getYaw(), useItem.getPitch());
+        record(capture,packet);
+        schedulePredictionValidation(capture);
       }else if(event.getPacketType()==PacketType.Play.Client.HELD_ITEM_CHANGE){
         var held=new WrapperPlayClientHeldItemChange(event);
         Packets.HeldItemChange packet=new Packets.HeldItemChange(held.getSlot());
@@ -386,6 +419,37 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           var velocity=packet.getVelocity();
           record(capture,new Packets.Velocity(vector(velocity.getX(),velocity.getY(),velocity.getZ())));
         }
+      }else if(event.getPacketType()==PacketType.Play.Server.SET_SLOT){
+        var slot=new WrapperPlayServerSetSlot(event);
+        var item=slot.getItem();
+        Packets.ContainerState packet=new Packets.ContainerState(
+            slot.getWindowId(),slot.getStateId(),slot.getSlot(),
+            item==null || item.isEmpty()?0:item.getAmount(),false);
+        record(capture,packet);
+      }else if(event.getPacketType()==PacketType.Play.Server.WINDOW_ITEMS){
+        var window=new WrapperPlayServerWindowItems(event);
+        var carried=window.getCarriedItem();
+        int totalItems=window.getItems()==null?0:window.getItems().size();
+        Packets.ContainerState packet=new Packets.ContainerState(
+            window.getWindowId(),window.getStateId(),-1,totalItems,
+            carried.isPresent() && !carried.get().isEmpty());
+        record(capture,packet);
+      }else if(event.getPacketType()==PacketType.Play.Server.SET_PLAYER_INVENTORY){
+        var inventory=new WrapperPlayServerSetPlayerInventory(event);
+        var item=inventory.getStack();
+        Packets.ContainerState packet=new Packets.ContainerState(
+            0,-1,inventory.getSlot(),item==null || item.isEmpty()?0:item.getAmount(),false);
+        record(capture,packet);
+      }else if(event.getPacketType()==PacketType.Play.Server.SET_CURSOR_ITEM){
+        var cursor=new WrapperPlayServerSetCursorItem(event);
+        var item=cursor.getStack();
+        Packets.ContainerState packet=new Packets.ContainerState(
+            -1,-1,-2,item==null || item.isEmpty()?0:item.getAmount(),item!=null && !item.isEmpty());
+        record(capture,packet);
+      }else if(event.getPacketType()==PacketType.Play.Server.ACKNOWLEDGE_BLOCK_CHANGES){
+        var ack=new WrapperPlayServerAcknowledgeBlockChanges(event);
+        Packets.BlockAck packet=new Packets.BlockAck(ack.getSequence());
+        record(capture,packet);
       }else if(event.getPacketType()==PacketType.Play.Server.BLOCK_CHANGE){
         var packet=new WrapperPlayServerBlockChange(event);
         var blockPosition=packet.getBlockPosition();
