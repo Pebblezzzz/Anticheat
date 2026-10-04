@@ -2,7 +2,7 @@ name: Maven tests
 
 on:
   push:
-    branches: [ main, phase8-hardening, grim-style-fp-hardening-20261004 ]
+    branches: [ main, phase8-hardening ]
   pull_request:
 
 jobs:
