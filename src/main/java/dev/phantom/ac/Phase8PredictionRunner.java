@@ -3914,7 +3914,7 @@ public final class Phase8PredictionRunner {
         hasClientTickBoundary
             ? "client-tick boundary observed"
             : "no client-tick boundary observed for authoritative flight toggle");
-    return Phase8MovementValidation.authoritativeObservation(
+    return Phase8MovementValidation.hardViolation(
         playerId,
         movementServerTick(packet),
         state,
@@ -3926,8 +3926,8 @@ public final class Phase8PredictionRunner {
             tick.clientTick(),
             !tick.exact(),
             List.of(tick.source())),
-        "UNAUTHORIZED_FLIGHT_TOGGLE_ATTEMPT",
-        "authoritative server state says flight is not permitted but a flight-on transition was observed",
+        "Flight",
+        "survival/adventure client asserted flight while authoritative flight state is disabled",
         List.of(
             "authoritativeCanFly=false",
             "authoritativeFlying=false",
