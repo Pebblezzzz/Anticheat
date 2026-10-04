@@ -24,6 +24,7 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPl
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientVehicleMove;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientHeldItemChange;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientEntityAction;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientClickWindow;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChunkData;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityVelocity;
@@ -201,12 +202,26 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           record(capture,packet);
           schedulePredictionValidation(capture);
         }
+      }else if(event.getPacketType()==PacketType.Play.Client.CLICK_WINDOW){
+        var click=new WrapperPlayClientClickWindow(event);
+        var clickType=click.getWindowClickType();
+        Packets.InventoryClick packet=new Packets.InventoryClick(
+            click.getWindowId(),click.getSlot(),click.getButton(),
+            clickType==null ? "UNKNOWN" : clickType.name());
+        record(capture,packet);
+        schedulePredictionValidation(capture);
       }else if(event.getPacketType()==PacketType.Play.Client.PLAYER_BLOCK_PLACEMENT){
         var placement=new WrapperPlayClientPlayerBlockPlacement(event);
         var position=placement.getBlockPosition();
         if(position!=null){
+          var cursor=placement.getCursorPosition();
           Packets.BlockPlace packet=new Packets.BlockPlace(
-              new dev.phantom.ac.world.Pos(position.x,position.y,position.z));
+              new dev.phantom.ac.world.Pos(position.x,position.y,position.z),
+              placement.getFaceId(),
+              cursor==null
+                  ?dev.phantom.ac.Maths.Vec3.ZERO
+                  :new dev.phantom.ac.Maths.Vec3(cursor.x,cursor.y,cursor.z),
+              cursor!=null);
           record(capture,packet);
           schedulePredictionValidation(capture);
         }
