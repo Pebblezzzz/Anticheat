@@ -186,7 +186,21 @@ public final class Vanilla12111RichPhysics {
         double inputScale = inputMagnitude > 1.0 ? 1.0 / Math.sqrt(2.0) : 1.0;
 
         double inputAcceleration;
-        if (fluid != Phase5Mechanics.Fluid.NONE) {
+        if (fluid == Phase5Mechanics.Fluid.WATER) {
+            /*
+             * Modern clients expose water movement efficiency as a real movement
+             * attribute. Depth Strider raises the base 0.02 swim speed toward the
+             * player's effective movement speed rather than simply removing water
+             * friction. Dolphin's Grace affects the post-input swim drag separately.
+             */
+            double movementSpeed = context.attributes().value() * context.effects().speedMultiplier();
+            if (context.movementEnvironment().sprinting()) movementSpeed *= SPRINTING_SPEED_MULTIPLIER;
+            double swimSpeed = 0.02
+                    + (movementSpeed - 0.02) * context.effects().depthStriderFraction();
+            inputAcceleration = inputMagnitude > 1.0
+                    ? swimSpeed
+                    : swimSpeed * INPUT_FRICTION;
+        } else if (fluid != Phase5Mechanics.Fluid.NONE) {
             inputAcceleration = inputMagnitude > 1.0
                     ? AIR_ACCEL
                     : AIR_ACCEL * INPUT_FRICTION;
@@ -214,9 +228,19 @@ public final class Vanilla12111RichPhysics {
                 double slipperiness = BlockCatalogue12111.slipperiness(support);
                 double movementSpeed = context.attributes().value() * context.effects().speedMultiplier();
                 if (context.movementEnvironment().sprinting()) movementSpeed *= SPRINTING_SPEED_MULTIPLIER;
-                if (context.movementEnvironment().sneaking()) movementSpeed *= 0.3;
+                if (context.movementEnvironment().sneaking()) movementSpeed *= context.effects().sneakingSpeedMultiplier();
+
+                /*
+                 * Soul Speed is represented by the modern movement-efficiency
+                 * attribute. In the target 1.21.11 path, a player with Soul Speed
+                 * must not inherit the ordinary Soul Sand slowdown.
+                 */
+                boolean soulSpeedSurface = context.effects().soulSpeedActive()
+                        && (support.blockId().equals("minecraft:soul_sand")
+                        || support.blockId().equals("minecraft:soul_soil"));
+                double effectiveSlipperiness = soulSpeedSurface ? 0.6 : slipperiness;
                 double frictionInfluencedSpeed = movementSpeed * FRICTION_SPEED_FACTOR
-                        / (slipperiness * slipperiness * slipperiness);
+                        / (effectiveSlipperiness * effectiveSlipperiness * effectiveSlipperiness);
                 inputAcceleration = inputMagnitude > 1.0
                         ? frictionInfluencedSpeed
                         : frictionInfluencedSpeed * INPUT_FRICTION;
@@ -370,9 +394,13 @@ public final class Vanilla12111RichPhysics {
 
         double horizontalFactor;
         if (fluid == Phase5Mechanics.Fluid.WATER) {
-            horizontalFactor = fluidSample.surfaceSwimming() && context.movementEnvironment().sprinting()
-                    ? WATER_SPRINT_DRAG
-                    : (context.movementEnvironment().sprinting() ? WATER_SPRINT_DRAG : WATER_DRAG);
+            if (context.effects().dolphinsGrace()) {
+                horizontalFactor = 0.96;
+            } else {
+                horizontalFactor = fluidSample.surfaceSwimming() && context.movementEnvironment().sprinting()
+                        ? WATER_SPRINT_DRAG
+                        : (context.movementEnvironment().sprinting() ? WATER_SPRINT_DRAG : WATER_DRAG);
+            }
         } else if (fluid == Phase5Mechanics.Fluid.LAVA) {
             horizontalFactor = LAVA_DRAG;
         } else if (climbing) {
