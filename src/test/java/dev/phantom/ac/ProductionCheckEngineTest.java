@@ -140,4 +140,51 @@ class ProductionCheckEngineTest {
     var result = ProductionCheckEngine.analyze("p", moves(91f), report(), CONFIG);
     assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("PacketRotation")));
   }
+  @Test
+  void heldItemOutsideHotbarIsDetected() {
+    var result = ProductionCheckEngine.analyze(
+        "p",
+        List.of(new Packets.RawPacket(1, 1, new Packets.HeldItemChange(9))),
+        report(),
+        CONFIG);
+    assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("HeldItemSlot")));
+  }
+
+  @Test
+  void sustainedClientTickBurstIsDetectedAsTimerEvidence() {
+    java.util.ArrayList<Packets.RawPacket> packets = new java.util.ArrayList<>();
+    for (int i = 0; i < 20; i++) {
+      packets.add(new Packets.RawPacket(i + 1, i * 10_000_000L, new Packets.ClientTickEnd()));
+    }
+
+    var result = ProductionCheckEngine.analyze("p", packets, report(), CONFIG);
+
+    assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("TimerBurst")));
+  }
+
+  @Test
+  void veryFastHardBlockBreakIsDetected() {
+    var stone = dev.phantom.ac.world.v12111.BlockCatalogue12111.decode("minecraft:stone", Map.of());
+    var world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+        .loadChunk(0, 0)
+        .setBlock(0, 0, 0, stone)
+        .build();
+    var p = player(0, 0);
+    var movement = new PredictionFrame(
+        2, 20_000_000L, 2, 0L,
+        new Packets.Move(p.position(), p.yaw(), p.pitch(), true, 0L),
+        p, p, Set.of(), Set.of(), world, List.of(), List.of());
+
+    var packets = List.of(
+        new Packets.RawPacket(1, 0L,
+            new Packets.DigAction("STARTED_DIGGING", new dev.phantom.ac.world.Pos(0, 0, 0), 1)),
+        new Packets.RawPacket(2, 20_000_000L,
+            new Packets.DigAction("FINISHED_DIGGING", new dev.phantom.ac.world.Pos(0, 0, 0), 2)));
+
+    var result = ProductionCheckEngine.analyze("p", packets, report(movement), CONFIG);
+
+    assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("FastBreak")));
+  }
+
+
 }
