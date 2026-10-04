@@ -76,6 +76,21 @@ public final class Phase8EnforcementPolicy {
     if (config.onlyWhenExhaustive() && !exhaustive) {
       return new Decision(false, 0.0, Set.of(), "evidence is not an exhaustive movement-reachability proof");
     }
+    /*
+     * Never treat a textual elimination reason as proof by itself. Production
+     * enforcement additionally requires the numeric evidence contract to show
+     * that a non-empty candidate set was completely eliminated and no candidate
+     * matched the observation.
+     */
+    if (evidence.reachableCandidateCount() <= 0) {
+      return new Decision(false, 0.0, Set.of(), "evidence contains no reachable candidates to eliminate");
+    }
+    if (evidence.matchingCandidateCount() != 0) {
+      return new Decision(false, 0.0, Set.of(), "evidence still contains matching candidates");
+    }
+    if (evidence.candidatesEliminated() != evidence.reachableCandidateCount()) {
+      return new Decision(false, 0.0, Set.of(), "evidence did not eliminate the complete reachable candidate set");
+    }
     if (evidence.firstInconsistentTick().isEmpty()) {
       return new Decision(false, 0.0, Set.of(), "evidence has no first inconsistent tick");
     }
