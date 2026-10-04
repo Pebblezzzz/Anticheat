@@ -121,6 +121,33 @@ public final class Phase8MovementValidation {
     return new Result(Verdict.UNCERTAIN, evidence);
   }
 
+  /**
+   * Creates a hard, non-reachability violation for an independently deterministic
+   * contradiction (for example an unauthorized flight-state toggle). These findings
+   * enter the same Grim-style violation/punishment stream as exhaustive movement flags.
+   */
+  public static Result hardViolation(String playerId, long serverTick, Player prior, Player observed,
+                                     WorldSnapshot world, String worldReference,
+                                     Validation.SyncWindow timing, String rule,
+                                     String eliminationReason, List<String> diagnostics,
+                                     String replayReference) {
+    Objects.requireNonNull(rule);
+    Objects.requireNonNull(eliminationReason);
+    Objects.requireNonNull(diagnostics);
+
+    List<String> uncertainty = timing.uncertain() ? List.copyOf(timing.reasons()) : List.of();
+    Evidence evidence = new Evidence(
+        VERSION, Verdict.IMPOSSIBLE, playerId, serverTick,
+        timing.earliestClientTick(), timing.latestClientTick(),
+        prior, observed, Contracts.TARGET_VERSION, worldReference,
+        List.of("authoritative server state observed", "client packet state observed"),
+        timing.reasons(), 0, 0, 0,
+        eliminationReason, OptionalLong.of(serverTick), Optional.empty(),
+        diagnostics, uncertainty, PHASE5_VERSION, PHASE6_VERSION,
+        PHASE7_VERSION, replayReference, rule);
+    return new Result(Verdict.IMPOSSIBLE, evidence);
+  }
+
   public static Result validate(String playerId, long serverTick, Player prior, Player observed,
                                 WorldSnapshot world, String worldReference,
                                 Validation.SyncWindow timing, List<String> inputAssumptions,
@@ -300,9 +327,9 @@ public final class Phase8MovementValidation {
       String key = evidence.playerId() + "/" + evidence.rule();
       State old = players.getOrDefault(key, State.empty());
       State next = switch (evidence.verdict()) {
-        case IMPOSSIBLE -> old.impossible(evidence.serverTick(), nowMillis, config);
-        case POSSIBLE -> old.recovered(evidence.serverTick(), nowMillis, config);
-        case UNCERTAIN -> old.uncertain(evidence.serverTick(), nowMillis, config);
+        case IMPOSSIBLE -> old.impossible(evidence.serverTick(), nowMillis, config, evidence.rule());
+        case POSSIBLE -> old.recovered(evidence.serverTick(), nowMillis, config, evidence.rule());
+        case UNCERTAIN -> old.uncertain(evidence.serverTick(), nowMillis, config, evidence.rule());
       };
 
       GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(evidence.rule());
