@@ -812,7 +812,7 @@ public final class Phase8PredictionRunner {
         prediction = Set.of();
         predictionTick = -1L;
         rootRebasedForMovement = true;
-        physicsFrontierSuppressedUntilPositionMovement = false;
+        physicsFrontierSuppressedUntilPositionMovement = true;
       } else if (bootstrapRecoveryRequired) {
         trace.add("FRONTIER_ROOT_SUPPRESSED reason=authoritative-observation-witness"
             + " positionBearing=" + (move.position() != null));
