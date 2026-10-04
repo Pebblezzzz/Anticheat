@@ -193,8 +193,8 @@ public final class ProductionCheckEngine {
       }
 
       if (finding.verdict() == Verdict.IMPOSSIBLE
-          && thresholdReached(activeCount, policy.log())
-          && boundaryCrossed(activeCount, policy.log(), 0.0)) {
+          && thresholdReached(level, policy.log())
+          && boundaryCrossed(level, policy.log(), 0.0)) {
         log = Optional.of(finding);
       }
 
