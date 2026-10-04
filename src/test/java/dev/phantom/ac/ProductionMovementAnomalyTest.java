@@ -65,7 +65,7 @@ class ProductionMovementAnomalyTest {
   @Test void blatantStepHeightProducesHardFinding() {
     ProductionCheckEngine.Report report = analyze(List.of(
         frame(1, player(0.5, 64.0, 0.5, true),
-            player(0.5, 65.0, 0.5, true))));
+            player(0.7, 65.0, 0.5, true))));
 
     assertTrue(report.findings().stream()
         .anyMatch(f -> f.rule().equals("Step") && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
