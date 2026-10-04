@@ -19,6 +19,9 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPl
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPong;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientTeleportConfirm;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerBlockPlacement;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientVehicleMove;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChunkData;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityVelocity;
@@ -44,6 +47,7 @@ import dev.phantom.ac.Packets.RawPacket;
 import dev.phantom.ac.Phase5Mechanics;
 import dev.phantom.ac.Phase7Timing;
 import dev.phantom.ac.Phase8PredictionRunner;
+import dev.phantom.ac.ProductionCheckEngine;
 import dev.phantom.ac.Phase8MovementValidation;
 import dev.phantom.ac.PhantomDebugFormatter;
 import dev.phantom.ac.PhantomPlayerState;
@@ -118,6 +122,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private final Map<UUID,DebugLevel> debugPlayers=new ConcurrentHashMap<>();
   private org.bukkit.scheduler.BukkitTask stateTask;
   private int validationBudget;
+  private ProductionCheckEngine.Config productionCheckConfig;
   private boolean alertsEnabled,broadcastAlerts,printAlertsToConsole,setbacksEnabled,setbacksOnlyExhaustive;
   private String alertPermission;
   private int alertIntervalTicks;
@@ -182,6 +187,37 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         appendPacket(capture,new RawPacket(sequence,receivedNanos,move,
             Packets.CaptureProvenance.fromAdapter(sourceId,move,authoritativeTick)));
         schedulePredictionValidation(capture);
+      }else if(event.getPacketType()==PacketType.Play.Client.INTERACT_ENTITY){
+        var interaction=new WrapperPlayClientInteractEntity(event);
+        if(interaction.getAction()!=null){
+          Packets.InteractAction action=switch(interaction.getAction()){
+            case ATTACK -> Packets.InteractAction.ATTACK;
+            case INTERACT -> Packets.InteractAction.INTERACT;
+            case INTERACT_AT -> Packets.InteractAction.INTERACT_AT;
+          };
+          Packets.InteractEntity packet=new Packets.InteractEntity(interaction.getEntityId(),action);
+          record(capture,packet);
+          schedulePredictionValidation(capture);
+        }
+      }else if(event.getPacketType()==PacketType.Play.Client.PLAYER_BLOCK_PLACEMENT){
+        var placement=new WrapperPlayClientPlayerBlockPlacement(event);
+        var position=placement.getBlockPosition();
+        if(position!=null){
+          Packets.BlockPlace packet=new Packets.BlockPlace(
+              new dev.phantom.ac.world.Pos(position.x,position.y,position.z));
+          record(capture,packet);
+          schedulePredictionValidation(capture);
+        }
+      }else if(event.getPacketType()==PacketType.Play.Client.VEHICLE_MOVE){
+        var vehicle=new WrapperPlayClientVehicleMove(event);
+        var position=vehicle.getPosition();
+        if(position!=null){
+          Packets.VehicleMove packet=new Packets.VehicleMove(
+              vector(position.x,position.y,position.z),
+              vehicle.getYaw(),vehicle.getPitch(),vehicle.isOnGround());
+          record(capture,packet);
+          schedulePredictionValidation(capture);
+        }
       }else if(event.getPacketType()==PacketType.Play.Client.PLAYER_INPUT){
         var input=new WrapperPlayClientPlayerInput(event);
         Packets.ClientInput clientInput=new Packets.ClientInput(
@@ -393,6 +429,13 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     punishmentCommand=getConfig().getString("enforcement.punishment-command","warn {player} Phantom movement evidence");
     exemptionPermission=getConfig().getString("enforcement.permission","phantom.exempt");
     validationBudget=Math.max(1,getConfig().getInt("validation.candidate-budget",4096));
+    productionCheckConfig=new ProductionCheckEngine.Config(
+        getConfig().getBoolean("checks.enabled",true),
+        Math.max(1,getConfig().getInt("checks.minimum-observations",3)),
+        Math.max(1,getConfig().getInt("checks.reset-after-ticks",40)),
+        Math.max(0,getConfig().getInt("checks.alert-debounce-ticks",20)),
+        Math.max(1.0,getConfig().getDouble("checks.attack-reach",4.0)),
+        Math.max(1.0,getConfig().getDouble("checks.block-interaction-reach",5.0)));
     getServer().getPluginManager().registerEvents(this,this);
     PacketEvents.getAPI().getEventManager().registerListener(listener);
     int processors=Runtime.getRuntime().availableProcessors();
@@ -1193,6 +1236,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           capture.playerState.initialStateReceivedNanos());
 
       Phase8PredictionRunner.Report report=incremental;
+      ProductionCheckEngine.Report productionChecks =
+          ProductionCheckEngine.analyze(playerName, raw, incremental, productionCheckConfig);
       capture.lastDebugReport=incremental;
 
       DebugLevel debug=debugLevel(capture.playerId);
@@ -1254,7 +1299,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       }
 
       // The only hop back is the immutable validation report for Bukkit actions.
-      getServer().getScheduler().runTask(this,()->applyResult(capture,report));
+      getServer().getScheduler().runTask(this,()->applyResult(capture,report,productionChecks));
     }catch(RuntimeException failure){
       capture.lastValidationElapsedMicros=(System.nanoTime()-startedNanos)/1_000L;
       getLogger().log(java.util.logging.Level.WARNING,
@@ -1263,13 +1308,36 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
   }
 
-  private void applyResult(Capture capture,Phase8PredictionRunner.Report report){
+  private void applyResult(
+      Capture capture,
+      Phase8PredictionRunner.Report report,
+      ProductionCheckEngine.Report productionChecks){
     DebugLevel debugLevel=debugLevel(capture.playerId);
     if (debugLevel.trace()) {
       for(Phase8MovementValidation.Result result:report.results())
         logValidationDebug(getServer().getPlayer(capture.playerId)==null
             ?capture.playerId.toString()
             :getServer().getPlayer(capture.playerId).getName(),result);
+    }
+
+    for(ProductionCheckEngine.Finding finding:productionChecks.findings()){
+      if(finding.verdict()!=ProductionCheckEngine.Verdict.IMPOSSIBLE)continue;
+      var accumulatedCheck=capture.productionChecks.accept(finding,productionCheckConfig);
+      capture.productionChecks=accumulatedCheck.state();
+      accumulatedCheck.alert().ifPresent(alert->{
+        String message=alert.message(capture.playerName);
+        if(printAlertsToConsole)getLogger().warning(message
+            +" reason="+alert.reason()+" severity="
+            +String.format(Locale.ROOT,"%.2f",alert.severity())
+            +" replay="+alert.replayReference());
+        if(broadcastAlerts){
+          getServer().broadcastMessage(message);
+        }else{
+          for(Player recipient:getServer().getOnlinePlayers())
+            if(recipient.hasPermission(alertPermission))
+              recipient.sendMessage(message);
+        }
+      });
     }
 
     Phase8MovementValidation.Evidence latestSetbackEvidence=null;
@@ -2078,6 +2146,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     volatile long paperMoveFailureWindowStartNanos=-1L;
     volatile int paperMoveFailureCount;
     volatile Phase8MovementValidation.Accumulator accumulator=Phase8MovementValidation.Accumulator.empty();
+    volatile ProductionCheckEngine.Accumulator productionChecks=ProductionCheckEngine.Accumulator.empty();
     final ValidationResultGate validationGate=new ValidationResultGate();
     final AtomicLong validationRuns=new AtomicLong();
     final AtomicLong validationPackets=new AtomicLong();
