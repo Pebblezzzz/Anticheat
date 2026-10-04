@@ -96,7 +96,6 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class HardenedPhantomPaperPlugin extends JavaPlugin implements Listener {
   private static final int MAX_CAPTURE_PACKETS=12_000,MAX_VALIDATION_PACKETS=6_000;
   private static final int LOCAL_SNAPSHOT_RADIUS_CHUNKS=2;
-  private static final long WORLD_TRANSACTION_MIN_INTERVAL_NANOS=2_000_000L;
   private static final long PAPER_MOVE_FAILURE_WINDOW_NANOS=1_000_000_000L;
   private static final int PAPER_MOVE_FAILURE_THRESHOLD=1;
   private static final long VALIDATION_SLOW_RUN_NANOS=50_000_000L;
@@ -836,24 +835,36 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     return channel instanceof Channel nettyChannel ? nettyChannel : null;
   }
 
+  /**
+   * Advances the per-tick ping-pong sandwich.
+   *
+   * <p>Each server tick has exactly one boundary ping. That ping closes the
+   * previous tick interval, so all clientbound mutations emitted since the prior
+   * boundary are held behind this transaction. The same ping is also the opening
+   * marker for the next interval. This is the bounded "one big sandwich" model:
+   * PING(n) -> tick state changes -> PING(n+1).</p>
+   */
   private void requestStateBarrier(Player player,Capture capture){
-    if(capture.pendingChunkDecodes.get()>0)return;
-    long now=System.nanoTime();
-    long last=capture.lastWorldBarrierNanos.get();
-    if(last!=Long.MIN_VALUE&&now-last<WORLD_TRANSACTION_MIN_INTERVAL_NANOS)return;
     sendStateBarrier(player,capture);
   }
 
   private void sendStateBarrier(Player player,Capture capture){
     Packets.PlayerContext context=capture.playerState.pendingAuthoritativeContext();
-    if(context==null)return;
 
     short transactionId=capture.nextWorldTransaction();
     long sequenceBoundary=capture.sequence.get();
+
+    // World mutations since the previous boundary belong to this closing ping.
     capture.clientWorld.openBarrier(transactionId,sequenceBoundary);
 
-    Packets.PlayerContext barrierContext=context.withTransactionBarrier(transactionId);
-    capture.playerState.markBarrierSent(transactionId,barrierContext);
+    Packets.PlayerContext barrierContext=
+        context==null ? null : context.withTransactionBarrier(transactionId);
+
+    // The first boundary has no preceding authority sample, but it still has
+    // to exist as the opening marker for the first client-tick sandwich.
+    if(barrierContext!=null){
+      capture.playerState.markBarrierSent(transactionId,barrierContext);
+    }
     capture.outstandingTransactions.add(transactionId);
 
     try{
@@ -869,20 +880,22 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           Packets.CaptureProvenance.fromAdapter(
               "paper-transaction",tx,authoritativeTick(capture))));
 
-      long contextSequence=capture.sequence.incrementAndGet();
-      long contextNanos=System.nanoTime();
-      appendPacket(capture,new RawPacket(
-          contextSequence,
-          contextNanos,
-          barrierContext,
-          Packets.CaptureProvenance.fromAdapter(
-              "paper-live-transaction",
-              barrierContext,
-              authoritativeTick(capture),
-              capture.clientTickTracker.hasObservedBoundary()
-                  ?capture.clientTickTracker.clientTickForMovement()
-                  :null)));
-      capture.playerState.markContextPublished();
+      if(barrierContext!=null){
+        long contextSequence=capture.sequence.incrementAndGet();
+        long contextNanos=System.nanoTime();
+        appendPacket(capture,new RawPacket(
+            contextSequence,
+            contextNanos,
+            barrierContext,
+            Packets.CaptureProvenance.fromAdapter(
+                "paper-live-transaction",
+                barrierContext,
+                authoritativeTick(capture),
+                capture.clientTickTracker.hasObservedBoundary()
+                    ?capture.clientTickTracker.clientTickForMovement()
+                    :null)));
+        capture.playerState.markContextPublished();
+      }
     }catch(RuntimeException failure){
       capture.outstandingTransactions.remove(transactionId);
       capture.reservedTransactions.remove(transactionId);
@@ -1137,8 +1150,13 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             anchorReceivedNanos);
       }
 
-      capture.playerState.observeAuthoritativeContext(context);
+      /*
+       * The boundary ping closes the previous client-tick sandwich and becomes
+       * the opening marker for the next one. Capture the newly observed
+       * authority only after that ping so it is released by the next boundary.
+       */
       requestStateBarrier(player,capture);
+      capture.playerState.observeAuthoritativeContext(context);
     }
   }
 
