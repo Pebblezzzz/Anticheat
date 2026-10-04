@@ -304,20 +304,27 @@ public final class ProductionCheckEngine {
         }
       }
 
-      if (packet instanceof Packets.DigAction dig && frame != null) {
+      if (packet instanceof Packets.DigAction dig) {
         String action = dig.action();
         if (action.contains("STARTED_DIGGING")) {
           diggingStarts.put(dig.position(), raw.receivedNanos());
-          diggingStartFrames.put(dig.position(), frame);
+          if (frame != null) {
+            diggingStartFrames.put(dig.position(), frame);
+          } else {
+            diggingStartFrames.remove(dig.position());
+          }
         } else if (action.contains("FINISHED_DIGGING")) {
           Long started = diggingStarts.remove(dig.position());
           PredictionFrame startedFrame = diggingStartFrames.remove(dig.position());
-          if (started != null && startedFrame != null
+          PredictionFrame worldFrame = startedFrame != null ? startedFrame : frame;
+          if (started != null
+              && worldFrame != null
+              && frame != null
               && raw.receivedNanos() >= started
               && raw.receivedNanos() - started <= 35_000_000L
               && ("survival".equalsIgnoreCase(frame.observedAfter().gamemode())
                   || "adventure".equalsIgnoreCase(frame.observedAfter().gamemode()))) {
-            var state = startedFrame.world().blockAtOrNull(
+            var state = worldFrame.world().blockAtOrNull(
                 dig.position().x(), dig.position().y(), dig.position().z());
             if (state != null
                 && !state.isAir()
