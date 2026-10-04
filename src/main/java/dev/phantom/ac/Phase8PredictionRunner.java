@@ -718,15 +718,16 @@ public final class Phase8PredictionRunner {
           && positionExactlyMatches(observedBefore.position(), observedAfter.position())
           && observedAfter.onGround();
       /*
-       * Grim advances its prediction engine for every client movement update,
-       * including position-bearing zero-delta packets. These packets are still
-       * client movement ticks; treating them as observation-only leaves the
-       * persistent physics frontier frozen while the packet/client clock moves
-       * forward. Keep only explicit status packets observation-only.
+       * A position-bearing zero-delta packet is still a client movement boundary.
+       * When no causal server context exists, let the persistent physics frontier
+       * advance through the same vanilla tick instead of freezing it at the last
+       * observation. Keep the existing observation-witness path when authority is
+       * available because that velocity is not an atomic client-boundary state.
        */
-      boolean statusObservation = move.position() == null
-          && move.movementKind() == Packets.MovementKind.STATUS;
-      boolean observationOnlyMovement = statusObservation;
+      boolean stationaryWithoutCausalAuthority =
+          stationaryPositionObservation && latestCausalAuthority(packet) == null;
+      boolean observationOnlyMovement = move.position() == null
+          || (stationaryPositionObservation && !stationaryWithoutCausalAuthority);
       if (observationOnlyMovement && tick.timingUncertain()) {
         tick = tick.withTimingUncertaintyResolved(
             "observation-only movement does not advance client physics, so Phase 7 chronology uncertainty is not kinematic");
@@ -848,7 +849,9 @@ public final class Phase8PredictionRunner {
         rememberObservedMovement(observedBefore, observedAfter, tick);
       }
 
-      if (observationOnlyMovement) {
+      if (move.position() == null || stationaryPositionObservation) {
+        boolean statusObservation = move.position() == null
+            && move.movementKind() == Packets.MovementKind.STATUS;
         boolean positionlessRotationObservation = move.position() == null && !statusObservation;
 
         if (physicsFrontierSuppressedUntilPositionMovement) {
@@ -919,10 +922,18 @@ public final class Phase8PredictionRunner {
           continue;
         }
         /*
-         * Explicit STATUS packets are non-kinematic observations. Position-bearing
-         * packets, including zero-displacement packets, continue through the
-         * normal prediction path so the persistent client-physics frontier advances
-         * with the client tick instead of becoming stale between real movements.
+         * Grim treats a position/rotation observation separately from the
+         * prediction tick. In particular, a stationary position packet is not
+         * proof that the retained physics candidate occupies the observed
+         * position. The client has already supplied the observation; validating
+         * that packet against an older physics root manufactured the false
+         * IMPOSSIBLE results seen after join/reconciliation.
+         *
+         * Keep rotation-only observations attached to the retained physics
+         * frontier, but use an observation witness for stationary position
+         * packets. The witness is deliberately not promoted to the persistent
+         * physics frontier because its velocity is observational rather than a
+         * verified client-tick boundary.
          */
         Set<Candidate> observationCandidates;
         boolean possibleObservation;
