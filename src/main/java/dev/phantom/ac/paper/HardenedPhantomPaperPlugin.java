@@ -92,6 +92,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private static final long WORLD_TRANSACTION_MIN_INTERVAL_NANOS=2_000_000L;
   private static final long PAPER_MOVE_FAILURE_WINDOW_NANOS=1_000_000_000L;
   private static final int PAPER_MOVE_FAILURE_THRESHOLD=1;
+  private static final long VALIDATION_SLOW_RUN_NANOS=50_000_000L;
 
   private final Map<UUID,Capture> captures=new ConcurrentHashMap<>();
   enum DebugLevel {
@@ -639,9 +640,22 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   @Override public boolean onCommand(CommandSender sender,Command command,String label,String[] args){
     if(!command.getName().equalsIgnoreCase("phantom"))return false;
     if(args.length==0||args[0].equalsIgnoreCase("status")){
+      long runs=captures.values().stream().mapToLong(c->c.validationRuns.get()).sum();
+      long totalNanos=captures.values().stream().mapToLong(c->c.validationNanosTotal.get()).sum();
+      long slowRuns=captures.values().stream().mapToLong(c->c.validationSlowRuns.get()).sum();
+      long possible=captures.values().stream().mapToLong(c->c.validationPossible.get()).sum();
+      long uncertain=captures.values().stream().mapToLong(c->c.validationUncertain.get()).sum();
+      long impossible=captures.values().stream().mapToLong(c->c.validationImpossible.get()).sum();
+      long queued=captures.values().stream().filter(c->c.predictionValidationQueued.get()).count();
+      long avgMicros=runs==0?0:(totalNanos/1_000L)/runs;
       sender.sendMessage("PhantomAC captures="+captures.size()
           +" visibleChunks="+captures.values().stream().mapToInt(c->c.clientWorld.visibleChunkCount()).sum()
           +" pendingBarriers="+captures.values().stream().mapToInt(c->c.clientWorld.pendingBarrierCount()).sum()
+          +" validationQueued="+queued
+          +" validationRuns="+runs
+          +" avgValidationMicros="+avgMicros
+          +" slowRuns="+slowRuns
+          +" verdicts="+possible+"/"+uncertain+"/"+impossible
           +" setbacksDefault="+setbacksEnabled);
       return true;
     }
@@ -1215,7 +1229,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             +" continuation="+incremental.continuation()
             +" frontierRetained="+incremental.candidateFrontierRetained());
       }
-      capture.lastValidationElapsedMicros=(System.nanoTime()-startedNanos)/1_000L;
+      long validationElapsedNanos=System.nanoTime()-startedNanos;
+      capture.lastValidationElapsedMicros=validationElapsedNanos/1_000L;
+      capture.lastValidationCompletedNanos=System.nanoTime();
+      capture.validationNanosTotal.addAndGet(validationElapsedNanos);
+      capture.validationSlowRuns.addAndGet(validationElapsedNanos>=VALIDATION_SLOW_RUN_NANOS ? 1L : 0L);
+      capture.validationPossible.addAndGet(incremental.possible());
+      capture.validationUncertain.addAndGet(incremental.uncertain());
+      capture.validationImpossible.addAndGet(incremental.impossible());
       capture.lastValidationBatchPackets=raw.size();
       capture.lastValidationBatchMovements=incremental.movementObservations();
       capture.validationPackets.addAndGet(raw.size());
@@ -2061,7 +2082,13 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     final AtomicLong validationRuns=new AtomicLong();
     final AtomicLong validationPackets=new AtomicLong();
     final AtomicLong validationMovements=new AtomicLong();
+    final AtomicLong validationNanosTotal=new AtomicLong();
+    final AtomicLong validationSlowRuns=new AtomicLong();
+    final AtomicLong validationPossible=new AtomicLong();
+    final AtomicLong validationUncertain=new AtomicLong();
+    final AtomicLong validationImpossible=new AtomicLong();
     volatile long lastValidationElapsedMicros=-1L;
+    volatile long lastValidationCompletedNanos=-1L;
     volatile int lastValidationBatchPackets;
     volatile int lastValidationBatchMovements;
     int processedResults;
