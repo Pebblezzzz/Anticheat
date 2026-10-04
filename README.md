@@ -8,11 +8,13 @@ The Paper adapter is diagnostic-only. It captures client movement/input and outb
 
 The project is GPL-3.0-only because its Paper packet adapter requires the separately installed GPL-3.0 PacketEvents plugin. No PacketEvents or GrimAC source code has been copied. See [LICENSE.md](LICENSE.md).
 
-## Status and version discipline
+## Production status and version discipline
 
-The implementation is internally tested, deterministic, and version-isolated through `Vanilla12111Physics`. It is **not claimed to be 1:1 vanilla**. Its walking/jumping constants and simplified block catalogue require comparison against recorded 1.21.11 vanilla-client traces before enforcement. Unsupported mechanics are represented as uncertainty, not as violations.
+The 1.21.11 movement path is version-pinned, deterministic, replayable, and protected by explicit `POSSIBLE`, `UNCERTAIN`, and exhaustively proven `IMPOSSIBLE` verdicts. The live adapter captures compensated world/timing/entity state and runs expensive prediction asynchronously. Modern movement modifiers represented in the current implementation include Depth Strider, Swift Sneak, Soul Speed, and Dolphin's Grace.
 
-No GrimAC source was copied or linked into this repository. GrimAC was consulted only for high-level architectural concerns (per-player world history, predictive/reachable simulation, and latency-aware state); it is GPL-3.0, so direct reuse would require GPL compliance and attribution.
+Production enforcement is downstream from simulation. It requires repeated consecutive exhaustive contradictions plus numeric evidence that a non-empty reachable candidate set was completely eliminated. Incomplete world/timing/entity coverage remains `UNCERTAIN`, never a punishment decision.
+
+No GrimAC source was copied or linked into this repository. Grim is used as an engineering reference for prediction, compensated world state, latency handling, collision ordering, and edge-case coverage; Phantom implements those concepts independently.
 
 ## Core invariants
 
