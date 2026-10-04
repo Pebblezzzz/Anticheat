@@ -123,7 +123,7 @@ class Phase8PredictionRunnerTest {
     Player start = anchor();
 
     Maths.Vec3 correctedPosition = new Maths.Vec3(8.5, 64.0, 8.5);
-    Move correction = new Move(correctedPosition, 15f, 4f, true, null, MovementKind.POSITION_ROTATION);
+    Teleport correction = new Teleport(77, correctedPosition, 15f, 4f);
     Move currentPosition = new Move(
         new Maths.Vec3(8.4819, 64.0, 8.5010), 15f, 4f, true, 6723L);
     Move rotationOne = new Move(null, 100f, 12f, true, 6727L);
