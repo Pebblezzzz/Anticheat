@@ -570,6 +570,37 @@ class CausalMovementPipelineTest {
   }
 
   @Test
+  void statusMovementPacketValidatesGroundClaimWithoutInventingPositionOrRotation() {
+    Packets.PlayerContext liveAuthority = authority();
+    List<RawPacket> packets = List.of(
+        new RawPacket(1, 0, liveAuthority,
+            Packets.CaptureProvenance.fromAdapter("paper-live", liveAuthority, 0L, 1L)),
+        new RawPacket(2, 10, new Move(
+            null, null, null, false, 1L, Packets.MovementKind.STATUS),
+            Packets.CaptureProvenance.fromAdapter(
+                "paper-status", new Move(
+                    null, null, null, false, 1L, Packets.MovementKind.STATUS), 0L, 1L)));
+
+    var report = CausalMovementPipeline.analyze(
+        "status-ground-spoof",
+        Timeline.assign(new Normalizer().normalize(packets), 0, 50_000_000L),
+        4096,
+        exactTiming(),
+        floorWorld(),
+        anchor(),
+        0L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(Verdict.IMPOSSIBLE, report.results().getFirst().verdict(),
+        report.results().toString());
+    assertEquals("MOVEMENT_REACHABILITY", report.results().getFirst().evidence().rule());
+    assertEquals(0, report.results().getFirst().evidence().matchingCandidateCount());
+    assertFalse(report.results().getFirst().evidence().uncertaintySources().stream()
+        .anyMatch(reason -> reason.contains("position") && reason.contains("rotation")),
+        report.results().getFirst().evidence().uncertaintySources().toString());
+  }
+
+  @Test
   void PaperMovementRejectionIsPreservedAsCorroborationOnly() {
     List<RawPacket> packets = List.of(
         new RawPacket(1, 0, new ChunkStates(
