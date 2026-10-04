@@ -177,6 +177,52 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void provisionalPacketBootstrapCannotBecomeImpossibleOnLaterMismatch() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = WorldSnapshot.builder(Contracts.TARGET_VERSION)
+        .loadChunk(0, 0)
+        .build();
+    Player start = anchor();
+
+    Move first = new Move(
+        new Maths.Vec3(.6, 64.0, .5), 0f, 0f, true, 1L);
+    Move mismatched = new Move(
+        new Maths.Vec3(1.6, 64.0, .5), 0f, 0f, true, 2L);
+
+    var report = runner.process(
+        "provisional-packet-bootstrap",
+        List.of(
+            new RawPacket(
+                1L, 10L, first,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-movement", first, 1L, 1L)),
+            new RawPacket(
+                2L, 20L, mismatched,
+                Packets.CaptureProvenance.fromAdapter(
+                    "test-movement", mismatched, 1L, 2L))),
+        world,
+        start,
+        -1L);
+
+    assertEquals(2, report.movementObservations(), report.results().toString());
+    assertNotEquals(
+        Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        report.results().getLast().verdict(),
+        report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.UNCERTAIN,
+        report.results().getLast().verdict(),
+        report.results().toString());
+    assertTrue(report.frames().getFirst().predictedAfter().stream()
+        .anyMatch(candidate ->
+            candidate.provenance().input().equals("CLIENT_MOVEMENT_BOOTSTRAP_PROVISIONAL")),
+        report.frames().getFirst().toString());
+    assertTrue(report.frames().get(1).trace().stream()
+        .anyMatch(line -> line.startsWith("PACKET_PROVISIONAL_FRONTIER_UNCERTAIN")),
+        report.frames().get(1).trace().toString());
+  }
+
+  @Test
   void stalePredictionFrontierCannotTurnRotationOnlyPacketsIntoImpossible() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     WorldSnapshot world = floorWorld();
