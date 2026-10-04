@@ -7,7 +7,7 @@ import static dev.phantom.ac.Maths.Vec3;
 public final class Packets {
   private Packets() {}
 
-  public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm,
+  public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm, UseItem, ContainerState, BlockAck,
       Velocity, Effect, Gamemode, PlayerContext, FlightToggle, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange,
       WorldTransactionSend, WorldTransactionAck, PaperMovementRejection, ClientBlockBreak, EntitySpawn, EntityMove, EntityDespawn,
       InteractEntity, BlockPlace, VehicleMove, HeldItemChange, EntityAction, DigAction, InventoryClick {
@@ -18,10 +18,36 @@ public final class Packets {
     }
   }
 
-  public record Move(Vec3 position, Float yaw, Float pitch, Boolean onGround, Long clientTick) implements Packet { public Move { if(clientTick!=null&&clientTick<0) throw new IllegalArgumentException("clientTick must be non-negative"); } }
+  public enum MovementKind { POSITION, ROTATION, POSITION_ROTATION, STATUS }
+  public record Move(Vec3 position, Float yaw, Float pitch, Boolean onGround, Long clientTick, MovementKind movementKind) implements Packet {
+    public Move {
+      if(clientTick!=null&&clientTick<0) throw new IllegalArgumentException("clientTick must be non-negative");
+      Objects.requireNonNull(movementKind,"movementKind");
+    }
+    public Move(Vec3 position, Float yaw, Float pitch, Boolean onGround, Long clientTick) {
+      this(position,yaw,pitch,onGround,clientTick,deriveMovementKind(position,yaw,pitch));
+    }
+    private static MovementKind deriveMovementKind(Vec3 position, Float yaw, Float pitch) {
+      if(position!=null && (yaw!=null || pitch!=null)) return MovementKind.POSITION_ROTATION;
+      if(position!=null) return MovementKind.POSITION;
+      if(yaw!=null || pitch!=null) return MovementKind.ROTATION;
+      return MovementKind.STATUS;
+    }
+  }
   /** Protocol-observed end of a client tick. This is a boundary signal, not a movement timestamp. */
   public record ClientTickEnd() implements Packet {}
   public record ClientInput(boolean forward, boolean backward, boolean left, boolean right, boolean jump, boolean sneak, boolean sprint) implements Packet {}
+  public record UseItem(int hand, int sequence, Float yaw, Float pitch) implements Packet {
+    public UseItem {
+      if(sequence < 0) throw new IllegalArgumentException("sequence must be non-negative");
+    }
+  }
+  public record ContainerState(int windowId, int stateId) implements Packet {
+    public ContainerState { if(windowId < 0) throw new IllegalArgumentException("windowId must be non-negative"); }
+  }
+  public record BlockAck(int sequence) implements Packet {
+    public BlockAck { if(sequence < 0) throw new IllegalArgumentException("sequence must be non-negative"); }
+  }
   /** Server-side event evidence that the client attempted to toggle flying. */
   public record FlightToggle(boolean flying, boolean cancelled) implements Packet {}
   /** Client-side block-break prediction intent used for the short pre-authoritative-update window. */
@@ -206,7 +232,7 @@ public final class Packets {
     public static String directionFor(Packet packet){
       if(packet instanceof Move||packet instanceof ClientInput||packet instanceof ClientTickEnd||packet instanceof TeleportConfirm
           ||packet instanceof WorldTransactionAck||packet instanceof FlightToggle||packet instanceof ClientBlockBreak
-          ||packet instanceof InteractEntity||packet instanceof BlockPlace||packet instanceof VehicleMove
+          ||packet instanceof InteractEntity||packet instanceof BlockPlace||packet instanceof VehicleMove||packet instanceof UseItem||packet instanceof BlockAck
           ||packet instanceof HeldItemChange||packet instanceof EntityAction||packet instanceof DigAction
           ||packet instanceof InventoryClick)return "CLIENT_TO_SERVER";
       if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof Effect||packet instanceof Gamemode||packet instanceof PlayerContext||packet instanceof WorldTransactionSend||packet.mutatesWorld())return "SERVER_TO_CLIENT";
