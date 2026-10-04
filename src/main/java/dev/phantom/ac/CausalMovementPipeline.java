@@ -390,18 +390,9 @@ public final class CausalMovementPipeline {
                 !eventTiming.uncertain() && movement.chronologyClean(), fields);
             results.add(result);
             switch (result.verdict()) {
-              case POSSIBLE -> {
-                possible++;
-                contradictionActive = false;
-              }
-              case UNCERTAIN -> {
-                uncertain++;
-                recoveryRequired = true;
-              }
-              case IMPOSSIBLE -> {
-                impossible++;
-                contradictionActive = true;
-              }
+              case POSSIBLE -> contradictionActive = false;
+              case UNCERTAIN -> recoveryRequired = true;
+              case IMPOSSIBLE -> contradictionActive = true;
             }
             trace.add("EVIDENCE " + result.verdict()
                 + " reason=STATUS_GROUND_CLAIM"
@@ -416,7 +407,6 @@ public final class CausalMovementPipeline {
                 playerId, serverTick, observedBefore, observedAfter, movement.world(),
                 worldReference, sync, assumptions, uncertainSearchResult, replayReference, false,
                 EnumSet.of(Phase6Reachability.ObservedField.GROUND)));
-            uncertain++;
             recoveryRequired = true;
             frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
                 assumptions, uncertainty, trace));
