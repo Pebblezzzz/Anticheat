@@ -794,7 +794,7 @@ public final class Phase8PredictionRunner {
       boolean rootRebasedForMovement = false;
       boolean temporallyStaleFrontierBeforeRoot =
           move.position() != null
-              && predictionFrontierTemporallyStale(prediction, tick);
+              && predictionContainsStaleServerCorrection(prediction, tick);
 
       if (temporallyStaleFrontierBeforeRoot) {
         /*
@@ -3242,6 +3242,14 @@ public final class Phase8PredictionRunner {
             1,
             List.of()));
     return candidate;
+  }
+
+  private static boolean predictionContainsStaleServerCorrection(
+      Set<Candidate> candidates,
+      TickResolution tick) {
+    return predictionFrontierTemporallyStale(candidates, tick)
+        && candidates.stream().allMatch(candidate ->
+            "SERVER_CORRECTION".equals(candidate.provenance().input()));
   }
 
   private static boolean predictionFrontierTemporallyStale(
