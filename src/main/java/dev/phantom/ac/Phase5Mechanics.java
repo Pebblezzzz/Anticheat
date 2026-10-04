@@ -64,6 +64,14 @@ public final class Phase5Mechanics {
         throw new IllegalArgumentException("effect/enchantment level must be -1 or greater");
       }
     }
+    /** Backward-compatible constructor used by legacy traces that store the levitation amplifier directly. */
+    public MovementEffects(int speedAmplifier, int slownessAmplifier, int jumpBoostAmplifier,
+                           int levitationAmplifier, boolean slowFalling) {
+      this(speedAmplifier, slownessAmplifier, jumpBoostAmplifier, levitationAmplifier,
+          slowFalling, -1, -1, -1, false);
+    }
+
+    /** Backward-compatible boolean convenience constructor. */
     public MovementEffects(int speedAmplifier, int slownessAmplifier, int jumpBoostAmplifier,
                            boolean levitation, boolean slowFalling) {
       this(speedAmplifier, slownessAmplifier, jumpBoostAmplifier, levitation ? 0 : -1,
