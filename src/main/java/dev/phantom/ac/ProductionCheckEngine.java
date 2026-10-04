@@ -149,8 +149,9 @@ public final class ProductionCheckEngine {
 
       Optional<Finding> alert = Optional.empty();
       boolean thresholdReached = level + 1.0e-9 >= config.alertViolationThreshold();
-      boolean crossedNextInterval = level + 1.0e-9
-          >= old.lastAlertViolationLevel() + config.alertViolationInterval();
+      boolean crossedNextInterval = old.lastAlertTick() < 0L
+          ? thresholdReached
+          : level + 1.0e-9 >= old.lastAlertViolationLevel() + config.alertViolationInterval();
       boolean debounceSatisfied = old.lastAlertTick() < 0L
           || finding.serverTick() - old.lastAlertTick() >= config.alertDebounceTicks();
 
