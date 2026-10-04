@@ -726,6 +726,13 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     return true;
   }
 
+  private static int enchantmentLevel(org.bukkit.inventory.ItemStack item, String key){
+    if(item==null||key==null||key.isBlank())return -1;
+    org.bukkit.enchantments.Enchantment enchantment =
+        org.bukkit.enchantments.Enchantment.getByKey(org.bukkit.NamespacedKey.minecraft(key));
+    return enchantment==null ? -1 : item.getEnchantmentLevel(enchantment);
+  }
+
   private static Channel asNettyChannel(Object channel){
     return channel instanceof Channel nettyChannel ? nettyChannel : null;
   }
@@ -926,6 +933,22 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       for(PotionEffect effect:player.getActivePotionEffects())
         if(effect.getType().getKey()!=null)
           effects.put(effect.getType().getKey().toString(),effect.getAmplifier());
+
+      /*
+       * Modern 1.21 movement uses enchantment-backed attributes for several
+       * movement modifiers. Packet capture does not reliably expose those
+       * values on the movement stream, so the Bukkit main-thread snapshot
+       * records the compensated player equipment as explicit core state.
+       */
+      int depthStrider = enchantmentLevel(
+          player.getInventory().getBoots(), "depth_strider");
+      int soulSpeed = enchantmentLevel(
+          player.getInventory().getBoots(), "soul_speed");
+      int swiftSneak = enchantmentLevel(
+          player.getInventory().getLeggings(), "swift_sneak");
+      if (depthStrider >= 0) effects.put("phantom:depth_strider", depthStrider);
+      if (soulSpeed >= 0) effects.put("phantom:soul_speed", soulSpeed);
+      if (swiftSneak >= 0) effects.put("phantom:swift_sneak", swiftSneak);
 
       Phase5Mechanics.Pose pose=
           player.isSleeping()?Phase5Mechanics.Pose.SLEEPING:
