@@ -11,7 +11,9 @@ import java.util.Set;
  * <p>Enforcement is deliberately downstream of evidence accumulation. The policy
  * never inspects movement distance or timing itself; it only permits actions when
  * the supplied Phase 8 evidence proves exhaustive modeled elimination and the
- * configured repeated-evidence threshold has been reached.</p>
+ * configured repeated-evidence threshold has been reached. The accumulator uses
+ * the same consecutive-impossible episode gate for staff alerts, so a recovered
+ * or uncertain observation cannot inherit a prior episode into enforcement.</p>
  */
 public final class Phase8EnforcementPolicy {
   private Phase8EnforcementPolicy() {}
