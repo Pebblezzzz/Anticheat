@@ -1234,16 +1234,20 @@ public final class Phase8PredictionRunner {
           latestContinuation = Continuation.ACTIVE;
           lastPositionClientTick = tick.clientTick();
 
-          SearchResult bootstrapSearch = new SearchResult(
-              Verdict.POSSIBLE,
-              bootstrapCandidates,
-              1,
-              bootstrapCandidates.size(),
-              0, 0, 0, 0,
-              List.of(
-                  "client movement bootstrap reconstructed the hidden start velocity from the observed tick",
-                  "canonical Phase 5 replay reproduced the observed movement exactly",
-                  "physical sprint/sneak state was preserved as explicit candidate alternatives when key-state and server movement-state evidence disagreed"));
+          SearchResult bootstrapSearch = packetOnlyBootstrap
+              ? uncertainSearch(
+                  bootstrapCandidates,
+                  "packet-only provisional recovery root has no fresh causal authority")
+              : new SearchResult(
+                  Verdict.POSSIBLE,
+                  bootstrapCandidates,
+                  1,
+                  bootstrapCandidates.size(),
+                  0, 0, 0, 0,
+                  List.of(
+                      "client movement bootstrap reconstructed the hidden start velocity from the observed tick",
+                      "canonical Phase 5 replay reproduced the observed movement exactly",
+                      "physical sprint/sneak state was preserved as explicit candidate alternatives when key-state and server movement-state evidence disagreed"));
           List<String> bootstrapUncertainty = new ArrayList<>();
           bootstrapUncertainty.add(
               "client-side starting velocity was reconstructed from observed movement because the server velocity is not an atomic client-tick state");
