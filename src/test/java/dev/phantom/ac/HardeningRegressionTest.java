@@ -24,40 +24,34 @@ class HardeningRegressionTest {
     assertTrue(result.alert().isEmpty(), "a single hard mismatch must not alert by default");
   }
 
-  @Test void defaultConfigRequiresThreeConsecutiveImpossibleObservations() {
+  @Test void defaultConfigUsesAHighActiveVlAlertThreshold() {
     var accumulator = Phase8MovementValidation.Accumulator.empty();
     var config = Phase8MovementValidation.Config.defaults();
 
-    var first = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 10), config);
-    accumulator = first.state();
-    assertTrue(first.alert().isEmpty());
+    for (int tick = 10; tick < 109; tick++) {
+      var accepted = accumulator.accept(evidence(Verdict.IMPOSSIBLE, tick), config);
+      accumulator = accepted.state();
+      assertTrue(accepted.alert().isEmpty(), "default Simulation-style alert threshold should not fire early");
+    }
 
-    var second = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 11), config);
-    accumulator = second.state();
-    assertTrue(second.alert().isEmpty());
-
-    var third = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 12), config);
-    assertTrue(third.alert().isPresent(), "three consecutive exhaustive mismatches should reach the default alert gate");
+    var threshold = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 109), config);
+    assertTrue(threshold.alert().isPresent());
+    assertEquals(100.0, threshold.state().players().get("player/MOVEMENT_REACHABILITY").violationLevel());
   }
 
-  @Test void possibleObservationBreaksTheImpossibleAlertEpisodeEvenWhenVlPersists() {
+  @Test void possibleObservationDoesNotResetActiveViolationHistory() {
     var accumulator = Phase8MovementValidation.Accumulator.empty();
     var config = new Phase8MovementValidation.Config(2, 0, true, true);
 
     accumulator = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 1), config).state();
     accumulator = accumulator.accept(evidence(Verdict.POSSIBLE, 2), config).state();
 
-    var freshImpossible = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 3), config);
-    accumulator = freshImpossible.state();
+    var secondImpossible = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 3), config);
 
-    assertTrue(freshImpossible.alert().isEmpty(),
-        "persisted VL must not bypass the consecutive-impossible episode gate");
-    assertEquals(1,
-        accumulator.players().get("player/MOVEMENT_REACHABILITY").consecutiveImpossible());
-
-    var secondFreshImpossible = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 4), config);
-    assertTrue(secondFreshImpossible.alert().isPresent(),
-        "the second consecutive impossible observation should satisfy the explicit gate");
+    assertTrue(secondImpossible.alert().isPresent(),
+        "the second flag should satisfy the active-VL threshold even after a possible observation");
+    assertEquals(2.0,
+        secondImpossible.state().players().get("player/MOVEMENT_REACHABILITY").violationLevel());
   }
 
   @Test void velocityPacketReplacesVelocity() {
