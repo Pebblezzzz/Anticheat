@@ -140,7 +140,7 @@ class ProductionCheckEngineTest {
     PredictionFrame mixed = new PredictionFrame(
         1L, 1L, 1L, 1L, move, before, after,
         Set.of(airCandidate, groundCandidate), Set.of(airCandidate, groundCandidate),
-        WorldSnapshot.emptyOverworld12111(), List.of(), List.of());
+        WorldSnapshot.emptyOverworld12111(), List.of("timing is ambiguous"), List.of());
     var mixedResult = ProductionCheckEngine.analyze(
         "p", List.of(new Packets.RawPacket(1L, 1L, move)), report(mixed), CONFIG);
     assertTrue(mixedResult.findings().stream().noneMatch(f -> f.rule().equals("GroundSpoof")));
