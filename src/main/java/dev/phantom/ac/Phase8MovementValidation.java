@@ -28,7 +28,8 @@ public final class Phase8MovementValidation {
   public record Config(double alertViolationThreshold, int alertDebounceTicks,
                        boolean alertsEnabled, boolean observationOnly,
                        double violationIncrement, double violationDecayPerTick,
-                       double maximumViolationLevel, double alertInterval) implements Serializable {
+                       double maximumViolationLevel, double alertInterval,
+                       GrimAlertPolicy.Config alertPolicy) implements Serializable {
     public Config {
       if (!Double.isFinite(alertViolationThreshold) || alertViolationThreshold <= 0.0)
         throw new IllegalArgumentException("alertViolationThreshold must be finite and positive");
@@ -39,13 +40,35 @@ public final class Phase8MovementValidation {
       if (!Double.isFinite(maximumViolationLevel) || maximumViolationLevel <= 0) throw new IllegalArgumentException("maximumViolationLevel must be finite and positive");
       if (!Double.isFinite(alertInterval) || alertInterval <= 0) throw new IllegalArgumentException("alertInterval must be finite and positive");
       if (maximumViolationLevel < alertViolationThreshold) throw new IllegalArgumentException("maximumViolationLevel must cover the alert threshold");
+      Objects.requireNonNull(alertPolicy);
     }
+    public Config(double alertViolationThreshold, int alertDebounceTicks,
+                  boolean alertsEnabled, boolean observationOnly,
+                  double violationIncrement, double violationDecayPerTick,
+                  double maximumViolationLevel, double alertInterval) {
+      this(alertViolationThreshold, alertDebounceTicks, alertsEnabled, observationOnly,
+          violationIncrement, violationDecayPerTick, maximumViolationLevel, alertInterval,
+          new GrimAlertPolicy.Config(
+              List.of(),
+              new GrimAlertPolicy.CommandRule(alertViolationThreshold, alertInterval),
+              GrimAlertPolicy.CommandRule.parse("1:1"),
+              300_000L));
+    }
+
     public Config(double alertViolationThreshold, int alertDebounceTicks,
                   boolean alertsEnabled, boolean observationOnly) {
       this(alertViolationThreshold, alertDebounceTicks, alertsEnabled, observationOnly,
-          1.0, 0.005, 100.0, 40.0);
+          1.0, 0.005, 100.0, 40.0,
+          new GrimAlertPolicy.Config(
+              List.of(),
+              new GrimAlertPolicy.CommandRule(alertViolationThreshold, 40.0),
+              GrimAlertPolicy.CommandRule.parse("1:1"),
+              300_000L));
     }
-    public static Config defaults() { return new Config(100.0, 0, true, true); }
+    public static Config defaults() {
+      return new Config(100.0, 0, true, true,
+          1.0, 0.005, 100.0, 40.0, GrimAlertPolicy.Config.defaults());
+    }
     public double alertThreshold() { return alertViolationThreshold; }
   }
 
@@ -117,6 +140,33 @@ public final class Phase8MovementValidation {
         diagnostics, uncertainty, PHASE5_VERSION, PHASE6_VERSION,
         PHASE7_VERSION, replayReference, rule);
     return new Result(Verdict.UNCERTAIN, evidence);
+  }
+
+  /**
+   * Creates a hard, non-reachability violation for an independently deterministic
+   * contradiction (for example an unauthorized flight-state toggle). These findings
+   * enter the same Grim-style violation/punishment stream as exhaustive movement flags.
+   */
+  public static Result hardViolation(String playerId, long serverTick, Player prior, Player observed,
+                                     WorldSnapshot world, String worldReference,
+                                     Validation.SyncWindow timing, String rule,
+                                     String eliminationReason, List<String> diagnostics,
+                                     String replayReference) {
+    Objects.requireNonNull(rule);
+    Objects.requireNonNull(eliminationReason);
+    Objects.requireNonNull(diagnostics);
+
+    List<String> uncertainty = timing.uncertain() ? List.copyOf(timing.reasons()) : List.of();
+    Evidence evidence = new Evidence(
+        VERSION, Verdict.IMPOSSIBLE, playerId, serverTick,
+        timing.earliestClientTick(), timing.latestClientTick(),
+        prior, observed, Contracts.TARGET_VERSION, worldReference,
+        List.of("authoritative server state observed", "client packet state observed"),
+        timing.reasons(), 0, 0, 0,
+        eliminationReason, OptionalLong.of(serverTick), Optional.empty(),
+        diagnostics, uncertainty, PHASE5_VERSION, PHASE6_VERSION,
+        PHASE7_VERSION, replayReference, rule);
+    return new Result(Verdict.IMPOSSIBLE, evidence);
   }
 
   public static Result validate(String playerId, long serverTick, Player prior, Player observed,
@@ -290,74 +340,167 @@ public final class Phase8MovementValidation {
     public static Accumulator empty() { return new Accumulator(Map.of()); }
 
     public Accumulated accept(Evidence evidence, Config config) {
+      return accept(evidence, config, Math.max(0L, evidence.serverTick()) * 50L);
+    }
+
+    public Accumulated accept(Evidence evidence, Config config, long nowMillis) {
       Objects.requireNonNull(evidence); Objects.requireNonNull(config);
       String key = evidence.playerId() + "/" + evidence.rule();
       State old = players.getOrDefault(key, State.empty());
       State next = switch (evidence.verdict()) {
-        case IMPOSSIBLE -> old.impossible(evidence.serverTick(), config);
-        case POSSIBLE -> old.recovered(evidence.serverTick(), config);
-        case UNCERTAIN -> old.uncertain(evidence.serverTick(), config);
+        case IMPOSSIBLE -> old.impossible(evidence.serverTick(), nowMillis, config, evidence.rule());
+        case POSSIBLE -> old.recovered(evidence.serverTick(), nowMillis, config, evidence.rule());
+        case UNCERTAIN -> old.uncertain(evidence.serverTick(), nowMillis, config, evidence.rule());
       };
-      Map<String, State> updated = new LinkedHashMap<>(players); updated.put(key, next);
+
+      GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(evidence.rule());
+      int activeCount = next.violationTimesMillis().size();
+      double level = activeCount * config.violationIncrement();
+      next = new State(next.consecutiveImpossible(), next.supportingImpossible(),
+          next.uncertaintyPeriods(), next.recoveries(), next.lastObservationTick(),
+          next.lastAlertTick(), level, next.lastAlertViolationLevel(),
+          next.violationTimesMillis());
+
       Optional<Alert> alert = Optional.empty();
-      double threshold = config.alertThreshold();
-      boolean thresholdReached = next.violationLevel() >= threshold;
-      boolean crossedNextInterval = next.lastAlertTick() < 0
-          ? thresholdReached
-          : next.violationLevel() + 1e-9 >= next.lastAlertViolationLevel() + config.alertInterval();
-      /*
-       * Every exhaustive IMPOSSIBLE observation is a real flag and immediately adds
-       * violation level. Grim does not require three consecutive flags before a check
-       * becomes a flag; alert commands are a separate threshold over active violations.
-       * POSSIBLE/UNCERTAIN evidence may reduce VL through decay, but does not erase the
-       * already-recorded flag history.
-       */
+      Optional<Alert> log = Optional.empty();
+
+      boolean thresholdReached = findingThresholdReached(level, policy.alert());
+      boolean crossedNextInterval = commandBoundaryCrossed(level, policy.alert(), next.lastAlertViolationLevel());
       if (config.alertsEnabled() && evidence.verdict() == Verdict.IMPOSSIBLE
-          && thresholdReached
-          && (next.lastAlertTick() < 0 || crossedNextInterval)) {
-        double confidence = Math.min(1.0, next.violationLevel() / threshold);
-        alert = Optional.of(new Alert(evidence.playerId(), evidence.serverTick(), evidence.firstInconsistentTick().orElse(evidence.serverTick()),
-            evidence.rule(), evidence.eliminationReason(), confidence, next.supportingImpossible(), next.violationLevel(), evidence.replayReference()));
-        updated.put(key, next.alerted(evidence.serverTick()));
+          && thresholdReached && crossedNextInterval) {
+        Alert emitted = new Alert(evidence.playerId(), evidence.serverTick(),
+            evidence.firstInconsistentTick().orElse(evidence.serverTick()),
+            evidence.rule(), evidence.eliminationReason(),
+            Math.min(1.0, level / Math.max(1.0, policy.alert().threshold())),
+            next.supportingImpossible(), level, evidence.replayReference());
+        alert = Optional.of(emitted);
+        next = next.alerted(evidence.serverTick(), level);
       }
-      return new Accumulated(new Accumulator(updated), alert);
+
+      if (evidence.verdict() == Verdict.IMPOSSIBLE
+          && findingThresholdReached(level, policy.log())
+          && commandBoundaryCrossed(level, policy.log(), 0.0)) {
+        Alert emitted = new Alert(evidence.playerId(), evidence.serverTick(),
+            evidence.firstInconsistentTick().orElse(evidence.serverTick()),
+            evidence.rule(), evidence.eliminationReason(),
+            Math.min(1.0, level / Math.max(1.0, policy.log().threshold())),
+            next.supportingImpossible(), level, evidence.replayReference());
+        log = Optional.of(emitted);
+      }
+
+      Map<String, State> updated = new LinkedHashMap<>(players);
+      updated.put(key, next);
+      return new Accumulated(new Accumulator(updated), alert, log);
+    }
+
+    private static boolean findingThresholdReached(double level, GrimAlertPolicy.CommandRule rule) {
+      return level + 1e-9 >= rule.threshold();
+    }
+
+    private static boolean commandBoundaryCrossed(double level, GrimAlertPolicy.CommandRule rule, double lastLevel) {
+      if (rule.interval() == 0.0) {
+        return level >= rule.threshold() && lastLevel < rule.threshold();
+      }
+      if (lastLevel <= 0.0) return level + 1e-9 >= rule.threshold();
+      return level + 1e-9 >= lastLevel + rule.interval();
     }
   }
+
 
   public record State(int consecutiveImpossible, int supportingImpossible, int uncertaintyPeriods,
                       int recoveries, long lastObservationTick, long lastAlertTick,
-                      double violationLevel, double lastAlertViolationLevel) implements Serializable {
+                      double violationLevel, double lastAlertViolationLevel,
+                      List<Long> violationTimesMillis) implements Serializable {
+    public State {
+      if (consecutiveImpossible < 0 || supportingImpossible < 0 || uncertaintyPeriods < 0 || recoveries < 0
+          || !Double.isFinite(violationLevel) || violationLevel < 0.0
+          || !Double.isFinite(lastAlertViolationLevel) || lastAlertViolationLevel < 0.0) {
+        throw new IllegalArgumentException("invalid movement violation state");
+      }
+      violationTimesMillis = List.copyOf(violationTimesMillis);
+    }
+
     public State(int consecutiveImpossible, int supportingImpossible, int uncertaintyPeriods,
                  int recoveries, long lastObservationTick, long lastAlertTick) {
       this(consecutiveImpossible, supportingImpossible, uncertaintyPeriods, recoveries,
-          lastObservationTick, lastAlertTick, supportingImpossible, supportingImpossible);
+          lastObservationTick, lastAlertTick, supportingImpossible, supportingImpossible, List.of());
     }
-    public static State empty() { return new State(0, 0, 0, 0, -1, -1, 0.0, 0.0); }
-    State impossible(long tick, Config config) {
-      double decayed = decayTo(tick, config);
+
+    public State(int consecutiveImpossible, int supportingImpossible, int uncertaintyPeriods,
+                 int recoveries, long lastObservationTick, long lastAlertTick,
+                 double violationLevel, double lastAlertViolationLevel) {
+      this(consecutiveImpossible, supportingImpossible, uncertaintyPeriods, recoveries,
+          lastObservationTick, lastAlertTick, violationLevel, lastAlertViolationLevel, List.of());
+    }
+
+    public static State empty() {
+      return new State(0, 0, 0, 0, -1, -1, 0.0, 0.0, List.of());
+    }
+
+    State impossible(long tick, long nowMillis, Config config) {
+      return impossible(tick, nowMillis, config, "MOVEMENT_REACHABILITY");
+    }
+
+    State impossible(long tick, long nowMillis, Config config, String rule) {
+      GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(rule);
+      long cutoff = nowMillis - policy.removeViolationsAfterMillis();
+      List<Long> active = new ArrayList<>();
+      for (long timestamp : violationTimesMillis) if (timestamp > cutoff) active.add(timestamp);
+      active.add(nowMillis);
+      double level = active.size() * config.violationIncrement();
       return new State(consecutiveImpossible + 1, supportingImpossible + 1, uncertaintyPeriods, recoveries,
-          tick, lastAlertTick, Math.min(config.maximumViolationLevel(), decayed + config.violationIncrement()), lastAlertViolationLevel);
+          tick, lastAlertTick, level, lastAlertViolationLevel, active);
     }
-    State recovered(long tick, Config config) {
+
+    State recovered(long tick, long nowMillis, Config config) {
+      return recovered(tick, nowMillis, config, "MOVEMENT_REACHABILITY");
+    }
+
+    State recovered(long tick, long nowMillis, Config config, String rule) {
       return new State(0, supportingImpossible, uncertaintyPeriods, recoveries + 1, tick, lastAlertTick,
-          decayTo(tick, config), lastAlertViolationLevel);
+          activeLevel(nowMillis, config, rule), lastAlertViolationLevel, activeViolations(nowMillis, config, rule));
     }
-    State uncertain(long tick, Config config) {
+
+    State uncertain(long tick, long nowMillis, Config config) {
+      return uncertain(tick, nowMillis, config, "MOVEMENT_REACHABILITY");
+    }
+
+    State uncertain(long tick, long nowMillis, Config config, String rule) {
       return new State(0, supportingImpossible, uncertaintyPeriods + 1, recoveries, lastObservationTick, lastAlertTick,
-          decayTo(tick, config), lastAlertViolationLevel);
+          activeLevel(nowMillis, config, rule), lastAlertViolationLevel, activeViolations(nowMillis, config, rule));
     }
-    State alerted(long tick) {
+
+    State alerted(long tick, double level) {
       return new State(consecutiveImpossible, supportingImpossible, uncertaintyPeriods, recoveries,
-          lastObservationTick, tick, violationLevel, violationLevel);
+          lastObservationTick, tick, level, level, violationTimesMillis);
     }
-    double decayTo(long tick, Config config) {
-      if (lastObservationTick < 0 || tick <= lastObservationTick + 1 || config.violationDecayPerTick() == 0) return violationLevel;
-      long idleTicks = tick - lastObservationTick - 1;
-      return Math.max(0.0, violationLevel - idleTicks * config.violationDecayPerTick());
+
+    List<Long> activeViolations(long nowMillis, Config config) {
+      return activeViolations(nowMillis, config, "MOVEMENT_REACHABILITY");
+    }
+
+    List<Long> activeViolations(long nowMillis, Config config, String rule) {
+      GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(rule);
+      long cutoff = Math.max(0L, nowMillis - policy.removeViolationsAfterMillis());
+      return violationTimesMillis.stream().filter(timestamp -> timestamp > cutoff).toList();
+    }
+
+    double activeLevel(long nowMillis, Config config) {
+      return activeLevel(nowMillis, config, "MOVEMENT_REACHABILITY");
+    }
+
+    double activeLevel(long nowMillis, Config config, String rule) {
+      return activeViolations(nowMillis, config, rule).size() * config.violationIncrement();
     }
   }
 
-  public record Accumulated(Accumulator state, Optional<Alert> alert) implements Serializable {}
+  public record Accumulated(Accumulator state, Optional<Alert> alert, Optional<Alert> log) implements Serializable {
+    public Accumulated {
+      Objects.requireNonNull(state);
+      Objects.requireNonNull(alert);
+      Objects.requireNonNull(log);
+    }
+  }
 
   public record Alert(String playerId, long serverTick, long firstInconsistentTick, String reason,
                       String evidence, double confidence, int supportingEvents, double violationLevel,

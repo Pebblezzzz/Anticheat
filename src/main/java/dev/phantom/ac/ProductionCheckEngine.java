@@ -4,6 +4,7 @@ import dev.phantom.ac.Phase8PredictionRunner.PredictionFrame;
 import dev.phantom.ac.Phase5Mechanics.Pose;
 import dev.phantom.ac.geometry.BlockBox;
 import dev.phantom.ac.world.Pos;
+import dev.phantom.ac.world.BlockState;
 
 import java.util.*;
 import static dev.phantom.ac.Maths.Vec3;
@@ -39,7 +40,8 @@ public final class ProductionCheckEngine {
       double violationIncrement,
       double violationDecayPerTick,
       double maximumViolationLevel,
-      double alertViolationInterval) implements java.io.Serializable {
+      double alertViolationInterval,
+      GrimAlertPolicy.Config alertPolicy) implements java.io.Serializable {
     public Config {
       if (!Double.isFinite(alertViolationThreshold) || alertViolationThreshold <= 0.0
           || resetAfterTicks < 1 || alertDebounceTicks < 0)
@@ -55,6 +57,7 @@ public final class ProductionCheckEngine {
           || !Double.isFinite(alertViolationInterval) || alertViolationInterval <= 0.0
           || maximumViolationLevel < alertViolationThreshold)
         throw new IllegalArgumentException("invalid production violation buffer");
+      Objects.requireNonNull(alertPolicy);
     }
 
     public Config(
@@ -66,7 +69,12 @@ public final class ProductionCheckEngine {
         double blockInteractionReach) {
       this(enabled, alertViolationThreshold, resetAfterTicks, alertDebounceTicks,
           attackReach, blockInteractionReach, true, 20, 250_000_000L,
-          1.0, 0.005, 100.0, 40.0);
+          1.0, 0.005, 100.0, 40.0,
+          new GrimAlertPolicy.Config(
+              List.of(),
+              new GrimAlertPolicy.CommandRule(alertViolationThreshold, 40.0),
+              GrimAlertPolicy.CommandRule.parse("1:1"),
+              300_000L));
     }
   }
 
@@ -102,27 +110,53 @@ public final class ProductionCheckEngine {
       long lastObservationTick,
       long lastAlertTick,
       double violationLevel,
-      double lastAlertViolationLevel) implements java.io.Serializable {
+      double lastAlertViolationLevel,
+      List<Long> violationTimesMillis) implements java.io.Serializable {
     public State {
       if (supportingEvents < 0 || !Double.isFinite(violationLevel) || violationLevel < 0.0
           || !Double.isFinite(lastAlertViolationLevel) || lastAlertViolationLevel < 0.0) {
         throw new IllegalArgumentException("invalid production violation state");
       }
+      violationTimesMillis = List.copyOf(violationTimesMillis);
     }
-    public static State empty() { return new State(0, -1L, -1L, 0.0, 0.0); }
 
-    double decayTo(long tick, Config config) {
-      if (lastObservationTick < 0L || tick <= lastObservationTick + 1L
-          || config.violationDecayPerTick() == 0.0) {
-        return violationLevel;
-      }
-      long idleTicks = tick - lastObservationTick - 1L;
-      return Math.max(0.0, violationLevel - idleTicks * config.violationDecayPerTick());
+    public State(
+        int supportingEvents,
+        long lastObservationTick,
+        long lastAlertTick,
+        double violationLevel,
+        double lastAlertViolationLevel) {
+      this(supportingEvents, lastObservationTick, lastAlertTick,
+          violationLevel, lastAlertViolationLevel, List.of());
+    }
+
+    public static State empty() {
+      return new State(0, -1L, -1L, 0.0, 0.0, List.of());
+    }
+
+    State addViolation(long tick, long nowMillis, Config config, String rule) {
+      GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(rule);
+      long cutoff = nowMillis - policy.removeViolationsAfterMillis();
+      List<Long> active = new ArrayList<>();
+      for (long timestamp : violationTimesMillis) if (timestamp > cutoff) active.add(timestamp);
+      active.add(nowMillis);
+      double level = active.size() * config.violationIncrement();
+      return new State(supportingEvents + 1, tick, lastAlertTick, level,
+          lastAlertViolationLevel, active);
+    }
+
+    State retainActive(long tick, long nowMillis, Config config, String rule) {
+      GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(rule);
+      long cutoff = Math.max(0L, nowMillis - policy.removeViolationsAfterMillis());
+      List<Long> active = violationTimesMillis.stream().filter(timestamp -> timestamp > cutoff).toList();
+      double level = active.size() * config.violationIncrement();
+      return new State(supportingEvents, tick, lastAlertTick, level,
+          lastAlertViolationLevel, active);
     }
 
     State alerted(long tick, double level) {
       return new State(supportingEvents, tick == lastObservationTick ? tick : lastObservationTick,
-          tick, level, level);
+          tick, level, level, violationTimesMillis);
     }
   }
 
@@ -131,47 +165,66 @@ public final class ProductionCheckEngine {
     public static Accumulator empty() { return new Accumulator(Map.of()); }
 
     public Result accept(Finding finding, Config config) {
+      return accept(finding, config, Math.max(0L, finding.serverTick()) * 50L);
+    }
+
+    public Result accept(Finding finding, Config config, long nowMillis) {
       Objects.requireNonNull(finding);
       Objects.requireNonNull(config);
-      if (!config.enabled()) return new Result(this, Optional.empty());
+      if (!config.enabled()) return new Result(this, Optional.empty(), Optional.empty());
 
       Map<String, State> updated = new LinkedHashMap<>(rules);
       State old = rules.getOrDefault(finding.rule(), State.empty());
-      double decayed = old.decayTo(finding.serverTick(), config);
-      int supporting = finding.verdict() == Verdict.IMPOSSIBLE
-          ? old.supportingEvents() + 1
-          : old.supportingEvents();
-      double level = finding.verdict() == Verdict.IMPOSSIBLE
-          ? Math.min(config.maximumViolationLevel(), decayed + config.violationIncrement())
-          : decayed;
-      State next = new State(supporting, finding.serverTick(), old.lastAlertTick(),
-          level, old.lastAlertViolationLevel());
+      State next = finding.verdict() == Verdict.IMPOSSIBLE
+          ? old.addViolation(finding.serverTick(), nowMillis, config, finding.rule())
+          : old.retainActive(finding.serverTick(), nowMillis, config, finding.rule());
+
+      GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(finding.rule());
+      int activeCount = next.violationTimesMillis().size();
+      double level = activeCount * config.violationIncrement();
+      next = new State(next.supportingEvents(), next.lastObservationTick(),
+          next.lastAlertTick(), level, next.lastAlertViolationLevel(), next.violationTimesMillis());
 
       Optional<Finding> alert = Optional.empty();
-      boolean thresholdReached = level + 1.0e-9 >= config.alertViolationThreshold();
-      boolean crossedNextInterval = old.lastAlertTick() < 0L
-          ? thresholdReached
-          : level + 1.0e-9 >= old.lastAlertViolationLevel() + config.alertViolationInterval();
-      boolean debounceSatisfied = old.lastAlertTick() < 0L
-          || finding.serverTick() - old.lastAlertTick() >= config.alertDebounceTicks();
+      Optional<Finding> log = Optional.empty();
+
+      boolean thresholdReached = thresholdReached(level, policy.alert());
+      boolean crossedNextInterval = boundaryCrossed(level, policy.alert(), next.lastAlertViolationLevel());
 
       if (finding.verdict() == Verdict.IMPOSSIBLE
-          && thresholdReached
-          && crossedNextInterval
-          && debounceSatisfied) {
+          && thresholdReached && crossedNextInterval) {
         alert = Optional.of(finding);
         next = next.alerted(finding.serverTick(), level);
       }
 
+      if (finding.verdict() == Verdict.IMPOSSIBLE
+          && thresholdReached(level, policy.log())
+          && boundaryCrossed(level, policy.log(), 0.0)) {
+        log = Optional.of(finding);
+      }
+
       updated.put(finding.rule(), next);
-      return new Result(new Accumulator(updated), alert);
+      return new Result(new Accumulator(updated), alert, log);
+    }
+
+    private static boolean thresholdReached(double level, GrimAlertPolicy.CommandRule rule) {
+      return level + 1e-9 >= rule.threshold();
+    }
+
+    private static boolean boundaryCrossed(double level, GrimAlertPolicy.CommandRule rule, double lastLevel) {
+      if (rule.interval() == 0.0) {
+        return level >= rule.threshold() && lastLevel < rule.threshold();
+      }
+      if (lastLevel <= 0.0) return level + 1e-9 >= rule.threshold();
+      return level + 1e-9 >= lastLevel + rule.interval();
     }
   }
 
-  public record Result(Accumulator state, Optional<Finding> alert) {
+public record Result(Accumulator state, Optional<Finding> alert, Optional<Finding> log) {
     public Result {
       Objects.requireNonNull(state);
       Objects.requireNonNull(alert);
+      Objects.requireNonNull(log);
     }
   }
 
@@ -388,10 +441,14 @@ public final class ProductionCheckEngine {
         BlockBox block = new BlockBox(pos.x(), pos.y(), pos.z(), pos.x() + 1.0, pos.y() + 1.0, pos.z() + 1.0);
         double distance = pointAabbDistance(eyePosition(frame.observedAfter()), block);
         if (distance > config.blockInteractionReach()) {
-          findings.add(uncertainFinding(playerId, serverTick, "FarBreak",
-              String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
-              Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
-              sequence));
+          findings.add((distance > config.blockInteractionReach() + 1.0)
+              ? finding(playerId, serverTick, "FarBreak",
+                  String.format(Locale.ROOT, "block distance %.3f is more than 1 block beyond %.3f", distance, config.blockInteractionReach()),
+                  Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0), sequence)
+              : uncertainFinding(playerId, serverTick, "FarBreak",
+                  String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
+                  Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
+                  sequence));
         }
       }
 
@@ -417,10 +474,14 @@ public final class ProductionCheckEngine {
           BlockBox block = new BlockBox(pos.x(), pos.y(), pos.z(), pos.x() + 1.0, pos.y() + 1.0, pos.z() + 1.0);
           double distance = pointAabbDistance(eyePosition(frame.observedAfter()), block);
           if (distance > config.blockInteractionReach()) {
-            findings.add(uncertainFinding(playerId, serverTick, "FarPlace",
-                String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
-                Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
-                sequence));
+            findings.add((distance > config.blockInteractionReach() + 1.0)
+                ? finding(playerId, serverTick, "FarPlace",
+                    String.format(Locale.ROOT, "block distance %.3f is more than 1 block beyond %.3f", distance, config.blockInteractionReach()),
+                    Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0), sequence)
+                : uncertainFinding(playerId, serverTick, "FarPlace",
+                    String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
+                    Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
+                    sequence));
           }
         }
       }
@@ -451,9 +512,13 @@ public final class ProductionCheckEngine {
                 && !state.isAir()
                 && !state.isUnsupported()
                 && isSlowBreakBlock(state.blockId())) {
-              findings.add(uncertainFinding(playerId, serverTick, "FastBreak",
-                  "a slow-to-break block reached FINISHED_DIGGING within 35 ms of STARTED_DIGGING",
-                  1.0, sequence));
+              findings.add((raw.receivedNanos() - started) <= 10_000_000L
+                  ? finding(playerId, serverTick, "FastBreak",
+                      "a slow-to-break block reached FINISHED_DIGGING within 10 ms of STARTED_DIGGING",
+                      1.0, sequence)
+                  : uncertainFinding(playerId, serverTick, "FastBreak",
+                      "a slow-to-break block reached FINISHED_DIGGING within 35 ms of STARTED_DIGGING",
+                      1.0, sequence));
             }
           }
         }
@@ -469,7 +534,211 @@ public final class ProductionCheckEngine {
       // No rotation packet means there is no aim evidence; intentionally silent.
     }
 
+    findings.addAll(analyzeMovementAnomalies(playerId, movement.frames()));
+
     return new Report(findings);
+  }
+
+  private static List<Finding> analyzeMovementAnomalies(
+      String playerId, List<PredictionFrame> frames) {
+    if (frames.isEmpty()) return List.of();
+
+    List<Finding> findings = new ArrayList<>();
+    double airborneY = Double.NaN;
+    boolean airborneTracking = false;
+
+    for (int index = 0; index < frames.size(); index++) {
+      PredictionFrame frame = frames.get(index);
+      Packets.Move move = frame.movement();
+      if (move.position() == null) {
+        airborneTracking = false;
+        airborneY = Double.NaN;
+        continue;
+      }
+
+      dev.phantom.ac.State.Player before = frame.observedBefore();
+      dev.phantom.ac.State.Player after = frame.observedAfter();
+      long sequence = frame.sequence();
+      long tick = frame.serverTick();
+
+      if (isNormalSurvivalMovement(frame)) {
+        Vec3 delta = new Vec3(
+            after.position().x() - before.position().x(),
+            after.position().y() - before.position().y(),
+            after.position().z() - before.position().z());
+        double horizontal = Math.hypot(delta.x(), delta.z());
+        boolean jumping = after.input().map(Simulation.AdvancedInput::jump).orElse(false);
+
+        /*
+         * Step: vanilla's normal standing step height is below one block. A
+         * >0.65 block vertical rise while remaining grounded, without a jump,
+         * is outside the normal collision step envelope and is a strong
+         * deterministic signature of a Step-height cheat.
+         */
+        if (before.onGround() && after.onGround() && !jumping
+            && delta.y() > 0.65 && horizontal > 0.05) {
+          findings.add(finding(playerId, tick, "Step",
+              String.format(Locale.ROOT,
+                  "grounded movement rose %.3f blocks in one client tick without a jump",
+                  delta.y()),
+              1.0, sequence));
+        }
+
+        /*
+         * Speed: use a deliberately high hard boundary so knockback, sprinting,
+         * ice, and normal attribute effects remain below it. Blatant speed
+         * clients routinely exceed this single-tick displacement.
+         */
+        boolean candidateExternalMotion = frame.predictedBefore().stream()
+            .anyMatch(candidate -> {
+              Phase5Mechanics.MovementEnvironment env = candidate.context().movementEnvironment();
+              double speed = Math.hypot(
+                  candidate.context().clientVelocity().x(),
+                  candidate.context().clientVelocity().z());
+              return env.vehicle().active() || env.gliding() || speed > 0.70;
+            });
+        if (!candidateExternalMotion && !jumping && horizontal > 1.0) {
+          findings.add(finding(playerId, tick, "Speed",
+              String.format(Locale.ROOT,
+                  "survival/adventure movement displaced %.3f blocks horizontally in one client tick",
+                  horizontal),
+              1.0, sequence));
+        }
+
+        /*
+         * Flight: upward motion with a non-jump state after the previous tick
+         * has already become non-grounded is not a vanilla continuation unless
+         * an external vertical effect is present.
+         */
+        boolean externalVertical = frame.predictedBefore().stream().anyMatch(candidate -> {
+          Phase5Mechanics.MovementEffects effects = candidate.context().effects();
+          Phase5Mechanics.MovementEnvironment env = candidate.context().movementEnvironment();
+          return effects.levitation() || effects.slowFalling()
+              || env.fluid() != Phase5Mechanics.Fluid.NONE
+              || env.climbable() || env.gliding() || env.vehicle().active();
+        });
+        if (!externalVertical && !before.onGround() && !after.onGround() && !jumping
+            && before.velocity().y() <= 0.05 && delta.y() > 0.16) {
+          findings.add(finding(playerId, tick, "Flight",
+              String.format(Locale.ROOT,
+                  "airborne movement gained %.3f vertical blocks without jump or vertical effect",
+                  delta.y()),
+              1.0, sequence));
+        }
+
+        /*
+         * A sustained hover/descent cancellation is also incompatible with
+         * vanilla gravity. Requiring the prior observed tick prevents a normal
+         * jump apex from becoming a flag.
+         */
+        if (!externalVertical && !before.onGround() && !after.onGround() && !jumping
+            && Math.abs(delta.y()) <= 0.01
+            && index > 0) {
+          PredictionFrame previous = frames.get(index - 1);
+          if (previous.movement().position() != null
+              && isNormalSurvivalMovement(previous)
+              && !previous.observedAfter().onGround()) {
+            Vec3 previousDelta = new Vec3(
+                previous.observedAfter().position().x() - previous.observedBefore().position().x(),
+                previous.observedAfter().position().y() - previous.observedBefore().position().y(),
+                previous.observedAfter().position().z() - previous.observedBefore().position().z());
+            boolean currentHover = Math.abs(delta.y()) <= 0.02
+                && Math.abs(after.velocity().y()) <= 0.02;
+            boolean previousHover = Math.abs(previous.observedAfter().velocity().y()) <= 0.02;
+            if (currentHover && previousHover
+                && (horizontal > 0.05 || Math.hypot(previousDelta.x(), previousDelta.z()) > 0.05)) {
+              findings.add(finding(playerId, tick, "Flight",
+                  "airborne vertical velocity remained near zero across consecutive movement ticks without a vertical effect",
+                  1.0, sequence));
+            }
+          }
+        }
+
+        /*
+         * NoFall: retain the fall origin while the player is genuinely airborne.
+         * A multi-block fall that lands while every modeled candidate remains
+         * airborne is a deterministic no-fall contradiction.
+         */
+        if (!before.onGround() && !after.onGround()) {
+          if (!airborneTracking) {
+            airborneY = before.position().y();
+            airborneTracking = true;
+          }
+        } else if (airborneTracking && after.onGround()) {
+          double fallDistance = airborneY - after.position().y();
+          boolean physicalLanding = frame.predictedAfter().stream()
+              .anyMatch(candidate -> candidate.context().player().onGround());
+          if (fallDistance > 3.0 && !physicalLanding) {
+            findings.add(finding(playerId, tick, "NoFall",
+                String.format(Locale.ROOT,
+                    "landing after %.3f blocks of tracked fall has no grounded legitimate candidate",
+                    fallDistance),
+                1.0, sequence));
+          }
+          airborneTracking = false;
+          airborneY = Double.NaN;
+        } else if (after.onGround()) {
+          airborneTracking = false;
+          airborneY = Double.NaN;
+        }
+      } else {
+        airborneTracking = false;
+        airborneY = Double.NaN;
+      }
+
+      /*
+       * Jesus: an on-ground claim over a fluid block with no collision support
+       * below the player is not a normal vanilla standing state. Lily pads and
+       * genuine solid support are excluded by the support test.
+       */
+      if (move.position() != null
+          && ("survival".equalsIgnoreCase(after.gamemode())
+              || "adventure".equalsIgnoreCase(after.gamemode()))
+          && after.onGround()
+          && (after.environment() == dev.phantom.ac.State.Environment.WATER
+              || after.environment() == dev.phantom.ac.State.Environment.LAVA)) {
+        int bx = (int) Math.floor(after.position().x());
+        int by = (int) Math.floor(after.position().y());
+        int bz = (int) Math.floor(after.position().z());
+        if (frame.world().coverageAt(bx, by, bz) == dev.phantom.ac.world.Coverage.KNOWN
+            && frame.world().coverageAt(bx, by - 1, bz) == dev.phantom.ac.world.Coverage.KNOWN) {
+          BlockState fluid = frame.world().blockAtOrNull(bx, by, bz);
+          BlockState below = frame.world().blockAtOrNull(bx, by - 1, bz);
+          if (fluid != null && fluid.hasFluidName() && !isSolidSupport(below)) {
+            findings.add(finding(playerId, tick, "Jesus",
+                "player claimed on-ground while standing on liquid without collision support",
+                1.0, sequence));
+          }
+        }
+      }
+    }
+
+    return findings;
+  }
+
+  private static boolean isNormalSurvivalMovement(PredictionFrame frame) {
+    dev.phantom.ac.State.Player player = frame.observedAfter();
+    if (!"survival".equalsIgnoreCase(player.gamemode())
+        && !"adventure".equalsIgnoreCase(player.gamemode())) {
+      return false;
+    }
+    if (player.environment() != dev.phantom.ac.State.Environment.DRY) return false;
+    for (Phase6Reachability.Candidate candidate : frame.predictedBefore()) {
+      Phase5Mechanics.MovementEnvironment env = candidate.context().movementEnvironment();
+      if (env.fluid() != Phase5Mechanics.Fluid.NONE
+          || env.climbable() || env.gliding() || env.vehicle().active()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static boolean isSolidSupport(BlockState state) {
+    if (state == null || state.isAir() || state.isUnsupported() || state.hasFluidName()) return false;
+    return switch (state.variant()) {
+      case NO_COLLISION_SPECIAL -> false;
+      default -> true;
+    };
   }
 
   private static Finding finding(String playerId, long serverTick, String rule,
@@ -586,6 +855,6 @@ public final class ProductionCheckEngine {
     return new Config(
         true, 100.0, 40, 20, 4.0, 5.0,
         true, 20, 250_000_000L,
-        1.0, 0.005, 100.0, 40.0);
+        1.0, 0.005, 100.0, 40.0, GrimAlertPolicy.Config.defaults());
   }
 }
