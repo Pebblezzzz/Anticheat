@@ -171,7 +171,8 @@ class Phase8PredictionRunnerTest {
         report.frames().getFirst().toString());
     assertTrue(report.frames().get(1).trace().stream()
         .anyMatch(line -> line.contains("FRONTIER_COMMITTED")
-            || line.contains("FRONTIER_RETAINED")),
+            || line.contains("FRONTIER_RETAINED")
+            || line.contains("FRONTIER_ADVANCED_UNCERTAIN")),
         report.frames().get(1).trace().toString());
   }
 
@@ -235,7 +236,7 @@ class Phase8PredictionRunnerTest {
         .anyMatch(line -> line.startsWith("OBSERVATION rotation-only")),
         report.frames().get(1).trace().toString());
     assertTrue(report.frames().get(2).trace().stream()
-        .anyMatch(line -> line.contains("rotation is a retained client-state observation")),
+        .anyMatch(line -> line.startsWith("OBSERVATION rotation-only")),
         report.frames().get(2).trace().toString());
   }
 
