@@ -4,6 +4,7 @@ import dev.phantom.ac.Phase8PredictionRunner.PredictionFrame;
 import dev.phantom.ac.Phase5Mechanics.Pose;
 import dev.phantom.ac.geometry.BlockBox;
 import dev.phantom.ac.world.Pos;
+import dev.phantom.ac.State.Player;
 import dev.phantom.ac.world.BlockState;
 
 import java.util.*;
@@ -555,8 +556,8 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
         continue;
       }
 
-      State.Player before = frame.observedBefore();
-      State.Player after = frame.observedAfter();
+      Player before = frame.observedBefore();
+      Player after = frame.observedAfter();
       long sequence = frame.sequence();
       long tick = frame.serverTick();
 
@@ -692,8 +693,8 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
           && ("survival".equalsIgnoreCase(after.gamemode())
               || "adventure".equalsIgnoreCase(after.gamemode()))
           && after.onGround()
-          && (after.environment() == State.Environment.WATER
-              || after.environment() == State.Environment.LAVA)) {
+          && (after.environment() == dev.phantom.ac.State.Environment.WATER
+              || after.environment() == dev.phantom.ac.State.Environment.LAVA)) {
         int bx = (int) Math.floor(after.position().x());
         int by = (int) Math.floor(after.position().y());
         int bz = (int) Math.floor(after.position().z());
@@ -852,6 +853,6 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
     return new Config(
         true, 100.0, 40, 20, 4.0, 5.0,
         true, 20, 250_000_000L,
-        1.0, 0.005, 100.0, 40.0);
+        1.0, 0.005, 100.0, 40.0, GrimAlertPolicy.Config.defaults());
   }
 }
