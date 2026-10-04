@@ -242,17 +242,18 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         }
       }else if(event.getPacketType()==PacketType.Play.Client.PLAYER_DIGGING){
         WrapperPlayClientPlayerDigging digging=new WrapperPlayClientPlayerDigging(event);
-        var blockPosition=digging.getBlockPosition();
-        if(blockPosition!=null){
+        var digBlockPosition=digging.getBlockPosition();
+        if(digBlockPosition!=null){
           int diggingSequence=digging.getSequence();
           Packets.DigAction digAction=new Packets.DigAction(
               digging.getAction().name(),
-              new dev.phantom.ac.world.Pos(blockPosition.x,blockPosition.y,blockPosition.z),
+              new dev.phantom.ac.world.Pos(digBlockPosition.x,digBlockPosition.y,digBlockPosition.z),
               diggingSequence);
           record(capture,digAction);
         }
         if(digging.getAction()==DiggingAction.FINISHED_DIGGING){
-          var blockPosition=digging.getBlockPosition();
+          var finishedPosition=digging.getBlockPosition();
+          if(finishedPosition==null) return;
           var position=new dev.phantom.ac.world.Pos(
               finishedPosition.getX(),finishedPosition.getY(),finishedPosition.getZ());
           long sequence=capture.sequence.incrementAndGet();
