@@ -13,7 +13,10 @@ alerts:
   # Prevent unbounded VL growth during long sessions.
   maximum-violation-level: 100.0
   # Alert when VL reaches this level, then every this many additional VL.
-  violation-alert-interval: 2.0
+  # Matches Grim's Simulation-style persistence model rather than a fixed
+  # "N impossible packets" alert gate.
+  violation-alert-threshold: 100.0
+  violation-alert-interval: 40.0
 
 debug:
   # Targeted Phase 8 diagnostics are disabled by default. Use /phantom debug <player> at runtime.
@@ -26,7 +29,8 @@ enforcement:
   kick-enabled: false
   punishment-enabled: false
   punishment-command: "warn {player} Phantom movement evidence"
-  # A movement IMPOSSIBLE result must be supported by repeated consecutive exhaustive evidence.
+  # Enforcement remains stricter than operator alerts and is disabled by default.
+  # This is not the staff-alert threshold; alerts use the VL buffer above.
   minimum-impossible-observations: 3
   minimum-confidence: 1.0
   only-when-exhaustive: true
@@ -43,9 +47,13 @@ setbacks:
   only-when-exhaustive: true
 
 checks:
-  # Non-movement packet checks are evidence-only and require repeated impossible observations.
+  # Packet checks are evidence-only and use the same VL persistence model as Grim.
   enabled: true
-  minimum-observations: 3
+  alert-violation-threshold: 100.0
+  violation-increment: 1.0
+  violation-decay-per-tick: 0.005
+  maximum-violation-level: 100.0
+  violation-alert-interval: 40.0
   reset-after-ticks: 40
   alert-debounce-ticks: 20
   # Vanilla 1.21.11 interaction envelopes; creative attributes may be narrower/broader

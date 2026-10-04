@@ -469,14 +469,18 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     validationBudget=Math.max(1,getConfig().getInt("validation.candidate-budget",4096));
     productionCheckConfig=new ProductionCheckEngine.Config(
         getConfig().getBoolean("checks.enabled",true),
-        Math.max(1,getConfig().getInt("checks.minimum-observations",3)),
+        Math.max(0.000001,getConfig().getDouble("checks.alert-violation-threshold",100.0)),
         Math.max(1,getConfig().getInt("checks.reset-after-ticks",40)),
         Math.max(0,getConfig().getInt("checks.alert-debounce-ticks",20)),
         Math.max(1.0,getConfig().getDouble("checks.attack-reach",4.0)),
         Math.max(1.0,getConfig().getDouble("checks.block-interaction-reach",5.0)),
         getConfig().getBoolean("checks.timer-enabled",true),
         Math.max(4,getConfig().getInt("checks.timer-window-ticks",20)),
-        Math.max(1_000_000L,getConfig().getLong("checks.timer-window-nanos",250_000_000L)));
+        Math.max(1_000_000L,getConfig().getLong("checks.timer-window-nanos",250_000_000L)),
+        violationIncrement,
+        violationDecayPerTick,
+        maximumViolationLevel,
+        Math.max(0.000001,getConfig().getDouble("checks.violation-alert-interval",40.0)));
     getServer().getPluginManager().registerEvents(this,this);
     PacketEvents.getAPI().getEventManager().registerListener(listener);
     int processors=Runtime.getRuntime().availableProcessors();
@@ -1381,7 +1385,6 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
 
     for(ProductionCheckEngine.Finding finding:productionChecks.findings()){
-      if(finding.verdict()!=ProductionCheckEngine.Verdict.IMPOSSIBLE)continue;
       var accumulatedCheck=capture.productionChecks.accept(finding,productionCheckConfig);
       capture.productionChecks=accumulatedCheck.state();
       accumulatedCheck.alert().ifPresent(alert->{

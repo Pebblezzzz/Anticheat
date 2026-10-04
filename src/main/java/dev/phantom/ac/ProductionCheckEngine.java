@@ -28,33 +28,45 @@ public final class ProductionCheckEngine {
 
   public record Config(
       boolean enabled,
-      int minimumObservations,
+      double alertViolationThreshold,
       int resetAfterTicks,
       int alertDebounceTicks,
       double attackReach,
       double blockInteractionReach,
       boolean timerEnabled,
       int timerWindowTicks,
-      long timerWindowNanos) implements java.io.Serializable {
+      long timerWindowNanos,
+      double violationIncrement,
+      double violationDecayPerTick,
+      double maximumViolationLevel,
+      double alertViolationInterval) implements java.io.Serializable {
     public Config {
-      if (minimumObservations < 1 || resetAfterTicks < 1 || alertDebounceTicks < 0)
+      if (!Double.isFinite(alertViolationThreshold) || alertViolationThreshold <= 0.0
+          || resetAfterTicks < 1 || alertDebounceTicks < 0)
         throw new IllegalArgumentException("invalid production check thresholds");
       if (!Double.isFinite(attackReach) || attackReach <= 0.0
           || !Double.isFinite(blockInteractionReach) || blockInteractionReach <= 0.0)
         throw new IllegalArgumentException("interaction ranges must be finite and positive");
       if (timerWindowTicks < 4 || timerWindowNanos <= 0L)
         throw new IllegalArgumentException("invalid timer window");
+      if (!Double.isFinite(violationIncrement) || violationIncrement <= 0.0
+          || !Double.isFinite(violationDecayPerTick) || violationDecayPerTick < 0.0
+          || !Double.isFinite(maximumViolationLevel) || maximumViolationLevel <= 0.0
+          || !Double.isFinite(alertViolationInterval) || alertViolationInterval <= 0.0
+          || maximumViolationLevel < alertViolationThreshold)
+        throw new IllegalArgumentException("invalid production violation buffer");
     }
 
     public Config(
         boolean enabled,
-        int minimumObservations,
+        double alertViolationThreshold,
         int resetAfterTicks,
         int alertDebounceTicks,
         double attackReach,
         double blockInteractionReach) {
-      this(enabled, minimumObservations, resetAfterTicks, alertDebounceTicks,
-          attackReach, blockInteractionReach, true, 20, 250_000_000L);
+      this(enabled, alertViolationThreshold, resetAfterTicks, alertDebounceTicks,
+          attackReach, blockInteractionReach, true, 20, 250_000_000L,
+          1.0, 0.005, 100.0, 40.0);
     }
   }
 
@@ -88,11 +100,30 @@ public final class ProductionCheckEngine {
   public record State(
       int supportingEvents,
       long lastObservationTick,
-      long lastAlertTick) implements java.io.Serializable {
+      long lastAlertTick,
+      double violationLevel,
+      double lastAlertViolationLevel) implements java.io.Serializable {
     public State {
-      if (supportingEvents < 0) throw new IllegalArgumentException("supportingEvents must be non-negative");
+      if (supportingEvents < 0 || !Double.isFinite(violationLevel) || violationLevel < 0.0
+          || !Double.isFinite(lastAlertViolationLevel) || lastAlertViolationLevel < 0.0) {
+        throw new IllegalArgumentException("invalid production violation state");
+      }
     }
-    public static State empty() { return new State(0, -1L, -1L); }
+    public static State empty() { return new State(0, -1L, -1L, 0.0, 0.0); }
+
+    double decayTo(long tick, Config config) {
+      if (lastObservationTick < 0L || tick <= lastObservationTick + 1L
+          || config.violationDecayPerTick() == 0.0) {
+        return violationLevel;
+      }
+      long idleTicks = tick - lastObservationTick - 1L;
+      return Math.max(0.0, violationLevel - idleTicks * config.violationDecayPerTick());
+    }
+
+    State alerted(long tick, double level) {
+      return new State(supportingEvents, tick == lastObservationTick ? tick : lastObservationTick,
+          tick, level, level);
+    }
   }
 
   public record Accumulator(Map<String, State> rules) implements java.io.Serializable {
@@ -102,28 +133,36 @@ public final class ProductionCheckEngine {
     public Result accept(Finding finding, Config config) {
       Objects.requireNonNull(finding);
       Objects.requireNonNull(config);
-      if (finding.verdict() != Verdict.IMPOSSIBLE || !config.enabled()) {
-        return new Result(this, Optional.empty());
-      }
+      if (!config.enabled()) return new Result(this, Optional.empty());
 
       Map<String, State> updated = new LinkedHashMap<>(rules);
       State old = rules.getOrDefault(finding.rule(), State.empty());
-      int nextSupporting =
-          old.lastObservationTick() < 0L
-              || finding.serverTick() - old.lastObservationTick() > config.resetAfterTicks()
-              ? 1
-              : old.supportingEvents() + 1;
+      double decayed = old.decayTo(finding.serverTick(), config);
+      int supporting = finding.verdict() == Verdict.IMPOSSIBLE
+          ? old.supportingEvents() + 1
+          : old.supportingEvents();
+      double level = finding.verdict() == Verdict.IMPOSSIBLE
+          ? Math.min(config.maximumViolationLevel(), decayed + config.violationIncrement())
+          : decayed;
+      State next = new State(supporting, finding.serverTick(), old.lastAlertTick(),
+          level, old.lastAlertViolationLevel());
 
-      State next = new State(nextSupporting, finding.serverTick(), old.lastAlertTick());
       Optional<Finding> alert = Optional.empty();
-      boolean thresholdReached = nextSupporting >= config.minimumObservations();
-      boolean debounceSatisfied =
-          old.lastAlertTick() < 0L
-              || finding.serverTick() - old.lastAlertTick() >= config.alertDebounceTicks();
-      if (thresholdReached && debounceSatisfied) {
+      boolean thresholdReached = level + 1.0e-9 >= config.alertViolationThreshold();
+      boolean crossedNextInterval = old.lastAlertTick() < 0L
+          ? thresholdReached
+          : level + 1.0e-9 >= old.lastAlertViolationLevel() + config.alertViolationInterval();
+      boolean debounceSatisfied = old.lastAlertTick() < 0L
+          || finding.serverTick() - old.lastAlertTick() >= config.alertDebounceTicks();
+
+      if (finding.verdict() == Verdict.IMPOSSIBLE
+          && thresholdReached
+          && crossedNextInterval
+          && debounceSatisfied) {
         alert = Optional.of(finding);
-        next = new State(nextSupporting, finding.serverTick(), finding.serverTick());
+        next = next.alerted(finding.serverTick(), level);
       }
+
       updated.put(finding.rule(), next);
       return new Result(new Accumulator(updated), alert);
     }
@@ -232,12 +271,29 @@ public final class ProductionCheckEngine {
       }
 
       if (packet instanceof Packets.Move move) {
-        if (move.onGround() && frame != null && !frame.predictedAfter().isEmpty()
-            && frame.predictedAfter().stream()
-                .noneMatch(candidate -> candidate.context().player().onGround())) {
-          findings.add(finding(playerId, serverTick, "GroundSpoof",
-              "the observed ground claim is contradicted by every retained movement candidate",
-              1.0, sequence));
+        /*
+         * GroundSpoof is a prediction check, not a packet-shape check. Match Grim's
+         * conservative boundary: only evaluate position-bearing, non-stationary
+         * movement after prediction completed, and only when every retained candidate
+         * agrees on the physical ground state. Mixed candidates or uncertainty mean
+         * the ground contradiction is not exhaustively proven.
+         */
+        boolean positionBearingMovement = move.position() != null
+            && frame != null
+            && !positionExactlyMatches(frame.observedBefore().position(), frame.observedAfter().position());
+        boolean predictionGroundDeterministic = frame != null
+            && frame.predictedAfter() != null
+            && !frame.predictedAfter().isEmpty()
+            && frame.predictedAfter().stream().map(candidate -> candidate.context().player().onGround())
+                .distinct().count() == 1L
+            && frame.uncertaintySources().isEmpty();
+        if (positionBearingMovement && predictionGroundDeterministic && move.onGround() != null) {
+          boolean predictedGround = frame.predictedAfter().iterator().next().context().player().onGround();
+          if (move.onGround() != predictedGround) {
+            findings.add(finding(playerId, serverTick, "GroundSpoof",
+                "the claimed ground state contradicts the deterministic predicted physical ground state",
+                1.0, sequence));
+          }
         }
 
         if (move.position() != null) {
@@ -445,6 +501,13 @@ public final class ProductionCheckEngine {
     };
   }
 
+  private static boolean positionExactlyMatches(Vec3 a, Vec3 b) {
+    return a != null && b != null
+        && Double.doubleToLongBits(a.x()) == Double.doubleToLongBits(b.x())
+        && Double.doubleToLongBits(a.y()) == Double.doubleToLongBits(b.y())
+        && Double.doubleToLongBits(a.z()) == Double.doubleToLongBits(b.z());
+  }
+
   private static boolean finite(Vec3 v) {
     return Double.isFinite(v.x()) && Double.isFinite(v.y()) && Double.isFinite(v.z());
   }
@@ -520,6 +583,9 @@ public final class ProductionCheckEngine {
   }
 
   public static Config defaultConfig() {
-    return new Config(true, 3, 40, 20, 4.0, 5.0, true, 20, 250_000_000L);
+    return new Config(
+        true, 100.0, 40, 20, 4.0, 5.0,
+        true, 20, 250_000_000L,
+        1.0, 0.005, 100.0, 40.0);
   }
 }

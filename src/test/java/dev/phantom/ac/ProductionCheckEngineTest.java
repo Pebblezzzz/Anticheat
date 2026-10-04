@@ -53,21 +53,97 @@ class ProductionCheckEngineTest {
   }
 
   @Test
-  void repeatedImpossibleFindingsAlertOnlyAfterConfiguredEpisode() {
+  void productionAlertUsesVlThresholdInsteadOfThreeImpossibleObservations() {
+    ProductionCheckEngine.Config config =
+        new ProductionCheckEngine.Config(true, 100.0, 40, 20, 4.0, 5.0);
     ProductionCheckEngine.Finding finding =
         new ProductionCheckEngine.Finding("p", 1, "Reach",
             ProductionCheckEngine.Verdict.IMPOSSIBLE, "too far", 1.0, "r1");
-    ProductionCheckEngine.Accumulator accumulator =
-        ProductionCheckEngine.Accumulator.empty();
 
-    var first = accumulator.accept(finding, CONFIG);
-    var second = first.state().accept(finding, CONFIG);
-    var third = second.state().accept(finding, CONFIG);
+    var state = ProductionCheckEngine.Accumulator.empty();
+    for (int i = 0; i < 99; i++) {
+      state = state.accept(finding, config).state();
+      finding = new ProductionCheckEngine.Finding("p", i + 2L, "Reach",
+          ProductionCheckEngine.Verdict.IMPOSSIBLE, "too far", 1.0, "r1");
+    }
+    assertTrue(state.rules().get("Reach").supportingEvents() >= 99);
+    var threshold = state.accept(finding, config);
+    assertTrue(threshold.alert().isPresent());
+    assertEquals(100.0, threshold.state().rules().get("Reach").violationLevel(), 1.0e-9);
+  }
 
-    assertTrue(first.alert().isEmpty());
-    assertTrue(second.alert().isEmpty());
-    assertTrue(third.alert().isPresent());
-    assertEquals(3, third.state().rules().get("Reach").supportingEvents());
+  private static Phase6Reachability.Candidate candidate(State.Player player, long id) {
+    Phase6Reachability.Context context = new Phase6Reachability.Context(
+        20, player, Simulation.Environment.DRY, Simulation.Attributes.DEFAULT,
+        Phase5Mechanics.MovementEffects.NONE, Phase5Mechanics.Pose.STANDING,
+        Phase5Mechanics.MovementEnvironment.dry(player.onGround(), false, false), false);
+    return new Phase6Reachability.Candidate(
+        id, context,
+        new Phase6Reachability.Provenance(
+            id, -1L, 20L, "INPUT", "WORLD", "None", List.of("ground-spoof test"), 1, List.of()));
+  }
+
+  @Test
+  void groundSpoofIgnoresRotationOnlyPackets() {
+    State.Player grounded = player(0, 0);
+    Phase6Reachability.Candidate airborne = candidate(
+        new State.Player(
+            grounded.position(), grounded.velocity(), grounded.yaw(), grounded.pitch(), false,
+            grounded.gamemode(), grounded.effects(), grounded.awaitingTeleport(), grounded.uncertain(),
+            grounded.input(), grounded.attributes(), grounded.pose(), grounded.environment(),
+            grounded.clientTickRange(), grounded.provenance(), grounded.uncertaintyReasons()),
+        1L);
+
+    Packets.Move move = new Packets.Move(null, 90f, 0f, true, 1L);
+    PredictionFrame prediction = new PredictionFrame(
+        1L, 1L, 1L, 1L, move, grounded, grounded,
+        Set.of(airborne), Set.of(airborne), WorldSnapshot.emptyOverworld12111(), List.of(), List.of());
+
+    var result = ProductionCheckEngine.analyze("p",
+        List.of(new Packets.RawPacket(1L, 1L, move)),
+        report(prediction), CONFIG);
+
+    assertTrue(result.findings().stream().noneMatch(f -> f.rule().equals("GroundSpoof")));
+  }
+
+  @Test
+  void groundSpoofRequiresDeterministicPredictionGroundState() {
+    State.Player before = player(0, 0);
+    State.Player after = new State.Player(
+        new Vec3(0, -1, 0), before.velocity(), before.yaw(), before.pitch(), true,
+        before.gamemode(), before.effects(), before.awaitingTeleport(), before.uncertain(),
+        before.input(), before.attributes(), before.pose(), before.environment(),
+        before.clientTickRange(), before.provenance(), before.uncertaintyReasons());
+    State.Player predictedAir = new State.Player(
+        new Vec3(0, -1, 0), Vec3.ZERO, 0, 0, false,
+        "survival", Map.of(), OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Phase5Mechanics.Pose.STANDING,
+        State.Environment.DRY, State.TickRange.exact(1), State.Provenance.UNKNOWN, Set.of());
+
+    Packets.Move move = new Packets.Move(after.position(), after.yaw(), after.pitch(), true, 1L);
+    Phase6Reachability.Candidate airCandidate = candidate(predictedAir, 2L);
+    Phase6Reachability.Candidate groundCandidate = candidate(
+        new State.Player(
+            predictedAir.position(), predictedAir.velocity(), predictedAir.yaw(), predictedAir.pitch(), true,
+            predictedAir.gamemode(), predictedAir.effects(), OptionalInt.empty(), predictedAir.uncertain(),
+            predictedAir.input(), predictedAir.attributes(), predictedAir.pose(), predictedAir.environment(),
+            predictedAir.clientTickRange(), predictedAir.provenance(), predictedAir.uncertaintyReasons()),
+        3L);
+
+    PredictionFrame deterministic = new PredictionFrame(
+        1L, 1L, 1L, 1L, move, before, after,
+        Set.of(airCandidate), Set.of(airCandidate), WorldSnapshot.emptyOverworld12111(), List.of(), List.of());
+    var deterministicResult = ProductionCheckEngine.analyze(
+        "p", List.of(new Packets.RawPacket(1L, 1L, move)), report(deterministic), CONFIG);
+    assertTrue(deterministicResult.findings().stream().anyMatch(f -> f.rule().equals("GroundSpoof")));
+
+    PredictionFrame mixed = new PredictionFrame(
+        1L, 1L, 1L, 1L, move, before, after,
+        Set.of(airCandidate, groundCandidate), Set.of(airCandidate, groundCandidate),
+        WorldSnapshot.emptyOverworld12111(), List.of("timing is ambiguous"), List.of());
+    var mixedResult = ProductionCheckEngine.analyze(
+        "p", List.of(new Packets.RawPacket(1L, 1L, move)), report(mixed), CONFIG);
+    assertTrue(mixedResult.findings().stream().noneMatch(f -> f.rule().equals("GroundSpoof")));
   }
 
   @Test
