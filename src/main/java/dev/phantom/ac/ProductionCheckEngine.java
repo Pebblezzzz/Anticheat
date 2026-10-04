@@ -292,17 +292,7 @@ public final class ProductionCheckEngine {
         }
       }
 
-      if (packet instanceof Packets.BlockPlace place && frame != null) {
-        Pos pos = place.position();
-        BlockBox block = new BlockBox(pos.x(), pos.y(), pos.z(), pos.x() + 1.0, pos.y() + 1.0, pos.z() + 1.0);
-        double distance = pointAabbDistance(eyePosition(frame.observedAfter()), block);
-        if (distance > config.blockInteractionReach()) {
-          findings.add(finding(playerId, serverTick, "FarPlace",
-              String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
-              Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
-              sequence));
-        }
-
+      if (packet instanceof Packets.BlockPlace place) {
         if (place.cursorPresent()) {
           Vec3 cursor = place.cursor();
           if (cursor.x() < -1.0e-4 || cursor.x() > 1.0001
@@ -317,6 +307,18 @@ public final class ProductionCheckEngine {
           findings.add(finding(playerId, serverTick, "BlockPlaceFace",
               "block-use face id is outside the legal 0..5 range",
               1.0, sequence));
+        }
+
+        if (frame != null) {
+          Pos pos = place.position();
+          BlockBox block = new BlockBox(pos.x(), pos.y(), pos.z(), pos.x() + 1.0, pos.y() + 1.0, pos.z() + 1.0);
+          double distance = pointAabbDistance(eyePosition(frame.observedAfter()), block);
+          if (distance > config.blockInteractionReach()) {
+            findings.add(finding(playerId, serverTick, "FarPlace",
+                String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
+                Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
+                sequence));
+          }
         }
       }
 
