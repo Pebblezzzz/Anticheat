@@ -583,6 +583,9 @@ public final class ProductionCheckEngine {
   }
 
   public static Config defaultConfig() {
-    return new Config(true, 3, 40, 20, 4.0, 5.0, true, 20, 250_000_000L);
+    return new Config(
+        true, 100.0, 40, 20, 4.0, 5.0,
+        true, 20, 250_000_000L,
+        1.0, 0.005, 100.0, 40.0);
   }
 }
