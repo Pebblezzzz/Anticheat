@@ -155,17 +155,30 @@ class Phase8PredictionRunnerTest {
     assertEquals(3, report.movementObservations(), report.results().toString());
     assertEquals(
         Phase8MovementValidation.Verdict.UNCERTAIN,
+        report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(report.frames().getFirst().predictedAfter().isEmpty(),
+        report.frames().getFirst().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.startsWith("FRONTIER_TEMPORALLY_STALE")),
+        report.frames().getFirst().trace().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().get(1).verdict(),
         report.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.UNCERTAIN,
+        Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().get(2).verdict(),
         report.results().toString());
+    assertTrue(report.frames().get(1).predictedAfter().isEmpty(),
+        report.frames().get(1).toString());
+    assertTrue(report.frames().get(2).predictedAfter().isEmpty(),
+        report.frames().get(2).toString());
     assertTrue(report.frames().get(1).trace().stream()
-        .anyMatch(line -> line.startsWith("ROTATION_OBSERVATION_STALE_FRONTIER")),
+        .anyMatch(line -> line.startsWith("FRONTIER_ROOT_SUPPRESSED")),
         report.frames().get(1).trace().toString());
     assertTrue(report.frames().get(2).trace().stream()
-        .anyMatch(line -> line.startsWith("ROTATION_OBSERVATION_STALE_FRONTIER")),
+        .anyMatch(line -> line.startsWith("FRONTIER_ROOT_SUPPRESSED")),
         report.frames().get(2).trace().toString());
   }
 

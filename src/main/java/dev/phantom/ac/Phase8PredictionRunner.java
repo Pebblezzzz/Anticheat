@@ -792,8 +792,28 @@ public final class Phase8PredictionRunner {
       boolean bootstrapRecoveryRequired =
           physicsFrontierSuppressedUntilPositionMovement;
       boolean rootRebasedForMovement = false;
+      boolean temporallyStaleFrontierBeforeRoot =
+          move.position() != null
+              && predictionContainsStaleServerCorrection(prediction, tick);
 
-      if (bootstrapRecoveryRequired) {
+      if (temporallyStaleFrontierBeforeRoot) {
+        /*
+         * Do not let ensureRoot() manufacture a fresh PACKET_CLIENT_ROOT from
+         * the current observation after an older correction frontier has already
+         * fallen outside the bounded horizon. The stale frontier must be
+         * discarded before any root creation; otherwise the new root would hide
+         * the state discontinuity and rotation-only packets could appear
+         * kinematically proven from an observation-only state.
+         */
+        trace.add("FRONTIER_TEMPORALLY_STALE"
+            + " predictionTick=" + predictionTick
+            + " clientTick=" + tick.clientTick()
+            + " action=CLEAR_AND_REBASE_FROM_OBSERVATION");
+        prediction = Set.of();
+        predictionTick = -1L;
+        rootRebasedForMovement = true;
+        physicsFrontierSuppressedUntilPositionMovement = true;
+      } else if (bootstrapRecoveryRequired) {
         trace.add("FRONTIER_ROOT_SUPPRESSED reason=authoritative-observation-witness"
             + " positionBearing=" + (move.position() != null));
       } else {
@@ -3222,6 +3242,14 @@ public final class Phase8PredictionRunner {
             1,
             List.of()));
     return candidate;
+  }
+
+  private static boolean predictionContainsStaleServerCorrection(
+      Set<Candidate> candidates,
+      TickResolution tick) {
+    return predictionFrontierTemporallyStale(candidates, tick)
+        && candidates.stream().allMatch(candidate ->
+            "SERVER_CORRECTION".equals(candidate.provenance().input()));
   }
 
   private static boolean predictionFrontierTemporallyStale(
