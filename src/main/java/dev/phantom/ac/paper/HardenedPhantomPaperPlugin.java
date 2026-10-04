@@ -255,6 +255,12 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         record(capture,clientInput);
         if(debugLevel(capture.playerId).trace())
           logClientInputDebug(capture.playerName,capture.sequence.get(),clientInput);
+      }else if(event.getPacketType()==PacketType.Play.Client.USE_ITEM){
+        var useItem=new WrapperPlayClientUseItem(event);
+        Packets.UseItem packet=new Packets.UseItem(
+            useItem.getHand().getId(), useItem.getSequence(), useItem.getYaw(), useItem.getPitch());
+        record(capture,packet);
+        schedulePredictionValidation(capture);
       }else if(event.getPacketType()==PacketType.Play.Client.HELD_ITEM_CHANGE){
         var held=new WrapperPlayClientHeldItemChange(event);
         Packets.HeldItemChange packet=new Packets.HeldItemChange(held.getSlot());
