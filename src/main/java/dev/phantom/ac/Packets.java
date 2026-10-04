@@ -10,7 +10,7 @@ public final class Packets {
   public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm,
       Velocity, Effect, Gamemode, PlayerContext, FlightToggle, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange,
       WorldTransactionSend, WorldTransactionAck, PaperMovementRejection, ClientBlockBreak, EntitySpawn, EntityMove, EntityDespawn,
-      InteractEntity, BlockPlace, VehicleMove, HeldItemChange, EntityAction, DigAction {
+      InteractEntity, BlockPlace, VehicleMove, HeldItemChange, EntityAction, DigAction, InventoryClick {
     default boolean mutatesWorld() {
       return this instanceof ChunkData || this instanceof ChunkUnload
           || this instanceof BlockChange || this instanceof ChunkStates || this instanceof BlockStateChange || this instanceof UnsupportedBlockStateChange
@@ -42,10 +42,29 @@ public final class Packets {
     }
   }
 
-  /** Client block-use intent used by far-place and scaffolding/aim corroboration. */
-  public record BlockPlace(dev.phantom.ac.world.Pos position) implements Packet {
+  /** Client block-use intent with the hit-face/cursor provenance exposed by 1.21.x. */
+  public record BlockPlace(
+      dev.phantom.ac.world.Pos position,
+      int faceId,
+      Vec3 cursor,
+      boolean cursorPresent) implements Packet {
     public BlockPlace {
       Objects.requireNonNull(position, "position");
+      Objects.requireNonNull(cursor, "cursor");
+      if (cursorPresent && (!Double.isFinite(cursor.x()) || !Double.isFinite(cursor.y()) || !Double.isFinite(cursor.z()))) {
+        throw new IllegalArgumentException("cursor must be finite when present");
+      }
+    }
+
+    public BlockPlace(dev.phantom.ac.world.Pos position) {
+      this(position, -1, Vec3.ZERO, false);
+    }
+  }
+
+  /** Client inventory/container click provenance for packet-integrity checks. */
+  public record InventoryClick(int windowId, int slot, int button, String clickType) implements Packet {
+    public InventoryClick {
+      if (clickType == null || clickType.isBlank()) throw new IllegalArgumentException("clickType is required");
     }
   }
 
@@ -188,7 +207,8 @@ public final class Packets {
       if(packet instanceof Move||packet instanceof ClientInput||packet instanceof ClientTickEnd||packet instanceof TeleportConfirm
           ||packet instanceof WorldTransactionAck||packet instanceof FlightToggle||packet instanceof ClientBlockBreak
           ||packet instanceof InteractEntity||packet instanceof BlockPlace||packet instanceof VehicleMove
-          ||packet instanceof HeldItemChange||packet instanceof EntityAction||packet instanceof DigAction)return "CLIENT_TO_SERVER";
+          ||packet instanceof HeldItemChange||packet instanceof EntityAction||packet instanceof DigAction
+          ||packet instanceof InventoryClick)return "CLIENT_TO_SERVER";
       if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof Effect||packet instanceof Gamemode||packet instanceof PlayerContext||packet instanceof WorldTransactionSend||packet.mutatesWorld())return "SERVER_TO_CLIENT";
       return "UNKNOWN";
     }
