@@ -4,8 +4,8 @@ alerts:
   broadcast: false
   print-to-console: true
   permission: phantom.alerts
-  # Minimum server ticks between repeated alerts for the same player/check.
-  alert-interval-ticks: 2
+  # Kept for configuration compatibility; Grim's active-VL alert model is not time-debounced.
+  alert-interval-ticks: 0
   # VL added by each exhaustively-impossible observation.
   violation-increment: 1.0
   # VL decays continuously with server time; 0.005 is 1 VL per 200 ticks.
@@ -29,9 +29,11 @@ enforcement:
   kick-enabled: false
   punishment-enabled: false
   punishment-command: "warn {player} Phantom movement evidence"
-  # Enforcement remains stricter than operator alerts and is disabled by default.
-  # This is not the staff-alert threshold; alerts use the VL buffer above.
-  minimum-impossible-observations: 3
+  # Active-VL thresholds mirror Grim's separation between check setbacks and punishment commands.
+  # One exhaustive IMPOSSIBLE result immediately raises VL; these thresholds only control enforcement actions.
+  setback-violation-level: 10.0
+  kick-violation-level: 100.0
+  punishment-violation-level: 100.0
   minimum-confidence: 1.0
   only-when-exhaustive: true
   permission-exempt: true
