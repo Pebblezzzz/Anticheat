@@ -2961,8 +2961,33 @@ public final class Phase8PredictionRunner {
     }
 
     MovementEnvironment environment = packetMovementEnvironment(observedAfter, world);
+    /*
+     * The movement packet is now a new client-physics boundary. Do not carry the
+     * correction packet's uncertainty/awaiting-teleport metadata into that root;
+     * those fields describe the old transition, not the observed post-movement
+     * physics state. The uncertainty is represented by the recovery evidence,
+     * not by poisoning the candidate so the next physics step can never become
+     * exhaustive.
+     */
+    Player provisionalState = new Player(
+        observedAfter.position(),
+        observedDelta,
+        observedAfter.yaw(),
+        observedAfter.pitch(),
+        observedAfter.onGround(),
+        observedAfter.gamemode(),
+        observedAfter.effects(),
+        OptionalInt.empty(),
+        false,
+        observedAfter.input(),
+        observedAfter.attributes(),
+        observedAfter.pose(),
+        observedAfter.environment(),
+        observedAfter.clientTickRange(),
+        State.Provenance.UNKNOWN,
+        Set.of());
     Candidate provisional = candidateFromPlayer(
-        observedAfter,
+        provisionalState,
         tick.clientTick(),
         "CLIENT_MOVEMENT_BOOTSTRAP_OBSERVED",
         -1L,
