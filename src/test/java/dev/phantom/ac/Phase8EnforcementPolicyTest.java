@@ -31,7 +31,9 @@ class Phase8EnforcementPolicyTest {
 
   private static Phase8EnforcementPolicy.Config config() {
     return new Phase8EnforcementPolicy.Config(
-        true, true, true, true, 2, 1.0, "punish {player} {rule} {tick} {replay}");
+        true, true, true, true,
+        2.0, 3.0, 3.0, 1.0,
+        "punish {player} {rule} {tick} {replay}");
   }
 
   @Test void nonImpossibleEvidenceNeverProducesEnforcementActions() {
@@ -50,21 +52,30 @@ class Phase8EnforcementPolicyTest {
     assertTrue(decision.actions().isEmpty());
   }
 
-  @Test void repeatedExhaustiveImpossibleEvidenceEnablesConfiguredActions() {
-    var decision = Phase8EnforcementPolicy.evaluate(
+  @Test void activeViolationLevelEnablesOnlyActionsWhoseThresholdWasReached() {
+    var setbackOnly = Phase8EnforcementPolicy.evaluate(
+        evidence(
+            Verdict.IMPOSSIBLE,
+            "all exhaustively modeled legitimate candidates disagree with the observed movement state",
+            2, OptionalLong.of(2)),
+        new State(2, 2, 0, 0, 2, -1, 2.0, 0.0), config());
+    assertTrue(setbackOnly.eligible());
+    assertEquals(java.util.Set.of(Phase8EnforcementPolicy.Action.SETBACK), setbackOnly.actions());
+
+    var allActions = Phase8EnforcementPolicy.evaluate(
         evidence(
             Verdict.IMPOSSIBLE,
             "all exhaustively modeled legitimate candidates disagree with the observed movement state",
             3, OptionalLong.of(3)),
-        new State(2, 2, 0, 0, 3, -1), config());
-    assertTrue(decision.eligible());
+        new State(3, 3, 0, 0, 3, -1, 3.0, 0.0), config());
+    assertTrue(allActions.eligible());
     assertEquals(
         java.util.Set.of(
             Phase8EnforcementPolicy.Action.SETBACK,
             Phase8EnforcementPolicy.Action.KICK,
             Phase8EnforcementPolicy.Action.PUNISHMENT_COMMAND),
-        decision.actions());
-    assertEquals(1.0, decision.confidence());
+        allActions.actions());
+    assertEquals(1.0, allActions.confidence());
   }
 
   @Test void punishmentTemplateIsDeterministicallyExpanded() {
@@ -79,16 +90,16 @@ class Phase8EnforcementPolicyTest {
         "punish Alice MOVEMENT_REACHABILITY tick=9 replay=replay:9 first=7",
         command);
   }
-  @Test void enforcementDoesNotRepeatAfterThresholdWithinSameEpisode() {
+  @Test void enforcementDoesNotNeedAConsecutiveEpisode() {
     Evidence e = evidence(
         Verdict.IMPOSSIBLE,
         "all exhaustively modeled legitimate candidates disagree with the observed movement state",
         4, OptionalLong.of(4));
     var decision = Phase8EnforcementPolicy.evaluate(
-        e, new State(3, 3, 0, 0, 4, -1), config());
+        e, new State(1, 1, 0, 0, 4, -1, 1.0, 0.0), config());
     assertFalse(decision.eligible());
     assertTrue(decision.actions().isEmpty());
-    assertTrue(decision.reason().contains("already"));
+    assertTrue(decision.reason().contains("threshold"));
   }
 
   @Test void incompleteNumericEliminationCannotEnableEnforcement() {
@@ -104,7 +115,7 @@ class Phase8EnforcementPolicyTest {
         Phase8MovementValidation.PHASE7_VERSION, "replay:10", "MOVEMENT_REACHABILITY");
 
     var decision = Phase8EnforcementPolicy.evaluate(
-        incomplete, new State(2, 2, 0, 0, 10, -1), config());
+        incomplete, new State(2, 2, 0, 0, 10, -1, 2.0, 0.0), config());
     assertFalse(decision.eligible());
     assertTrue(decision.reason().contains("complete reachable candidate set"));
   }
