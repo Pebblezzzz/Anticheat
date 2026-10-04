@@ -195,8 +195,8 @@ public final class Vanilla12111RichPhysics {
              */
             double movementSpeed = context.attributes().value() * context.effects().speedMultiplier();
             if (context.movementEnvironment().sprinting()) movementSpeed *= SPRINTING_SPEED_MULTIPLIER;
-            double swimSpeed = 0.02
-                    + (movementSpeed - 0.02) * context.effects().depthStriderFraction();
+            double swimSpeed = AIR_ACCEL
+                    + (movementSpeed - AIR_ACCEL) * context.effects().depthStriderFraction();
             inputAcceleration = inputMagnitude > 1.0
                     ? swimSpeed
                     : swimSpeed * INPUT_FRICTION;
