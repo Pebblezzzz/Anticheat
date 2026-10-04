@@ -155,9 +155,13 @@ class Phase8PredictionRunnerTest {
         report.results().getFirst().verdict(),
         report.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.POSSIBLE,
+        Phase8MovementValidation.Verdict.UNCERTAIN,
         report.results().get(1).verdict(),
         report.results().toString());
+    assertTrue(report.frames().get(1).predictedAfter().stream()
+        .anyMatch(candidate ->
+            candidate.provenance().input().equals("CLIENT_MOVEMENT_BOOTSTRAP_OBSERVED")),
+        report.frames().get(1).toString());
     assertTrue(report.frames().getFirst().trace().stream()
         .anyMatch(line -> line.startsWith("BOOTSTRAP_AUTHORITY_FALLBACK")),
         report.frames().getFirst().trace().toString());
