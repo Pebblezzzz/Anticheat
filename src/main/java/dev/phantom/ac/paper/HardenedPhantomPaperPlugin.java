@@ -1628,33 +1628,51 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         Math.max(0.0,getConfig().getDouble("alerts.violation-alert-interval",40.0)));
     GrimAlertPolicy.CommandRule fallbackLog=GrimAlertPolicy.CommandRule.parse("1:1");
 
+    List<GrimAlertPolicy.Group> groups=new ArrayList<>();
     org.bukkit.configuration.ConfigurationSection groupsSection =
         getConfig().getConfigurationSection("punishments.groups");
-    if(groupsSection==null){
-      return new GrimAlertPolicy.Config(List.of(),fallbackAlert,fallbackLog,fallbackWindowMillis);
-    }
+    boolean configuredBlatant=false;
 
-    List<GrimAlertPolicy.Group> groups=new ArrayList<>();
-    for(String groupName:groupsSection.getKeys(false)){
-      org.bukkit.configuration.ConfigurationSection group=
-          groupsSection.getConfigurationSection(groupName);
-      if(group==null) continue;
-      List<String> checks=group.getStringList("checks");
-      if(checks.isEmpty()) continue;
-      long windowSeconds=Math.max(1L,
-          group.getLong("remove-violations-after-seconds",fallbackWindowSeconds));
-      try{
-        GrimAlertPolicy.CommandRule alert=GrimAlertPolicy.CommandRule.parse(
-            group.getString("alert","100:40"));
-        GrimAlertPolicy.CommandRule log=GrimAlertPolicy.CommandRule.parse(
-            group.getString("log","1:1"));
-        groups.add(new GrimAlertPolicy.Group(
-            groupName,windowSeconds*1000L,checks,alert,log));
-      }catch(RuntimeException invalid){
-        getLogger().warning("[PhantomAC] Ignoring invalid punishment group "
-            +groupName+": "+invalid.getMessage());
+    if(groupsSection!=null){
+      for(String groupName:groupsSection.getKeys(false)){
+        org.bukkit.configuration.ConfigurationSection group=
+            groupsSection.getConfigurationSection(groupName);
+        if(group==null) continue;
+        List<String> checks=group.getStringList("checks");
+        if(checks.isEmpty()) continue;
+        if(groupName.equalsIgnoreCase("Blatant")) configuredBlatant=true;
+        long windowSeconds=Math.max(1L,
+            group.getLong("remove-violations-after-seconds",fallbackWindowSeconds));
+        try{
+          GrimAlertPolicy.CommandRule alert=GrimAlertPolicy.CommandRule.parse(
+              group.getString("alert","100:40"));
+          GrimAlertPolicy.CommandRule log=GrimAlertPolicy.CommandRule.parse(
+              group.getString("log","1:1"));
+          groups.add(new GrimAlertPolicy.Group(
+              groupName,windowSeconds*1000L,checks,alert,log));
+        }catch(RuntimeException invalid){
+          getLogger().warning("[PhantomAC] Ignoring invalid punishment group "
+              +groupName+": "+invalid.getMessage());
+        }
       }
     }
+
+    /*
+     * Preserve the immediate hard-finding path even for servers upgrading from
+     * an older config.yml. saveDefaultConfig() intentionally does not overwrite
+     * an existing file, so relying on the resource-only Blatant group would leave
+     * legacy installs on Grim's 100:40 Simulation alert threshold.
+     */
+    if(!configuredBlatant){
+      groups.add(0,new GrimAlertPolicy.Group(
+          "Blatant",
+          fallbackWindowMillis,
+          List.of("Flight","Step","Speed","Jesus","NoFall","FastBreak","FarBreak","FarPlace"),
+          GrimAlertPolicy.CommandRule.parse("1:1"),
+          GrimAlertPolicy.CommandRule.parse("1:1")));
+      getLogger().info("[PhantomAC] Built-in immediate alert policy enabled for deterministic movement contradictions");
+    }
+
     return new GrimAlertPolicy.Config(groups,fallbackAlert,fallbackLog,fallbackWindowMillis);
   }
 
