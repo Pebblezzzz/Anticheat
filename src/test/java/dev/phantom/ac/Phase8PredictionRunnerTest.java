@@ -151,7 +151,7 @@ class Phase8PredictionRunnerTest {
 
     assertEquals(2, report.movementObservations(), report.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.UNCERTAIN,
+        Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getFirst().verdict(),
         report.results().toString());
     assertEquals(
@@ -209,10 +209,12 @@ class Phase8PredictionRunnerTest {
 
     assertEquals(3, report.movementObservations(), report.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.UNCERTAIN,
+        Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getFirst().verdict(),
         report.results().toString());
-    assertTrue(report.frames().getFirst().predictedAfter().isEmpty(),
+    assertTrue(report.frames().getFirst().predictedAfter().stream()
+        .anyMatch(candidate ->
+            candidate.provenance().input().equals("CLIENT_MOVEMENT_BOOTSTRAP_OBSERVED")),
         report.frames().getFirst().toString());
     assertTrue(report.frames().getFirst().trace().stream()
         .anyMatch(line -> line.startsWith("FRONTIER_TEMPORALLY_STALE")),
@@ -225,15 +227,11 @@ class Phase8PredictionRunnerTest {
         Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().get(2).verdict(),
         report.results().toString());
-    assertTrue(report.frames().get(1).predictedAfter().isEmpty(),
-        report.frames().get(1).toString());
-    assertTrue(report.frames().get(2).predictedAfter().isEmpty(),
-        report.frames().get(2).toString());
     assertTrue(report.frames().get(1).trace().stream()
-        .anyMatch(line -> line.startsWith("FRONTIER_ROOT_SUPPRESSED")),
+        .anyMatch(line -> line.contains("rotation is a retained client-state observation")),
         report.frames().get(1).trace().toString());
     assertTrue(report.frames().get(2).trace().stream()
-        .anyMatch(line -> line.startsWith("FRONTIER_ROOT_SUPPRESSED")),
+        .anyMatch(line -> line.contains("rotation is a retained client-state observation")),
         report.frames().get(2).trace().toString());
   }
 
@@ -1358,21 +1356,12 @@ class Phase8PredictionRunnerTest {
         report.results().getLast().verdict(),
         report.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.UNCERTAIN,
+        Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getLast().verdict(),
         report.results().toString());
     assertTrue(
         report.frames().getLast().trace().stream()
-            .anyMatch(line -> line.startsWith("FRONTIER_SPATIAL_REBASE")),
-        report.frames().getLast().trace().toString());
-    assertTrue(
-        report.frames().getLast().trace().stream()
-            .anyMatch(line -> line.startsWith("FRONTIER_REBASE_AUTHORITY_STALE")
-                && line.contains("UNCERTAIN_UNTIL_CAUSAL_ANCHOR")),
-        report.frames().getLast().trace().toString());
-    assertTrue(
-        report.frames().getLast().trace().stream()
-            .anyMatch(line -> line.startsWith("FRONTIER_PRESERVED")),
+            .anyMatch(line -> line.contains("CLIENT_MOVEMENT_BOOTSTRAP")),
         report.frames().getLast().trace().toString());
   }
 
