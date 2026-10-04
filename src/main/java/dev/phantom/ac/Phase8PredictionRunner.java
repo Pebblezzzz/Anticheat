@@ -708,7 +708,9 @@ public final class Phase8PredictionRunner {
       }
 
       if (move.position() == null || stationaryPositionObservation) {
-        boolean positionlessRotationObservation = move.position() == null;
+        boolean statusObservation = move.position() == null
+            && move.movementKind() == Packets.MovementKind.STATUS;
+        boolean positionlessRotationObservation = move.position() == null && !statusObservation;
 
         if (physicsFrontierSuppressedUntilPositionMovement) {
           /*
@@ -735,12 +737,7 @@ public final class Phase8PredictionRunner {
                   EntityCollisions.NONE_TRACKED);
 
           Set<Phase6Reachability.ObservedField> observedFields =
-              positionlessRotationObservation
-                  ? EnumSet.of(Phase6Reachability.ObservedField.ROTATION)
-                  : EnumSet.of(
-                      Phase6Reachability.ObservedField.POSITION,
-                      Phase6Reachability.ObservedField.ROTATION,
-                      Phase6Reachability.ObservedField.GROUND);
+              observedFieldsFor(move);
           SearchResult observationSearch = new SearchResult(
               Verdict.POSSIBLE,
               Set.of(witness),
@@ -748,12 +745,16 @@ public final class Phase8PredictionRunner {
               1,
               0, 0, 0, 0,
               List.of(authorityMatches
-                  ? (positionlessRotationObservation
-                      ? "rotation-only observation matched fresh causal authority; no physics root retained"
-                      : "stationary observation matched fresh causal authority; no physics root retained")
-                  : (positionlessRotationObservation
-                      ? "rotation-only observation validated without advancing physics; no physics root retained"
-                      : "stationary observation validated without advancing physics; no physics root retained")));
+                  ? (statusObservation
+                      ? "status ground observation matched fresh causal authority; no physics root retained"
+                      : positionlessRotationObservation
+                          ? "rotation-only observation matched fresh causal authority; no physics root retained"
+                          : "stationary observation matched fresh causal authority; no physics root retained")
+                  : (statusObservation
+                      ? "status ground observation validated without advancing physics; no physics root retained"
+                      : positionlessRotationObservation
+                          ? "rotation-only observation validated without advancing physics; no physics root retained"
+                          : "stationary observation validated without advancing physics; no physics root retained")));
           Phase8MovementValidation.Result result = validate(
               playerId, packet, move, observedBefore, observedAfter, world,
               tick, List.of(), observationSearch, true, observedFields);
@@ -808,12 +809,7 @@ public final class Phase8PredictionRunner {
           possibleObservation = true;
         }
 
-        Set<Phase6Reachability.ObservedField> observedFields =
-            positionlessRotationObservation
-                ? EnumSet.of(Phase6Reachability.ObservedField.ROTATION)
-                : EnumSet.of(
-                    Phase6Reachability.ObservedField.POSITION,
-                    Phase6Reachability.ObservedField.ROTATION);
+        Set<Phase6Reachability.ObservedField> observedFields = observedFieldsFor(move);
         SearchResult observationSearch = possibleObservation
             ? new SearchResult(
                 Verdict.POSSIBLE,
@@ -821,9 +817,11 @@ public final class Phase8PredictionRunner {
                 0,
                 observationCandidates.size(),
                 0, 0, 0, 0,
-                List.of(positionlessRotationObservation
-                    ? "rotation is a retained client-state observation; no physics step is advanced"
-                    : "stationary position/rotation observation; observed state is used as a non-physics witness"))
+                List.of(statusObservation
+                    ? "status ground observation; no physics step is advanced"
+                    : positionlessRotationObservation
+                        ? "rotation is a retained client-state observation; no physics step is advanced"
+                        : "stationary position/rotation observation; observed state is used as a non-physics witness"))
             : uncertainSearch(prediction, "no prediction root exists for observation-only movement packet");
         /*
          * Observation-only look/stationary packets do not advance physics, so
@@ -1588,13 +1586,10 @@ public final class Phase8PredictionRunner {
       }
       Set<Phase6Reachability.ObservedField> validationFields =
           groundClaimMismatch
-              ? EnumSet.of(
-                  Phase6Reachability.ObservedField.POSITION,
-                  Phase6Reachability.ObservedField.ROTATION)
-              : EnumSet.of(
-                  Phase6Reachability.ObservedField.POSITION,
-                  Phase6Reachability.ObservedField.ROTATION,
-                  Phase6Reachability.ObservedField.GROUND);
+              ? observedFieldsFor(move).stream()
+                  .filter(field -> field != Phase6Reachability.ObservedField.GROUND)
+                  .collect(java.util.stream.Collectors.toCollection(() -> EnumSet.noneOf(Phase6Reachability.ObservedField.class)))
+              : observedFieldsFor(move);
       Phase8MovementValidation.Result result = validate(
           playerId, packet, move, observedBefore, observedAfter, world,
           validationTick, uncertaintySources, search, timingExhaustive, validationFields);
@@ -1665,6 +1660,25 @@ public final class Phase8PredictionRunner {
         latestContinuation,
         !prediction.isEmpty(),
         frames);
+  }
+
+  private static EnumSet<Phase6Reachability.ObservedField> observedFieldsFor(Packets.Move move) {
+    EnumSet<Phase6Reachability.ObservedField> fields =
+        EnumSet.noneOf(Phase6Reachability.ObservedField.class);
+    Packets.MovementKind kind = move.movementKind();
+    if (kind == Packets.MovementKind.POSITION || kind == Packets.MovementKind.POSITION_ROTATION) {
+      fields.add(Phase6Reachability.ObservedField.POSITION);
+    }
+    if (kind == Packets.MovementKind.ROTATION || kind == Packets.MovementKind.POSITION_ROTATION) {
+      fields.add(Phase6Reachability.ObservedField.ROTATION);
+    }
+    if (kind == Packets.MovementKind.STATUS
+        || kind == Packets.MovementKind.POSITION
+        || kind == Packets.MovementKind.POSITION_ROTATION
+        || kind == Packets.MovementKind.ROTATION) {
+      fields.add(Phase6Reachability.ObservedField.GROUND);
+    }
+    return fields;
   }
 
   private record TickResolution(
