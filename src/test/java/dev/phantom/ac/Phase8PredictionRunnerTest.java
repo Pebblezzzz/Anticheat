@@ -163,13 +163,17 @@ class Phase8PredictionRunnerTest {
         .anyMatch(line -> line.startsWith("FRONTIER_TEMPORALLY_STALE")),
         report.frames().getFirst().trace().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.UNCERTAIN,
+        Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().get(1).verdict(),
         report.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.UNCERTAIN,
+        Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().get(2).verdict(),
         report.results().toString());
+    assertTrue(report.frames().get(1).predictedAfter().isEmpty(),
+        report.frames().get(1).toString());
+    assertTrue(report.frames().get(2).predictedAfter().isEmpty(),
+        report.frames().get(2).toString());
     assertTrue(report.frames().get(1).trace().stream()
         .anyMatch(line -> line.startsWith("ROTATION_OBSERVATION_STALE_FRONTIER")),
         report.frames().get(1).trace().toString());
