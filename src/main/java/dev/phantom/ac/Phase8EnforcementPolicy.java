@@ -25,12 +25,16 @@ public final class Phase8EnforcementPolicy {
       boolean kickEnabled,
       boolean punishmentEnabled,
       boolean onlyWhenExhaustive,
-      int minimumImpossibleObservations,
+      double minimumSetbackViolationLevel,
+      double minimumKickViolationLevel,
+      double minimumPunishmentViolationLevel,
       double minimumConfidence,
       String punishmentCommand) implements Serializable {
     public Config {
-      if (minimumImpossibleObservations < 1) {
-        throw new IllegalArgumentException("minimumImpossibleObservations must be positive");
+      if (!Double.isFinite(minimumSetbackViolationLevel) || minimumSetbackViolationLevel < 0.0
+          || !Double.isFinite(minimumKickViolationLevel) || minimumKickViolationLevel < 0.0
+          || !Double.isFinite(minimumPunishmentViolationLevel) || minimumPunishmentViolationLevel < 0.0) {
+        throw new IllegalArgumentException("enforcement violation thresholds must be finite and non-negative");
       }
       if (!Double.isFinite(minimumConfidence) || minimumConfidence < 0.0 || minimumConfidence > 1.0) {
         throw new IllegalArgumentException("minimumConfidence must be in 0..1");
@@ -94,27 +98,30 @@ public final class Phase8EnforcementPolicy {
     if (evidence.firstInconsistentTick().isEmpty()) {
       return new Decision(false, 0.0, Set.of(), "evidence has no first inconsistent tick");
     }
-    if (episode.consecutiveImpossible() < config.minimumImpossibleObservations()) {
-      return new Decision(false,
-          Math.min(1.0, (double) episode.consecutiveImpossible() / config.minimumImpossibleObservations()),
-          Set.of(),
-          "configured consecutive impossible-evidence threshold has not been reached");
+    double violationLevel = episode.violationLevel();
+    double confidence = Math.min(1.0, violationLevel / Math.max(1.0, config.minimumPunishmentViolationLevel()));
+    if (violationLevel < config.minimumSetbackViolationLevel()
+        && violationLevel < config.minimumKickViolationLevel()
+        && violationLevel < config.minimumPunishmentViolationLevel()) {
+      return new Decision(false, confidence, Set.of(),
+          "active violation level has not reached any configured enforcement threshold");
     }
-    if (episode.consecutiveImpossible() > config.minimumImpossibleObservations()) {
-      return new Decision(false, 1.0, Set.of(),
-          "enforcement actions were already eligible earlier in this impossible-evidence episode");
-    }
-
-    double confidence = 1.0;
     if (confidence < config.minimumConfidence()) {
       return new Decision(false, confidence, Set.of(), "minimum enforcement confidence has not been reached");
     }
 
     EnumSet<Action> actions = EnumSet.noneOf(Action.class);
-    if (config.setbackEnabled()) actions.add(Action.SETBACK);
-    if (config.kickEnabled()) actions.add(Action.KICK);
-    if (config.punishmentEnabled()) actions.add(Action.PUNISHMENT_COMMAND);
-    return new Decision(true, confidence, actions, "exhaustive impossible movement evidence met the configured enforcement policy");
+    if (config.setbackEnabled() && violationLevel >= config.minimumSetbackViolationLevel()) {
+      actions.add(Action.SETBACK);
+    }
+    if (config.kickEnabled() && violationLevel >= config.minimumKickViolationLevel()) {
+      actions.add(Action.KICK);
+    }
+    if (config.punishmentEnabled() && violationLevel >= config.minimumPunishmentViolationLevel()) {
+      actions.add(Action.PUNISHMENT_COMMAND);
+    }
+    return new Decision(!actions.isEmpty(), confidence, actions,
+        "exhaustive impossible movement evidence reached the configured active-VL enforcement thresholds");
   }
 
   public static String renderPunishmentCommand(
