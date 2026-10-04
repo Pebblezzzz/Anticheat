@@ -39,7 +39,8 @@ public final class ProductionCheckEngine {
       double violationIncrement,
       double violationDecayPerTick,
       double maximumViolationLevel,
-      double alertViolationInterval) implements java.io.Serializable {
+      double alertViolationInterval,
+      GrimAlertPolicy.Config alertPolicy) implements java.io.Serializable {
     public Config {
       if (!Double.isFinite(alertViolationThreshold) || alertViolationThreshold <= 0.0
           || resetAfterTicks < 1 || alertDebounceTicks < 0)
@@ -55,6 +56,7 @@ public final class ProductionCheckEngine {
           || !Double.isFinite(alertViolationInterval) || alertViolationInterval <= 0.0
           || maximumViolationLevel < alertViolationThreshold)
         throw new IllegalArgumentException("invalid production violation buffer");
+      Objects.requireNonNull(alertPolicy);
     }
 
     public Config(
@@ -66,7 +68,7 @@ public final class ProductionCheckEngine {
         double blockInteractionReach) {
       this(enabled, alertViolationThreshold, resetAfterTicks, alertDebounceTicks,
           attackReach, blockInteractionReach, true, 20, 250_000_000L,
-          1.0, 0.005, 100.0, 40.0);
+          1.0, 0.005, 100.0, 40.0, GrimAlertPolicy.Config.defaults());
     }
   }
 
@@ -102,27 +104,53 @@ public final class ProductionCheckEngine {
       long lastObservationTick,
       long lastAlertTick,
       double violationLevel,
-      double lastAlertViolationLevel) implements java.io.Serializable {
+      double lastAlertViolationLevel,
+      List<Long> violationTimesMillis) implements java.io.Serializable {
     public State {
       if (supportingEvents < 0 || !Double.isFinite(violationLevel) || violationLevel < 0.0
           || !Double.isFinite(lastAlertViolationLevel) || lastAlertViolationLevel < 0.0) {
         throw new IllegalArgumentException("invalid production violation state");
       }
+      violationTimesMillis = List.copyOf(violationTimesMillis);
     }
-    public static State empty() { return new State(0, -1L, -1L, 0.0, 0.0); }
 
-    double decayTo(long tick, Config config) {
-      if (lastObservationTick < 0L || tick <= lastObservationTick + 1L
-          || config.violationDecayPerTick() == 0.0) {
-        return violationLevel;
-      }
-      long idleTicks = tick - lastObservationTick - 1L;
-      return Math.max(0.0, violationLevel - idleTicks * config.violationDecayPerTick());
+    public State(
+        int supportingEvents,
+        long lastObservationTick,
+        long lastAlertTick,
+        double violationLevel,
+        double lastAlertViolationLevel) {
+      this(supportingEvents, lastObservationTick, lastAlertTick,
+          violationLevel, lastAlertViolationLevel, List.of());
+    }
+
+    public static State empty() {
+      return new State(0, -1L, -1L, 0.0, 0.0, List.of());
+    }
+
+    State addViolation(long tick, long nowMillis, Config config, String rule) {
+      GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(rule);
+      long cutoff = Math.max(0L, nowMillis - policy.removeViolationsAfterMillis());
+      List<Long> active = new ArrayList<>();
+      for (long timestamp : violationTimesMillis) if (timestamp > cutoff) active.add(timestamp);
+      active.add(nowMillis);
+      double level = Math.min(config.maximumViolationLevel(), active.size() * config.violationIncrement());
+      return new State(supportingEvents + 1, tick, lastAlertTick, level,
+          lastAlertViolationLevel, active);
+    }
+
+    State retainActive(long tick, long nowMillis, Config config, String rule) {
+      GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(rule);
+      long cutoff = Math.max(0L, nowMillis - policy.removeViolationsAfterMillis());
+      List<Long> active = violationTimesMillis.stream().filter(timestamp -> timestamp > cutoff).toList();
+      double level = Math.min(config.maximumViolationLevel(), active.size() * config.violationIncrement());
+      return new State(supportingEvents, tick, lastAlertTick, level,
+          lastAlertViolationLevel, active);
     }
 
     State alerted(long tick, double level) {
       return new State(supportingEvents, tick == lastObservationTick ? tick : lastObservationTick,
-          tick, level, level);
+          tick, level, level, violationTimesMillis);
     }
   }
 
@@ -131,47 +159,68 @@ public final class ProductionCheckEngine {
     public static Accumulator empty() { return new Accumulator(Map.of()); }
 
     public Result accept(Finding finding, Config config) {
+      return accept(finding, config, Math.max(0L, finding.serverTick()) * 50L);
+    }
+
+    public Result accept(Finding finding, Config config, long nowMillis) {
       Objects.requireNonNull(finding);
       Objects.requireNonNull(config);
-      if (!config.enabled()) return new Result(this, Optional.empty());
+      if (!config.enabled()) return new Result(this, Optional.empty(), Optional.empty());
 
       Map<String, State> updated = new LinkedHashMap<>(rules);
       State old = rules.getOrDefault(finding.rule(), State.empty());
-      double decayed = old.decayTo(finding.serverTick(), config);
-      int supporting = finding.verdict() == Verdict.IMPOSSIBLE
-          ? old.supportingEvents() + 1
-          : old.supportingEvents();
-      double level = finding.verdict() == Verdict.IMPOSSIBLE
-          ? Math.min(config.maximumViolationLevel(), decayed + config.violationIncrement())
-          : decayed;
-      State next = new State(supporting, finding.serverTick(), old.lastAlertTick(),
-          level, old.lastAlertViolationLevel());
+      State next = finding.verdict() == Verdict.IMPOSSIBLE
+          ? old.addViolation(finding.serverTick(), nowMillis, config, finding.rule())
+          : old.retainActive(finding.serverTick(), nowMillis, config, finding.rule());
+
+      GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(finding.rule());
+      int activeCount = next.violationTimesMillis().size();
+      double level = Math.min(config.maximumViolationLevel(), activeCount * config.violationIncrement());
+      next = new State(next.supportingEvents(), next.lastObservationTick(),
+          next.lastAlertTick(), level, next.lastAlertViolationLevel(), next.violationTimesMillis());
 
       Optional<Finding> alert = Optional.empty();
-      boolean thresholdReached = level + 1.0e-9 >= config.alertViolationThreshold();
-      boolean crossedNextInterval = old.lastAlertTick() < 0L
-          ? thresholdReached
-          : level + 1.0e-9 >= old.lastAlertViolationLevel() + config.alertViolationInterval();
-      boolean debounceSatisfied = old.lastAlertTick() < 0L
-          || finding.serverTick() - old.lastAlertTick() >= config.alertDebounceTicks();
+      Optional<Finding> log = Optional.empty();
+
+      boolean thresholdReached = thresholdReached(activeCount, policy.alert());
+      boolean crossedNextInterval = boundaryCrossed(activeCount, policy.alert(), next.lastAlertViolationLevel());
+      boolean debounceSatisfied = next.lastAlertTick() < 0L
+          || finding.serverTick() - next.lastAlertTick() >= config.alertDebounceTicks();
 
       if (finding.verdict() == Verdict.IMPOSSIBLE
-          && thresholdReached
-          && crossedNextInterval
-          && debounceSatisfied) {
+          && thresholdReached && crossedNextInterval && debounceSatisfied) {
         alert = Optional.of(finding);
         next = next.alerted(finding.serverTick(), level);
       }
 
+      if (finding.verdict() == Verdict.IMPOSSIBLE
+          && thresholdReached(activeCount, policy.log())
+          && boundaryCrossed(activeCount, policy.log(), 0.0)) {
+        log = Optional.of(finding);
+      }
+
       updated.put(finding.rule(), next);
-      return new Result(new Accumulator(updated), alert);
+      return new Result(new Accumulator(updated), alert, log);
+    }
+
+    private static boolean thresholdReached(int count, GrimAlertPolicy.CommandRule rule) {
+      return count + 1e-9 >= rule.threshold();
+    }
+
+    private static boolean boundaryCrossed(int count, GrimAlertPolicy.CommandRule rule, double lastLevel) {
+      if (rule.interval() == 0.0) {
+        return count >= rule.threshold() && lastLevel < rule.threshold();
+      }
+      if (lastLevel <= 0.0) return count + 1e-9 >= rule.threshold();
+      return count + 1e-9 >= lastLevel + rule.interval();
     }
   }
 
-  public record Result(Accumulator state, Optional<Finding> alert) {
+public record Result(Accumulator state, Optional<Finding> alert, Optional<Finding> log) {
     public Result {
       Objects.requireNonNull(state);
       Objects.requireNonNull(alert);
+      Objects.requireNonNull(log);
     }
   }
 
@@ -376,10 +425,14 @@ public final class ProductionCheckEngine {
         // entity box and a conservative 4-block interaction envelope.
         if (!Double.isFinite(hitDistance)
             && fallbackDistance > config.attackReach() + 0.25) {
-          findings.add(uncertainFinding(playerId, serverTick, "Reach",
-              "attack ray does not intersect the compensated target within the interaction envelope",
-              Math.min(1.0, Math.max(0.0, (fallbackDistance - config.attackReach()) / 2.0)),
-              sequence));
+          findings.add((fallbackDistance > config.attackReach() + 1.0)
+              ? finding(playerId, serverTick, "Reach",
+                  "attack target is more than 1 block beyond the configured interaction envelope",
+                  Math.min(1.0, (fallbackDistance - config.attackReach()) / 2.0), sequence)
+              : uncertainFinding(playerId, serverTick, "Reach",
+                  "attack ray does not intersect the compensated target within the interaction envelope",
+                  Math.min(1.0, Math.max(0.0, (fallbackDistance - config.attackReach()) / 2.0)),
+                  sequence));
         }
       }
 
@@ -388,10 +441,14 @@ public final class ProductionCheckEngine {
         BlockBox block = new BlockBox(pos.x(), pos.y(), pos.z(), pos.x() + 1.0, pos.y() + 1.0, pos.z() + 1.0);
         double distance = pointAabbDistance(eyePosition(frame.observedAfter()), block);
         if (distance > config.blockInteractionReach()) {
-          findings.add(uncertainFinding(playerId, serverTick, "FarBreak",
-              String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
-              Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
-              sequence));
+          findings.add((distance > config.blockInteractionReach() + 1.0)
+              ? finding(playerId, serverTick, "FarBreak",
+                  String.format(Locale.ROOT, "block distance %.3f is more than 1 block beyond %.3f", distance, config.blockInteractionReach()),
+                  Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0), sequence)
+              : uncertainFinding(playerId, serverTick, "FarBreak",
+                  String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
+                  Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
+                  sequence));
         }
       }
 
@@ -417,10 +474,14 @@ public final class ProductionCheckEngine {
           BlockBox block = new BlockBox(pos.x(), pos.y(), pos.z(), pos.x() + 1.0, pos.y() + 1.0, pos.z() + 1.0);
           double distance = pointAabbDistance(eyePosition(frame.observedAfter()), block);
           if (distance > config.blockInteractionReach()) {
-            findings.add(uncertainFinding(playerId, serverTick, "FarPlace",
-                String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
-                Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
-                sequence));
+            findings.add((distance > config.blockInteractionReach() + 1.0)
+                ? finding(playerId, serverTick, "FarPlace",
+                    String.format(Locale.ROOT, "block distance %.3f is more than 1 block beyond %.3f", distance, config.blockInteractionReach()),
+                    Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0), sequence)
+                : uncertainFinding(playerId, serverTick, "FarPlace",
+                    String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
+                    Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
+                    sequence));
           }
         }
       }
@@ -451,9 +512,13 @@ public final class ProductionCheckEngine {
                 && !state.isAir()
                 && !state.isUnsupported()
                 && isSlowBreakBlock(state.blockId())) {
-              findings.add(uncertainFinding(playerId, serverTick, "FastBreak",
-                  "a slow-to-break block reached FINISHED_DIGGING within 35 ms of STARTED_DIGGING",
-                  1.0, sequence));
+              findings.add((raw.receivedNanos() - started) <= 10_000_000L
+                  ? finding(playerId, serverTick, "FastBreak",
+                      "a slow-to-break block reached FINISHED_DIGGING within 10 ms of STARTED_DIGGING",
+                      1.0, sequence)
+                  : uncertainFinding(playerId, serverTick, "FastBreak",
+                      "a slow-to-break block reached FINISHED_DIGGING within 35 ms of STARTED_DIGGING",
+                      1.0, sequence));
             }
           }
         }
