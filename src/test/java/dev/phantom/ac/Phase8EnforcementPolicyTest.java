@@ -91,5 +91,24 @@ class Phase8EnforcementPolicyTest {
     assertTrue(decision.reason().contains("already"));
   }
 
+  @Test void incompleteNumericEliminationCannotEnableEnforcement() {
+    Player p = Player.initial(Maths.Vec3.ZERO);
+    Validation.SyncWindow timing = new Validation.SyncWindow(10, 10, false, List.of("exact timing"));
+    Evidence incomplete = new Evidence(
+        Phase8MovementValidation.VERSION, Verdict.IMPOSSIBLE, "player", 10, 10, 10,
+        p, p, Contracts.TARGET_VERSION, "world:test", List.of("input=known"),
+        timing.reasons(), 4, 0, 3,
+        "all exhaustively modeled legitimate candidates disagree with the observed movement state",
+        OptionalLong.of(10), Optional.<CandidateSummary>empty(), List.of("diagnostic"), List.of(),
+        Phase8MovementValidation.PHASE5_VERSION, Phase8MovementValidation.PHASE6_VERSION,
+        Phase8MovementValidation.PHASE7_VERSION, "replay:10", "MOVEMENT_REACHABILITY");
+
+    var decision = Phase8EnforcementPolicy.evaluate(
+        incomplete, new State(2, 2, 0, 0, 10, -1), config());
+    assertFalse(decision.eligible());
+    assertTrue(decision.reason().contains("complete reachable candidate set"));
+  }
+
+
 
 }
