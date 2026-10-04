@@ -136,7 +136,7 @@ public final class ProductionCheckEngine {
 
     State addViolation(long tick, long nowMillis, Config config, String rule) {
       GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(rule);
-      long cutoff = Math.max(0L, nowMillis - policy.removeViolationsAfterMillis());
+      long cutoff = nowMillis - policy.removeViolationsAfterMillis();
       List<Long> active = new ArrayList<>();
       for (long timestamp : violationTimesMillis) if (timestamp > cutoff) active.add(timestamp);
       active.add(nowMillis);
