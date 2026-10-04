@@ -254,7 +254,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         if(digging.getAction()==DiggingAction.FINISHED_DIGGING){
           var blockPosition=digging.getBlockPosition();
           var position=new dev.phantom.ac.world.Pos(
-              blockPosition.getX(),blockPosition.getY(),blockPosition.getZ());
+              finishedPosition.getX(),finishedPosition.getY(),finishedPosition.getZ());
           long sequence=capture.sequence.incrementAndGet();
           long receivedNanos=System.nanoTime();
           Long clientTick=capture.clientTickTracker.hasObservedBoundary()
@@ -458,7 +458,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         Math.max(1,getConfig().getInt("checks.reset-after-ticks",40)),
         Math.max(0,getConfig().getInt("checks.alert-debounce-ticks",20)),
         Math.max(1.0,getConfig().getDouble("checks.attack-reach",4.0)),
-        Math.max(1.0,getConfig().getDouble("checks.block-interaction-reach",5.0)));
+        Math.max(1.0,getConfig().getDouble("checks.block-interaction-reach",5.0)),
+        getConfig().getBoolean("checks.timer-enabled",true),
+        Math.max(4,getConfig().getInt("checks.timer-window-ticks",20)),
+        Math.max(1_000_000L,getConfig().getLong("checks.timer-window-nanos",250_000_000L)));
     getServer().getPluginManager().registerEvents(this,this);
     PacketEvents.getAPI().getEventManager().registerListener(listener);
     int processors=Runtime.getRuntime().availableProcessors();
