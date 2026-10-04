@@ -60,6 +60,6 @@ Duplicate capture records are preserved as evidence but are no longer allowed to
 
 ## External validation rule
 
-`IMPLEMENTED` and `INTERNALLY TESTED` do not mean `VANILLA VALIDATED`. Real Minecraft Java 1.21.11 client traces are required to validate numeric timing and movement behavior empirically. This environment cannot launch that client or produce those sessions.
+Real Minecraft Java 1.21.11 client traces are useful as an optional deployment-conformance dataset for numeric timing and movement behavior. They are not treated as a fabricated prerequisite or as the definition of whether the deterministic implementation exists. The repository keeps synthetic/replayable fixtures separate from external client measurements.
 
-No automatic punishment/setback logic has been added as part of the Phase 7 work.
+No client capture corpus is used as a substitute for explicit `IMPOSSIBLE` proof, and incomplete empirical coverage remains a validation limitation rather than a punishment input.
