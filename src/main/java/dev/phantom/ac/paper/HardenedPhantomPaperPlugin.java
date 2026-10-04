@@ -574,7 +574,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       thread.setDaemon(true);
       return thread;
     });
-    stateTask=getServer().getScheduler().runTaskTimer(this,()->{drainChunkQueues();captureLiveContext();},1L,1L);
+    stateTask=getServer().getScheduler().runTaskTimer(this,this::drainChunkQueues,1L,1L);
     getLogger().info("[PhantomAC] Hardened Phase 8 adapter enabled; movement validation runs on per-connection Netty EventLoops");
   }
 
@@ -595,69 +595,22 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   @EventHandler public void onJoin(PlayerJoinEvent event){
-    Player player=event.getPlayer();
-    captures.compute(player.getUniqueId(),(id,existing)->{
-      if(existing!=null){
-        existing.updateServerPosition(player);
-        return existing;
-      }
-      Capture capture=new Capture(id,System.nanoTime(),validationBudget);
-      capture.updateServerPosition(player);
-      return capture;
-    });
+    UUID playerId=event.getPlayer().getUniqueId();
+    captures.computeIfAbsent(playerId,id->new Capture(id,System.nanoTime(),validationBudget));
   }
 
-  @EventHandler public void onTeleport(PlayerTeleportEvent event){
-    Player player=event.getPlayer();
-    Capture capture=captures.get(player.getUniqueId());
-    if(capture==null || event.getTo()==null)return;
-
-    /*
-     * PlayerTeleportEvent supplies a server-authoritative destination. Re-anchor
-     * the prediction epoch from that destination after the event rather than
-     * copying the client's next reported position into the baseline.
-     */
-    getServer().getScheduler().runTask(this,()->{
-      if(!player.isOnline() || !captures.containsKey(player.getUniqueId()))return;
-      State.Player template=capture.playerState.initialState();
-      if(template==null)return;
-      org.bukkit.Location location=player.getLocation();
-      org.bukkit.util.Vector velocity=player.getVelocity();
-      State.Player authoritativeAnchor=new State.Player(
-          new Vec3(location.getX(),location.getY(),location.getZ()),
-          new Vec3(velocity.getX(),velocity.getY(),velocity.getZ()),
-          location.getYaw(),location.getPitch(),player.isOnGround(),
-          player.getGameMode().name().toLowerCase(Locale.ROOT),
-          template.effects(),OptionalInt.empty(),false,Optional.empty(),
-          template.attributes(),template.pose(),template.environment(),
-          State.TickRange.unknown(),State.Provenance.UNKNOWN,Set.of());
-      long receivedNanos=System.nanoTime();
-      capture.playerState.beginResync(authoritativeAnchor,receivedNanos);
-      if (debugLevel(player.getUniqueId()).trace()) {
-        getLogger().info("[PhantomAC][PHASE8][REANCHOR] player="+player.getName()
-            +" reason=PLAYER_TELEPORT_EVENT"
-            +" sequenceBoundary="+capture.sequence.get()
-            +" position="+authoritativeAnchor.position());
-      }
-    });
-  }
+  // Re-anchoring is driven by the clientbound position-correction packet.
+  // Bukkit teleport events never enter movement detection state.
 
   @EventHandler public void onRespawn(PlayerRespawnEvent event){
-    Player player=event.getPlayer();
-    getServer().getScheduler().runTask(this,()->{
-      Capture capture=new Capture(player.getUniqueId(),System.nanoTime(),validationBudget);
-      captures.put(player.getUniqueId(),capture);
-      State.Player anchor=State.Player.initial(
-          new Vec3(player.getLocation().getX(),player.getLocation().getY(),player.getLocation().getZ()));
-      capture.playerState.activate(anchor,System.nanoTime());
-    });
+    UUID playerId=event.getPlayer().getUniqueId();
+    captures.put(playerId,new Capture(playerId,System.nanoTime(),validationBudget));
   }
 
   @EventHandler public void onWorldChange(PlayerChangedWorldEvent event){
-    Capture capture=new Capture(event.getPlayer().getUniqueId(),System.nanoTime(),validationBudget);
-    capture.updateServerPosition(event.getPlayer());
-    captures.put(event.getPlayer().getUniqueId(),capture);
-    setbackOverrides.remove(event.getPlayer().getUniqueId());
+    UUID playerId=event.getPlayer().getUniqueId();
+    captures.put(playerId,new Capture(playerId,System.nanoTime(),validationBudget));
+    setbackOverrides.remove(playerId);
   }
 
   @EventHandler public void onQuit(PlayerQuitEvent event){
@@ -1364,7 +1317,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       if(raw.isEmpty())return;
 
       String playerName=capture.playerName==null?capture.playerId.toString():capture.playerName;
-      State.Player anchor=capture.playerState.initialState();
+      State.Player anchor=null;
       if(debugLevel(capture.playerId).trace()){
         getLogger().info("[PhantomAC][PHASE8][PREDICT_START] player="+playerName
             +" thread="+Thread.currentThread().getName()
@@ -1379,7 +1332,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           raw,
           sequence->clientWorldForMovement(capture,sequence),
           anchor,
-          capture.playerState.initialStateReceivedNanos());
+          -1L);
 
       Phase8PredictionRunner.Report report=incremental;
       ProductionCheckEngine.Report productionChecks =
@@ -2389,7 +2342,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       playerId=id;epochNanos=epoch;
       movementRunner=new Phase8PredictionRunner(candidateBudget);
       playerState=new PhantomPlayerState(id);
-      clientWorld.setCollisionResolver((snapshot,state,x,y,z)->PaperVanillaCollision.resolve(state,x,y,z));      clientWorld.markEntityTrackingComplete();
+      // Movement collision is resolved from the immutable packet-visible world.
+      // No live Bukkit/Paper collision shape is installed here.
+      clientWorld.markEntityTrackingIncomplete();
     }
 
     void updateServerPosition(Player player){
