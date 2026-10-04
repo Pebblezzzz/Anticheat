@@ -369,19 +369,6 @@ public final class ProductionCheckEngine {
         }
       }
 
-      if (packet instanceof Packets.InventoryClick click) {
-        if (click.slot() < -999 || click.slot() > 127) {
-          findings.add(finding(playerId, serverTick, "InventorySlot",
-              "container click slot is outside the protocol slot envelope",
-              1.0, sequence));
-        }
-        if ("UNKNOWN".equals(click.clickType())) {
-          findings.add(finding(playerId, serverTick, "InventoryClickType",
-              "container click type could not be decoded",
-              1.0, sequence));
-        }
-      }
-
       if (packet instanceof Packets.DigAction dig) {
         String action = dig.action();
         if (action.contains("STARTED_DIGGING")) {
