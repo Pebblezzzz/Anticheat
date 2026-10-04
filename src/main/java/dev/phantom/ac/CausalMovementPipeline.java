@@ -410,11 +410,11 @@ public final class CausalMovementPipeline {
             frames.add(frame(sequence, event, eventTiming, movement, observedBefore, observedAfter,
                 assumptions, uncertainty, trace));
           } else {
-            SearchResult uncertain = uncertainSearch(frontier.candidates(),
+            SearchResult uncertainSearchResult = uncertainSearch(frontier.candidates(),
                 "status movement packet has no causally aligned authoritative ground witness");
             results.add(Phase8MovementValidation.validate(
                 playerId, serverTick, observedBefore, observedAfter, movement.world(),
-                worldReference, sync, assumptions, uncertain, replayReference, false,
+                worldReference, sync, assumptions, uncertainSearchResult, replayReference, false,
                 EnumSet.of(Phase6Reachability.ObservedField.GROUND)));
             uncertain++;
             recoveryRequired = true;
@@ -2430,6 +2430,88 @@ public final class CausalMovementPipeline {
       if (timeline.events().get(i).packet().packet().mutatesWorld()) return true;
     }
     return false;
+  }
+
+  private static long movementTickForObservation(Phase7Timing.EventTiming timing) {
+    return Math.max(0L, timing.simulationClientTicks().min());
+  }
+
+  /**
+   * Status movement packets contain only the client's on-ground claim.
+   * Compare that claim against the nearest causally preceding authoritative
+   * snapshot, without pretending the packet carried position or rotation.
+   */
+  private static Optional<Candidate> statusObservationWitness(
+      MovementEvent movement,
+      long simulationTick) {
+    if (simulationTick < 0L) return Optional.empty();
+
+    LinkedHashMap<Long, AuthoritativeSnapshot> snapshots = new LinkedHashMap<>();
+    movement.simulationAuthority().ifPresent(snapshot ->
+        snapshots.put(snapshot.sequence(), snapshot));
+    movement.authority().snapshot()
+        .filter(snapshot ->
+            snapshot.sequence() < movement.event().packet().sequence()
+                && snapshot.receivedNanos() <= movement.event().packet().receivedNanos())
+        .ifPresent(snapshot -> snapshots.put(snapshot.sequence(), snapshot));
+
+    Player observed = movement.stateFrame().after();
+    for (AuthoritativeSnapshot snapshot : snapshots.values()) {
+      long age = movement.event().serverTick() - snapshot.serverTick();
+      if (age < 0L || age > 1L) continue;
+
+      Packets.PlayerContext context = snapshot.context();
+      if (!Phase6Reachability.positionMatches(context.serverPosition(), observed.position())) continue;
+
+      Player authoritative = playerFromAuthority(context);
+      MovementEnvironment environment = movementEnvironmentOf(authoritative);
+      Player witnessPlayer = new Player(
+          observed.position(),
+          authoritative.velocity(),
+          observed.yaw(),
+          observed.pitch(),
+          authoritative.onGround(),
+          authoritative.gamemode(),
+          authoritative.effects(),
+          authoritative.awaitingTeleport(),
+          false,
+          observed.input(),
+          authoritative.attributes(),
+          authoritative.pose(),
+          authoritative.environment(),
+          observed.clientTickRange(),
+          authoritative.provenance(),
+          authoritative.uncertaintyReasons());
+
+      Context contextValue = new Context(
+          simulationTick,
+          witnessPlayer,
+          simulationEnvironmentFor(environment),
+          witnessPlayer.attributes(),
+          movementEffects(witnessPlayer),
+          witnessPlayer.pose(),
+          environment,
+          witnessPlayer.pose() == Pose.SLEEPING,
+          entityCollisionsFor(movement));
+
+      return Optional.of(new Candidate(
+          0,
+          contextValue,
+          new Phase6Reachability.Provenance(
+              0,
+              snapshot.sequence(),
+              simulationTick,
+              "STATUS_GROUND_AUTHORITY",
+              "AUTHORITY",
+              "None",
+              List.of(
+                  "status packet contains only the client's on-ground claim",
+                  "authoritative ground state is the physical comparison state"),
+              1,
+              List.of(),
+              List.of())));
+    }
+    return Optional.empty();
   }
 
   private static Optional<Candidate> initialAnchorObservationWitness(
