@@ -153,7 +153,7 @@ class Phase8PredictionRunnerTest {
     assertEquals(
         Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getFirst().verdict(),
-        report.results().toString());
+        report.frames().getFirst().trace().toString());
     assertEquals(
         Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().get(1).verdict(),
