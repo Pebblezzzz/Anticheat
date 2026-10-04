@@ -41,3 +41,14 @@ setbacks:
   enabled: false
   # Never setback from a verdict produced by an incomplete timing/world search.
   only-when-exhaustive: true
+
+checks:
+  # Non-movement packet checks are evidence-only and require repeated impossible observations.
+  enabled: true
+  minimum-observations: 3
+  reset-after-ticks: 40
+  alert-debounce-ticks: 20
+  # Vanilla 1.21.11 interaction envelopes; creative attributes may be narrower/broader
+  # in future versions, so checks stay conservative until those attributes are wired.
+  attack-reach: 4.0
+  block-interaction-reach: 5.0
