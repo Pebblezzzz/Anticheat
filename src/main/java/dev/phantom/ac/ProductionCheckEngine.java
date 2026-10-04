@@ -203,6 +203,14 @@ public final class ProductionCheckEngine {
         continue;
       }
 
+      if (packet instanceof Packets.HeldItemChange heldItem) {
+        if (heldItem.slot() < 0 || heldItem.slot() > 8) {
+          findings.add(finding(playerId, serverTick, "HeldItemSlot",
+              "held-item slot is outside the legal hotbar range 0..8",
+              1.0, sequence));
+        }
+      }
+
       if (packet instanceof Packets.Move move) {
         if (move.onGround() && frame != null && !frame.predictedAfter().isEmpty()
             && frame.predictedAfter().stream()
