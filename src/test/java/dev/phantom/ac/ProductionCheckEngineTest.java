@@ -89,9 +89,9 @@ class ProductionCheckEngineTest {
     Phase6Reachability.Candidate airborne = candidate(
         new State.Player(
             grounded.position(), grounded.velocity(), grounded.yaw(), grounded.pitch(), false,
-            grounded.gamemode(), grounded.effects(), grounded.heldSlot(), grounded.awaitingTeleport().isPresent(),
+            grounded.gamemode(), grounded.effects(), grounded.awaitingTeleport(), grounded.uncertain(),
             grounded.input(), grounded.attributes(), grounded.pose(), grounded.environment(),
-            grounded.tickRange(), grounded.provenance(), grounded.uncertaintyDimensions()),
+            grounded.clientTickRange(), grounded.provenance(), grounded.uncertaintyReasons()),
         1L);
 
     Packets.Move move = new Packets.Move(null, 90f, 0f, true, 1L);
@@ -111,9 +111,9 @@ class ProductionCheckEngineTest {
     State.Player before = player(0, 0);
     State.Player after = new State.Player(
         new Vec3(0, -1, 0), before.velocity(), before.yaw(), before.pitch(), true,
-        before.gamemode(), before.effects(), before.heldSlot(), before.awaitingTeleport().isPresent(),
+        before.gamemode(), before.effects(), before.awaitingTeleport(), before.uncertain(),
         before.input(), before.attributes(), before.pose(), before.environment(),
-        before.tickRange(), before.provenance(), before.uncertaintyDimensions());
+        before.clientTickRange(), before.provenance(), before.uncertaintyReasons());
     State.Player predictedAir = new State.Player(
         new Vec3(0, -1, 0), Vec3.ZERO, 0, 0, false,
         "survival", Map.of(), OptionalInt.empty(), false, Optional.empty(),
@@ -125,9 +125,9 @@ class ProductionCheckEngineTest {
     Phase6Reachability.Candidate groundCandidate = candidate(
         new State.Player(
             predictedAir.position(), predictedAir.velocity(), predictedAir.yaw(), predictedAir.pitch(), true,
-            predictedAir.gamemode(), predictedAir.effects(), predictedAir.heldSlot(), false,
-            Optional.empty(), predictedAir.attributes(), predictedAir.pose(), predictedAir.environment(),
-            predictedAir.tickRange(), predictedAir.provenance(), Set.of()),
+            predictedAir.gamemode(), predictedAir.effects(), OptionalInt.empty(), predictedAir.uncertain(),
+            predictedAir.input(), predictedAir.attributes(), predictedAir.pose(), predictedAir.environment(),
+            predictedAir.clientTickRange(), predictedAir.provenance(), predictedAir.uncertaintyReasons()),
         3L);
 
     PredictionFrame deterministic = new PredictionFrame(
