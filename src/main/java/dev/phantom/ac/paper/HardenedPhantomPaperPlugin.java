@@ -130,7 +130,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private int alertIntervalTicks;
   private double violationIncrement,violationDecayPerTick,maximumViolationLevel;
   private boolean kickEnabled,punishmentEnabled,enforcementOnlyExhaustive,permissionExempt;
-  private int minimumImpossibleObservations;
+  private double alertViolationThreshold;
+  private double minimumSetbackViolationLevel,minimumKickViolationLevel,minimumPunishmentViolationLevel;
   private double minimumEnforcementConfidence;
   private String punishmentCommand,exemptionPermission;
   private final Map<UUID,Boolean> setbackOverrides=new ConcurrentHashMap<>();
@@ -462,7 +463,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     punishmentEnabled=getConfig().getBoolean("enforcement.punishment-enabled",false);
     enforcementOnlyExhaustive=getConfig().getBoolean("enforcement.only-when-exhaustive",true);
     permissionExempt=getConfig().getBoolean("enforcement.permission-exempt",true);
-    minimumImpossibleObservations=Math.max(1,getConfig().getInt("enforcement.minimum-impossible-observations",3));
+    alertViolationThreshold=Math.max(0.000001,getConfig().getDouble("alerts.violation-alert-threshold",100.0));
+    minimumSetbackViolationLevel=Math.max(0.0,getConfig().getDouble("enforcement.setback-violation-level",10.0));
+    minimumKickViolationLevel=Math.max(0.0,getConfig().getDouble("enforcement.kick-violation-level",100.0));
+    minimumPunishmentViolationLevel=Math.max(0.0,getConfig().getDouble("enforcement.punishment-violation-level",100.0));
     minimumEnforcementConfidence=Math.max(0.0,Math.min(1.0,getConfig().getDouble("enforcement.minimum-confidence",1.0)));
     punishmentCommand=getConfig().getString("enforcement.punishment-command","warn {player} Phantom movement evidence");
     exemptionPermission=getConfig().getString("enforcement.permission","phantom.exempt");
@@ -1408,7 +1412,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
     Phase8MovementValidation.Config accumulatorConfig =
         new Phase8MovementValidation.Config(
-            minimumImpossibleObservations, 20, alertsEnabled, true);
+            alertViolationThreshold, 0, alertsEnabled, true,
+            violationIncrement, violationDecayPerTick, maximumViolationLevel,
+            Math.max(0.000001, getConfig().getDouble("alerts.violation-alert-interval",40.0)));
 
     Phase8EnforcementPolicy.Config enforcementConfig =
         new Phase8EnforcementPolicy.Config(
@@ -1416,7 +1422,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             kickEnabled,
             punishmentEnabled,
             enforcementOnlyExhaustive,
-            minimumImpossibleObservations,
+            minimumSetbackViolationLevel,
+            minimumKickViolationLevel,
+            minimumPunishmentViolationLevel,
             minimumEnforcementConfidence,
             punishmentCommand);
 
