@@ -14,6 +14,10 @@ The canonical 1.21.11 path represents normal walking/sprinting/sneaking/jumping,
 
 A missing world/entity/timing fact is never silently converted into air, zero velocity, neutral input, or a hard movement violation.
 
+## Packet and interaction coverage
+
+Position/rotation sanity, held-slot integrity, timer-burst evidence, reach, far break/place, block-placement cursor/face integrity, inventory slot/type integrity, conservative FastBreak evidence, and ground-claim corroboration are now part of the production evidence layer.
+
 ## Evidence and enforcement
 
 `POSSIBLE` means at least one complete candidate explains the observation.

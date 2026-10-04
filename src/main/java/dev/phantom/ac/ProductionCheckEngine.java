@@ -292,15 +292,46 @@ public final class ProductionCheckEngine {
         }
       }
 
-      if (packet instanceof Packets.BlockPlace place && frame != null) {
-        Pos pos = place.position();
-        BlockBox block = new BlockBox(pos.x(), pos.y(), pos.z(), pos.x() + 1.0, pos.y() + 1.0, pos.z() + 1.0);
-        double distance = pointAabbDistance(eyePosition(frame.observedAfter()), block);
-        if (distance > config.blockInteractionReach()) {
-          findings.add(finding(playerId, serverTick, "FarPlace",
-              String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
-              Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
-              sequence));
+      if (packet instanceof Packets.BlockPlace place) {
+        if (place.cursorPresent()) {
+          Vec3 cursor = place.cursor();
+          if (cursor.x() < -1.0e-4 || cursor.x() > 1.0001
+              || cursor.y() < -1.0e-4 || cursor.y() > 1.0001
+              || cursor.z() < -1.0e-4 || cursor.z() > 1.0001) {
+            findings.add(finding(playerId, serverTick, "BlockPlaceCursor",
+                "block-use cursor coordinates are outside the legal 0..1 hitbox envelope",
+                1.0, sequence));
+          }
+        }
+        if (place.faceId() < 0 || place.faceId() > 5) {
+          findings.add(finding(playerId, serverTick, "BlockPlaceFace",
+              "block-use face id is outside the legal 0..5 range",
+              1.0, sequence));
+        }
+
+        if (frame != null) {
+          Pos pos = place.position();
+          BlockBox block = new BlockBox(pos.x(), pos.y(), pos.z(), pos.x() + 1.0, pos.y() + 1.0, pos.z() + 1.0);
+          double distance = pointAabbDistance(eyePosition(frame.observedAfter()), block);
+          if (distance > config.blockInteractionReach()) {
+            findings.add(finding(playerId, serverTick, "FarPlace",
+                String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
+                Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
+                sequence));
+          }
+        }
+      }
+
+      if (packet instanceof Packets.InventoryClick click) {
+        if (click.slot() < -999 || click.slot() > 127) {
+          findings.add(finding(playerId, serverTick, "InventorySlot",
+              "container click slot is outside the protocol slot envelope",
+              1.0, sequence));
+        }
+        if ("UNKNOWN".equals(click.clickType())) {
+          findings.add(finding(playerId, serverTick, "InventoryClickType",
+              "container click type could not be decoded",
+              1.0, sequence));
         }
       }
 

@@ -1,8 +1,10 @@
 # Phantom AC Core
 
-Clean-room, deterministic server-side movement-validation foundation for **Minecraft Java 1.21.11**. Platform integration is isolated in `dev.phantom.ac.paper`; the deterministic core has no Bukkit/Paper or PacketEvents types.
+Production-oriented, deterministic server-side anti-cheat for Minecraft Java 1.21.11.
 
-The Paper adapter is diagnostic-only. It captures client movement/input and outbound teleport, velocity, chunk, and block packets into normalized records without letting platform types enter the core.
+Clean-room, deterministic server-side validation for **Minecraft Java 1.21.11**. Platform integration is isolated in `dev.phantom.ac.paper`; the deterministic core has no Bukkit/Paper or PacketEvents types.
+
+The Paper adapter captures movement/input, timing, corrections, compensated client-visible world state, entity lifecycle, interaction packets, block use, inventory clicks, and operator evidence. Expensive prediction runs asynchronously and returns immutable reports to the main thread for policy/enforcement actions.
 
 ## License
 
@@ -10,7 +12,7 @@ The project is GPL-3.0-only because its Paper packet adapter requires the separa
 
 ## Production status and version discipline
 
-The 1.21.11 movement path is version-pinned, deterministic, replayable, and protected by explicit `POSSIBLE`, `UNCERTAIN`, and exhaustively proven `IMPOSSIBLE` verdicts. The live adapter captures compensated world/timing/entity state and runs expensive prediction asynchronously. Modern movement modifiers represented in the current implementation include Depth Strider, Swift Sneak, Soul Speed, and Dolphin's Grace.
+The 1.21.11 movement path is version-pinned, deterministic, replayable, and protected by explicit `POSSIBLE`, `UNCERTAIN`, and exhaustively proven `IMPOSSIBLE` verdicts. The live adapter captures compensated world/timing/entity state and runs expensive prediction asynchronously. Modern movement modifiers represented in the current implementation include Depth Strider, Swift Sneak, Soul Speed, and Dolphin's Grace. The packet/evidence layer also covers position/rotation sanity, held-slot integrity, timer-burst evidence, reach, far break/place, block-placement cursor/face integrity, inventory packet integrity, conservative FastBreak evidence, and ground-claim corroboration.
 
 Production enforcement is downstream from simulation. It requires repeated consecutive exhaustive contradictions plus numeric evidence that a non-empty reachable candidate set was completely eliminated. Incomplete world/timing/entity coverage remains `UNCERTAIN`, never a punishment decision.
 

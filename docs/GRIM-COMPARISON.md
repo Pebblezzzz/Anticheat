@@ -40,11 +40,11 @@ Phantom's operator alert value is pure and testable; it has no punishment side e
 
 ## Approaches rejected for this project
 - Copying Grim source or adapting its internal classes: rejected for licensing, architectural, and clean-room reasons.
-- Claiming 1:1 vanilla parity based only on an implementation resemblance: rejected because Phantom has no independent 1.21.11 client trace corpus yet.
+- Claiming 1:1 vanilla parity based only on implementation resemblance: rejected. Phantom remains explicitly version-pinned and empirical client sessions are optional deployment-conformance data, not fabricated proof.
 - Treating a fixed movement tolerance as a substitute for simulation: rejected by the project requirements.
 - Treating all unknown world data as air: rejected because it creates unsound reachability conclusions.
 - Making the core depend on Netty, Bukkit, PacketEvents, or live clocks: rejected because deterministic replay and platform isolation are explicit contracts.
-- Adding broad multi-version or vehicle support before the 1.21.11 trace baseline is proven: rejected as breadth-first scaffolding.
+- Adding broad multi-version support before the 1.21.11 movement contract is stable: rejected as breadth-first scaffolding.
 
 ## Why flight was not being detected
 The previous live path had two concrete faults. First, validation was only meaningfully surfaced by the manual command path; the scheduled path did not provide a complete operator-facing workflow. Second, `LiveValidation` discarded the prediction envelope after a mismatch by allowing the next empty candidate set to behave like a fresh anchor. Sustained flight could therefore produce one finding and then lose the continuity needed for repeated evidence. The live validator now retains the simulated envelope after divergence and continues producing findings. This is a correctness repair, not a flight-distance threshold.
@@ -65,8 +65,8 @@ Live validation also distinguishes position-bearing movement packets from rotati
 
 This follows the same broad architectural lesson visible in Grim's current player model: client claims, authoritative movement state, flying capability/status, prediction state, and compensated world state are tracked as separate concepts rather than collapsing them into one boolean. Grim also uses tick-boundary and packet-order information as independent movement evidence. This is an architectural comparison, not a claim of feature parity.
 ## Production hardening status
-Phantom now includes the modern movement modifiers and vehicle families relevant to the 1.21.11 target, persistent candidate-frontier prediction, client-visible world compensation, explicit timing uncertainty, numeric enforcement-proof checks, production validation health metrics, and regression coverage for the evidence gate.
+Phantom now includes the modern movement modifiers and vehicle families relevant to the 1.21.11 target, persistent candidate-frontier prediction, client-visible world compensation, explicit timing uncertainty, numeric enforcement-proof checks, production validation health metrics, interaction/reach evidence, packet-integrity checks, timer-burst evidence, conservative FastBreak evidence, and regression coverage for the evidence gate.
 
-Remaining work should be treated as feature expansion rather than replacing the movement architecture: broader non-movement check families, additional packet semantics such as combat/item/placement state, longer stress campaigns on real server populations, and future version adapters.
+Remaining work is feature expansion rather than a movement rewrite: deeper combat/aim heuristics, broader inventory/item semantics, more sophisticated scaffold/build analysis, long-running server soak measurements, and future version adapters. Those should continue to use the same evidence/uncertainty contract.
 
 These are deliberately kept outside the 1.21.11 movement proof so unsupported information cannot become a false movement violation.
