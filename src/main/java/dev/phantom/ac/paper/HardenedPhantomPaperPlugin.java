@@ -181,12 +181,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             :null;
         Long authoritativeTick=capture.authoritativeServerTick.get()>=0
             ?capture.authoritativeServerTick.get():null;
-        Packets.MovementKind movementKind=switch(event.getPacketType()){
-          case PLAYER_POSITION -> Packets.MovementKind.POSITION;
-          case PLAYER_ROTATION -> Packets.MovementKind.ROTATION;
-          case PLAYER_POSITION_AND_ROTATION -> Packets.MovementKind.POSITION_ROTATION;
-          default -> Packets.MovementKind.STATUS;
-        };
+        Packets.MovementKind movementKind =
+            packet.hasPositionChanged() && packet.hasRotationChanged()
+                ? Packets.MovementKind.POSITION_ROTATION
+                : packet.hasPositionChanged()
+                    ? Packets.MovementKind.POSITION
+                    : packet.hasRotationChanged()
+                        ? Packets.MovementKind.ROTATION
+                        : Packets.MovementKind.STATUS;
         Packets.Move move=new Packets.Move(
             packet.hasPositionChanged()?vector(location.getX(),location.getY(),location.getZ()):null,
             packet.hasRotationChanged()?location.getYaw():null,
