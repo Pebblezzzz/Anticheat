@@ -187,4 +187,34 @@ class ProductionCheckEngineTest {
   }
 
 
+  @Test
+  void illegalBlockPlaceCursorIsDetected() {
+    var place = new Packets.BlockPlace(
+        new dev.phantom.ac.world.Pos(0, 0, 0),
+        1,
+        new Vec3(1.5, 0.5, 0.5),
+        true);
+
+    var result = ProductionCheckEngine.analyze(
+        "p",
+        List.of(new Packets.RawPacket(1, 1, place)),
+        report(),
+        CONFIG);
+
+    assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("BlockPlaceCursor")));
+  }
+
+  @Test
+  void impossibleInventorySlotIsDetected() {
+    var result = ProductionCheckEngine.analyze(
+        "p",
+        List.of(new Packets.RawPacket(
+            1, 1, new Packets.InventoryClick(0, 128, 0, "PICKUP"))),
+        report(),
+        CONFIG);
+
+    assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("InventorySlot")));
+  }
+
+
 }
