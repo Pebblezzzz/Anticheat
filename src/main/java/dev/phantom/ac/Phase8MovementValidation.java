@@ -38,9 +38,9 @@ public final class Phase8MovementValidation {
       if (!Double.isFinite(violationDecayPerTick) || violationDecayPerTick < 0) throw new IllegalArgumentException("violationDecayPerTick must be finite and non-negative");
       if (!Double.isFinite(maximumViolationLevel) || maximumViolationLevel <= 0) throw new IllegalArgumentException("maximumViolationLevel must be finite and positive");
       if (!Double.isFinite(alertInterval) || alertInterval <= 0) throw new IllegalArgumentException("alertInterval must be finite and positive");
-      if (maximumViolationLevel < minimumImpossibleObservations) throw new IllegalArgumentException("maximumViolationLevel must cover the alert threshold");
+      if (maximumViolationLevel < alertViolationThreshold) throw new IllegalArgumentException("maximumViolationLevel must cover the alert threshold");
     }
-    public Config(int minimumImpossibleObservations, int alertDebounceTicks,
+    public Config(double alertViolationThreshold, int alertDebounceTicks,
                   boolean alertsEnabled, boolean observationOnly) {
       this(alertViolationThreshold, alertDebounceTicks, alertsEnabled, observationOnly,
           1.0, 0.005, 100.0, 40.0);
