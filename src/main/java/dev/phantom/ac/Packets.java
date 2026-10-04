@@ -7,7 +7,7 @@ import static dev.phantom.ac.Maths.Vec3;
 public final class Packets {
   private Packets() {}
 
-  public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm, UseItem, ContainerState, BlockAck,
+  public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm, UseItem, ContainerState, SlotStateChange, BlockAck,
       Velocity, Effect, Gamemode, PlayerContext, FlightToggle, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange,
       WorldTransactionSend, WorldTransactionAck, PaperMovementRejection, ClientBlockBreak, EntitySpawn, EntityMove, EntityDespawn,
       InteractEntity, BlockPlace, VehicleMove, HeldItemChange, EntityAction, DigAction, InventoryClick {
@@ -42,8 +42,20 @@ public final class Packets {
       if(sequence < 0) throw new IllegalArgumentException("sequence must be non-negative");
     }
   }
-  public record ContainerState(int windowId, int stateId) implements Packet {
-    public ContainerState { if(windowId < 0) throw new IllegalArgumentException("windowId must be non-negative"); }
+  public record ContainerState(int windowId, int stateId, int slot, int itemCount, boolean carriedItemPresent) implements Packet {
+    public ContainerState {
+      if(windowId < -1) throw new IllegalArgumentException("windowId must be >= -1");
+      if(stateId < -1) throw new IllegalArgumentException("stateId must be >= -1");
+      if(slot < -1) throw new IllegalArgumentException("slot must be >= -1");
+      if(itemCount < -1) throw new IllegalArgumentException("itemCount must be >= -1");
+    }
+    public ContainerState(int windowId, int stateId) { this(windowId,stateId,-1,-1,false); }
+  }
+  public record SlotStateChange(int windowId, int slot, boolean state) implements Packet {
+    public SlotStateChange {
+      if(windowId < 0) throw new IllegalArgumentException("windowId must be non-negative");
+      if(slot < 0) throw new IllegalArgumentException("slot must be non-negative");
+    }
   }
   public record BlockAck(int sequence) implements Packet {
     public BlockAck { if(sequence < 0) throw new IllegalArgumentException("sequence must be non-negative"); }
@@ -234,7 +246,7 @@ public final class Packets {
           ||packet instanceof WorldTransactionAck||packet instanceof FlightToggle||packet instanceof ClientBlockBreak
           ||packet instanceof InteractEntity||packet instanceof BlockPlace||packet instanceof VehicleMove||packet instanceof UseItem||packet instanceof BlockAck
           ||packet instanceof HeldItemChange||packet instanceof EntityAction||packet instanceof DigAction
-          ||packet instanceof InventoryClick)return "CLIENT_TO_SERVER";
+          ||packet instanceof InventoryClick||packet instanceof SlotStateChange)return "CLIENT_TO_SERVER";
       if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof Effect||packet instanceof Gamemode||packet instanceof PlayerContext||packet instanceof WorldTransactionSend||packet.mutatesWorld())return "SERVER_TO_CLIENT";
       return "UNKNOWN";
     }
