@@ -18,6 +18,15 @@ import static dev.phantom.ac.Maths.Vec3;
  */
 public final class ProductionCheckEngine {
   private static final double WORLD_BORDER = 29_999_999.0;
+  /*
+   * Small prediction residuals are retained as non-punitive evidence. A larger
+   * deterministic residual means the best modeled vanilla explanation itself
+   * could not account for the observed displacement.
+   */
+  private static final double PREDICTION_OFFSET_UNCERTAIN = 0.04;
+  private static final double PREDICTION_OFFSET_IMPOSSIBLE = 0.08;
+  private static final double PREDICTION_VERTICAL_UNCERTAIN = 0.05;
+  private static final double PREDICTION_VERTICAL_IMPOSSIBLE = 0.10;
   private static final Set<String> ENTITY_ACTIONS = Set.of(
       "START_SPRINTING", "STOP_SPRINTING",
       "START_SNEAKING", "STOP_SNEAKING",
@@ -603,6 +612,28 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
                   "survival/adventure movement displaced %.3f blocks horizontally in one client tick",
                   horizontal),
               1.0, sequence));
+        } else if (!candidateExternalMotion
+            && !jumping
+            && frame.predictionOffset().evaluated()
+            && frame.uncertaintySources().isEmpty()
+            && !frame.predictedAfter().isEmpty()) {
+          double offset = frame.predictionOffset().horizontal();
+          if (offset >= PREDICTION_OFFSET_IMPOSSIBLE) {
+            findings.add(finding(playerId, tick, "Speed",
+                String.format(Locale.ROOT,
+                    "best modeled vanilla prediction remained %.3f blocks horizontally behind the observed movement",
+                    offset),
+                Math.min(1.0, offset / (PREDICTION_OFFSET_IMPOSSIBLE * 2.0)), sequence));
+          } else if (offset >= PREDICTION_OFFSET_UNCERTAIN) {
+            findings.add(uncertainFinding(playerId, tick, "Speed",
+                String.format(Locale.ROOT,
+                    "best modeled vanilla prediction missed observed horizontal movement by %.3f blocks",
+                    offset),
+                Math.min(1.0,
+                    (offset - PREDICTION_OFFSET_UNCERTAIN)
+                        / (PREDICTION_OFFSET_IMPOSSIBLE - PREDICTION_OFFSET_UNCERTAIN)),
+                sequence));
+          }
         }
 
         /*
@@ -617,6 +648,32 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
               || env.fluid() != Phase5Mechanics.Fluid.NONE
               || env.climbable() || env.gliding() || env.vehicle().active();
         });
+        boolean deterministicPredictionOffset = frame.predictionOffset().evaluated()
+            && frame.uncertaintySources().isEmpty()
+            && !frame.predictedAfter().isEmpty();
+        if (!externalVertical && !before.onGround() && !after.onGround() && !jumping
+            && deterministicPredictionOffset
+            && delta.y() > PREDICTION_VERTICAL_UNCERTAIN
+            && frame.predictionOffset().deltaY() >= PREDICTION_VERTICAL_IMPOSSIBLE) {
+          findings.add(finding(playerId, tick, "Flight",
+              String.format(Locale.ROOT,
+                  "best modeled vanilla prediction remained %.3f vertical blocks below observed movement",
+                  frame.predictionOffset().deltaY()),
+              Math.min(1.0, frame.predictionOffset().deltaY() / 0.20), sequence));
+        } else if (!externalVertical && !before.onGround() && !after.onGround() && !jumping
+            && deterministicPredictionOffset
+            && frame.predictionOffset().deltaY() >= PREDICTION_VERTICAL_UNCERTAIN
+            && delta.y() > 0.05) {
+          findings.add(uncertainFinding(playerId, tick, "Flight",
+              String.format(Locale.ROOT,
+                  "best modeled vanilla prediction missed upward movement by %.3f blocks",
+                  frame.predictionOffset().deltaY()),
+              Math.min(1.0,
+                  (frame.predictionOffset().deltaY() - PREDICTION_VERTICAL_UNCERTAIN)
+                      / (PREDICTION_VERTICAL_IMPOSSIBLE - PREDICTION_VERTICAL_UNCERTAIN)),
+              sequence));
+        }
+
         if (!externalVertical && !before.onGround() && !after.onGround() && !jumping
             && before.velocity().y() <= 0.05 && delta.y() > 0.16) {
           findings.add(finding(playerId, tick, "Flight",
