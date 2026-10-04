@@ -715,7 +715,7 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
   }
 
   private static boolean isNormalSurvivalMovement(PredictionFrame frame) {
-    Player player = frame.observedAfter();
+    dev.phantom.ac.State.Player player = frame.observedAfter();
     if (!"survival".equalsIgnoreCase(player.gamemode())
         && !"adventure".equalsIgnoreCase(player.gamemode())) {
       return false;
