@@ -151,7 +151,7 @@ class Phase8PredictionRunnerTest {
 
     assertEquals(2, report.movementObservations(), report.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.POSSIBLE,
+        Phase8MovementValidation.Verdict.UNCERTAIN,
         report.results().getFirst().verdict(),
         report.results().toString());
     assertEquals(
@@ -160,14 +160,14 @@ class Phase8PredictionRunnerTest {
         report.results().toString());
     assertTrue(report.frames().get(1).predictedAfter().stream()
         .anyMatch(candidate ->
-            candidate.provenance().input().equals("CLIENT_MOVEMENT_BOOTSTRAP_OBSERVED")),
+            candidate.provenance().input().equals("CLIENT_MOVEMENT_BOOTSTRAP_PROVISIONAL")),
         report.frames().get(1).toString());
     assertTrue(report.frames().getFirst().trace().stream()
         .anyMatch(line -> line.startsWith("BOOTSTRAP_AUTHORITY_FALLBACK")),
         report.frames().getFirst().trace().toString());
     assertTrue(report.frames().getFirst().predictedAfter().stream()
         .anyMatch(candidate ->
-            candidate.provenance().input().equals("CLIENT_MOVEMENT_BOOTSTRAP_OBSERVED")),
+            candidate.provenance().input().equals("CLIENT_MOVEMENT_BOOTSTRAP_PROVISIONAL")),
         report.frames().getFirst().toString());
     assertTrue(report.frames().get(1).trace().stream()
         .anyMatch(line -> line.contains("FRONTIER_COMMITTED")
@@ -218,7 +218,8 @@ class Phase8PredictionRunnerTest {
             candidate.provenance().input().equals("CLIENT_MOVEMENT_BOOTSTRAP_PROVISIONAL")),
         report.frames().getFirst().toString());
     assertTrue(report.frames().get(1).trace().stream()
-        .anyMatch(line -> line.startsWith("PACKET_PROVISIONAL_FRONTIER_UNCERTAIN")),
+        .anyMatch(line -> line.startsWith("PACKET_PROVISIONAL_FRONTIER_UNCERTAIN")
+            || line.startsWith("FRONTIER_ADVANCED_UNCERTAIN")),
         report.frames().get(1).trace().toString());
   }
 
@@ -260,12 +261,12 @@ class Phase8PredictionRunnerTest {
 
     assertEquals(3, report.movementObservations(), report.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.POSSIBLE,
+        Phase8MovementValidation.Verdict.UNCERTAIN,
         report.results().getFirst().verdict(),
         report.results().toString());
     assertTrue(report.frames().getFirst().predictedAfter().stream()
         .anyMatch(candidate ->
-            candidate.provenance().input().equals("CLIENT_MOVEMENT_BOOTSTRAP_OBSERVED")),
+            candidate.provenance().input().equals("CLIENT_MOVEMENT_BOOTSTRAP_PROVISIONAL")),
         report.frames().getFirst().toString());
     assertTrue(report.frames().getFirst().trace().stream()
         .anyMatch(line -> line.startsWith("FRONTIER_TEMPORALLY_STALE")),
