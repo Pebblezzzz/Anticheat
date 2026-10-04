@@ -298,6 +298,13 @@ public final class Phase8PredictionRunner {
    * a verified client-boundary velocity.
    */
   private boolean physicsFrontierSuppressedUntilPositionMovement;
+  /*
+   * A fallback packet root built from raw observed displacement is live enough
+   * to preserve continuity, but its hidden client-boundary velocity was not
+   * reconstructed by canonical physics. Never promote a mismatch from that
+   * provisional frontier to IMPOSSIBLE until fresh causal authority reconnects it.
+   */
+  private boolean packetOnlyProvisionalFrontier;
   private long relativeClientTick = 0L;
   private boolean hasClientTickBoundary;
   private long lastProcessedSequence = -1L;
@@ -405,6 +412,7 @@ public final class Phase8PredictionRunner {
     prediction = Set.of();
     predictionTick = -1L;
     physicsFrontierSuppressedUntilPositionMovement = false;
+    packetOnlyProvisionalFrontier = false;
     relativeClientTick = 0L;
     hasClientTickBoundary = false;
     lastProcessedSequence = sequenceBoundary;
@@ -627,6 +635,7 @@ public final class Phase8PredictionRunner {
             entityCollisions(latestAuthority));
         prediction = Set.of(correction);
         predictionTick = correctionTick;
+        packetOnlyProvisionalFrontier = false;
         clearObservedMovementHistory();
         lastPositionClientTick = correctionTick;
         latestContinuation = Continuation.ACTIVE;
@@ -1217,23 +1226,28 @@ public final class Phase8PredictionRunner {
           Set<Candidate> bootstrapCandidates = bootstrap.orElseThrow();
           boolean packetOnlyBootstrap = bootstrapCandidates.stream()
               .allMatch(candidate ->
-                  "CLIENT_MOVEMENT_BOOTSTRAP_OBSERVED".equals(candidate.provenance().input()));
+                  "CLIENT_MOVEMENT_BOOTSTRAP_PROVISIONAL".equals(candidate.provenance().input()));
+          packetOnlyProvisionalFrontier = packetOnlyBootstrap;
           prediction = Set.copyOf(bootstrapCandidates);
           predictionTick = tick.clientTick();
           physicsFrontierSuppressedUntilPositionMovement = false;
           latestContinuation = Continuation.ACTIVE;
           lastPositionClientTick = tick.clientTick();
 
-          SearchResult bootstrapSearch = new SearchResult(
-              Verdict.POSSIBLE,
-              bootstrapCandidates,
-              1,
-              bootstrapCandidates.size(),
-              0, 0, 0, 0,
-              List.of(
-                  "client movement bootstrap reconstructed the hidden start velocity from the observed tick",
-                  "canonical Phase 5 replay reproduced the observed movement exactly",
-                  "physical sprint/sneak state was preserved as explicit candidate alternatives when key-state and server movement-state evidence disagreed"));
+          SearchResult bootstrapSearch = packetOnlyBootstrap
+              ? uncertainSearch(
+                  bootstrapCandidates,
+                  "packet-only provisional recovery root has no fresh causal authority")
+              : new SearchResult(
+                  Verdict.POSSIBLE,
+                  bootstrapCandidates,
+                  1,
+                  bootstrapCandidates.size(),
+                  0, 0, 0, 0,
+                  List.of(
+                      "client movement bootstrap reconstructed the hidden start velocity from the observed tick",
+                      "canonical Phase 5 replay reproduced the observed movement exactly",
+                      "physical sprint/sneak state was preserved as explicit candidate alternatives when key-state and server movement-state evidence disagreed"));
           List<String> bootstrapUncertainty = new ArrayList<>();
           bootstrapUncertainty.add(
               "client-side starting velocity was reconstructed from observed movement because the server velocity is not an atomic client-tick state");
@@ -1476,6 +1490,12 @@ public final class Phase8PredictionRunner {
           observedAfter.position().z() - observedBefore.position().z());
 
       AuthorityAnchor freshPredictionAuthority = freshCausalAuthority(packet);
+      if (packetOnlyProvisionalFrontier
+          && freshPredictionAuthority != null
+          && positionsMatch(freshPredictionAuthority.context().serverPosition(), observedBefore.position())) {
+        packetOnlyProvisionalFrontier = false;
+        trace.add("PACKET_PROVISIONAL_FRONTIER_PROMOTED reason=FRESH_CAUSAL_AUTHORITY");
+      }
       MovementEnvironment authoritativeMovementEnvironment =
           freshPredictionAuthority == null
               ? null
@@ -1591,6 +1611,28 @@ public final class Phase8PredictionRunner {
       Set<Candidate> fullMatches = matchingCandidates(prediction, observedAfter, move);
       Set<Candidate> positionRotationMatches =
           matchingCandidatesWithoutGround(prediction, observedAfter, move);
+      if (packetOnlyProvisionalFrontier
+          && fullMatches.isEmpty()
+          && move.position() != null
+          && freshPredictionAuthority == null) {
+        uncertaintySources.add(
+            "packet-only recovery frontier remains provisional; observed movement mismatch cannot establish exhaustive impossibility");
+        latestContinuation = Continuation.UNCERTAIN;
+        SearchResult provisionalSearch = uncertainSearch(
+            prediction,
+            String.join("; ", uncertaintySources));
+        Phase8MovementValidation.Result result = validate(
+            playerId, packet, move, observedBefore, observedAfter, world,
+            tick, uncertaintySources, provisionalSearch, false);
+        results.add(result);
+        uncertain++;
+        trace.add("PACKET_PROVISIONAL_FRONTIER_UNCERTAIN action=SUPPRESS_IMPOSSIBLE");
+        frames.add(frame(
+            sequence, packet, tick, move, observedBefore, observedAfter,
+            predictedBefore, prediction, world, uncertaintySources, trace));
+        continue;
+      }
+
       boolean groundClaimMismatch =
           fullMatches.isEmpty()
               && move.onGround() != null
@@ -2946,29 +2988,194 @@ public final class Phase8PredictionRunner {
       return Optional.empty();
     }
 
+    long simulationTick = tick.clientTick() - 1L;
+    InputConstraint inputConstraint =
+        inputForSimulationTick(inputHistory, simulationTick, movementPacket.sequence());
+    Optional<Simulation.AdvancedInput> keyInput =
+        inputConstraintToAdvancedInput(inputConstraint);
+    if (keyInput.isEmpty()) {
+      trace.add("BOOTSTRAP_REJECTED reason=packet-input-state-incomplete");
+      return Optional.empty();
+    }
+
+    Simulation.AdvancedInput keyState = keyInput.orElseThrow();
+    MovementEnvironment baseEnvironment = packetMovementEnvironment(observedBefore, world);
+    LinkedHashSet<MovementInputState> locomotionOptions = new LinkedHashSet<>();
+    locomotionOptions.add(new MovementInputState(keyState.sprint(), keyState.sneak()));
+    Optional.ofNullable(observedBefore.input().orElse(null))
+        .filter(Simulation.AdvancedInput.class::isInstance)
+        .map(Simulation.AdvancedInput.class::cast)
+        .ifPresent(clientInput ->
+            locomotionOptions.add(new MovementInputState(
+                clientInput.sprint(), clientInput.sneak())));
+
+    LinkedHashSet<Boolean> physicalGroundOptions = new LinkedHashSet<>();
+    Optional<Candidate> priorPhysical =
+        physicalCandidateAtObservedPosition(observedBefore.position(), simulationTick);
+    if (priorPhysical.isPresent()) {
+      physicalGroundOptions.add(priorPhysical.orElseThrow().context().player().onGround());
+    } else {
+      physicalGroundOptions.add(observedBefore.onGround());
+      physicalGroundOptions.add(!observedBefore.onGround());
+    }
+
     Vec3 observedDelta = new Vec3(
         observedAfter.position().x() - observedBefore.position().x(),
         observedAfter.position().y() - observedBefore.position().y(),
         observedAfter.position().z() - observedBefore.position().z());
-    double horizontalSpeed = Math.hypot(observedDelta.x(), observedDelta.z());
-    if (!Double.isFinite(horizontalSpeed)
-        || horizontalSpeed > 1.25
-        || !Double.isFinite(observedDelta.y())
-        || Math.abs(observedDelta.y()) > 4.0) {
-      trace.add("BOOTSTRAP_REJECTED reason=packet-observed-displacement-outside-conservative-bound"
-          + " observedDelta=" + observedDelta);
-      return Optional.empty();
+
+    LinkedHashSet<Candidate> candidates = new LinkedHashSet<>();
+    for (boolean physicalGround : physicalGroundOptions) {
+      for (MovementInputState locomotion : locomotionOptions) {
+        MovementEnvironment environment =
+            withLocomotionState(baseEnvironment, locomotion.sprinting(), locomotion.sneaking());
+        int maxJumpDelay =
+            keyState.jump() && physicalGround ? 10 : 0;
+
+        for (int jumpDelay = 0; jumpDelay <= maxJumpDelay; jumpDelay++) {
+          Simulation.AdvancedInput advancedInput = new Simulation.AdvancedInput(
+              keyState.forward(),
+              keyState.strafe(),
+              keyState.jump(),
+              locomotion.sprinting(),
+              locomotion.sneaking());
+
+          Player startTemplate = new Player(
+              observedBefore.position(),
+              observedBefore.velocity(),
+              move.yaw() == null ? observedBefore.yaw() : move.yaw(),
+              move.pitch() == null ? observedBefore.pitch() : move.pitch(),
+              physicalGround,
+              observedBefore.gamemode(),
+              observedBefore.effects(),
+              OptionalInt.empty(),
+              false,
+              Optional.of(advancedInput),
+              observedBefore.attributes(),
+              observedBefore.pose(),
+              observedBefore.environment(),
+              observedBefore.clientTickRange(),
+              State.Provenance.UNKNOWN,
+              Set.of(),
+              jumpDelay);
+
+          Optional<Vec3> startVelocity = reconstructCollisionFreeStartVelocity(
+              startTemplate,
+              advancedInput,
+              observedDelta,
+              world,
+              environment,
+              jumpDelay);
+          if (startVelocity.isEmpty()) {
+            continue;
+          }
+
+          Vec3 velocity = startVelocity.orElseThrow();
+          double horizontalSpeed = Math.hypot(velocity.x(), velocity.z());
+          if (!Double.isFinite(horizontalSpeed)
+              || horizontalSpeed > 1.25
+              || !Double.isFinite(velocity.y())
+              || Math.abs(velocity.y()) > 4.0) {
+            continue;
+          }
+
+          Player reconstructedStart = new Player(
+              startTemplate.position(),
+              velocity,
+              startTemplate.yaw(),
+              startTemplate.pitch(),
+              startTemplate.onGround(),
+              startTemplate.gamemode(),
+              startTemplate.effects(),
+              startTemplate.awaitingTeleport(),
+              false,
+              startTemplate.input(),
+              startTemplate.attributes(),
+              startTemplate.pose(),
+              startTemplate.environment(),
+              startTemplate.clientTickRange(),
+              State.Provenance.UNKNOWN,
+              Set.of(),
+              jumpDelay);
+
+          Vanilla12111RichPhysics.Context context =
+              new Vanilla12111RichPhysics.Context(
+                  simulationTick,
+                  reconstructedStart,
+                  advancedInput,
+                  world,
+                  simulationEnvironmentFor(environment),
+                  reconstructedStart.attributes(),
+                  movementEffects(reconstructedStart),
+                  reconstructedStart.pose(),
+                  environment,
+                  reconstructedStart.pose() == Pose.SLEEPING,
+                  false,
+                  EntityCollisions.NONE_TRACKED,
+                  observedDelta,
+                  observedBefore.onGround());
+          Vanilla12111RichPhysics.StepResult step =
+              new Vanilla12111RichPhysics().step(context);
+
+          if (step.state().uncertain()
+              || !positionsMatch(step.state().position(), observedAfter.position())) {
+            trace.add("BOOTSTRAP_REJECTED locomotion=" + locomotion
+                + " physicalGround=" + physicalGround
+                + " reason=canonical-physics-replay-did-not-reproduce"
+                + " reconstructed=" + step.state().position()
+                + " observed=" + observedAfter.position()
+                + " diagnostic=" + step.diagnostic());
+            continue;
+          }
+
+          Player after = new Player(
+              step.state().position(),
+              step.state().velocity(),
+              observedAfter.yaw(),
+              observedAfter.pitch(),
+              step.state().onGround(),
+              step.state().gamemode(),
+              step.state().effects(),
+              step.state().awaitingTeleport(),
+              false,
+              step.state().input(),
+              step.state().attributes(),
+              step.state().pose(),
+              step.state().environment(),
+              observedAfter.clientTickRange(),
+              step.state().provenance(),
+              step.state().uncertaintyReasons(),
+              step.state().jumpDelay());
+
+          candidates.add(candidateFromPlayer(
+              after,
+              tick.clientTick(),
+              "CLIENT_MOVEMENT_BOOTSTRAP_OBSERVED",
+              -1L,
+              EntityCollisions.NONE_TRACKED,
+              environment,
+              step.clientVelocityAfterTick()));
+        }
+      }
     }
 
-    MovementEnvironment environment = packetMovementEnvironment(observedAfter, world);
+    if (!candidates.isEmpty()) {
+      trace.add("BOOTSTRAP_START source=PACKET_OBSERVED_MOVEMENT"
+          + " simulationTick=" + simulationTick
+          + " observedDelta=" + observedDelta
+          + " candidateCount=" + candidates.size()
+          + " reconstruction=CANONICAL_PHASE5"
+          + " entityCollisionState=none-tracked");
+      return Optional.of(Set.copyOf(candidates));
+    }
+
     /*
-     * The movement packet is now a new client-physics boundary. Do not carry the
-     * correction packet's uncertainty/awaiting-teleport metadata into that root;
-     * those fields describe the old transition, not the observed post-movement
-     * physics state. The uncertainty is represented by the recovery evidence,
-     * not by poisoning the candidate so the next physics step can never become
-     * exhaustive.
+     * Phase 5 could not reproduce the first observed movement without an
+     * authoritative state. Keep a conservative packet-derived root so the
+     * predictor can remain live, but explicitly mark this frontier as provisional
+     * and prevent later IMPOSSIBLE results from treating it as exhaustive proof.
      */
+    MovementEnvironment environment = packetMovementEnvironment(observedAfter, world);
     Player provisionalState = new Player(
         observedAfter.position(),
         observedDelta,
@@ -2989,18 +3196,17 @@ public final class Phase8PredictionRunner {
     Candidate provisional = candidateFromPlayer(
         provisionalState,
         tick.clientTick(),
-        "CLIENT_MOVEMENT_BOOTSTRAP_OBSERVED",
+        "CLIENT_MOVEMENT_BOOTSTRAP_PROVISIONAL",
         -1L,
         EntityCollisions.NONE_TRACKED,
         environment,
         observedDelta);
-
     trace.add("BOOTSTRAP_PROVISIONAL source=PACKET_OBSERVED_MOVEMENT"
         + " sequence=" + movementPacket.sequence()
-        + " simulationTick=" + (tick.clientTick() - 1L)
+        + " simulationTick=" + simulationTick
         + " observedDelta=" + observedDelta
         + " retainedTick=" + tick.clientTick()
-        + " reason=no-fresh-causal-authority"
+        + " reason=canonical-reconstruction-unavailable"
         + " entityCollisionState=none-tracked");
     return Optional.of(Set.of(provisional));
   }
