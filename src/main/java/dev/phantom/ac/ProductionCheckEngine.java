@@ -289,10 +289,16 @@ public final class ProductionCheckEngine {
     double yawRadians = Math.toRadians(yaw);
     double pitchRadians = Math.toRadians(pitch);
     double cosPitch = Math.cos(pitchRadians);
-    return new Vec3(
+    Vec3 direction = new Vec3(
         -Math.sin(yawRadians) * cosPitch,
         -Math.sin(pitchRadians),
-        Math.cos(yawRadians) * cosPitch).normalize();
+        Math.cos(yawRadians) * cosPitch);
+    double length = Math.sqrt(
+        direction.x() * direction.x()
+        + direction.y() * direction.y()
+        + direction.z() * direction.z());
+    return length <= 1.0e-12 ? new Vec3(0.0, 0.0, 0.0)
+        : new Vec3(direction.x() / length, direction.y() / length, direction.z() / length);
   }
 
   private static double pointAabbDistance(Vec3 point, BlockBox box) {
