@@ -200,6 +200,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             packet.isOnGround(),
             clientTick,
             movementKind);
+        if (move.position()!=null) {
+          capture.lastServerX=move.position().x();
+          capture.lastServerY=move.position().y();
+          capture.lastServerZ=move.position().z();
+        }
         String sourceId=tickObservation.hasSeenTickEnd()?"paper-client-tick-boundary":"paper-relative-first-tick";
         long sequence=capture.sequence.incrementAndGet();
         long receivedNanos=System.nanoTime();
@@ -376,6 +381,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         RelativeFlag flags=packet.getRelativeFlags();
         record(capture,new Packets.Teleport(packet.getTeleportId(),vector(packet.getX(),packet.getY(),packet.getZ()),packet.getYaw(),packet.getPitch(),
             flags.has(RelativeFlag.X),flags.has(RelativeFlag.Y),flags.has(RelativeFlag.Z),flags.has(RelativeFlag.YAW),flags.has(RelativeFlag.PITCH)));
+        if (!flags.has(RelativeFlag.X) && !flags.has(RelativeFlag.Y) && !flags.has(RelativeFlag.Z)) {
+          capture.lastServerX=packet.getX();
+          capture.lastServerY=packet.getY();
+          capture.lastServerZ=packet.getZ();
+        }
       }else if(event.getPacketType()==PacketType.Play.Server.SPAWN_ENTITY){
         var packet=new WrapperPlayServerSpawnEntity(event);
         recordEntitySpawn(capture,packet.getEntityId(),vector(packet.getPosition().x,packet.getPosition().y,packet.getPosition().z));
