@@ -118,6 +118,8 @@ public final class BlockCatalogue12111 {
       return fluidStateBlock(name, p);
     }
 
+    if (FULL_CUBE_EXACT.contains(name)) return fullCube(name, p);
+
     if (isSlab(name)) return slab(name, p);
     if (isStairs(name)) return stairs(name, p);
     if (isFence(name)) return fence(name, p);
