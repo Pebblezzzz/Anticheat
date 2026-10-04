@@ -175,10 +175,10 @@ class Phase8PredictionRunnerTest {
     assertTrue(report.frames().get(2).predictedAfter().isEmpty(),
         report.frames().get(2).toString());
     assertTrue(report.frames().get(1).trace().stream()
-        .anyMatch(line -> line.startsWith("ROTATION_OBSERVATION_STALE_FRONTIER")),
+        .anyMatch(line -> line.startsWith("FRONTIER_ROOT_SUPPRESSED")),
         report.frames().get(1).trace().toString());
     assertTrue(report.frames().get(2).trace().stream()
-        .anyMatch(line -> line.startsWith("ROTATION_OBSERVATION_STALE_FRONTIER")),
+        .anyMatch(line -> line.startsWith("FRONTIER_ROOT_SUPPRESSED")),
         report.frames().get(2).trace().toString());
   }
 
