@@ -126,6 +126,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private int validationBudget;
   private ProductionCheckEngine.Config productionCheckConfig;
   private boolean alertsEnabled,broadcastAlerts,printAlertsToConsole,setbacksEnabled,setbacksOnlyExhaustive;
+  private GrimAlertPolicy.Config alertPolicy;
   private String alertPermission;
   private int alertIntervalTicks;
   private double violationIncrement,violationDecayPerTick,maximumViolationLevel;
@@ -470,6 +471,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     minimumEnforcementConfidence=Math.max(0.0,Math.min(1.0,getConfig().getDouble("enforcement.minimum-confidence",1.0)));
     punishmentCommand=getConfig().getString("enforcement.punishment-command","warn {player} Phantom movement evidence");
     exemptionPermission=getConfig().getString("enforcement.permission","phantom.exempt");
+    alertPolicy=loadAlertPolicy();
     validationBudget=Math.max(1,getConfig().getInt("validation.candidate-budget",4096));
     productionCheckConfig=new ProductionCheckEngine.Config(
         getConfig().getBoolean("checks.enabled",true),
@@ -484,7 +486,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         violationIncrement,
         violationDecayPerTick,
         maximumViolationLevel,
-        Math.max(0.000001,getConfig().getDouble("checks.violation-alert-interval",40.0)));
+        Math.max(0.000001,getConfig().getDouble("checks.violation-alert-interval",40.0)),
+        alertPolicy);
     getServer().getPluginManager().registerEvents(this,this);
     PacketEvents.getAPI().getEventManager().registerListener(listener);
     int processors=Runtime.getRuntime().availableProcessors();
@@ -710,15 +713,24 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           +" replay="+evidence.replayReference());
     }
     if(!accepted)return;
+    long alertNowMillis=System.currentTimeMillis();
     var accumulated=capture.accumulator.accept(evidence,
         new Phase8MovementValidation.Config(
             alertViolationThreshold, 0, alertsEnabled, true,
             violationIncrement, violationDecayPerTick, maximumViolationLevel,
-            Math.max(0.000001, getConfig().getDouble("alerts.violation-alert-interval",40.0))));
+            Math.max(0.000001, getConfig().getDouble("alerts.violation-alert-interval",40.0)),
+            alertPolicy),
+        alertNowMillis);
     capture.accumulator=accumulated.state();
     capture.processedResults++;
+    accumulated.log().ifPresent(log->{
+      if(printAlertsToConsole) getLogger().info("[PhantomAC][FLAG] "
+          +log.serverMessage(capture.playerName)
+          +" reason="+log.evidence()
+          +" replay="+log.replayReference());
+    });
     accumulated.alert().ifPresent(alert->{
-      if(printAlertsToConsole) getLogger().warning(alert.debugMessage());
+      if(printAlertsToConsole) getLogger().warning("[PhantomAC][ALERT] "+alert.debugMessage());
       if(broadcastAlerts){
         getServer().broadcastMessage(alert.serverMessage(capture.playerName));
       }else{
@@ -1389,12 +1401,19 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
             :getServer().getPlayer(capture.playerId).getName(),result);
     }
 
+    long alertNowMillis=System.currentTimeMillis();
     for(ProductionCheckEngine.Finding finding:productionChecks.findings()){
-      var accumulatedCheck=capture.productionChecks.accept(finding,productionCheckConfig);
+      var accumulatedCheck=capture.productionChecks.accept(finding,productionCheckConfig,alertNowMillis);
       capture.productionChecks=accumulatedCheck.state();
+      accumulatedCheck.log().ifPresent(log->{
+        if(printAlertsToConsole) getLogger().info("[PhantomAC][FLAG] "
+            +log.message(capture.playerName)
+            +" reason="+log.reason()
+            +" replay="+log.replayReference());
+      });
       accumulatedCheck.alert().ifPresent(alert->{
         String message=alert.message(capture.playerName);
-        if(printAlertsToConsole)getLogger().warning(message
+        if(printAlertsToConsole)getLogger().warning("[PhantomAC][ALERT] "+message
             +" reason="+alert.reason()+" severity="
             +String.format(Locale.ROOT,"%.2f",alert.severity())
             +" replay="+alert.replayReference());
@@ -1415,7 +1434,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         new Phase8MovementValidation.Config(
             alertViolationThreshold, 0, alertsEnabled, true,
             violationIncrement, violationDecayPerTick, maximumViolationLevel,
-            Math.max(0.000001, getConfig().getDouble("alerts.violation-alert-interval",40.0)));
+            Math.max(0.000001, getConfig().getDouble("alerts.violation-alert-interval",40.0)),
+            alertPolicy);
 
     Phase8EnforcementPolicy.Config enforcementConfig =
         new Phase8EnforcementPolicy.Config(
@@ -1433,8 +1453,15 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       Phase8MovementValidation.Evidence evidence=result.evidence();
       if(!capture.validationGate.accept(evidence.replayReference(),result.verdict()))continue;
 
-      var accumulated=capture.accumulator.accept(evidence,accumulatorConfig);
+      var accumulated=capture.accumulator.accept(evidence,accumulatorConfig,alertNowMillis);
       capture.accumulator=accumulated.state();
+
+      accumulated.log().ifPresent(log->{
+        if(printAlertsToConsole) getLogger().info("[PhantomAC][FLAG] "
+            +log.serverMessage(capture.playerName)
+            +" reason="+log.evidence()
+            +" replay="+log.replayReference());
+      });
 
       accumulated.alert().ifPresent(alert->{
         String message=alert.debugMessage();
@@ -1525,6 +1552,45 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         }
       }
     }
+  }
+
+  private GrimAlertPolicy.Config loadAlertPolicy(){
+    long fallbackWindowSeconds=Math.max(1L,
+        getConfig().getLong("punishments.remove-violations-after-seconds",300L));
+    long fallbackWindowMillis=fallbackWindowSeconds*1000L;
+    GrimAlertPolicy.CommandRule fallbackAlert=new GrimAlertPolicy.CommandRule(
+        Math.max(0.000001,getConfig().getDouble("alerts.violation-alert-threshold",100.0)),
+        Math.max(0.0,getConfig().getDouble("alerts.violation-alert-interval",40.0)));
+    GrimAlertPolicy.CommandRule fallbackLog=GrimAlertPolicy.CommandRule.parse("1:1");
+
+    org.bukkit.configuration.ConfigurationSection groupsSection =
+        getConfig().getConfigurationSection("punishments.groups");
+    if(groupsSection==null){
+      return new GrimAlertPolicy.Config(List.of(),fallbackAlert,fallbackLog,fallbackWindowMillis);
+    }
+
+    List<GrimAlertPolicy.Group> groups=new ArrayList<>();
+    for(String groupName:groupsSection.getKeys(false)){
+      org.bukkit.configuration.ConfigurationSection group=
+          groupsSection.getConfigurationSection(groupName);
+      if(group==null) continue;
+      List<String> checks=group.getStringList("checks");
+      if(checks.isEmpty()) continue;
+      long windowSeconds=Math.max(1L,
+          group.getLong("remove-violations-after-seconds",fallbackWindowSeconds));
+      try{
+        GrimAlertPolicy.CommandRule alert=GrimAlertPolicy.CommandRule.parse(
+            group.getString("alert","100:40"));
+        GrimAlertPolicy.CommandRule log=GrimAlertPolicy.CommandRule.parse(
+            group.getString("log","1:1"));
+        groups.add(new GrimAlertPolicy.Group(
+            groupName,windowSeconds*1000L,checks,alert,log));
+      }catch(RuntimeException invalid){
+        getLogger().warning("[PhantomAC] Ignoring invalid punishment group "
+            +groupName+": "+invalid.getMessage());
+      }
+    }
+    return new GrimAlertPolicy.Config(groups,fallbackAlert,fallbackLog,fallbackWindowMillis);
   }
 
   private boolean setbackEnabled(UUID playerId){
