@@ -248,6 +248,7 @@ public final class ProductionCheckEngine {
 public record Result(Accumulator state, Optional<Finding> alert, Optional<Finding> log) {
     public Result {
       Objects.requireNonNull(state);
+    Objects.requireNonNull(accuracyState);
       Objects.requireNonNull(alert);
       Objects.requireNonNull(log);
     }
@@ -262,7 +263,7 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
       List<Packets.RawPacket> packets,
       Phase8PredictionRunner.Report movement,
       Config config) {
-    return analyze(playerId, packets, movement, config, new SessionState());
+    return analyze(playerId, packets, movement, config, new SessionState(), new AccuracyChecks.State());
   }
 
   public static Report analyze(
@@ -271,6 +272,16 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
       Phase8PredictionRunner.Report movement,
       Config config,
       SessionState state) {
+    return analyze(playerId, packets, movement, config, state, new AccuracyChecks.State());
+  }
+
+  public static Report analyze(
+      String playerId,
+      List<Packets.RawPacket> packets,
+      Phase8PredictionRunner.Report movement,
+      Config config,
+      SessionState state,
+      AccuracyChecks.State accuracyState) {
     Objects.requireNonNull(playerId);
     Objects.requireNonNull(packets);
     Objects.requireNonNull(movement);
@@ -575,7 +586,7 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
     }
 
     findings.addAll(analyzeMovementAnomalies(playerId, movement.frames()));
-    findings.addAll(AccuracyChecks.analyze(playerId, ordered, movement.frames()));
+    findings.addAll(AccuracyChecks.analyze(playerId, ordered, movement.frames(), accuracyState));
 
     state.prune(ordered.isEmpty() ? 0L : ordered.getLast().sequence());
     return new Report(findings);
