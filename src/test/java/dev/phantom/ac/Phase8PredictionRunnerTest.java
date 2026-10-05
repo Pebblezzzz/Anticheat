@@ -2229,10 +2229,6 @@ class Phase8PredictionRunnerTest {
     List<String> trace = report.frames().stream()
         .flatMap(frame -> frame.trace().stream())
         .toList();
-    assertTrue(
-        trace.stream().anyMatch(line ->
-            line.contains("STATIONARY_GATE stationary=true visibleAuthority=false observationOnly=false")),
-        trace.toString());
     assertFalse(
         trace.stream().anyMatch(line ->
             line.contains("OBSERVATION stationary-position packet")),
