@@ -21,8 +21,9 @@ import static dev.phantom.ac.Maths.Vec3;
 public final class AccuracyChecks {
   private static final double MOVEMENT_ADVANTAGE_HARD = 0.20;
   private static final double MOVEMENT_ADVANTAGE_MIN_TICK = 0.018;
-  private static final int MOVEMENT_ADVANTAGE_STREAK = 5;
+  private static final double MOVEMENT_ADVANTAGE_IMMEDIATE = 0.10;
   private static final double VERTICAL_ADVANTAGE_HARD = 0.22;
+  private static final double VERTICAL_ADVANTAGE_IMMEDIATE = 0.10;
 
   private static final long CLIENT_TICK_NANOS = 50_000_000L;
   private static final long TIMER_BALANCE_HARD_NANOS = 150_000_000L;
@@ -72,72 +73,52 @@ public final class AccuracyChecks {
     if (frames.isEmpty()) return List.of();
 
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
-    double horizontalAdvantage = 0.0;
-    double verticalAdvantage = 0.0;
-    int horizontalStreak = 0;
-    int verticalStreak = 0;
+    double previousHorizontal = 0.0;
+    double previousVertical = 0.0;
 
     for (PredictionFrame frame : frames) {
-      if (frame.movement().position() == null
-          || frame.predictedAfter().isEmpty()
-          || !frame.uncertaintySources().isEmpty()
-          || !frame.predictionOffset().evaluated()) {
-        horizontalAdvantage = 0.0;
-        verticalAdvantage = 0.0;
-        horizontalStreak = 0;
-        verticalStreak = 0;
-        continue;
-      }
+      MovementAdvantageTracker.Snapshot advantage = frame.movementAdvantage();
+      if (!advantage.evaluated()) continue;
 
-      double horizontal = frame.predictionOffset().horizontal();
-      double vertical = frame.predictionOffset().vertical();
-      if (!Double.isFinite(horizontal) || !Double.isFinite(vertical)) {
-        horizontalAdvantage = 0.0;
-        verticalAdvantage = 0.0;
-        horizontalStreak = 0;
-        verticalStreak = 0;
-        continue;
-      }
+      double horizontal = advantage.accumulatedHorizontal();
+      double vertical = advantage.accumulatedVertical();
+      double signedHorizontal = advantage.signedHorizontal();
+      double signedVertical = advantage.signedVertical();
 
-      if (horizontal >= MOVEMENT_ADVANTAGE_MIN_TICK) {
-        horizontalAdvantage = Math.min(2.0, horizontalAdvantage * 0.80 + horizontal);
-        horizontalStreak++;
-      } else {
-        horizontalAdvantage = Math.max(0.0, horizontalAdvantage * 0.45 - 0.005);
-        horizontalStreak = Math.max(0, horizontalStreak - 1);
-      }
-
-      if (vertical >= 0.025) {
-        verticalAdvantage = Math.min(2.0, verticalAdvantage * 0.80 + vertical);
-        verticalStreak++;
-      } else {
-        verticalAdvantage = Math.max(0.0, verticalAdvantage * 0.45 - 0.005);
-        verticalStreak = Math.max(0, verticalStreak - 1);
-      }
-
-      if (horizontalAdvantage >= MOVEMENT_ADVANTAGE_HARD
-          && horizontalStreak >= MOVEMENT_ADVANTAGE_STREAK) {
+      boolean horizontalImmediate =
+          signedHorizontal >= MOVEMENT_ADVANTAGE_IMMEDIATE;
+      boolean horizontalAccumulated =
+          signedHorizontal >= MOVEMENT_ADVANTAGE_MIN_TICK
+              && horizontal >= MOVEMENT_ADVANTAGE_HARD
+              && previousHorizontal < MOVEMENT_ADVANTAGE_HARD;
+      if (horizontalImmediate || horizontalAccumulated) {
         findings.add(hard(playerId, frame, "Speed",
             String.format(Locale.ROOT,
-                "sustained horizontal movement advantage reached %.3f blocks across %d deterministic ticks",
-                horizontalAdvantage, horizontalStreak),
-            Math.min(1.0, horizontalAdvantage / 0.60)));
-        horizontalAdvantage *= 0.35;
-        horizontalStreak = 0;
+                "observed movement exceeded the reachable horizontal envelope by %.3f blocks; "
+                    + "decaying signed advantage is %.3f blocks",
+                signedHorizontal, horizontal),
+            Math.min(1.0, Math.max(signedHorizontal, horizontal) / 0.60)));
       }
 
-      if (verticalAdvantage >= VERTICAL_ADVANTAGE_HARD
-          && verticalStreak >= MOVEMENT_ADVANTAGE_STREAK
+      boolean verticalImmediate =
+          signedVertical >= VERTICAL_ADVANTAGE_IMMEDIATE;
+      boolean verticalAccumulated =
+          signedVertical >= VERTICAL_ADVANTAGE_MIN_TICK
+              && vertical >= VERTICAL_ADVANTAGE_HARD
+              && previousVertical < VERTICAL_ADVANTAGE_HARD;
+      if ((verticalImmediate || verticalAccumulated)
           && !frame.observedAfter().onGround()
           && !frame.observedAfter().input().map(Simulation.AdvancedInput::jump).orElse(false)) {
         findings.add(hard(playerId, frame, "Flight",
             String.format(Locale.ROOT,
-                "sustained vertical movement advantage reached %.3f blocks across %d deterministic ticks",
-                verticalAdvantage, verticalStreak),
-            Math.min(1.0, verticalAdvantage / 0.50)));
-        verticalAdvantage *= 0.35;
-        verticalStreak = 0;
+                "observed movement exceeded the reachable vertical envelope by %.3f blocks; "
+                    + "decaying signed advantage is %.3f blocks",
+                signedVertical, vertical),
+            Math.min(1.0, Math.max(signedVertical, vertical) / 0.60)));
       }
+
+      previousHorizontal = horizontal;
+      previousVertical = vertical;
     }
 
     return List.copyOf(findings);
