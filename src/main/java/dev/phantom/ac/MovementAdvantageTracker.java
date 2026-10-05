@@ -157,6 +157,15 @@ final class MovementAdvantageTracker {
         signedHorizontal,
         signedVertical);
   }
+  private static double signedOutside(double observed, double min, double max) {
+    if (!Double.isFinite(observed) || !Double.isFinite(min) || !Double.isFinite(max)) {
+      return 0.0D;
+    }
+    if (observed > max) return observed - max;
+    if (observed < min) return observed - min;
+    return 0.0D;
+  }
+
   private record EnvelopeExcess(
       boolean evaluated,
       double signedHorizontal,
