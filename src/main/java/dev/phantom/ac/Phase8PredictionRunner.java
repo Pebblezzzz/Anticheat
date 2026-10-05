@@ -850,7 +850,7 @@ public final class Phase8PredictionRunner {
         rememberObservedMovement(observedBefore, observedAfter, tick);
       }
 
-      if (move.position() == null || stationaryPositionObservation) {
+      if (observationOnlyMovement) {
         boolean statusObservation = move.position() == null
             && move.movementKind() == Packets.MovementKind.STATUS;
         boolean positionlessRotationObservation = move.position() == null && !statusObservation;
