@@ -190,32 +190,31 @@ class Phase8MovementCombinationRegressionTest {
   @Test
   void sneakingScalesAirInputBeforeJumpPrediction() {
     WorldSnapshot world = floorWorld();
-    Player start = new Player(
-        new Maths.Vec3(0.5, 65.0, 0.5),
-        Maths.Vec3.ZERO,
-        0f,
-        0f,
-        false,
-        "survival",
-        Map.of(),
-        OptionalInt.empty(),
-        false,
-        Optional.empty(),
-        new Simulation.Attributes(VANILLA_BASE_MOVEMENT_SPEED),
-        Pose.STANDING,
-        State.Environment.DRY,
-        State.TickRange.exact(0),
-        State.Provenance.UNKNOWN,
-        Set.of());
+    Player start = startPlayer();
     Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
 
-    var walking = physics.step(new Vanilla12111RichPhysics.Context(
+    Player airborne = physics.step(new Vanilla12111RichPhysics.Context(
         0L,
         start,
-        new Simulation.AdvancedInput(-1, 0, true, false, false),
+        new Simulation.AdvancedInput(0, 0, true, false, false),
         world,
         Simulation.Environment.DRY,
         start.attributes(),
+        MovementEffects.NONE,
+        Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        false,
+        false,
+        EntityCollisions.NONE_TRACKED)).state();
+    assertFalse(airborne.onGround());
+
+    var walking = physics.step(new Vanilla12111RichPhysics.Context(
+        1L,
+        airborne,
+        new Simulation.AdvancedInput(-1, 0, false, false, false),
+        world,
+        Simulation.Environment.DRY,
+        airborne.attributes(),
         MovementEffects.NONE,
         Pose.STANDING,
         MovementEnvironment.dry(false, false, false),
@@ -224,15 +223,15 @@ class Phase8MovementCombinationRegressionTest {
         EntityCollisions.NONE_TRACKED));
 
     var sneaking = physics.step(new Vanilla12111RichPhysics.Context(
-        0L,
-        start,
-        new Simulation.AdvancedInput(-1, 0, true, true, true),
+        1L,
+        airborne,
+        new Simulation.AdvancedInput(-1, 0, false, true, true),
         world,
         Simulation.Environment.DRY,
-        start.attributes(),
+        airborne.attributes(),
         MovementEffects.NONE,
         Pose.STANDING,
-        MovementEnvironment.dry(false, false, true),
+        MovementEnvironment.dry(false, true, true),
         false,
         false,
         EntityCollisions.NONE_TRACKED));
