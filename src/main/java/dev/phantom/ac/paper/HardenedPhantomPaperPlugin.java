@@ -147,6 +147,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private ExecutorService chunkExecutor;
   private ExecutorService worldPublishExecutor;
   private ExecutorService validationExecutor;
+  private final AtomicLong authoritativeServerTick = new AtomicLong(-1L);
   private volatile int chunkDecoderThreads;
   private final AtomicInteger chunkInFlight=new AtomicInteger();
 
@@ -581,7 +582,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       thread.setDaemon(true);
       return thread;
     });
-    stateTask=getServer().getScheduler().runTaskTimer(this,this::drainChunkQueues,1L,1L);
+    stateTask=getServer().getScheduler().runTaskTimer(this,this::onAuthoritativeServerTick,1L,1L);
     getLogger().info("[PhantomAC] Hardened Phase 8 adapter enabled; movement validation runs on per-connection Netty EventLoops");
   }
 
@@ -856,8 +857,20 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
   }
 
+  private void onAuthoritativeServerTick() {
+    long tick = authoritativeServerTick.incrementAndGet();
+    for (Player player : getServer().getOnlinePlayers()) {
+      Capture capture = captures.get(player.getUniqueId());
+      if (capture == null) continue;
+      capture.authoritativeServerTick.set(tick);
+      sendStateBarrier(player, capture);
+    }
+    drainChunkQueues();
+  }
+
   private static Long authoritativeTick(Capture capture){
-    return null;
+    long tick = capture.authoritativeServerTick.get();
+    return tick >= 0L ? tick : null;
   }
 
   private static boolean isNearChunk(Capture capture,Column column){
