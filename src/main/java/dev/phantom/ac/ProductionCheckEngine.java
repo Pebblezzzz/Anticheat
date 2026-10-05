@@ -42,7 +42,7 @@ public final class ProductionCheckEngine {
    * executor coalescing.
    */
   public static final class SessionState {
-    final Map<Integer, BlockBox> entities = new HashMap<>();
+    final Map<Integer, EntityHistory> entities = new HashMap<>();
     final Map<Pos, Long> diggingStarts = new HashMap<>();
     final Map<Pos, PredictionFrame> diggingStartFrames = new HashMap<>();
 
@@ -338,11 +338,13 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
       }
 
       if (packet instanceof Packets.EntitySpawn spawn) {
-        entities.put(spawn.entityId(), spawn.box());
+        entities.put(spawn.entityId(), new EntityHistory(raw.receivedNanos(), spawn.box()));
         continue;
       }
       if (packet instanceof Packets.EntityMove move) {
-        entities.put(move.entityId(), move.box());
+        entities.computeIfAbsent(
+                move.entityId(), ignored -> new EntityHistory(raw.receivedNanos(), move.box()))
+            .add(raw.receivedNanos(), move.box());
         continue;
       }
       if (packet instanceof Packets.EntityDespawn despawn) {
@@ -466,7 +468,10 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
 
       if (packet instanceof Packets.InteractEntity attack
           && attack.action() == Packets.InteractAction.ATTACK) {
-        BlockBox target = entities.get(attack.entityId());
+        EntityHistory targetHistory = entities.get(attack.entityId());
+        BlockBox target = targetHistory == null
+            ? null
+            : targetHistory.compensated(raw.receivedNanos());
         if (target == null || frame == null) continue;
 
         Vec3 eye = eyePosition(frame.observedAfter());
@@ -895,6 +900,35 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
           || blockId.equals("minecraft:deepslate_bricks");
     };
   }
+
+  private static final class EntityHistory {
+    private final ArrayDeque<EntitySample> samples = new ArrayDeque<>();
+
+    EntityHistory(long receivedNanos, BlockBox box) {
+      add(receivedNanos, box);
+    }
+
+    void add(long receivedNanos, BlockBox box) {
+      samples.addLast(new EntitySample(receivedNanos, box));
+      while (samples.size() > 4) samples.removeFirst();
+    }
+
+    BlockBox compensated(long interactionNanos) {
+      if (samples.isEmpty()) return null;
+      BlockBox result = null;
+      int used = 0;
+      for (EntitySample sample : samples.descendingIterator()::forEachRemaining) {}
+      for (EntitySample sample : samples) {
+        if (sample.receivedNanos() > interactionNanos) continue;
+        if (interactionNanos - sample.receivedNanos() > 150_000_000L) continue;
+        result = result == null ? sample.box() : result.enclose(sample.box());
+        if (++used >= 3) break;
+      }
+      return result == null ? samples.getLast().box() : result;
+    }
+  }
+
+  private record EntitySample(long receivedNanos, BlockBox box) {}
 
   private static boolean positionExactlyMatches(Vec3 a, Vec3 b) {
     return a != null && b != null
