@@ -1937,8 +1937,7 @@ public final class Phase8PredictionRunner {
     }
     if (kind == Packets.MovementKind.STATUS
         || kind == Packets.MovementKind.POSITION
-        || kind == Packets.MovementKind.POSITION_ROTATION
-        || kind == Packets.MovementKind.ROTATION) {
+        || kind == Packets.MovementKind.POSITION_ROTATION) {
       fields.add(Phase6Reachability.ObservedField.GROUND);
     }
     return fields;
