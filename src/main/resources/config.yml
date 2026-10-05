@@ -61,6 +61,7 @@ punishments:
       checks:
         - "Knockback"
         - "Explosion"
+        - "Vehicle"
       alert: "5:5"
       log: "1:1"
     Post:
@@ -95,6 +96,7 @@ punishments:
     Hitboxes:
       remove-violations-after-seconds: 300
       checks:
+        - "Hitbox"
         - "Hitboxes"
       alert: "5:3"
       log: "1:1"
@@ -121,6 +123,8 @@ punishments:
       remove-violations-after-seconds: 300
       checks:
         - "Interact"
+        - "Reach"
+        - "Hitbox"
         - "Aim"
         - "AimModulo360"
       alert: "20:40"
