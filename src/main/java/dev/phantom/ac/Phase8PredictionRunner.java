@@ -5330,7 +5330,27 @@ public final class Phase8PredictionRunner {
       WorldSnapshot world,
       List<String> uncertaintySources,
       List<String> trace) {
+    /*
+     * Item-use causality is a property of the movement frame, not only of the
+     * Phase 8 validation result. Grim keeps using-item state as an explicit
+     * prediction hypothesis while that state can still be in flight; downstream
+     * GroundSpoof/Speed checks must therefore see the same uncertainty envelope.
+     */
+    List<String> frameUncertaintySources = new ArrayList<>(uncertaintySources);
+    if (itemUseAuthorityPending && sequence > lastItemUseSequence) {
+      String itemUseReason =
+          "item-use packet arrived before a causally visible authoritative use_effects snapshot";
+      if (!frameUncertaintySources.contains(itemUseReason)) {
+        frameUncertaintySources.add(itemUseReason);
+      }
+    }
+
     List<String> mergedTrace = new ArrayList<>(trace);
+    if (!frameUncertaintySources.equals(uncertaintySources)) {
+      mergedTrace.add("ITEM_USE_UNCERTAINTY propagated=true"
+          + " reason=CAUSAL_USE_EFFECTS_GAP"
+          + " sequence=" + lastItemUseSequence);
+    }
 
     /*
      * Update the signed movement-advantage accumulator from the reachable
@@ -5345,7 +5365,7 @@ public final class Phase8PredictionRunner {
               .toList(),
           observedBefore.position(),
           observedAfter.position(),
-          uncertaintySources.isEmpty());
+          frameUncertaintySources.isEmpty());
       mergedTrace.add("MOVEMENT_ADVANTAGE"
           + " evaluated=" + latestMovementAdvantage.evaluated()
           + " signedHorizontal=" + latestMovementAdvantage.signedHorizontal()
@@ -5460,7 +5480,7 @@ public final class Phase8PredictionRunner {
         predictedBefore,
         predictedAfter,
         world,
-        uncertaintySources,
+        frameUncertaintySources,
         mergedTrace,
         predictionOffset,
         latestMovementAdvantage);

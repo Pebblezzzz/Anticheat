@@ -166,6 +166,39 @@ class ProductionCheckEngineTest {
   }
 
   @Test
+  void itemUseCausalUncertaintyDisablesGroundSpoofAndSpeed() {
+    State.Player before = player(0, 0);
+    State.Player after = new State.Player(
+        new Vec3(0, -1, 0), before.velocity(), before.yaw(), before.pitch(), true,
+        before.gamemode(), before.effects(), before.awaitingTeleport(), before.uncertain(),
+        before.input(), before.attributes(), before.pose(), before.environment(),
+        before.clientTickRange(), before.provenance(), before.uncertaintyReasons());
+    State.Player predictedAir = new State.Player(
+        after.position(), Vec3.ZERO, 0, 0, false,
+        "survival", Map.of(), OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Phase5Mechanics.Pose.STANDING,
+        State.Environment.DRY, State.TickRange.exact(1), State.Provenance.UNKNOWN, Set.of());
+
+    Packets.Move move = new Packets.Move(after.position(), after.yaw(), after.pitch(), true, 1L);
+    Phase6Reachability.Candidate candidate = candidate(predictedAir, 2L);
+    PredictionFrame itemUseUncertain = new PredictionFrame(
+        1L, 1L, 1L, 1L, move, before, after,
+        Set.of(candidate), Set.of(candidate), WorldSnapshot.emptyOverworld12111(),
+        List.of("item-use packet arrived before a causally visible authoritative use_effects snapshot"),
+        List.of(),
+        Phase8PredictionRunner.PredictionOffset.from(Set.of(candidate), after.position()),
+        MovementAdvantageTracker.Snapshot.empty());
+
+    var result = ProductionCheckEngine.analyze(
+        "p", List.of(new Packets.RawPacket(1L, 1L, move)),
+        report(itemUseUncertain), CONFIG);
+
+    assertTrue(result.findings().stream().noneMatch(f ->
+        f.rule().equals("GroundSpoof") || f.rule().equals("Speed")),
+        result.findings().toString());
+  }
+
+  @Test
   void largeInvalidPositionIsDetected() {
     List<Packets.RawPacket> packets = List.of(
         new Packets.RawPacket(1, 1, new Packets.Move(new Vec3(30_000_000, 0, 0), 0f, 0f, true, 0L)),
