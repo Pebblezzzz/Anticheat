@@ -39,7 +39,7 @@ public final class ProductionCheckEngine {
    * packets since the previous batch, so entity and digging state must survive
    * executor coalescing.
    */
-  public static final class State {
+  public static final class SessionState {
     final Map<Integer, BlockBox> entities = new HashMap<>();
     final Map<Pos, Long> diggingStarts = new HashMap<>();
     final Map<Pos, PredictionFrame> diggingStartFrames = new HashMap<>();
@@ -262,7 +262,7 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
       List<Packets.RawPacket> packets,
       Phase8PredictionRunner.Report movement,
       Config config) {
-    return analyze(playerId, packets, movement, config, new State());
+    return analyze(playerId, packets, movement, config, new SessionState());
   }
 
   public static Report analyze(
@@ -270,7 +270,7 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
       List<Packets.RawPacket> packets,
       Phase8PredictionRunner.Report movement,
       Config config,
-      State state) {
+      SessionState state) {
     Objects.requireNonNull(playerId);
     Objects.requireNonNull(packets);
     Objects.requireNonNull(movement);
