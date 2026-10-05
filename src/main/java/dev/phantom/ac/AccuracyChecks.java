@@ -693,7 +693,7 @@ public final class AccuracyChecks {
     return List.copyOf(findings);
   }
 
-  private static Vec3 eyePosition(State.Player player) {
+  private static Vec3 eyePosition(dev.phantom.ac.State.Player player) {
     double eye = switch (player.pose()) {
       case CROUCHING -> 1.27;
       case SWIMMING, FALL_FLYING, SLEEPING -> 0.4;
