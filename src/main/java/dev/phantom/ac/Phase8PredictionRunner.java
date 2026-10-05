@@ -726,9 +726,6 @@ public final class Phase8PredictionRunner {
        */
       boolean observationOnlyMovement = move.position() == null
           || (stationaryPositionObservation && latestAuthority != null);
-      trace.add("STATIONARY_GATE stationary=" + stationaryPositionObservation
-          + " visibleAuthority=" + (latestAuthority != null)
-          + " observationOnly=" + observationOnlyMovement);
       if (observationOnlyMovement && tick.timingUncertain()) {
         tick = tick.withTimingUncertaintyResolved(
             "observation-only movement does not advance client physics, so Phase 7 chronology uncertainty is not kinematic");
