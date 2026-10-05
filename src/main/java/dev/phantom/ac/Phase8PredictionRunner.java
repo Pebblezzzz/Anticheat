@@ -1292,6 +1292,27 @@ public final class Phase8PredictionRunner {
       prediction = spatialRebase.candidates();
 
       /*
+       * A single capture gap can make one movement chronologically uncertain, but
+       * a later exact, gap-free client-tick boundary establishes fresh chronology
+       * for the current movement. Keep other uncertainty dimensions intact.
+       */
+      if (!prediction.isEmpty()
+          && tick.exact()
+          && !tick.timingUncertain()
+          && !tickReliability.sequenceGap()) {
+        Set<Phase6Reachability.UncertainDimension> resolved =
+            EnumSet.of(Phase6Reachability.UncertainDimension.TIMING);
+        boolean hadTimingUncertainty = prediction.stream().anyMatch(candidate ->
+            candidate.context().uncertainty().contains(Phase6Reachability.UncertainDimension.TIMING));
+        if (hadTimingUncertainty) {
+          prediction = clearCandidateUncertainty(prediction, resolved);
+          trace.add("UNCERTAINTY_RECOVERY cleared=[TIMING]"
+              + " clientTick=" + tick.clientTick()
+              + " reason=exact-gap-free-client-boundary");
+        }
+      }
+
+      /*
        * A retained frontier can have a perfectly reliable client tick while its
        * spatial root is no longer causally connected to the packet we are about
        * to validate. This happens after sub-tick corrections/reconciliation when
@@ -4344,6 +4365,22 @@ public final class Phase8PredictionRunner {
     return new AdvanceResult(
         Set.copyOf(union), exhaustive, simulatedTicks,
         List.copyOf(reasons), List.copyOf(trace));
+  }
+
+  private static Set<Candidate> clearCandidateUncertainty(
+      Set<Candidate> candidates,
+      Set<Phase6Reachability.UncertainDimension> dimensions) {
+    Set<Candidate> result = new LinkedHashSet<>();
+    for (Candidate candidate : candidates) {
+      Phase6Reachability.Context context=candidate.context().withoutUncertainty(dimensions);
+      result.add(new Candidate(
+          candidate.id(), context, candidate.provenance(),
+          candidate.serverTickAssociation(), candidate.timingReference(),
+          candidate.worldReference(), candidate.worldKnowledge(), candidate.movementMode(),
+          candidate.inputAssumption(), candidate.transitionDiagnostics(),
+          candidate.entityCollisionReference()));
+    }
+    return Set.copyOf(result);
   }
 
   private static Set<Candidate> markCandidatesUncertain(
