@@ -3,6 +3,7 @@ package dev.phantom.ac;
 import dev.phantom.ac.Phase6Reachability.Candidate;
 import dev.phantom.ac.Phase8PredictionRunner.PredictionFrame;
 import dev.phantom.ac.geometry.BlockBox;
+import dev.phantom.ac.world.BlockState;
 import dev.phantom.ac.world.EntityCollisions;
 
 import java.util.*;
@@ -746,22 +747,22 @@ public final class AccuracyChecks {
       double clickRay = rayEntryDistance(
           eye, direction, clicked, 5.0);
       if (!Double.isFinite(clickRay)) {
-        findings.add(finding(playerId, frame.serverTick(), "Place",
+        findings.add(hard(playerId, frame, "Place",
             "placement packet selected a known clicked block that the reconstructed view ray never entered",
-            1.0, frame.sequence()));
+            1.0));
       }
 
       if (place.faceId() < 0 || place.faceId() > 5) {
-        findings.add(finding(playerId, frame.serverTick(), "Place",
+        findings.add(hard(playerId, frame, "Place",
             "placement packet used an invalid clicked-face id",
-            1.0, frame.sequence()));
+            1.0));
         continue;
       }
 
       if (place.cursorPresent() && !cursorMatchesFace(place.cursor(), place.faceId())) {
-        findings.add(finding(playerId, frame.serverTick(), "Place",
+        findings.add(hard(playerId, frame, "Place",
             "placement cursor does not lie on the selected block face",
-            1.0, frame.sequence()));
+            1.0));
       }
 
       int tx = bx;
