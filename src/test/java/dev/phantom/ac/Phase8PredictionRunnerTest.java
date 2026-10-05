@@ -1110,7 +1110,7 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
-  void jumpBoundaryRetainsPreviousHeldStateWhenInputAndMovementShareTheBoundary() {
+  void jumpBoundaryUsesNewestHeldStateWhenInputAndMovementShareTheBoundary() {
     Phase7Timing.Config exactTiming = new Phase7Timing.Config(
         50_000_000L, 50_000_000L, 50_000_000L,
         new Phase7Timing.LatencyBounds(0L, 0L),
@@ -1161,7 +1161,11 @@ class Phase8PredictionRunnerTest {
     assertTrue(
         report.frames().getFirst().trace().stream()
             .anyMatch(line -> line.contains("SIM_INPUT_OPTIONS")
-                && line.contains("jump=Optional[true]")
+                && line.contains("jump=Optional[true]")),
+        report.frames().getFirst().trace().toString());
+    assertFalse(
+        report.frames().getFirst().trace().stream()
+            .anyMatch(line -> line.contains("SIM_INPUT_OPTIONS")
                 && line.contains("jump=Optional[false]")),
         report.frames().getFirst().trace().toString());
   }
@@ -1308,7 +1312,11 @@ class Phase8PredictionRunnerTest {
     assertTrue(
         report.frames().getLast().trace().stream()
             .anyMatch(line -> line.contains("SIM_INPUT_OPTIONS")
-                && line.contains("jump=Optional[true]")
+                && line.contains("jump=Optional[true]")),
+        report.frames().getLast().trace().toString());
+    assertFalse(
+        report.frames().getLast().trace().stream()
+            .anyMatch(line -> line.contains("SIM_INPUT_OPTIONS")
                 && line.contains("jump=Optional[false]")),
         report.frames().getLast().trace().toString());
   }
