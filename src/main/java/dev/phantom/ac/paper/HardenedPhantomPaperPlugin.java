@@ -3,6 +3,7 @@ package dev.phantom.ac.paper;
 import io.netty.channel.Channel;
 import dev.phantom.ac.AccuracyChecks;
 import com.github.retrooper.packetevents.PacketEvents;
+import io.papermc.paper.event.entity.EntityKnockbackEvent;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
@@ -662,6 +663,19 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   @EventHandler public void onJoin(PlayerJoinEvent event){
     UUID playerId=event.getPlayer().getUniqueId();
     captures.computeIfAbsent(playerId,id->new Capture(id,System.nanoTime(),validationBudget));
+  }
+
+  @EventHandler
+  public void onEntityKnockback(EntityKnockbackEvent event) {
+    if (!(event.getEntity() instanceof Player player) || event.isCancelled()) return;
+    Capture capture = captures.get(player.getUniqueId());
+    if (capture == null) return;
+    var knockback = event.getKnockback();
+    Packets.ExplosionImpulse impulse = new Packets.ExplosionImpulse(
+        new Vec3(knockback.getX(), knockback.getY(), knockback.getZ()),
+        event.getCause().name());
+    record(capture, impulse);
+    schedulePredictionValidation(capture);
   }
 
   // Re-anchoring is driven by the clientbound position-correction packet.
