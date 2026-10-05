@@ -17,7 +17,16 @@ jobs:
           java-version: "21"
           cache: maven
       - name: Run full Maven suite
-        run: mvn -B package
+        run: mvn -B package 2>&1 | tee hardening-maven.log
+      - name: Upload Maven diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hardening-maven-diagnostics
+          path: |
+            hardening-maven.log
+            target/surefire-reports/**
+          if-no-files-found: warn
 
   vanilla-capture-build:
     runs-on: ubuntu-latest
