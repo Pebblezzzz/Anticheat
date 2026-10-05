@@ -288,6 +288,15 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         var held=new WrapperPlayClientHeldItemChange(event);
         Packets.HeldItemChange packet=new Packets.HeldItemChange(held.getSlot());
         record(capture,packet);
+        org.bukkit.entity.Player bukkitPlayer = getServer().getPlayer(playerId);
+        if (bukkitPlayer != null && held.getSlot() >= 0 && held.getSlot() < 9) {
+          org.bukkit.inventory.ItemStack item = bukkitPlayer.getInventory().getItem(held.getSlot());
+          String itemType = item == null || item.getType().isAir()
+              ? "minecraft:air" : item.getType().getKey().toString();
+          int amount = item == null ? 0 : item.getAmount();
+          record(capture, new Packets.InventorySlotState(
+              0, held.getSlot(), -1, itemType, amount, false));
+        }
         schedulePredictionValidation(capture);
       }else if(event.getPacketType()==PacketType.Play.Client.ENTITY_ACTION){
         var action=new WrapperPlayClientEntityAction(event);
@@ -317,8 +326,29 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           Long clientTick=capture.clientTickTracker.hasObservedBoundary()
               ?capture.clientTickTracker.clientTickForMovement()
               :null;
+          org.bukkit.entity.Player bukkitPlayer = getServer().getPlayer(playerId);
+          org.bukkit.inventory.ItemStack heldItem =
+              bukkitPlayer == null ? null : bukkitPlayer.getInventory().getItemInMainHand();
+          Double breakSpeed = null;
+          String heldItemType = "minecraft:air";
+          int heldItemAmount = 0;
+          if (bukkitPlayer != null) {
+            org.bukkit.block.Block liveBlock =
+                bukkitPlayer.getWorld().getBlockAt(position.x(), position.y(), position.z());
+            breakSpeed = (double) liveBlock.getBreakSpeed(bukkitPlayer);
+            if (heldItem != null && !heldItem.getType().isAir()) {
+              heldItemType = heldItem.getType().getKey().toString();
+              heldItemAmount = heldItem.getAmount();
+            }
+          }
           Packets.ClientBlockBreak breakPacket =
-              new Packets.ClientBlockBreak(position,digging.getSequence(),clientTick);
+              new Packets.ClientBlockBreak(
+                  position,
+                  digging.getSequence(),
+                  clientTick,
+                  breakSpeed,
+                  heldItemType,
+                  heldItemAmount);
           WorldSnapshot visibleWorld =
               capture.clientWorld.snapshotAtOrBeforeIncludingPending(sequence);
           boolean knownSolid=visibleWorld!=null
