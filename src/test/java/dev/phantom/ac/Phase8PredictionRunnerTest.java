@@ -81,6 +81,81 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void sameBatchAuthoritativeContextAnchorsFirstMovementWithoutCallerAnchor() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    Move movement = new Move(
+        new Maths.Vec3(1.7, 64.0, .5), 0f, 0f, true, 1L);
+
+    var report = runner.process(
+        "same-batch-first-move",
+        List.of(
+            new RawPacket(
+                1L, 10L, authority,
+                Packets.CaptureProvenance.fromAdapter(
+                    "paper-live-transaction", authority, 1L, 0L)),
+            new RawPacket(
+                2L, 15L, new ClientInput(true, false, false, false, false, false, false),
+                Packets.CaptureProvenance.fromAdapter(
+                    "paper-client-input",
+                    new ClientInput(true, false, false, false, false, false, false),
+                    1L, 0L)),
+            new RawPacket(
+                3L, 20L, movement,
+                Packets.CaptureProvenance.fromAdapter(
+                    "paper-client-tick-boundary", movement, 1L, 1L))),
+        world,
+        null,
+        -1L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(
+        report.frames().getFirst().trace().stream()
+            .noneMatch(line -> line.startsWith("FIRST_MOVEMENT_UNANCHORED")),
+        report.frames().getFirst().trace().toString());
+  }
+
+  @Test
+  void firstMovementWithoutCausalAnchorIsUncertainInsteadOfSelfAnchored() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+
+    Move movement = new Move(
+        new Maths.Vec3(1.7, 64.0, .5), 0f, 0f, true, 1L);
+
+    var report = runner.process(
+        "unanchored-first-move",
+        List.of(new RawPacket(
+            1L, 20L, movement,
+            Packets.CaptureProvenance.fromAdapter(
+                "paper-client-tick-boundary", movement, 1L, 1L))),
+        world,
+        null,
+        -1L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.UNCERTAIN,
+        report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(
+        report.frames().getFirst().trace().stream()
+            .anyMatch(line -> line.startsWith("FIRST_MOVEMENT_UNANCHORED")),
+        report.frames().getFirst().trace().toString());
+  }
+
+  @Test
   void groundedEdgeTransitionFeedsFallingVelocityIntoNextClientTick() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
 

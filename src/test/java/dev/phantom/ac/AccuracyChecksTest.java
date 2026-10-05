@@ -119,6 +119,27 @@ class AccuracyChecksTest {
   }
 
   @Test
+  void timerBalanceDoesNotDoubleCountRollingWindowDrift() {
+    List<Packets.RawPacket> packets = new ArrayList<>();
+    long sequence = 1L;
+    long nanos = 0L;
+
+    for (int i = 0; i < 12; i++) {
+      packets.add(new Packets.RawPacket(sequence++, nanos, new Packets.ClientTickEnd()));
+      nanos += 40_000_000L;
+    }
+    for (int i = 0; i < 19; i++) {
+      packets.add(new Packets.RawPacket(sequence++, nanos, new Packets.ClientTickEnd()));
+      nanos += 50_000_000L;
+    }
+
+    var findings = AccuracyChecks.analyze("p", packets, List.of());
+
+    assertTrue(findings.stream().noneMatch(f -> f.rule().equals("TimerBurst")),
+        () -> "rolling-window drift was double-counted: " + findings);
+  }
+
+  @Test
   void timerBalanceDetectsSustainedFastClientClock() {
     List<Packets.RawPacket> packets = new ArrayList<>();
     long sequence = 1L;

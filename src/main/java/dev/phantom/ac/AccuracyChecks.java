@@ -308,6 +308,16 @@ public final class AccuracyChecks {
     return List.copyOf(findings);
   }
 
+  /**
+   * Tracks timer balance incrementally from each client-tick interval.
+   *
+   * <p>The previous implementation added the full rolling-window drift on every
+   * boundary. Once the window reached 32 samples, the same elapsed time was
+   * counted repeatedly, making Timer evidence depend on window size instead of
+   * actual client clock drift. Grim-style timer accounting advances the balance
+   * from each real interval, while the rolling median/p90 are retained only as
+   * jitter guards.</p>
+   */
   private static List<ProductionCheckEngine.Finding> timerBalance(
       String playerId,
       List<Packets.RawPacket> packets,
@@ -318,28 +328,38 @@ public final class AccuracyChecks {
 
     for (Packets.RawPacket packet : packets) {
       if (!(packet.packet() instanceof Packets.ClientTickEnd)) continue;
+
+      Long previous = boundaries.peekLast();
       boundaries.addLast(packet.receivedNanos());
       while (boundaries.size() > 32) boundaries.removeFirst();
-      if (boundaries.size() < 8) continue;
 
-      Long first = boundaries.peekFirst();
-      long elapsed = packet.receivedNanos() - first;
-      if (elapsed <= 0L) continue;
+      if (previous == null) {
+        continue;
+      }
 
-      int intervals = boundaries.size() - 1;
-      long expected = CLIENT_TICK_NANOS * intervals;
-      long delta = expected - elapsed;
-      state.timerBalanceNanos = Math.max(-2_000_000_000L, Math.min(2_000_000_000L, state.timerBalanceNanos + delta));
+      long interval = packet.receivedNanos() - previous;
+      if (interval <= 0L) {
+        continue;
+      }
 
-      long mean = elapsed / intervals;
-      if (mean < 46_000_000L) state.consecutiveFast++;
-      else state.consecutiveFast = Math.max(0, state.consecutiveFast - 2);
+      long delta = CLIENT_TICK_NANOS - interval;
+      state.timerBalanceNanos = Math.max(
+          -2_000_000_000L,
+          Math.min(2_000_000_000L, state.timerBalanceNanos + delta));
+
+      if (interval < 46_000_000L) {
+        state.consecutiveFast++;
+      } else if (interval > 50_000_000L) {
+        state.consecutiveFast = Math.max(0, state.consecutiveFast - 2);
+      } else {
+        state.consecutiveFast = Math.max(0, state.consecutiveFast - 1);
+      }
 
       List<Long> recentIntervals = new ArrayList<>();
       List<Long> boundaryList = List.copyOf(boundaries);
       for (int i = 1; i < boundaryList.size(); i++) {
-        long interval = boundaryList.get(i) - boundaryList.get(i - 1);
-        if (interval > 0L) recentIntervals.add(interval);
+        long recent = boundaryList.get(i) - boundaryList.get(i - 1);
+        if (recent > 0L) recentIntervals.add(recent);
       }
       recentIntervals.sort(Long::compare);
       long median = recentIntervals.isEmpty()
@@ -347,7 +367,8 @@ public final class AccuracyChecks {
           : recentIntervals.get(recentIntervals.size() / 2);
       int p90Index = recentIntervals.isEmpty()
           ? -1
-          : Math.min(recentIntervals.size() - 1,
+          : Math.min(
+              recentIntervals.size() - 1,
               (int) Math.floor((recentIntervals.size() - 1) * 0.90));
       long p90 = p90Index < 0 ? Long.MAX_VALUE : recentIntervals.get(p90Index);
 

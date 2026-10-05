@@ -496,22 +496,16 @@ public final class Phase8PredictionRunner {
           !prediction.isEmpty(), List.of());
     }
 
-    if (clientState == null) {
-      Packets.RawPacket firstMovement = packets.stream()
-          .filter(packet -> packet.packet() instanceof Packets.Move move && move.position() != null)
-          .findFirst()
-          .orElse(null);
-      if (firstMovement == null) {
-        latestContinuation = Continuation.UNANCHORED;
-        return new Report(
-            List.of(), packets.size(), 0, 0, 0, 0,
-            lastProcessedSequence, relativeClientTick, latestContinuation, false, List.of());
-      }
-      clientState = State.Player.initial(((Packets.Move) firstMovement.packet()).position());
-      initialAnchor = clientState;
-      initialAnchorReceivedNanos = firstMovement.receivedNanos();
-      latestContinuation = Continuation.ACTIVE;
-    }
+    /*
+     * Do not bootstrap client state from the first movement observation. A movement
+     * packet is evidence to validate, not an authoritative starting point. The
+     * first position must therefore remain unanchored until a client-visible
+     * PlayerContext/currentAnchor establishes the pre-movement state.
+     *
+     * This is important for the very first movement after capture begins: treating
+     * that packet as the baseline turns an arbitrary displacement into a zero-delta
+     * observation and hides first-move Speed/Flight violations.
+     */
 
     /*
      * Phase 7 is the sole live client/server timing authority. Preserve the
@@ -569,7 +563,9 @@ public final class Phase8PredictionRunner {
       Packets.Packet value = packet.packet();
 
       if (value instanceof Packets.ClientTickEnd) {
-        clientState = State.apply(clientState, normalized);
+        if (clientState != null) {
+          clientState = State.apply(clientState, normalized);
+        }
         relativeClientTick = Math.addExact(relativeClientTick, 1L);
         hasClientTickBoundary = true;
         continue;
@@ -604,6 +600,17 @@ public final class Phase8PredictionRunner {
           pendingAuthorityContexts.put(barrierId, anchor);
         } else {
           applyClientVisibleAuthority(anchor);
+          if (clientState == null) {
+            /*
+             * The first client-visible authority in a capture is the legitimate
+             * pre-movement anchor. This also handles batches where PlayerContext
+             * and the first Move arrive in the same validation call.
+             */
+            clientState = playerFromAuthority(authority);
+            initialAnchor = clientState;
+            initialAnchorReceivedNanos = packet.receivedNanos();
+            latestContinuation = Continuation.ACTIVE;
+          }
         }
         continue;
       }
@@ -616,7 +623,9 @@ public final class Phase8PredictionRunner {
       }
 
       if (value instanceof Packets.ClientInput input) {
-        clientState = State.apply(clientState, normalized);
+        if (clientState != null) {
+          clientState = State.apply(clientState, normalized);
+        }
         // PLAYER_INPUT is a held-state update. Its causal simulation tick is
         // reconstructed by Phase 7 rather than guessed from packet arrival.
         currentInput = InputConstraint.fromClientInput(input);
@@ -736,6 +745,17 @@ public final class Phase8PredictionRunner {
       }
 
       movementObservations++;
+      boolean unanchoredInitialMovement = clientState == null;
+      if (unanchoredInitialMovement) {
+        /*
+         * There is no sound way to prove a first-move displacement without a
+         * causally prior position. Keep the observed position for continuity,
+         * but explicitly mark this packet UNCERTAIN rather than manufacturing a
+         * zero-delta baseline that could suppress later detection.
+         */
+        clientState = State.Player.initial(move.position() == null ? Vec3.ZERO : move.position())
+            .withUncertainty(State.UncertaintyReason.EXPLICIT_UNCERTAINTY);
+      }
       Player observedBefore = clientState;
       clientState = State.apply(clientState, normalized);
       Player observedAfter = clientState;
@@ -808,6 +828,26 @@ public final class Phase8PredictionRunner {
               + " movementSequence=" + compensatedWorld.movementSequence());
         }
       }
+      if (unanchoredInitialMovement) {
+        latestContinuation = Continuation.UNCERTAIN;
+        List<String> sources = List.of(
+            "no causally prior client-visible position exists for the first movement observation");
+        SearchResult search = uncertainSearch(Set.of(), sources.getFirst());
+        Phase8MovementValidation.Result result = validate(
+            playerId, packet, move, observedBefore, observedAfter, worldOrEmpty(world),
+            tick, sources, search, false, observedFieldsFor(move));
+        results.add(result);
+        uncertain++;
+        if (move.position() != null) {
+          rememberObservedMovement(observedBefore, observedAfter, tick);
+        }
+        trace.add("FIRST_MOVEMENT_UNANCHORED result=UNCERTAIN action=WAIT_FOR_CAUSAL_ANCHOR");
+        frames.add(frame(
+            sequence, packet, tick, move, observedBefore, observedAfter,
+            prediction, prediction, worldOrEmpty(world), sources, trace));
+        continue;
+      }
+
       if (world == null) {
         latestContinuation = Continuation.UNCERTAIN;
         List<String> sources = List.of(
