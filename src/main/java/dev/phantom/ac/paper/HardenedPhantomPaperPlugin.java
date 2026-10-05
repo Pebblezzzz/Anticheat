@@ -1379,11 +1379,28 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       Phase8PredictionRunner.Report report,
       ProductionCheckEngine.Report productionChecks){
     DebugLevel debugLevel=debugLevel(capture.playerId);
-    if (debugLevel.trace()) {
-      for(Phase8MovementValidation.Result result:report.results())
-        logValidationDebug(getServer().getPlayer(capture.playerId)==null
-            ?capture.playerId.toString()
-            :getServer().getPlayer(capture.playerId).getName(),result);
+    String debugPlayerName=getServer().getPlayer(capture.playerId)==null
+        ?capture.playerId.toString()
+        :getServer().getPlayer(capture.playerId).getName();
+
+    /*
+     * Emit focus diagnostics from the same main-thread result that is about to
+     * become a flag. The async validation pass also emits focus output, but the
+     * enforcement hop is the authoritative point where we know the exact report
+     * that reached the live checks. Keeping this here prevents a debug race from
+     * producing flags with no corresponding diagnostic record.
+     */
+    if (debugLevel.focus()) {
+      boolean loggedFocusedResult=false;
+      for(Phase8MovementValidation.Result result:report.results()) {
+        if(result.verdict()==Phase8MovementValidation.Verdict.POSSIBLE)continue;
+        if(debugLevel.trace()){
+          logValidationDebug(debugPlayerName,result);
+        }else if(!loggedFocusedResult){
+          logFocusedDebug(debugPlayerName,report);
+          loggedFocusedResult=true;
+        }
+      }
     }
 
     long alertNowMillis=System.currentTimeMillis();
