@@ -247,6 +247,15 @@ public final class Phase8PredictionRunner {
   private static final long MAX_INCREMENTAL_HORIZON = Phase6Reachability.MAX_HORIZON_TICKS;
   private static final long PREDICTION_RESYNC_LAG_TICKS = 2L;
 
+  private enum FrontierResetReason {
+    SERVER_TELEPORT,
+    TELEPORT_ACK_RESYNC,
+    RESPAWN_OR_WORLD,
+    STALE_CORRECTION,
+    SPATIAL_RECONCILIATION,
+    CAUSAL_AUTHORITY_REBUILD
+  }
+
   private final int maximumCandidates;
   private final GrimPredictionEngine grimPredictionEngine = new GrimPredictionEngine();
   /*
@@ -646,8 +655,11 @@ public final class Phase8PredictionRunner {
             "SERVER_CORRECTION",
             sequence,
             entityCollisions(latestAuthority));
-        prediction = Set.of(correction);
-        predictionTick = correctionTick;
+        recordFrontierReset(
+            FrontierResetReason.SERVER_TELEPORT,
+            Set.of(correction),
+            correctionTick,
+            new ArrayList<>());
         packetOnlyProvisionalFrontier = false;
         clearObservedMovementHistory();
         lastPositionClientTick = correctionTick;
@@ -659,8 +671,22 @@ public final class Phase8PredictionRunner {
           || value instanceof Packets.Velocity
           || value instanceof Packets.Effect
           || value instanceof Packets.Gamemode) {
+        boolean matchedTeleportAck =
+            value instanceof Packets.TeleportConfirm ack
+                && clientState.awaitingTeleport().isPresent()
+                && clientState.awaitingTeleport().getAsInt() == ack.id();
         clientState = State.apply(clientState, normalized);
-        if (value instanceof Packets.Velocity velocity) {
+        if (value instanceof Packets.TeleportConfirm) {
+          if (matchedTeleportAck) {
+            recordFrontierReset(
+                FrontierResetReason.TELEPORT_ACK_RESYNC,
+                prediction,
+                predictionTick,
+                new ArrayList<>());
+            clearObservedMovementHistory();
+            latestContinuation = Continuation.ACTIVE;
+          }
+        } else if (value instanceof Packets.Velocity velocity) {
           if (!prediction.isEmpty()) {
             Set<Candidate> updated = overlayVelocity(prediction, velocity.velocity(), maximumCandidates);
             if (!updated.isEmpty()) prediction = updated;
@@ -5257,6 +5283,22 @@ public final class Phase8PredictionRunner {
         mergedTrace,
         predictionOffset,
         latestMovementAdvantage);
+  }
+
+  private void recordFrontierReset(
+      FrontierResetReason reason,
+      Set<Candidate> replacement,
+      long replacementTick,
+      List<String> trace) {
+    prediction = replacement == null ? Set.of() : Set.copyOf(replacement);
+    predictionTick = replacement == null ? -1L : replacementTick;
+    packetOnlyProvisionalFrontier = false;
+    movementAdvantageTracker.reset();
+    latestMovementAdvantage = MovementAdvantageTracker.Snapshot.empty();
+    trace.add("FRONTIER_RESET reason=" + reason
+        + " replacementCandidates=" + prediction.size()
+        + " replacementTick=" + predictionTick
+        + " movementEvidenceReset=true");
   }
 
   private static Player withClientRotation(Player player, float yaw, float pitch) {
