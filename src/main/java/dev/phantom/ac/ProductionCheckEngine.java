@@ -43,10 +43,10 @@ public final class ProductionCheckEngine {
    */
   public static final class SessionState {
     final Map<Integer, EntityHistory> entities = new HashMap<>();
-    final ArrayDeque<Long> state.clientTickEndTimes = new ArrayDeque<>();
-    float state.lastYaw = Float.NaN;
-    long state.lastRotationSequence = -1L;
-    int state.modulo360Streak;
+    final ArrayDeque<Long> clientTickEndTimes = new ArrayDeque<>();
+    float lastYaw = Float.NaN;
+    long lastRotationSequence = -1L;
+    int modulo360Streak;
     final Map<Pos, Long> diggingStarts = new HashMap<>();
     final Map<Pos, Double> diggingStartSpeeds = new HashMap<>();
     final Map<Pos, String> diggingStartItems = new HashMap<>();
