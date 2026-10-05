@@ -486,14 +486,24 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
       if (packet instanceof Packets.ClientBlockBreak breakPacket && frame != null) {
         Pos pos = breakPacket.position();
         BlockBox block = new BlockBox(pos.x(), pos.y(), pos.z(), pos.x() + 1.0, pos.y() + 1.0, pos.z() + 1.0);
-        double distance = pointAabbDistance(eyePosition(frame.observedAfter()), block);
-        if (distance > config.blockInteractionReach()) {
+        Vec3 eye = eyePosition(frame.observedAfter());
+        double distance = pointAabbDistance(eye, block);
+        double rayDistance = rayEntryDistance(
+            eye,
+            lookDirection(frame.observedAfter().yaw(), frame.observedAfter().pitch()),
+            block,
+            config.blockInteractionReach());
+        if (!Double.isFinite(rayDistance) && distance > config.blockInteractionReach()) {
           findings.add((distance > config.blockInteractionReach() + 1.0)
               ? finding(playerId, serverTick, "FarBreak",
-                  String.format(Locale.ROOT, "block distance %.3f is more than 1 block beyond %.3f", distance, config.blockInteractionReach()),
+                  String.format(Locale.ROOT,
+                      "look ray misses the target block within %.3f blocks and the target is %.3f blocks away",
+                      config.blockInteractionReach(), distance),
                   Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0), sequence)
               : uncertainFinding(playerId, serverTick, "FarBreak",
-                  String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
+                  String.format(Locale.ROOT,
+                      "look ray misses the target block within %.3f blocks",
+                      config.blockInteractionReach()),
                   Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
                   sequence));
         }
@@ -519,14 +529,24 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
         if (frame != null) {
           Pos pos = place.position();
           BlockBox block = new BlockBox(pos.x(), pos.y(), pos.z(), pos.x() + 1.0, pos.y() + 1.0, pos.z() + 1.0);
-          double distance = pointAabbDistance(eyePosition(frame.observedAfter()), block);
-          if (distance > config.blockInteractionReach()) {
+          Vec3 eye = eyePosition(frame.observedAfter());
+          double distance = pointAabbDistance(eye, block);
+          double rayDistance = rayEntryDistance(
+              eye,
+              lookDirection(frame.observedAfter().yaw(), frame.observedAfter().pitch()),
+              block,
+              config.blockInteractionReach());
+          if (!Double.isFinite(rayDistance) && distance > config.blockInteractionReach()) {
             findings.add((distance > config.blockInteractionReach() + 1.0)
                 ? finding(playerId, serverTick, "FarPlace",
-                    String.format(Locale.ROOT, "block distance %.3f is more than 1 block beyond %.3f", distance, config.blockInteractionReach()),
+                    String.format(Locale.ROOT,
+                        "look ray misses the target block within %.3f blocks and the target is %.3f blocks away",
+                        config.blockInteractionReach(), distance),
                     Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0), sequence)
                 : uncertainFinding(playerId, serverTick, "FarPlace",
-                    String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
+                    String.format(Locale.ROOT,
+                        "look ray misses the target block within %.3f blocks",
+                        config.blockInteractionReach()),
                     Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
                     sequence));
           }
