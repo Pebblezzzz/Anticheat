@@ -1,6 +1,7 @@
 package dev.phantom.ac.paper;
 
 import io.netty.channel.Channel;
+import dev.phantom.ac.AccuracyChecks;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
