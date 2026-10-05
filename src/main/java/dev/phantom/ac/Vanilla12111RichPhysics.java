@@ -255,6 +255,15 @@ public final class Vanilla12111RichPhysics {
         }
 
         /*
+         * Item use is a client-input transform in modern Java: the active item's
+         * use_effects component scales the movement input before vanilla travel.
+         * Keep the multiplier here, after locomotion mode/surface handling but
+         * before the final directional vector is built, so eating/bow/shield use
+         * stays in the same deterministic path as ordinary movement.
+         */
+        inputAcceleration *= context.movementEnvironment().itemUseSpeedMultiplier();
+
+        /*
          * Inputs are applied after the starting-vector adjustments. This mirrors
          * Grim's prediction ordering: current/knockback-like state survives until
          * the input transform rather than being replaced by packet arrival order.

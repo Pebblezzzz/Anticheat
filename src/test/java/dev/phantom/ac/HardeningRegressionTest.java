@@ -79,6 +79,26 @@ class HardeningRegressionTest {
     assertEquals(toggle, decoded.events().getFirst().packet().packet());
   }
 
+  @Test void playerContextReplayPreservesItemUseSpeedMultiplier() {
+    var environment = new Phase5Mechanics.MovementEnvironment(
+        Phase5Mechanics.Fluid.NONE, false, false, true,
+        false, false, false, false, 1.0, 1.0, 1.0, 0.2);
+    var context = new Packets.PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Phase5Mechanics.Pose.STANDING, environment,
+        new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    var timeline = Timeline.assign(List.of(new Packets.NormalizedPacket(
+        0, 1, context, java.util.EnumSet.of(Packets.PacketFlag.NORMAL),
+        Packets.CaptureProvenance.fromAdapter("test", context, null))),
+        0, 50_000_000L);
+    var decoded = new Timeline.Codec().decode(new Timeline.Codec().encode(timeline));
+
+    assertEquals(0.2, ((Packets.PlayerContext) decoded.events().getFirst().packet().packet())
+        .movementEnvironment().itemUseSpeedMultiplier(), 1e-12);
+  }
+
   @Test void playerContextReplayRoundTripsThroughTimelineCodec() {
     var context = new Packets.PlayerContext("survival", new Simulation.Attributes(0.1),
         Map.of("minecraft:speed", 1), Phase5Mechanics.Pose.SWIMMING,

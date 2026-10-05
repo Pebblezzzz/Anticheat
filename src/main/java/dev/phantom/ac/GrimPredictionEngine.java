@@ -281,7 +281,7 @@ public final class GrimPredictionEngine {
         base.fluid(), base.submerged(), base.climbable(), base.onGround(),
         sprinting, sneaking, base.swimmingInput(), base.gliding(),
         base.fluidSpeedMultiplier(), base.fluidDrag(), base.gravityMultiplier(),
-        base.vehicle());
+        base.itemUseSpeedMultiplier(), base.vehicle());
     return new Context(
         context.simulationTick(),
         context.player(),

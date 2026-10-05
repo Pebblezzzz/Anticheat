@@ -109,6 +109,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private static final long PAPER_MOVE_FAILURE_WINDOW_NANOS=1_000_000_000L;
   private static final int PAPER_MOVE_FAILURE_THRESHOLD=1;
   private static final long VALIDATION_SLOW_RUN_NANOS=50_000_000L;
+  private static final int MAX_LIVE_VALIDATION_BATCH_PACKETS=256;
 
   private final Map<UUID,Capture> captures=new ConcurrentHashMap<>();
   enum DebugLevel {
@@ -638,7 +639,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       thread.setDaemon(true);
       return thread;
     });
-    int validationThreads=Math.max(1,Math.min(4,Math.max(1,processors/2)));
+    int validationThreads=Math.max(1,Math.min(2,Math.max(1,processors/2)));
     validationExecutor=Executors.newFixedThreadPool(validationThreads,r->{
       Thread thread=new Thread(r,"Phantom-Phase8Validator");
       thread.setDaemon(true);
@@ -984,6 +985,26 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     boolean gliding = player.isGliding();
     boolean sleeping = player.isSleeping();
 
+    double itemUseSpeedMultiplier = 1.0D;
+    boolean itemUseCanSprint = true;
+    if (player.hasActiveItem()) {
+      org.bukkit.inventory.ItemStack activeItem = player.getActiveItem();
+      if (activeItem != null && !activeItem.getType().isAir()) {
+        io.papermc.paper.datacomponent.item.UseEffects useEffects =
+            activeItem.getDataOrDefault(
+                io.papermc.paper.datacomponent.DataComponentTypes.USE_EFFECTS,
+                activeItem.getType().getDefaultData(
+                    io.papermc.paper.datacomponent.DataComponentTypes.USE_EFFECTS));
+        if (useEffects != null) {
+          itemUseCanSprint = useEffects.canSprint();
+          if (Float.isFinite(useEffects.speedMultiplier())) {
+            itemUseSpeedMultiplier = Math.max(0.0D, Math.min(1.0D, useEffects.speedMultiplier()));
+          }
+        }
+      }
+    }
+    sprinting = sprinting && itemUseCanSprint;
+
     Material feet = location.getBlock().getType();
     String materialName = feet.name();
     boolean climbable =
@@ -998,15 +1019,15 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     if (inLava) {
       movementEnvironment = new Phase5Mechanics.MovementEnvironment(
           Phase5Mechanics.Fluid.LAVA, true, climbable, onGround,
-          sprinting, sneaking, false, gliding, 1.0D, 0.5D, 0.25D);
+          sprinting, sneaking, false, gliding, 1.0D, 0.5D, 0.25D, itemUseSpeedMultiplier);
     } else if (inWater) {
       movementEnvironment = new Phase5Mechanics.MovementEnvironment(
           Phase5Mechanics.Fluid.WATER, true, climbable, onGround,
-          sprinting, sneaking, swimmingInput, gliding, 1.0D, 0.8D, 1.0D);
+          sprinting, sneaking, swimmingInput, gliding, 1.0D, 0.8D, 1.0D, itemUseSpeedMultiplier);
     } else {
       movementEnvironment = new Phase5Mechanics.MovementEnvironment(
           Phase5Mechanics.Fluid.NONE, false, climbable, onGround,
-          sprinting, sneaking, false, gliding, 1.0D, 1.0D, 1.0D);
+          sprinting, sneaking, false, gliding, 1.0D, 1.0D, 1.0D, itemUseSpeedMultiplier);
     }
 
     Phase5Mechanics.Pose pose =
@@ -1122,8 +1143,29 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
    */
   private void processLivePacket(Capture capture){
     if(capture==null || !acceptingAsyncValidation.get() || !isEnabled())return;
+    if(validationExecutor==null)return;
+    if(!capture.predictionValidationQueued.compareAndSet(false,true))return;
+    try{
+      validationExecutor.execute(()->{
+        try{
+          performLiveValidation(capture);
+        }finally{
+          capture.predictionValidationQueued.set(false);
+          if(acceptingAsyncValidation.get() && isEnabled()
+              && capture.hasPacketsAfter(capture.movementRunner.lastProcessedSequence())){
+            processLivePacket(capture);
+          }
+        }
+      });
+    }catch(RejectedExecutionException rejected){
+      capture.predictionValidationQueued.set(false);
+    }
+  }
 
-    List<RawPacket> raw=capture.copySince(capture.movementRunner.lastProcessedSequence());
+  private void performLiveValidation(Capture capture){
+    if(capture==null || !acceptingAsyncValidation.get() || !isEnabled())return;
+
+    List<RawPacket> raw=capture.copySince(capture.movementRunner.lastProcessedSequence(), MAX_LIVE_VALIDATION_BATCH_PACKETS);
     if(raw.isEmpty())return;
 
     long startedNanos=System.nanoTime();
@@ -2257,7 +2299,23 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
 
     List<RawPacket> copySince(long sequenceExclusive){
-      return packets.stream().filter(packet->packet.sequence()>sequenceExclusive).toList();
+      return copySince(sequenceExclusive, MAX_VALIDATION_PACKETS);
+    }
+
+    List<RawPacket> copySince(long sequenceExclusive,int maximumPackets){
+      if(maximumPackets<1)throw new IllegalArgumentException("maximumPackets must be positive");
+      ArrayList<RawPacket> out=new ArrayList<>(Math.min(maximumPackets,packets.size()));
+      for(RawPacket packet:packets){
+        if(packet.sequence()<=sequenceExclusive)continue;
+        out.add(packet);
+        if(out.size()>=maximumPackets)break;
+      }
+      return List.copyOf(out);
+    }
+
+    boolean hasPacketsAfter(long sequenceExclusive){
+      RawPacket last=packets.peekLast();
+      return last!=null && last.sequence()>sequenceExclusive;
     }
   }
 }
