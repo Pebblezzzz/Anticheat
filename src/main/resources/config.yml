@@ -13,11 +13,11 @@ alerts:
   violation-decay-per-tick: 0.005
   # Prevent unbounded VL growth during long sessions.
   maximum-violation-level: 100.0
-  # Alert when VL reaches this level, then every this many additional VL.
-  # Matches Grim's Simulation-style persistence model rather than a fixed
-  # "N impossible packets" alert gate.
-  violation-alert-threshold: 100.0
-  violation-alert-interval: 40.0
+  # Alert on every active VL: 1, 2, 3, ...
+  # This follows the same threshold:interval rule model as Grim, but keeps
+  # operator alerts immediate instead of waiting for a 100 VL milestone.
+  violation-alert-threshold: 1.0
+  violation-alert-interval: 1.0
 
 punishments:
   # Grim-style active violation window. A violation is removed after this many seconds
@@ -54,20 +54,20 @@ punishments:
         - "TimerBurst"
         - "TimerLimit"
         - "NoFall"
-      alert: "100:40"
+      alert: "1:1"
       log: "1:1"
     Knockback:
       remove-violations-after-seconds: 300
       checks:
         - "Knockback"
         - "Explosion"
-      alert: "5:5"
+      alert: "1:1"
       log: "1:1"
     Post:
       remove-violations-after-seconds: 300
       checks:
         - "Post"
-      alert: "20:20"
+      alert: "1:1"
       log: "1:1"
     BadPackets:
       remove-violations-after-seconds: 300
@@ -115,7 +115,7 @@ punishments:
         - "FarBreak"
         - "FarPlace"
         - "FastBreak"
-      alert: "10:5"
+      alert: "1:1"
       log: "1:1"
     Combat:
       remove-violations-after-seconds: 300
@@ -123,7 +123,7 @@ punishments:
         - "Interact"
         - "Aim"
         - "AimModulo360"
-      alert: "20:40"
+      alert: "1:1"
       log: "1:1"
     Autoclicker:
       remove-violations-after-seconds: 300
@@ -166,13 +166,13 @@ checks:
   # Packet checks are evidence-only. Punishment groups above control the active
   # violation window and alert/log thresholds.
   enabled: true
-  alert-violation-threshold: 100.0
+  alert-violation-threshold: 1.0
   violation-increment: 1.0
   violation-decay-per-tick: 0.005
   maximum-violation-level: 100.0
-  violation-alert-interval: 40.0
+  violation-alert-interval: 1.0
   reset-after-ticks: 40
-  alert-debounce-ticks: 20
+  alert-debounce-ticks: 0
   # Vanilla 1.21.11 interaction envelopes; creative attributes may be narrower/broader
   # in future versions, so checks stay conservative until those attributes are wired.
   attack-reach: 4.0
