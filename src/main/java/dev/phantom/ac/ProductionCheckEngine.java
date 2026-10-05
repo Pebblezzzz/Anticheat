@@ -240,9 +240,12 @@ public final class ProductionCheckEngine {
           .sum() * config.violationIncrement();
       long gapTicks = lastObservationTick >= 0L && tick >= lastObservationTick
           ? tick - lastObservationTick : 0L;
-      double level = Math.min(
-          config.maximumViolationLevel(),
-          Math.max(0.0, rawLevel - gapTicks * config.violationDecayPerTick()));
+      // Independent evidence represents concurrently active proof and should not
+      // lose score merely because its observations occur on adjacent server ticks.
+      // Temporal decay is applied when evidence is retained without a new impossible
+      // event (or when it expires from the active window), not between independent
+      // evidence additions.
+      double level = Math.min(config.maximumViolationLevel(), rawLevel);
 
       List<Long> timestamps = active.values().stream()
           .map(EvidenceStamp::seenMillis)
@@ -726,64 +729,22 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
         String action = dig.action();
         if (action.contains("STARTED_DIGGING")) {
           state.diggingStarts.put(dig.position(), raw.receivedNanos());
+          state.diggingStartSpeeds.put(dig.position(), dig.breakSpeedPerTick());
+          state.diggingStartItems.put(dig.position(), dig.heldItemType());
           if (frame != null) {
             state.diggingStartFrames.put(dig.position(), frame);
           } else {
             state.diggingStartFrames.remove(dig.position());
           }
         } else if (action.contains("FINISHED_DIGGING")) {
-          Long started = state.diggingStarts.remove(dig.position());
-          Double startSpeed = state.diggingStartSpeeds.remove(dig.position());
-          String startItem = state.diggingStartItems.remove(dig.position());
-          PredictionFrame startedFrame = state.diggingStartFrames.remove(dig.position());
-          PredictionFrame worldFrame = startedFrame != null ? startedFrame : frame;
-          if (started != null
-              && worldFrame != null
-              && frame != null
-              && raw.receivedNanos() >= started
-              && raw.receivedNanos() - started <= 35_000_000L
-              && ("survival".equalsIgnoreCase(frame.observedAfter().gamemode())
-                  || "adventure".equalsIgnoreCase(frame.observedAfter().gamemode()))) {
-            var blockState = worldFrame.world().blockAtOrNull(
-                dig.position().x(), dig.position().y(), dig.position().z());
-            if (blockState != null && !blockState.isAir() && !blockState.isUnsupported()) {
-              long startClientTick = startedFrame == null ? -1L : startedFrame.clientTick();
-              long finishClientTick = frame.clientTick();
-              long clientTickDelta = startClientTick >= 0L && finishClientTick >= startClientTick
-                  ? finishClientTick - startClientTick
-                  : Long.MAX_VALUE;
-              Double finishSpeed = dig.breakSpeedPerTick();
-              double conservativeMaxSpeed = Math.max(
-                  startSpeed == null ? 0.0 : startSpeed,
-                  finishSpeed == null ? 0.0 : finishSpeed);
-              boolean speedKnown = conservativeMaxSpeed > 0.0
-                  && Double.isFinite(conservativeMaxSpeed)
-                  && startSpeed != null
-                  && finishSpeed != null;
-              if (speedKnown && clientTickDelta != Long.MAX_VALUE) {
-                double maximumVanillaProgress =
-                    Math.max(0.0, clientTickDelta) * conservativeMaxSpeed;
-                if (maximumVanillaProgress + 1.0e-6 < 1.0) {
-                  findings.add(finding(playerId, serverTick, "FastBreak",
-                      String.format(Locale.ROOT,
-                          "finished digging after %d client ticks, but the captured server break speed permits at most %.3f progress",
-                          clientTickDelta, maximumVanillaProgress),
-                      Math.min(1.0, 1.0 - maximumVanillaProgress), sequence));
-                }
-              } else if (clientTickDelta != Long.MAX_VALUE
-                  && raw.receivedNanos() - started <= 35_000_000L) {
-                findings.add(uncertainFinding(playerId, serverTick, "FastBreak",
-                    "finished digging unusually quickly, but complete server break-speed state was not captured across the interval",
-                    0.85, sequence));
-              }
-              if (startItem != null && !startItem.equals(dig.heldItemType())) {
-                findings.add(uncertainFinding(playerId, serverTick, "InventoryState",
-                    "held tool changed during a single block-break interval; break-speed causality was segmented",
-                    0.65, sequence));
-              }
-            }
-          }
+          evaluateBlockBreakCompletion(
+              findings, state, playerId, serverTick, sequence, raw, frame,
+              dig.position(), dig.breakSpeedPerTick(), dig.heldItemType());
         }
+      } else if (packet instanceof Packets.ClientBlockBreak breakPacket) {
+        evaluateBlockBreakCompletion(
+            findings, state, playerId, serverTick, sequence, raw, frame,
+            breakPacket.position(), breakPacket.breakSpeedPerTick(), breakPacket.heldItemType());
       }
 
       // VehicleMove is captured separately so future vehicle prediction can consume
@@ -801,6 +762,73 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
 
     state.prune(ordered.isEmpty() ? 0L : ordered.getLast().sequence());
     return new Report(findings);
+  }
+
+  private static void evaluateBlockBreakCompletion(
+      List<Finding> findings,
+      SessionState state,
+      String playerId,
+      long serverTick,
+      long sequence,
+      Packets.RawPacket raw,
+      PredictionFrame frame,
+      Pos position,
+      Double finishSpeed,
+      String finishItem) {
+    Long started = state.diggingStarts.remove(position);
+    Double startSpeed = state.diggingStartSpeeds.remove(position);
+    String startItem = state.diggingStartItems.remove(position);
+    PredictionFrame startedFrame = state.diggingStartFrames.remove(position);
+    PredictionFrame worldFrame = startedFrame != null ? startedFrame : frame;
+
+    if (started == null
+        || worldFrame == null
+        || frame == null
+        || raw.receivedNanos() < started
+        || raw.receivedNanos() - started > 35_000_000L
+        || (!"survival".equalsIgnoreCase(frame.observedAfter().gamemode())
+            && !"adventure".equalsIgnoreCase(frame.observedAfter().gamemode()))) {
+      return;
+    }
+
+    var blockState = worldFrame.world().blockAtOrNull(position.x(), position.y(), position.z());
+    if (blockState == null || blockState.isAir() || blockState.isUnsupported()) return;
+
+    long startClientTick = startedFrame == null ? -1L : startedFrame.clientTick();
+    long finishClientTick = frame.clientTick();
+    long clientTickDelta = startClientTick >= 0L && finishClientTick >= startClientTick
+        ? finishClientTick - startClientTick
+        : Long.MAX_VALUE;
+    double conservativeMaxSpeed = Math.max(
+        startSpeed == null ? 0.0 : startSpeed,
+        finishSpeed == null ? 0.0 : finishSpeed);
+    boolean speedKnown = conservativeMaxSpeed > 0.0
+        && Double.isFinite(conservativeMaxSpeed)
+        && startSpeed != null
+        && finishSpeed != null;
+
+    if (speedKnown && clientTickDelta != Long.MAX_VALUE) {
+      double maximumVanillaProgress =
+          Math.max(0.0, clientTickDelta) * conservativeMaxSpeed;
+      if (maximumVanillaProgress + 1.0e-6 < 1.0) {
+        findings.add(finding(playerId, serverTick, "FastBreak",
+            String.format(Locale.ROOT,
+                "finished digging after %d client ticks, but the captured server break speed permits at most %.3f progress",
+                clientTickDelta, maximumVanillaProgress),
+            Math.min(1.0, 1.0 - maximumVanillaProgress), sequence));
+      }
+    } else if (clientTickDelta != Long.MAX_VALUE
+        && raw.receivedNanos() - started <= 35_000_000L) {
+      findings.add(uncertainFinding(playerId, serverTick, "FastBreak",
+          "finished digging unusually quickly, but complete server break-speed state was not captured across the interval",
+          0.85, sequence));
+    }
+
+    if (startItem != null && !startItem.equals(finishItem)) {
+      findings.add(uncertainFinding(playerId, serverTick, "InventoryState",
+          "held tool changed during a single block-break interval; break-speed causality was segmented",
+          0.65, sequence));
+    }
   }
 
   private static List<Finding> analyzeMovementAnomalies(
