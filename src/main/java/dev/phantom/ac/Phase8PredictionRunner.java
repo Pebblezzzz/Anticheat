@@ -244,6 +244,13 @@ public final class Phase8PredictionRunner {
    */
   private static final double POSITION_RECONCILIATION_TOLERANCE =
       POSITION_TOLERANCE * 2.0;
+  /*
+   * Falling ticks can cross collision/fluid boundaries where the canonical
+   * replay and the live client differ by a few centimeters vertically. Keep
+   * this envelope narrow and only enable it for a descending airborne state
+   * whose horizontal motion is already inside the strict tolerance.
+   */
+  private static final double AIRBORNE_DESCENT_RECONCILIATION_TOLERANCE = 0.125;
   private static final long MAX_INCREMENTAL_HORIZON = Phase6Reachability.MAX_HORIZON_TICKS;
   private static final long PREDICTION_RESYNC_LAG_TICKS = 2L;
 
@@ -1888,8 +1895,15 @@ public final class Phase8PredictionRunner {
       if (fullMatches.isEmpty()
           && !groundClaimMismatch
           && uncertaintySources.isEmpty()) {
+        boolean airborneDescentBoundary =
+            qualifiesForAirborneDescentReconciliation(
+                prediction, observedBefore, observedAfter);
+        double reconciliationTolerance = airborneDescentBoundary
+            ? AIRBORNE_DESCENT_RECONCILIATION_TOLERANCE
+            : POSITION_RECONCILIATION_TOLERANCE;
         reconciliation = reconcileClosePredictionMismatch(
-            prediction, observedAfter, trace);
+            prediction, observedAfter, trace, reconciliationTolerance,
+            airborneDescentBoundary ? "AIRBORNE_DESCENT_BOUNDARY" : "STANDARD");
       }
       if (reconciliation.isPresent()) {
         Candidate reconciled = reconciliation.orElseThrow();
@@ -2677,10 +2691,45 @@ public final class Phase8PredictionRunner {
                 positionDistanceSquared(candidate.context().player().position(), position)));
   }
 
+  private static boolean qualifiesForAirborneDescentReconciliation(
+      Set<Candidate> candidates,
+      Player observedBefore,
+      Player observedAfter) {
+    if (observedBefore.onGround()
+        || observedAfter.onGround()
+        || observedAfter.position().y() >= observedBefore.position().y()
+        || candidates.isEmpty()) {
+      return false;
+    }
+
+    Candidate closest = candidates.stream()
+        .min(Comparator.comparingDouble(candidate ->
+            positionDistanceSquared(
+                candidate.context().player().position(),
+                observedAfter.position())))
+        .orElse(null);
+    if (closest == null) return false;
+
+    Player predicted = closest.context().player();
+    double horizontalErrorSquared =
+        Math.pow(predicted.position().x() - observedAfter.position().x(), 2)
+            + Math.pow(predicted.position().z() - observedAfter.position().z(), 2);
+    double verticalError =
+        Math.abs(predicted.position().y() - observedAfter.position().y());
+
+    return !predicted.onGround()
+        && predicted.velocity().y() < 0.0
+        && horizontalErrorSquared
+            <= POSITION_TOLERANCE * POSITION_TOLERANCE
+        && verticalError <= AIRBORNE_DESCENT_RECONCILIATION_TOLERANCE;
+  }
+
   private static Optional<Candidate> reconcileClosePredictionMismatch(
       Set<Candidate> candidates,
       Player observedAfter,
-      List<String> trace) {
+      List<String> trace,
+      double reconciliationTolerance,
+      String reconciliationReason) {
     Candidate closest = candidates.stream()
         .min(Comparator.comparingDouble(candidate ->
             positionDistanceSquared(
@@ -2694,7 +2743,7 @@ public final class Phase8PredictionRunner {
         observedAfter.position()));
     if (!Double.isFinite(distance)
         || distance <= POSITION_TOLERANCE
-        || distance > POSITION_RECONCILIATION_TOLERANCE) {
+        || distance > reconciliationTolerance) {
       return Optional.empty();
     }
 
@@ -2705,7 +2754,7 @@ public final class Phase8PredictionRunner {
         oldPlayer.velocity(),
         observedAfter.yaw(),
         observedAfter.pitch(),
-        oldPlayer.onGround(),
+        observedAfter.onGround(),
         oldPlayer.gamemode(),
         oldPlayer.effects(),
         oldPlayer.awaitingTeleport(),
@@ -2716,7 +2765,8 @@ public final class Phase8PredictionRunner {
         oldPlayer.environment(),
         observedAfter.clientTickRange(),
         oldPlayer.provenance(),
-        oldPlayer.uncertaintyReasons());
+        oldPlayer.uncertaintyReasons(),
+        oldPlayer.jumpDelay());
 
     Context rebasedContext = new Context(
         old.simulationTick(),
@@ -2734,9 +2784,10 @@ public final class Phase8PredictionRunner {
         old.lastOnGround());
 
     trace.add("CLOSE_MISMATCH candidate=" + closest.id()
+        + " reason=" + reconciliationReason
         + " distance=" + distance
         + " strictTolerance=" + POSITION_TOLERANCE
-        + " reconciliationTolerance=" + POSITION_RECONCILIATION_TOLERANCE
+        + " reconciliationTolerance=" + reconciliationTolerance
         + " oldPosition=" + oldPlayer.position()
         + " observedPosition=" + observedAfter.position()
         + " clientVelocity=" + old.clientVelocity());
