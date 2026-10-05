@@ -521,7 +521,7 @@ class ProductionCheckEngineTest {
 
     assertTrue(
         latest.findings().stream().anyMatch(f -> f.rule().equals("TimerBurst")),
-        () -> "live per-packet state was lost: " + latest.findings());
+        "live per-packet state was lost: " + latest.findings());
   }
 
   @Test
@@ -546,7 +546,7 @@ class ProductionCheckEngineTest {
 
     assertTrue(
         latest.findings().stream().anyMatch(f -> f.rule().equals("AimModulo360")),
-        () -> "rotation state was lost: " + latest.findings());
+        "rotation state was lost: " + latest.findings());
   }
 
 
