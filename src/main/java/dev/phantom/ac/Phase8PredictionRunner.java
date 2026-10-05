@@ -121,7 +121,8 @@ public final class Phase8PredictionRunner {
       WorldSnapshot world,
       List<String> uncertaintySources,
       List<String> trace,
-      PredictionOffset predictionOffset) {
+      PredictionOffset predictionOffset,
+      MovementAdvantageTracker.Snapshot movementAdvantage) {
     public PredictionFrame {
       if (sequence < 0 || receivedNanos < 0 || serverTick < 0 || clientTick < 0) {
         throw new IllegalArgumentException("invalid prediction-frame provenance");
@@ -163,7 +164,8 @@ public final class Phase8PredictionRunner {
           world,
           uncertaintySources,
           trace,
-          PredictionOffset.from(predictedAfter, observedAfter.position()));
+          PredictionOffset.from(predictedAfter, observedAfter.position()),
+          MovementAdvantageTracker.Snapshot.empty());
     }
   }
 
@@ -247,6 +249,15 @@ public final class Phase8PredictionRunner {
 
   private final int maximumCandidates;
   private final GrimPredictionEngine grimPredictionEngine = new GrimPredictionEngine();
+  /*
+   * Movement advantage is evidence state, not prediction state. It therefore
+   * survives ordinary spatial reconciliation/rebasing and only resets on a
+   * genuine player/anchor reset.
+   */
+  private final MovementAdvantageTracker movementAdvantageTracker =
+      new MovementAdvantageTracker();
+  private MovementAdvantageTracker.Snapshot latestMovementAdvantage =
+      MovementAdvantageTracker.Snapshot.empty();
   private final Phase7Timing.Config phase7TimingConfig;
   private final ArrayDeque<Packets.RawPacket> timingHistory = new ArrayDeque<>();
   private long timingEpochNanos = -1L;
@@ -419,6 +430,8 @@ public final class Phase8PredictionRunner {
     clearObservedMovementHistory();
     lastPositionClientTick = -1L;
     nextCandidateId = 1L;
+    movementAdvantageTracker.reset();
+    latestMovementAdvantage = MovementAdvantageTracker.Snapshot.empty();
     latestContinuation = Continuation.UNANCHORED;
   }
 
@@ -3696,7 +3709,8 @@ public final class Phase8PredictionRunner {
       trace.add("FRONTIER_SPATIAL_REBASE count=" + rebasedCount
           + " expectedRootTick=" + expectedRootTick
           + " observedPosition=" + observedBefore.position()
-          + " tolerance=" + POSITION_TOLERANCE);
+          + " tolerance=" + POSITION_TOLERANCE
+          + " movementAdvantagePreserved=true");
     }
     return new SpatialRebaseResult(Set.copyOf(rebased), rebasedCount > 0);
   }
@@ -5114,6 +5128,35 @@ public final class Phase8PredictionRunner {
       List<String> uncertaintySources,
       List<String> trace) {
     List<String> mergedTrace = new ArrayList<>(trace);
+
+    /*
+     * Update the signed movement-advantage accumulator from the reachable
+     * envelope before this frame is exposed to downstream checks. Because the
+     * accumulator is owned by the runner rather than by Candidate positions,
+     * ordinary observed-position rebases cannot erase prior advantage.
+     */
+    if (move.position() != null && !predictedAfter.isEmpty()) {
+      latestMovementAdvantage = movementAdvantageTracker.observe(
+          predictedAfter.stream()
+              .map(candidate -> candidate.context().player().position())
+              .toList(),
+          observedBefore.position(),
+          observedAfter.position(),
+          uncertaintySources.isEmpty());
+      mergedTrace.add("MOVEMENT_ADVANTAGE"
+          + " evaluated=" + latestMovementAdvantage.evaluated()
+          + " signedHorizontal=" + latestMovementAdvantage.signedHorizontal()
+          + " signedVertical=" + latestMovementAdvantage.signedVertical()
+          + " accumulatedHorizontal=" + latestMovementAdvantage.accumulatedHorizontal()
+          + " accumulatedVertical=" + latestMovementAdvantage.accumulatedVertical());
+    } else if (move.position() != null) {
+      latestMovementAdvantage = movementAdvantageTracker.decayOnly();
+      mergedTrace.add("MOVEMENT_ADVANTAGE evaluated=false"
+          + " accumulatedHorizontal=" + latestMovementAdvantage.accumulatedHorizontal()
+          + " accumulatedVertical=" + latestMovementAdvantage.accumulatedVertical()
+          + " reason=no-reachable-envelope");
+    }
+
     Vec3 actualMovement = new Vec3(
         observedAfter.position().x() - observedBefore.position().x(),
         observedAfter.position().y() - observedBefore.position().y(),
@@ -5194,6 +5237,11 @@ public final class Phase8PredictionRunner {
         + " horizontal=" + predictionOffset.horizontal()
         + " vertical=" + predictionOffset.vertical()
         + " total=" + predictionOffset.total());
+    mergedTrace.add("MOVEMENT_ADVANTAGE_STATE accumulatedHorizontal="
+        + latestMovementAdvantage.accumulatedHorizontal()
+        + " accumulatedVertical=" + latestMovementAdvantage.accumulatedVertical()
+        + " signedHorizontal=" + latestMovementAdvantage.signedHorizontal()
+        + " signedVertical=" + latestMovementAdvantage.signedVertical());
     return new PredictionFrame(
         sequence,
         packet.receivedNanos(),
@@ -5207,7 +5255,8 @@ public final class Phase8PredictionRunner {
         world,
         uncertaintySources,
         mergedTrace,
-        predictionOffset);
+        predictionOffset,
+        latestMovementAdvantage);
   }
 
   private static Player withClientRotation(Player player, float yaw, float pitch) {
