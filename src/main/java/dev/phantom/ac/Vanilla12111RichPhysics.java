@@ -228,7 +228,6 @@ public final class Vanilla12111RichPhysics {
                 double slipperiness = BlockCatalogue12111.slipperiness(support);
                 double movementSpeed = context.attributes().value() * context.effects().speedMultiplier();
                 if (context.movementEnvironment().sprinting()) movementSpeed *= SPRINTING_SPEED_MULTIPLIER;
-                if (context.movementEnvironment().sneaking()) movementSpeed *= context.effects().sneakingSpeedMultiplier();
 
                 /*
                  * Soul Speed is represented by the modern movement-efficiency
