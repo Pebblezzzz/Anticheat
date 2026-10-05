@@ -532,13 +532,18 @@ public final class AccuracyChecks {
   private record PendingImpulse(long sequence, long receivedNanos, Vec3 velocity) {}
 
   private static PredictionFrame frameAt(Map<Long, PredictionFrame> frames, long sequence) {
-    Map.Entry<Long, PredictionFrame> entry = frames instanceof NavigableMap<Long, PredictionFrame> navigable
-        ? navigable.floorEntry(sequence)
-        : frames.entrySet().stream()
-            .filter(e -> e.getKey() <= sequence)
-            .max(Map.Entry.comparingByKey())
-            .orElse(null);
-    return entry == null ? null : entry.getValue();
+    if (frames instanceof NavigableMap<?, ?> rawNavigable) {
+      @SuppressWarnings("unchecked")
+      NavigableMap<Long, PredictionFrame> navigable =
+          (NavigableMap<Long, PredictionFrame>) rawNavigable;
+      Map.Entry<Long, PredictionFrame> entry = navigable.floorEntry(sequence);
+      return entry == null ? null : entry.getValue();
+    }
+    return frames.entrySet().stream()
+        .filter(e -> e.getKey() <= sequence)
+        .max(Map.Entry.comparingByKey())
+        .map(Map.Entry::getValue)
+        .orElse(null);
   }
 
   private static ProductionCheckEngine.Finding hard(
