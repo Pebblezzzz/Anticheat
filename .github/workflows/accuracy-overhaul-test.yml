@@ -16,4 +16,15 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - run: mvn -B -DskipTests=false test
+      - name: Run Maven tests
+        run: mvn -B -ntp clean test 2>&1 | tee maven-test.log
+      - name: Upload Maven diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accuracy-overhaul-maven-diagnostics
+          path: |
+            maven-test.log
+            target/surefire-reports/**
+            target/test-classes/**
+          if-no-files-found: warn
