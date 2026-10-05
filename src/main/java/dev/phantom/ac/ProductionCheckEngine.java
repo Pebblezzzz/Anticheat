@@ -46,7 +46,6 @@ public final class ProductionCheckEngine {
 
     void prune(long currentSequence) {
       while (diggingStarts.size() > 64) {
-        diggingStarts.keySet().iterator().next();
         Pos oldest = diggingStarts.keySet().iterator().next();
         diggingStarts.remove(oldest);
       }
