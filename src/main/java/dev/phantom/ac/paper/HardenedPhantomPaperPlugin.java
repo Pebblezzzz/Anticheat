@@ -668,7 +668,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   @EventHandler public void onJoin(PlayerJoinEvent event){
     UUID playerId=event.getPlayer().getUniqueId();
-    captures.computeIfAbsent(playerId,id->new Capture(id,System.nanoTime(),validationBudget));
+    Capture capture = captures.computeIfAbsent(
+        playerId, id -> new Capture(id, System.nanoTime(), validationBudget));
+    publishInitialAuthoritativeContext(capture, event.getPlayer());
   }
 
   @EventHandler
@@ -689,12 +691,16 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
   @EventHandler public void onRespawn(PlayerRespawnEvent event){
     UUID playerId=event.getPlayer().getUniqueId();
-    captures.put(playerId,new Capture(playerId,System.nanoTime(),validationBudget));
+    Capture capture = new Capture(playerId, System.nanoTime(), validationBudget);
+    captures.put(playerId, capture);
+    publishInitialAuthoritativeContext(capture, event.getPlayer());
   }
 
   @EventHandler public void onWorldChange(PlayerChangedWorldEvent event){
     UUID playerId=event.getPlayer().getUniqueId();
-    captures.put(playerId,new Capture(playerId,System.nanoTime(),validationBudget));
+    Capture capture = new Capture(playerId, System.nanoTime(), validationBudget);
+    captures.put(playerId, capture);
+    publishInitialAuthoritativeContext(capture, event.getPlayer());
     setbackOverrides.remove(playerId);
   }
 
@@ -939,10 +945,106 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     for (Player player : getServer().getOnlinePlayers()) {
       Capture capture = captures.get(player.getUniqueId());
       if (capture == null) continue;
+
       capture.authoritativeServerTick.set(tick);
+
+      /*
+       * Grim keeps a persistent movement frontier anchored to real server state.
+       * Phantom previously sent a transaction barrier without publishing the
+       * Bukkit state that belongs to it, so Phase 8 could fall back to the
+       * CLIENT_MOVEMENT_BOOTSTRAP_PROVISIONAL root forever.
+       */
+      Packets.PlayerContext context = authoritativeContext(player);
+      capture.playerState.observeAuthoritativeContext(context);
       sendStateBarrier(player, capture);
     }
     drainChunkQueues();
+  }
+
+  private static Packets.PlayerContext authoritativeContext(Player player) {
+    Objects.requireNonNull(player, "player");
+
+    var location = player.getLocation();
+    AttributeInstance movementSpeed = player.getAttribute(Attribute.MOVEMENT_SPEED);
+    double resolvedMovementSpeed =
+        movementSpeed == null || !Double.isFinite(movementSpeed.getValue())
+            ? 0.1D
+            : Math.max(0.0D, movementSpeed.getValue());
+
+    Map<String, Integer> effects = new LinkedHashMap<>();
+    for (PotionEffect effect : player.getActivePotionEffects()) {
+      if (effect == null || effect.getType() == null || effect.getType().getKey() == null) continue;
+      effects.put(effect.getType().getKey().toString().toLowerCase(Locale.ROOT), effect.getAmplifier());
+    }
+
+    boolean onGround = player.isOnGround();
+    boolean sprinting = player.isSprinting();
+    boolean sneaking = player.isSneaking();
+    boolean swimmingInput = player.isSwimming();
+    boolean gliding = player.isGliding();
+    boolean sleeping = player.isSleeping();
+
+    Material feet = location.getBlock().getType();
+    String materialName = feet.name();
+    boolean climbable =
+        materialName.endsWith("_LADDER")
+            || materialName.equals("LADDER")
+            || materialName.contains("VINE");
+
+    boolean inLava = player.isInLava();
+    boolean inWater = swimmingInput || (!inLava && materialName.contains("WATER"));
+
+    Phase5Mechanics.MovementEnvironment movementEnvironment;
+    if (inLava) {
+      movementEnvironment = new Phase5Mechanics.MovementEnvironment(
+          Phase5Mechanics.Fluid.LAVA, true, climbable, onGround,
+          sprinting, sneaking, false, gliding, 1.0D, 0.5D, 0.25D);
+    } else if (inWater) {
+      movementEnvironment = new Phase5Mechanics.MovementEnvironment(
+          Phase5Mechanics.Fluid.WATER, true, climbable, onGround,
+          sprinting, sneaking, swimmingInput, gliding, 1.0D, 0.8D, 1.0D);
+    } else {
+      movementEnvironment = new Phase5Mechanics.MovementEnvironment(
+          Phase5Mechanics.Fluid.NONE, false, climbable, onGround,
+          sprinting, sneaking, false, gliding, 1.0D, 1.0D, 1.0D);
+    }
+
+    Phase5Mechanics.Pose pose =
+        Phase5Mechanics.nextPose(Phase5Mechanics.Pose.STANDING, movementEnvironment, sleeping);
+
+    org.bukkit.util.Vector velocity = player.getVelocity();
+    return new Packets.PlayerContext(
+        player.getGameMode().name().toLowerCase(Locale.ROOT),
+        new dev.phantom.ac.Simulation.Attributes(resolvedMovementSpeed),
+        effects,
+        pose,
+        movementEnvironment,
+        new Vec3(location.getX(), location.getY(), location.getZ()),
+        new Vec3(velocity.getX(), velocity.getY(), velocity.getZ()),
+        player.getAllowFlight(),
+        player.isFlying(),
+        sleeping,
+        List.of(),
+        Phase5Mechanics.VehicleState.NONE);
+  }
+
+  private void publishInitialAuthoritativeContext(Capture capture, Player player) {
+    Packets.PlayerContext context = authoritativeContext(player);
+    capture.playerState.observeAuthoritativeContext(context);
+
+    long sequence = capture.sequence.incrementAndGet();
+    long receivedNanos = System.nanoTime();
+    appendPacket(capture, new RawPacket(
+        sequence,
+        receivedNanos,
+        context,
+        Packets.CaptureProvenance.fromAdapter(
+            "paper-initial-authority",
+            context,
+            authoritativeTick(capture),
+            capture.clientTickTracker.hasObservedBoundary()
+                ? capture.clientTickTracker.clientTickForMovement()
+                : null)));
   }
 
   private static Long authoritativeTick(Capture capture){
