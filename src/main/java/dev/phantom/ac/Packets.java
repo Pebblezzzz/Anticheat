@@ -316,7 +316,8 @@ public final class Packets {
           ||packet instanceof HeldItemChange||packet instanceof EntityAction||packet instanceof DigAction
           ||packet instanceof InventoryClick||packet instanceof SlotStateChange)return "CLIENT_TO_SERVER";
       if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof ExplosionImpulse
-          ||packet instanceof Effect||packet instanceof Gamemode||packet instanceof PlayerContext||packet instanceof WorldTransactionSend||packet.mutatesWorld())return "SERVER_TO_CLIENT";
+          ||packet instanceof Effect||packet instanceof Gamemode||packet instanceof PlayerContext
+          ||packet instanceof InventorySlotState||packet instanceof WorldTransactionSend||packet.mutatesWorld())return "SERVER_TO_CLIENT";
       return "UNKNOWN";
     }
   }
