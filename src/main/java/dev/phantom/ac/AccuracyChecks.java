@@ -391,7 +391,7 @@ public final class AccuracyChecks {
       if (outsidePredictionEnvelope) {
         int badMoves = pending.badMoves() + 1;
         state.pendingImpulse = new PendingImpulse(
-            pending.sequence(), pending.receivedNanos(), pending.velocity(), badMoves);
+            pending.sequence(), pending.receivedNanos(), pending.velocity(), badMoves, pending.source());
         state.knockbackResiduals.addLast(minTotalResidual);
         while (state.knockbackResiduals.size() > 8) state.knockbackResiduals.removeFirst();
 
