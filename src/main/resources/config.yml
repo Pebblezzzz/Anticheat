@@ -95,7 +95,7 @@ punishments:
     Hitboxes:
       remove-violations-after-seconds: 300
       checks:
-        - "Hitboxes"
+        - "Hitbox"
       alert: "5:3"
       log: "1:1"
     Misc:

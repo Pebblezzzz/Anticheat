@@ -53,23 +53,42 @@ class ProductionCheckEngineTest {
   }
 
   @Test
-  void productionAlertUsesVlThresholdInsteadOfThreeImpossibleObservations() {
+  void repeatedIdenticalEvidenceDoesNotInflateViolationLevel() {
     ProductionCheckEngine.Config config =
-        new ProductionCheckEngine.Config(true, 100.0, 40, 20, 4.0, 5.0);
+        new ProductionCheckEngine.Config(true, 3.0, 40, 20, 4.0, 5.0);
     ProductionCheckEngine.Finding finding =
         new ProductionCheckEngine.Finding("p", 1, "Reach",
-            ProductionCheckEngine.Verdict.IMPOSSIBLE, "too far", 1.0, "r1");
+            ProductionCheckEngine.Verdict.IMPOSSIBLE, "same geometric contradiction", 1.0, "r1");
 
     var state = ProductionCheckEngine.Accumulator.empty();
     for (int i = 0; i < 99; i++) {
-      state = state.accept(finding, config).state();
-      finding = new ProductionCheckEngine.Finding("p", i + 2L, "Reach",
-          ProductionCheckEngine.Verdict.IMPOSSIBLE, "too far", 1.0, "r1");
+      state = state.accept(
+          new ProductionCheckEngine.Finding("p", i + 1L, "Reach",
+              ProductionCheckEngine.Verdict.IMPOSSIBLE, "same geometric contradiction", 1.0, "r1"),
+          config).state();
     }
-    assertTrue(state.rules().get("Reach").supportingEvents() >= 99);
-    var threshold = state.accept(finding, config);
-    assertTrue(threshold.alert().isPresent());
-    assertEquals(100.0, threshold.state().rules().get("Reach").violationLevel(), 1.0e-9);
+    assertEquals(1, state.rules().get("Reach").supportingEvents());
+    assertEquals(1.0, state.rules().get("Reach").violationLevel(), 1.0e-9);
+  }
+
+  @Test
+  void independentEvidenceCanCrossConfiguredThreshold() {
+    ProductionCheckEngine.Config config =
+        new ProductionCheckEngine.Config(true, 3.0, 40, 20, 4.0, 5.0);
+    var state = ProductionCheckEngine.Accumulator.empty();
+
+    state = state.accept(new ProductionCheckEngine.Finding(
+        "p", 1, "Reach", ProductionCheckEngine.Verdict.IMPOSSIBLE,
+        "geometric range contradiction", 1.0, "r1"), config).state();
+    state = state.accept(new ProductionCheckEngine.Finding(
+        "p", 2, "Reach", ProductionCheckEngine.Verdict.IMPOSSIBLE,
+        "causal target distance contradiction", 1.0, "r2"), config).state();
+    var third = state.accept(new ProductionCheckEngine.Finding(
+        "p", 3, "Reach", ProductionCheckEngine.Verdict.IMPOSSIBLE,
+        "view-ray interaction contradiction", 1.0, "r3"), config);
+
+    assertTrue(third.alert().isPresent());
+    assertEquals(3.0, third.state().rules().get("Reach").violationLevel(), 1.0e-9);
   }
 
   private static Phase6Reachability.Candidate candidate(State.Player player, long id) {
@@ -280,13 +299,25 @@ class ProductionCheckEngineTest {
         new Packets.Move(p.position(), p.yaw(), p.pitch(), true, 0L),
         p, p, Set.of(), Set.of(), world, List.of(), List.of());
 
+    var startPlayer = p;
+    var startFrame = new PredictionFrame(
+        1, 0L, 1, 0L,
+        new Packets.Move(startPlayer.position(), startPlayer.yaw(), startPlayer.pitch(), true, 0L),
+        startPlayer, startPlayer, Set.of(), Set.of(), world, List.of(), List.of());
+    var finishFrame = movement;
+
     var packets = List.of(
         new Packets.RawPacket(1, 0L,
-            new Packets.DigAction("STARTED_DIGGING", new dev.phantom.ac.world.Pos(0, 0, 0), 1)),
+            new Packets.DigAction(
+                "STARTED_DIGGING",
+                new dev.phantom.ac.world.Pos(0, 0, 0),
+                1, 0.02, "minecraft:air", 0)),
         new Packets.RawPacket(2, 20_000_000L,
-            new Packets.DigAction("FINISHED_DIGGING", new dev.phantom.ac.world.Pos(0, 0, 0), 2)));
+            new Packets.ClientBlockBreak(
+                new dev.phantom.ac.world.Pos(0, 0, 0), 2, 1L, 0.02, "minecraft:air", 0)));
 
-    var result = ProductionCheckEngine.analyze("p", packets, report(movement), CONFIG);
+    var result = ProductionCheckEngine.analyze(
+        "p", packets, report(startFrame, finishFrame), CONFIG);
 
     assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("FastBreak")));
   }
@@ -377,18 +408,36 @@ class ProductionCheckEngineTest {
 
     var result = ProductionCheckEngine.analyze("p", packets, report(frame(2, player(0, 0))), CONFIG);
 
-    assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("Reach")));
-    assertTrue(result.findings().stream().filter(f -> f.rule().equals("Reach"))
-        .allMatch(f -> f.verdict() == ProductionCheckEngine.Verdict.UNCERTAIN));
+    var reach = result.findings().stream()
+        .filter(f -> f.rule().equals("Reach"))
+        .findFirst()
+        .orElseThrow();
+    assertEquals(ProductionCheckEngine.Verdict.IMPOSSIBLE, reach.verdict());
+    assertEquals(ProductionCheckEngine.EvidenceClass.IMPOSSIBLE, reach.evidenceClass());
+    assertEquals(1.0, reach.normalizedScore(), 1.0e-9);
 
-    var accumulator = ProductionCheckEngine.Accumulator.empty();
-    for (var finding : result.findings()) {
-      var accepted = accumulator.accept(finding, CONFIG);
-      assertTrue(accepted.alert().isEmpty());
-      accumulator = accepted.state();
-    }
+    var accepted = ProductionCheckEngine.Accumulator.empty().accept(reach, CONFIG);
+    assertTrue(accepted.alert().isEmpty());
+    assertEquals(1.0, accepted.state().rules().get("Reach").violationLevel(), 1.0e-9);
   }
 
+
+  @Test
+  void movingTargetUsesInterpolatedClientVisibleHitbox() {
+    BlockBox first = new BlockBox(-0.5, 1.0, 2.5, 0.5, 2.0, 3.5);
+    BlockBox second = new BlockBox(3.5, 1.0, 2.5, 4.5, 2.0, 3.5);
+    Packets.Move move = new Packets.Move(new Vec3(0, 0, 0), 307.0f, 0.0f, true, 1L);
+    PredictionFrame prediction = frame(3, player(307.0f, 0.0f));
+    List<Packets.RawPacket> packets = List.of(
+        new Packets.RawPacket(1, 0L, new Packets.EntitySpawn(10, first)),
+        new Packets.RawPacket(2, 100L, new Packets.EntityMove(10, second)),
+        new Packets.RawPacket(3, 50L, new Packets.InteractEntity(10, Packets.InteractAction.ATTACK)));
+
+    var result = ProductionCheckEngine.analyze("p", packets, report(prediction), CONFIG);
+
+    assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("Hitbox")
+        || f.rule().equals("Reach")));
+  }
 
   @Test
   void bestPredictionResidualDetectsSubBlockSpeed() {
@@ -418,7 +467,7 @@ class ProductionCheckEngineTest {
     var result = ProductionCheckEngine.analyze(
         "p", List.of(new Packets.RawPacket(1L, 1L, move)), report(frame), CONFIG);
 
-    assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("Speed")));
+    assertTrue(result.findings().stream().noneMatch(f -> f.rule().equals("Speed")));
   }
 
   @Test

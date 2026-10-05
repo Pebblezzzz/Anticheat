@@ -44,6 +44,8 @@ public final class ProductionCheckEngine {
   public static final class SessionState {
     final Map<Integer, EntityHistory> entities = new HashMap<>();
     final Map<Pos, Long> diggingStarts = new HashMap<>();
+    final Map<Pos, Double> diggingStartSpeeds = new HashMap<>();
+    final Map<Pos, String> diggingStartItems = new HashMap<>();
     final Map<Pos, PredictionFrame> diggingStartFrames = new HashMap<>();
 
     void prune(long currentSequence) {
@@ -52,6 +54,8 @@ public final class ProductionCheckEngine {
         diggingStarts.remove(oldest);
       }
       diggingStartFrames.keySet().retainAll(diggingStarts.keySet());
+      diggingStartSpeeds.keySet().retainAll(diggingStarts.keySet());
+      diggingStartItems.keySet().retainAll(diggingStarts.keySet());
     }
   }
 
@@ -110,6 +114,13 @@ public final class ProductionCheckEngine {
 
   public enum Verdict { CLEAR, IMPOSSIBLE, UNCERTAIN }
 
+  public enum EvidenceClass {
+    IMPOSSIBLE,
+    HIGHLY_SUSPICIOUS,
+    WEAK_HEURISTIC,
+    INSUFFICIENT_INFORMATION
+  }
+
   public record Finding(
       String playerId,
       long serverTick,
@@ -117,21 +128,63 @@ public final class ProductionCheckEngine {
       Verdict verdict,
       String reason,
       double severity,
-      String replayReference) implements java.io.Serializable {
+      String replayReference,
+      EvidenceClass evidenceClass,
+      double normalizedScore,
+      String independenceKey,
+      boolean causalEvidence) implements java.io.Serializable {
     public Finding {
       Objects.requireNonNull(playerId);
       Objects.requireNonNull(rule);
       Objects.requireNonNull(verdict);
       Objects.requireNonNull(reason);
       Objects.requireNonNull(replayReference);
-      if (serverTick < 0 || !Double.isFinite(severity) || severity < 0.0) {
+      Objects.requireNonNull(evidenceClass);
+      Objects.requireNonNull(independenceKey);
+      if (serverTick < 0 || !Double.isFinite(severity) || severity < 0.0
+          || !Double.isFinite(normalizedScore) || normalizedScore < 0.0
+          || normalizedScore > 1.0 || independenceKey.isBlank()) {
         throw new IllegalArgumentException("invalid finding");
       }
+    }
+
+    public Finding(
+        String playerId,
+        long serverTick,
+        String rule,
+        Verdict verdict,
+        String reason,
+        double severity,
+        String replayReference) {
+      this(
+          playerId,
+          serverTick,
+          rule,
+          verdict,
+          reason,
+          severity,
+          replayReference,
+          verdict == Verdict.IMPOSSIBLE
+              ? EvidenceClass.IMPOSSIBLE
+              : clampScore(severity) >= 0.75
+                  ? EvidenceClass.HIGHLY_SUSPICIOUS
+                  : EvidenceClass.INSUFFICIENT_INFORMATION,
+          clampScore(severity),
+          independenceFingerprint(rule, verdict, reason),
+          verdict == Verdict.IMPOSSIBLE);
     }
 
     public String message(String playerName) {
       String name = playerName == null || playerName.isBlank() ? playerId : playerName;
       return "[PhantomAC] " + name + " failed " + rule + " (" + reason + ")";
+    }
+  }
+
+  private record EvidenceStamp(long seenMillis, double score) {
+    EvidenceStamp {
+      if (seenMillis < 0L || !Double.isFinite(score) || score < 0.0 || score > 1.0) {
+        throw new IllegalArgumentException("invalid evidence stamp");
+      }
     }
   }
 
@@ -141,13 +194,15 @@ public final class ProductionCheckEngine {
       long lastAlertTick,
       double violationLevel,
       double lastAlertViolationLevel,
-      List<Long> violationTimesMillis) implements java.io.Serializable {
+      List<Long> violationTimesMillis,
+      Map<String, EvidenceStamp> activeEvidence) implements java.io.Serializable {
     public State {
       if (supportingEvents < 0 || !Double.isFinite(violationLevel) || violationLevel < 0.0
           || !Double.isFinite(lastAlertViolationLevel) || lastAlertViolationLevel < 0.0) {
         throw new IllegalArgumentException("invalid production violation state");
       }
       violationTimesMillis = List.copyOf(violationTimesMillis);
+      activeEvidence = Map.copyOf(activeEvidence);
     }
 
     public State(
@@ -157,36 +212,77 @@ public final class ProductionCheckEngine {
         double violationLevel,
         double lastAlertViolationLevel) {
       this(supportingEvents, lastObservationTick, lastAlertTick,
-          violationLevel, lastAlertViolationLevel, List.of());
+          violationLevel, lastAlertViolationLevel, List.of(), Map.of());
     }
 
     public static State empty() {
-      return new State(0, -1L, -1L, 0.0, 0.0, List.of());
+      return new State(0, -1L, -1L, 0.0, 0.0, List.of(), Map.of());
     }
 
-    State addViolation(long tick, long nowMillis, Config config, String rule) {
-      GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(rule);
-      long cutoff = nowMillis - policy.removeViolationsAfterMillis();
-      List<Long> active = new ArrayList<>();
-      for (long timestamp : violationTimesMillis) if (timestamp > cutoff) active.add(timestamp);
-      active.add(nowMillis);
-      double level = active.size() * config.violationIncrement();
-      return new State(supportingEvents + 1, tick, lastAlertTick, level,
-          lastAlertViolationLevel, active);
+    State addViolation(
+        Finding finding,
+        long tick,
+        long nowMillis,
+        Config config) {
+      GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(finding.rule());
+      long cutoff = Math.max(0L, nowMillis - policy.removeViolationsAfterMillis());
+      Map<String, EvidenceStamp> active = new LinkedHashMap<>();
+      for (var entry : activeEvidence.entrySet()) {
+        if (entry.getValue().seenMillis() > cutoff) active.put(entry.getKey(), entry.getValue());
+      }
+      boolean independent = !active.containsKey(finding.independenceKey());
+      if (independent) {
+        active.put(finding.independenceKey(), new EvidenceStamp(nowMillis, finding.normalizedScore()));
+      }
+
+      double rawLevel = active.values().stream()
+          .mapToDouble(EvidenceStamp::score)
+          .sum() * config.violationIncrement();
+      long gapTicks = lastObservationTick >= 0L && tick >= lastObservationTick
+          ? tick - lastObservationTick : 0L;
+      double level = Math.min(
+          config.maximumViolationLevel(),
+          Math.max(0.0, rawLevel - gapTicks * config.violationDecayPerTick()));
+
+      List<Long> timestamps = active.values().stream()
+          .map(EvidenceStamp::seenMillis)
+          .sorted()
+          .toList();
+      return new State(
+          supportingEvents + (independent ? 1 : 0),
+          tick,
+          lastAlertTick,
+          level,
+          lastAlertViolationLevel,
+          timestamps,
+          active);
     }
 
     State retainActive(long tick, long nowMillis, Config config, String rule) {
       GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(rule);
       long cutoff = Math.max(0L, nowMillis - policy.removeViolationsAfterMillis());
-      List<Long> active = violationTimesMillis.stream().filter(timestamp -> timestamp > cutoff).toList();
-      double level = active.size() * config.violationIncrement();
+      Map<String, EvidenceStamp> active = new LinkedHashMap<>();
+      for (var entry : activeEvidence.entrySet()) {
+        if (entry.getValue().seenMillis() > cutoff) active.put(entry.getKey(), entry.getValue());
+      }
+      double rawLevel = active.values().stream().mapToDouble(EvidenceStamp::score).sum()
+          * config.violationIncrement();
+      long gapTicks = lastObservationTick >= 0L && tick >= lastObservationTick
+          ? tick - lastObservationTick : 0L;
+      double level = Math.min(
+          config.maximumViolationLevel(),
+          Math.max(0.0, rawLevel - gapTicks * config.violationDecayPerTick()));
+      List<Long> timestamps = active.values().stream()
+          .map(EvidenceStamp::seenMillis)
+          .sorted()
+          .toList();
       return new State(supportingEvents, tick, lastAlertTick, level,
-          lastAlertViolationLevel, active);
+          lastAlertViolationLevel, timestamps, active);
     }
 
     State alerted(long tick, double level) {
       return new State(supportingEvents, tick == lastObservationTick ? tick : lastObservationTick,
-          tick, level, level, violationTimesMillis);
+          tick, level, level, violationTimesMillis, activeEvidence);
     }
   }
 
@@ -205,24 +301,37 @@ public final class ProductionCheckEngine {
 
       Map<String, State> updated = new LinkedHashMap<>(rules);
       State old = rules.getOrDefault(finding.rule(), State.empty());
+      if (old.lastObservationTick() >= 0L
+          && finding.serverTick() >= old.lastObservationTick()
+          && finding.serverTick() - old.lastObservationTick() >= config.resetAfterTicks()) {
+        old = State.empty();
+      }
       State next = finding.verdict() == Verdict.IMPOSSIBLE
-          ? old.addViolation(finding.serverTick(), nowMillis, config, finding.rule())
+          ? old.addViolation(finding, finding.serverTick(), nowMillis, config)
           : old.retainActive(finding.serverTick(), nowMillis, config, finding.rule());
 
       GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(finding.rule());
-      int activeCount = next.violationTimesMillis().size();
-      double level = activeCount * config.violationIncrement();
+      double level = Math.min(config.maximumViolationLevel(), next.violationLevel());
       next = new State(next.supportingEvents(), next.lastObservationTick(),
-          next.lastAlertTick(), level, next.lastAlertViolationLevel(), next.violationTimesMillis());
+          next.lastAlertTick(), level, next.lastAlertViolationLevel(),
+          next.violationTimesMillis(), next.activeEvidence());
 
       Optional<Finding> alert = Optional.empty();
       Optional<Finding> log = Optional.empty();
 
-      boolean thresholdReached = thresholdReached(level, policy.alert());
-      boolean crossedNextInterval = boundaryCrossed(level, policy.alert(), next.lastAlertViolationLevel());
+      double alertThreshold = Math.max(config.alertViolationThreshold(), policy.alert().threshold());
+      double alertInterval = Math.max(config.alertViolationInterval(), policy.alert().interval());
+      GrimAlertPolicy.CommandRule alertRule =
+          new GrimAlertPolicy.CommandRule(alertThreshold, alertInterval);
+      boolean thresholdReached = level + 1.0e-9 >= alertRule.threshold();
+      boolean crossedNextInterval = boundaryCrossed(
+          level, alertRule, next.lastAlertViolationLevel());
+      boolean debounceSatisfied =
+          next.lastAlertTick() < 0L
+              || finding.serverTick() - next.lastAlertTick() >= config.alertDebounceTicks();
 
       if (finding.verdict() == Verdict.IMPOSSIBLE
-          && thresholdReached && crossedNextInterval) {
+          && thresholdReached && crossedNextInterval && debounceSatisfied) {
         alert = Optional.of(finding);
         next = next.alerted(finding.serverTick(), level);
       }
@@ -260,6 +369,36 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
 
   public record Report(List<Finding> findings) {
     public Report { findings = List.copyOf(findings); }
+  }
+
+  private static double clampScore(double score) {
+    return Math.max(0.0, Math.min(1.0, score));
+  }
+
+  private static String independenceFingerprint(String rule, Verdict verdict, String reason) {
+    String normalized = reason
+        .replaceAll("[-+]?\\d+(?:\\.\\d+)?", "N")
+        .replaceAll("\\s+", " ")
+        .trim();
+    if (normalized.length() > 96) normalized = normalized.substring(0, 96);
+    return rule + "|" + verdict + "|" + normalized;
+  }
+
+  private static Finding typedFinding(
+      String playerId,
+      long serverTick,
+      String rule,
+      Verdict verdict,
+      String reason,
+      double score,
+      String replayReference,
+      EvidenceClass evidenceClass,
+      boolean causalEvidence) {
+    return new Finding(
+        playerId, serverTick, rule, verdict, reason, score, replayReference,
+        evidenceClass, clampScore(score),
+        independenceFingerprint(rule, verdict, reason),
+        causalEvidence);
   }
 
   public static Report analyze(
@@ -472,21 +611,44 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
         BlockBox target = targetHistory == null
             ? null
             : targetHistory.compensated(raw.receivedNanos());
-        if (target == null || frame == null) continue;
+        if (frame == null) continue;
+
+        if (target == null) {
+          findings.add(uncertainFinding(playerId, serverTick, "Hitbox",
+              "attack target has no causally reconstructed client-visible hitbox",
+              1.0, sequence));
+          continue;
+        }
 
         Vec3 eye = eyePosition(frame.observedAfter());
         Vec3 direction = lookDirection(frame.observedAfter().yaw(), frame.observedAfter().pitch());
-        double hitDistance = rayEntryDistance(eye, direction, target, config.attackReach());
-        double fallbackDistance = pointAabbDistance(eye, target);
+        double rayDistance = rayEntryDistance(eye, direction, target, config.attackReach());
+        double pointDistance = pointAabbDistance(eye, target);
 
-        // The packet has no hit vector for an ATTACK action. Use the compensated
-        // entity box and a conservative 4-block interaction envelope.
-        if (!Double.isFinite(hitDistance)
-            && fallbackDistance > config.attackReach() + 0.25) {
-          findings.add(uncertainFinding(playerId, serverTick, "Reach",
-              "attack ray does not intersect the compensated target within the interaction envelope",
-              Math.min(1.0, Math.max(0.0, (fallbackDistance - config.attackReach()) / 2.0)),
-              sequence));
+        if (!Double.isFinite(rayDistance)) {
+          if (pointDistance > config.attackReach() + 1.0e-6) {
+            findings.add(finding(playerId, serverTick, "Reach",
+                String.format(Locale.ROOT,
+                    "attack target hitbox was %.3f blocks from the eye, beyond configured %.3f block reach",
+                    pointDistance, config.attackReach()),
+                Math.min(1.0,
+                    (pointDistance - config.attackReach())
+                        / Math.max(0.5, config.attackReach() * 0.5)),
+                sequence));
+          } else if (frame.uncertaintySources().isEmpty()) {
+            findings.add(finding(playerId, serverTick, "Hitbox",
+                String.format(Locale.ROOT,
+                    "target was within %.3f blocks but the observed client view ray never entered the reconstructed hitbox",
+                    config.attackReach()),
+                Math.min(1.0, Math.max(0.0,
+                    (config.attackReach() - pointDistance)
+                        / Math.max(0.5, config.attackReach()))),
+                sequence));
+          } else {
+            findings.add(uncertainFinding(playerId, serverTick, "Hitbox",
+                "target geometry is within interaction range, but movement/timing uncertainty prevents a hard ray contradiction",
+                0.75, sequence));
+          }
         }
       }
 
@@ -571,6 +733,8 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
           }
         } else if (action.contains("FINISHED_DIGGING")) {
           Long started = state.diggingStarts.remove(dig.position());
+          Double startSpeed = state.diggingStartSpeeds.remove(dig.position());
+          String startItem = state.diggingStartItems.remove(dig.position());
           PredictionFrame startedFrame = state.diggingStartFrames.remove(dig.position());
           PredictionFrame worldFrame = startedFrame != null ? startedFrame : frame;
           if (started != null
@@ -582,24 +746,41 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
                   || "adventure".equalsIgnoreCase(frame.observedAfter().gamemode()))) {
             var blockState = worldFrame.world().blockAtOrNull(
                 dig.position().x(), dig.position().y(), dig.position().z());
-            if (blockState != null
-                && !blockState.isAir()
-                && !blockState.isUnsupported()
-                && isSlowBreakBlock(blockState.blockId())) {
+            if (blockState != null && !blockState.isAir() && !blockState.isUnsupported()) {
               long startClientTick = startedFrame == null ? -1L : startedFrame.clientTick();
-            long finishClientTick = frame.clientTick();
-            long clientTickDelta = startClientTick >= 0L && finishClientTick >= startClientTick
-                ? finishClientTick - startClientTick
-                : Long.MAX_VALUE;
-            if (clientTickDelta <= 1L) {
-              findings.add(finding(playerId, serverTick, "FastBreak",
-                  "a slow-to-break block reached FINISHED_DIGGING within one reconstructed client tick",
-                  1.0, sequence));
-            } else if (raw.receivedNanos() - started <= 35_000_000L) {
-              findings.add(uncertainFinding(playerId, serverTick, "FastBreak",
-                  "a slow-to-break block reached FINISHED_DIGGING unusually quickly; client timing was not sufficient for proof",
-                  1.0, sequence));
-            }
+              long finishClientTick = frame.clientTick();
+              long clientTickDelta = startClientTick >= 0L && finishClientTick >= startClientTick
+                  ? finishClientTick - startClientTick
+                  : Long.MAX_VALUE;
+              Double finishSpeed = breakPacket.breakSpeedPerTick();
+              double conservativeMaxSpeed = Math.max(
+                  startSpeed == null ? 0.0 : startSpeed,
+                  finishSpeed == null ? 0.0 : finishSpeed);
+              boolean speedKnown = conservativeMaxSpeed > 0.0
+                  && Double.isFinite(conservativeMaxSpeed)
+                  && startSpeed != null
+                  && finishSpeed != null;
+              if (speedKnown && clientTickDelta != Long.MAX_VALUE) {
+                double maximumVanillaProgress =
+                    Math.max(0.0, clientTickDelta) * conservativeMaxSpeed;
+                if (maximumVanillaProgress + 1.0e-6 < 1.0) {
+                  findings.add(finding(playerId, serverTick, "FastBreak",
+                      String.format(Locale.ROOT,
+                          "finished digging after %d client ticks, but the captured server break speed permits at most %.3f progress",
+                          clientTickDelta, maximumVanillaProgress),
+                      Math.min(1.0, 1.0 - maximumVanillaProgress), sequence));
+                }
+              } else if (clientTickDelta != Long.MAX_VALUE
+                  && raw.receivedNanos() - started <= 35_000_000L) {
+                findings.add(uncertainFinding(playerId, serverTick, "FastBreak",
+                    "finished digging unusually quickly, but complete server break-speed state was not captured across the interval",
+                    0.85, sequence));
+              }
+              if (startItem != null && !startItem.equals(breakPacket.heldItemType())) {
+                findings.add(uncertainFinding(playerId, serverTick, "InventoryState",
+                    "held tool changed during a single block-break interval; break-speed causality was segmented",
+                    0.65, sequence));
+              }
             }
           }
         }
@@ -627,211 +808,39 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
     if (frames.isEmpty()) return List.of();
 
     List<Finding> findings = new ArrayList<>();
-    double airborneY = Double.NaN;
-    boolean airborneTracking = false;
-
-    for (int index = 0; index < frames.size(); index++) {
-      PredictionFrame frame = frames.get(index);
+    for (PredictionFrame frame : frames) {
       Packets.Move move = frame.movement();
-      if (move.position() == null) {
-        airborneTracking = false;
-        airborneY = Double.NaN;
-        continue;
+      if (move.position() == null) continue;
+
+      State.Player before = frame.observedBefore();
+      State.Player after = frame.observedAfter();
+      if (!isNormalSurvivalMovement(frame)) continue;
+
+      Vec3 delta = new Vec3(
+          after.position().x() - before.position().x(),
+          after.position().y() - before.position().y(),
+          after.position().z() - before.position().z());
+      double horizontal = Math.hypot(delta.x(), delta.z());
+      boolean jumping = after.input().map(Simulation.AdvancedInput::jump).orElse(false);
+
+      // Step remains a distinct collision-envelope contradiction; Speed/Flight/NoFall
+      // are owned by the prediction-derived movement evidence layer in AccuracyChecks.
+      if (before.onGround() && after.onGround() && !jumping
+          && delta.y() > 0.65 && horizontal > 0.05
+          && predictionContradictsObservedPosition(frame, 0.08)) {
+        findings.add(finding(playerId, frame.serverTick(), "Step",
+            String.format(Locale.ROOT,
+                "grounded movement rose %.3f blocks in one client tick without a jump",
+                delta.y()),
+            1.0, frame.sequence()));
       }
 
-      dev.phantom.ac.State.Player before = frame.observedBefore();
-      dev.phantom.ac.State.Player after = frame.observedAfter();
-      long sequence = frame.sequence();
-      long tick = frame.serverTick();
-
-      if (isNormalSurvivalMovement(frame)) {
-        Vec3 delta = new Vec3(
-            after.position().x() - before.position().x(),
-            after.position().y() - before.position().y(),
-            after.position().z() - before.position().z());
-        double horizontal = Math.hypot(delta.x(), delta.z());
-        boolean jumping = after.input().map(Simulation.AdvancedInput::jump).orElse(false);
-
-        /*
-         * Step: vanilla's normal standing step height is below one block. A
-         * >0.65 block vertical rise while remaining grounded, without a jump,
-         * is outside the normal collision step envelope and is a strong
-         * deterministic signature of a Step-height cheat.
-         */
-        if (before.onGround() && after.onGround() && !jumping
-            && delta.y() > 0.65 && horizontal > 0.05
-            && predictionContradictsObservedPosition(frame, 0.08)) {
-          findings.add(finding(playerId, tick, "Step",
-              String.format(Locale.ROOT,
-                  "grounded movement rose %.3f blocks in one client tick without a jump",
-                  delta.y()),
-              1.0, sequence));
-        }
-
-        /*
-         * Speed: use a deliberately high hard boundary so knockback, sprinting,
-         * ice, and normal attribute effects remain below it. Blatant speed
-         * clients routinely exceed this single-tick displacement.
-         */
-        boolean candidateExternalMotion = frame.predictedBefore().stream()
-            .anyMatch(candidate -> {
-              Phase5Mechanics.MovementEnvironment env = candidate.context().movementEnvironment();
-              double speed = Math.hypot(
-                  candidate.context().clientVelocity().x(),
-                  candidate.context().clientVelocity().z());
-              return env.vehicle().active() || env.gliding() || speed > 0.70;
-            });
-        if (!candidateExternalMotion && !jumping && horizontal > 1.0
-            && predictionContradictsObservedPosition(frame, 0.08)) {
-          findings.add(finding(playerId, tick, "Speed",
-              String.format(Locale.ROOT,
-                  "survival/adventure movement displaced %.3f blocks horizontally in one client tick",
-                  horizontal),
-              1.0, sequence));
-        } else if (!candidateExternalMotion
-            && !jumping
-            && frame.predictionOffset().evaluated()
-            && frame.uncertaintySources().isEmpty()
-            && !frame.predictedAfter().isEmpty()) {
-          double offset = frame.predictionOffset().horizontal();
-          if (offset >= PREDICTION_OFFSET_IMPOSSIBLE) {
-            findings.add(finding(playerId, tick, "Speed",
-                String.format(Locale.ROOT,
-                    "best modeled vanilla prediction remained %.3f blocks horizontally behind the observed movement",
-                    offset),
-                Math.min(1.0, offset / (PREDICTION_OFFSET_IMPOSSIBLE * 2.0)), sequence));
-          } else if (offset >= PREDICTION_OFFSET_UNCERTAIN) {
-            findings.add(uncertainFinding(playerId, tick, "Speed",
-                String.format(Locale.ROOT,
-                    "best modeled vanilla prediction missed observed horizontal movement by %.3f blocks",
-                    offset),
-                Math.min(1.0,
-                    (offset - PREDICTION_OFFSET_UNCERTAIN)
-                        / (PREDICTION_OFFSET_IMPOSSIBLE - PREDICTION_OFFSET_UNCERTAIN)),
-                sequence));
-          }
-        }
-
-        /*
-         * Flight: upward motion with a non-jump state after the previous tick
-         * has already become non-grounded is not a vanilla continuation unless
-         * an external vertical effect is present.
-         */
-        boolean externalVertical = frame.predictedBefore().stream().anyMatch(candidate -> {
-          Phase5Mechanics.MovementEffects effects = candidate.context().effects();
-          Phase5Mechanics.MovementEnvironment env = candidate.context().movementEnvironment();
-          return effects.levitation() || effects.slowFalling()
-              || env.fluid() != Phase5Mechanics.Fluid.NONE
-              || env.climbable() || env.gliding() || env.vehicle().active();
-        });
-        boolean deterministicPredictionOffset = frame.predictionOffset().evaluated()
-            && frame.uncertaintySources().isEmpty()
-            && !frame.predictedAfter().isEmpty();
-        if (!externalVertical && !before.onGround() && !after.onGround() && !jumping
-            && deterministicPredictionOffset
-            && delta.y() > PREDICTION_VERTICAL_UNCERTAIN
-            && frame.predictionOffset().deltaY() >= PREDICTION_VERTICAL_IMPOSSIBLE) {
-          findings.add(finding(playerId, tick, "Flight",
-              String.format(Locale.ROOT,
-                  "best modeled vanilla prediction remained %.3f vertical blocks below observed movement",
-                  frame.predictionOffset().deltaY()),
-              Math.min(1.0, frame.predictionOffset().deltaY() / 0.20), sequence));
-        } else if (!externalVertical && !before.onGround() && !after.onGround() && !jumping
-            && deterministicPredictionOffset
-            && frame.predictionOffset().deltaY() >= PREDICTION_VERTICAL_UNCERTAIN
-            && delta.y() > 0.05) {
-          findings.add(uncertainFinding(playerId, tick, "Flight",
-              String.format(Locale.ROOT,
-                  "best modeled vanilla prediction missed upward movement by %.3f blocks",
-                  frame.predictionOffset().deltaY()),
-              Math.min(1.0,
-                  (frame.predictionOffset().deltaY() - PREDICTION_VERTICAL_UNCERTAIN)
-                      / (PREDICTION_VERTICAL_IMPOSSIBLE - PREDICTION_VERTICAL_UNCERTAIN)),
-              sequence));
-        }
-
-        if (!externalVertical && !before.onGround() && !after.onGround() && !jumping
-            && before.velocity().y() <= 0.05 && delta.y() > 0.16
-            && predictionContradictsObservedPosition(frame, 0.08)) {
-          findings.add(finding(playerId, tick, "Flight",
-              String.format(Locale.ROOT,
-                  "airborne movement gained %.3f vertical blocks without jump or vertical effect",
-                  delta.y()),
-              1.0, sequence));
-        }
-
-        /*
-         * A sustained hover/descent cancellation is also incompatible with
-         * vanilla gravity. Requiring the prior observed tick prevents a normal
-         * jump apex from becoming a flag.
-         */
-        if (!externalVertical && !before.onGround() && !after.onGround() && !jumping
-            && Math.abs(delta.y()) <= 0.01
-            && index > 0) {
-          PredictionFrame previous = frames.get(index - 1);
-          if (previous.movement().position() != null
-              && isNormalSurvivalMovement(previous)
-              && !previous.observedAfter().onGround()) {
-            Vec3 previousDelta = new Vec3(
-                previous.observedAfter().position().x() - previous.observedBefore().position().x(),
-                previous.observedAfter().position().y() - previous.observedBefore().position().y(),
-                previous.observedAfter().position().z() - previous.observedBefore().position().z());
-            boolean currentHover = Math.abs(delta.y()) <= 0.02
-                && Math.abs(after.velocity().y()) <= 0.02;
-            boolean previousHover = Math.abs(previous.observedAfter().velocity().y()) <= 0.02;
-            if (currentHover && previousHover
-                && (horizontal > 0.05 || Math.hypot(previousDelta.x(), previousDelta.z()) > 0.05)
-                && predictionContradictsObservedPosition(frame, 0.08)) {
-              findings.add(finding(playerId, tick, "Flight",
-                  "airborne vertical velocity remained near zero across consecutive movement ticks without a vertical effect",
-                  1.0, sequence));
-            }
-          }
-        }
-
-        /*
-         * NoFall: retain the fall origin while the player is genuinely airborne.
-         * A multi-block fall that lands while every modeled candidate remains
-         * airborne is a deterministic no-fall contradiction.
-         */
-        if (!before.onGround() && !after.onGround()) {
-          if (!airborneTracking) {
-            airborneY = before.position().y();
-            airborneTracking = true;
-          }
-        } else if (airborneTracking && after.onGround()) {
-          double fallDistance = airborneY - after.position().y();
-          boolean physicalLanding = frame.predictedAfter().stream()
-              .anyMatch(candidate -> candidate.context().player().onGround());
-          if (fallDistance > 3.0 && !physicalLanding) {
-            findings.add(finding(playerId, tick, "NoFall",
-                String.format(Locale.ROOT,
-                    "landing after %.3f blocks of tracked fall has no grounded legitimate candidate",
-                    fallDistance),
-                1.0, sequence));
-          }
-          airborneTracking = false;
-          airborneY = Double.NaN;
-        } else if (after.onGround()) {
-          airborneTracking = false;
-          airborneY = Double.NaN;
-        }
-      } else {
-        airborneTracking = false;
-        airborneY = Double.NaN;
-      }
-
-      /*
-       * Jesus: an on-ground claim over a fluid block with no collision support
-       * below the player is not a normal vanilla standing state. Lily pads and
-       * genuine solid support are excluded by the support test.
-       */
       if (move.position() != null
           && ("survival".equalsIgnoreCase(after.gamemode())
               || "adventure".equalsIgnoreCase(after.gamemode()))
           && after.onGround()
-          && (after.environment() == dev.phantom.ac.State.Environment.WATER
-              || after.environment() == dev.phantom.ac.State.Environment.LAVA)) {
+          && (after.environment() == State.Environment.WATER
+              || after.environment() == State.Environment.LAVA)) {
         int bx = (int) Math.floor(after.position().x());
         int by = (int) Math.floor(after.position().y());
         int bz = (int) Math.floor(after.position().z());
@@ -840,15 +849,14 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
           BlockState fluid = frame.world().blockAtOrNull(bx, by, bz);
           BlockState below = frame.world().blockAtOrNull(bx, by - 1, bz);
           if (fluid != null && fluid.hasFluidName() && !isSolidSupport(below)) {
-            findings.add(finding(playerId, tick, "Jesus",
+            findings.add(finding(playerId, frame.serverTick(), "Jesus",
                 "player claimed on-ground while standing on liquid without collision support",
-                1.0, sequence));
+                1.0, frame.sequence()));
           }
         }
       }
     }
-
-    return findings;
+    return List.copyOf(findings);
   }
 
   private static boolean isNormalSurvivalMovement(PredictionFrame frame) {
@@ -934,21 +942,42 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
 
     BlockBox compensated(long interactionNanos) {
       if (samples.isEmpty()) return null;
-      BlockBox result = null;
-      int used = 0;
-      java.util.Iterator<EntitySample> iterator = samples.descendingIterator();
-      while (iterator.hasNext()) {
-        EntitySample sample = iterator.next();
-        if (sample.receivedNanos() > interactionNanos) continue;
-        if (interactionNanos - sample.receivedNanos() > 150_000_000L) continue;
-        result = result == null ? sample.box() : result.enclose(sample.box());
-        if (++used >= 3) break;
+      EntitySample before = null;
+      EntitySample after = null;
+      for (EntitySample sample : samples) {
+        if (sample.receivedNanos() <= interactionNanos) {
+          before = sample;
+        } else {
+          after = sample;
+          break;
+        }
       }
-      return result == null ? samples.getLast().box() : result;
+      if (before == null) return samples.getFirst().box();
+      if (after == null) return samples.getLast().box();
+      long span = after.receivedNanos() - before.receivedNanos();
+      if (span <= 0L) return before.box();
+      double alpha = Math.max(0.0, Math.min(1.0,
+          (interactionNanos - before.receivedNanos()) / (double) span));
+      return interpolateBox(before.box(), after.box(), alpha);
     }
   }
 
   private record EntitySample(long receivedNanos, BlockBox box) {}
+
+  private static BlockBox interpolateBox(BlockBox a, BlockBox b, double alpha) {
+    return new BlockBox(
+        lerp(a.minX(), b.minX(), alpha),
+        lerp(a.minY(), b.minY(), alpha),
+        lerp(a.minZ(), b.minZ(), alpha),
+        lerp(a.maxX(), b.maxX(), alpha),
+        lerp(a.maxY(), b.maxY(), alpha),
+        lerp(a.maxZ(), b.maxZ(), alpha));
+  }
+
+  private static double lerp(double a, double b, double alpha) {
+    return a + (b - a) * alpha;
+  }
+
 
   private static boolean positionExactlyMatches(Vec3 a, Vec3 b) {
     return a != null && b != null

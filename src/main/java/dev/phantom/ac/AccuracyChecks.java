@@ -55,6 +55,8 @@ public final class AccuracyChecks {
     final Map<Long, Integer> actionsPerTick = new HashMap<>();
     final Map<Long, Integer> placementsPerTick = new HashMap<>();
     final Map<Integer, Integer> aimMissStreaks = new HashMap<>();
+    final Map<Integer, ItemSlotState> inventorySlots = new HashMap<>();
+    int heldInventorySlot = -1;
     int scaffoldConsecutive;
     boolean noFallTracking;
     double fallOriginY;
@@ -67,7 +69,9 @@ public final class AccuracyChecks {
     final Map<Integer, EntityHistory> entities = new HashMap<>();
     long lastAttackNanos = -1L;
     Vec3 previousVehiclePosition;
+    Vec3 vehiclePlayerOffset;
     long previousVehicleNanos = -1L;
+    boolean vehicleOffsetKnown;
 
     void prune(long currentSequence) {
       while (attackTimes.size() > 64) attackTimes.removeFirst();
@@ -91,7 +95,9 @@ public final class AccuracyChecks {
       actionsPerTick.clear();
       placementsPerTick.clear();
       previousVehiclePosition = null;
+      vehiclePlayerOffset = null;
       previousVehicleNanos = -1L;
+      vehicleOffsetKnown = false;
     }
   }
 
@@ -124,6 +130,7 @@ public final class AccuracyChecks {
     Map<Long, PredictionFrame> framesBySequence = new TreeMap<>();
     for (PredictionFrame frame : frames) framesBySequence.put(frame.sequence(), frame);
 
+    findings.addAll(inventoryState(playerId, ordered, framesBySequence, state));
     findings.addAll(movementAdvantage(playerId, frames, state));
     findings.addAll(noFallContinuity(playerId, frames, state));
     findings.addAll(timerBalance(playerId, ordered, framesBySequence, state));
@@ -133,6 +140,53 @@ public final class AccuracyChecks {
     findings.addAll(packetIntegrity(playerId, ordered, framesBySequence, state));
     findings.addAll(scaffoldAndPlacement(playerId, ordered, framesBySequence, state));
     findings.addAll(vehicleSafety(playerId, ordered, framesBySequence, state));
+    return List.copyOf(findings);
+  }
+
+  private static List<ProductionCheckEngine.Finding> inventoryState(
+      String playerId,
+      List<Packets.RawPacket> packets,
+      Map<Long, PredictionFrame> frames,
+      State state) {
+    List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
+
+    for (Packets.RawPacket packet : packets) {
+      if (packet.packet() instanceof Packets.InventorySlotState slot) {
+        state.inventorySlots.put(
+            slot.slot(),
+            new ItemSlotState(slot.itemType(), slot.itemAmount(), slot.stateId()));
+        if (slot.slot() >= 0 && slot.slot() < 9 && state.heldInventorySlot < 0) {
+          state.heldInventorySlot = slot.slot();
+        }
+        continue;
+      }
+
+      if (packet.packet() instanceof Packets.HeldItemChange held) {
+        state.heldInventorySlot = held.slot();
+        continue;
+      }
+
+      String observedItem = null;
+      if (packet.packet() instanceof Packets.BlockPlace place) {
+        observedItem = place.heldItemType();
+      } else if (packet.packet() instanceof Packets.DigAction dig) {
+        observedItem = dig.heldItemType();
+      } else if (packet.packet() instanceof Packets.ClientBlockBreak breakPacket) {
+        observedItem = breakPacket.heldItemType();
+      }
+      if (observedItem == null || state.heldInventorySlot < 0) continue;
+
+      ItemSlotState known = state.inventorySlots.get(state.heldInventorySlot);
+      if (known == null || observedItem.equals(known.itemType())) continue;
+
+      PredictionFrame frame = frameAt(frames, packet.sequence());
+      findings.add(uncertain(playerId, frame, "InventoryState",
+          String.format(Locale.ROOT,
+              "action reported held item %s but the latest causally visible slot state is %s",
+              observedItem, known.itemType()),
+          0.55));
+    }
+
     return List.copyOf(findings);
   }
 
@@ -318,8 +372,35 @@ public final class AccuracyChecks {
       if (packet.packet() instanceof Packets.Velocity velocity) {
         double horizontal = Math.hypot(velocity.velocity().x(), velocity.velocity().z());
         if (horizontal >= KNOCKBACK_MIN_HORIZONTAL) {
-          state.pendingImpulse =
-              new PendingImpulse(packet.sequence(), packet.receivedNanos(), velocity.velocity(), 0);
+          PendingImpulse existing = state.pendingImpulse;
+          boolean joinsExplosion = existing != null
+              && "EXPLOSION".equals(existing.source())
+              && packet.sequence() >= existing.sequence()
+              && packet.sequence() - existing.sequence() <= 3L
+              && vectorDistance(existing.velocity(), velocity.velocity()) <= 0.08;
+          state.pendingImpulse = joinsExplosion
+              ? new PendingImpulse(
+                  existing.sequence(),
+                  existing.receivedNanos(),
+                  velocity.velocity(),
+                  existing.badMoves(),
+                  existing.source())
+              : new PendingImpulse(
+                  packet.sequence(), packet.receivedNanos(), velocity.velocity(), 0, "KNOCKBACK");
+          if (!joinsExplosion) state.knockbackResiduals.clear();
+        }
+        continue;
+      }
+
+      if (packet.packet() instanceof Packets.ExplosionImpulse impulse) {
+        double horizontal = Math.hypot(impulse.velocity().x(), impulse.velocity().z());
+        if (horizontal >= KNOCKBACK_MIN_HORIZONTAL) {
+          state.pendingImpulse = new PendingImpulse(
+              packet.sequence(),
+              packet.receivedNanos(),
+              impulse.velocity(),
+              0,
+              "EXPLOSION".equalsIgnoreCase(impulse.cause()) ? "EXPLOSION" : "KNOCKBACK");
           state.knockbackResiduals.clear();
         }
         continue;
@@ -373,7 +454,7 @@ public final class AccuracyChecks {
       if (outsidePredictionEnvelope) {
         int badMoves = pending.badMoves() + 1;
         state.pendingImpulse = new PendingImpulse(
-            pending.sequence(), pending.receivedNanos(), pending.velocity(), badMoves);
+            pending.sequence(), pending.receivedNanos(), pending.velocity(), badMoves, pending.source());
         state.knockbackResiduals.addLast(minTotalResidual);
         while (state.knockbackResiduals.size() > 8) state.knockbackResiduals.removeFirst();
 
@@ -382,10 +463,11 @@ public final class AccuracyChecks {
               .mapToDouble(Double::doubleValue)
               .average()
               .orElse(minTotalResidual);
-          findings.add(hard(playerId, frame, "Knockback",
+          String rule = "EXPLOSION".equals(pending.source()) ? "Explosion" : "Knockback";
+          findings.add(hard(playerId, frame, rule,
               String.format(Locale.ROOT,
-                  "post-velocity movement stayed outside every causally predicted response; residual=%.3f blocks",
-                  evidence),
+                  "post-%s movement stayed outside every causally predicted response; residual=%.3f blocks",
+                  pending.source().toLowerCase(Locale.ROOT), evidence),
               Math.min(1.0, evidence / 0.50)));
           state.pendingImpulse = null;
           state.knockbackResiduals.clear();
@@ -457,21 +539,36 @@ public final class AccuracyChecks {
         if (target != null) {
           Vec3 eye = eyePosition(frame.observedAfter());
           Vec3 direction = lookDirection(frame.observedAfter().yaw(), frame.observedAfter().pitch());
-          double rayDistance = rayEntryDistance(eye, direction, target, 4.25);
-          double pointDistance = pointAabbDistance(eye, target);
-          if (!Double.isFinite(rayDistance) && pointDistance <= 4.25
-              && frame.uncertaintySources().isEmpty()) {
+          Vec3 center = new Vec3(
+              (target.minX() + target.maxX()) * 0.5,
+              (target.minY() + target.maxY()) * 0.5,
+              (target.minZ() + target.maxZ()) * 0.5);
+          double targetDistance = pointAabbDistance(eye, target);
+          double centerDistance = Math.sqrt(
+              Math.pow(center.x() - eye.x(), 2)
+                  + Math.pow(center.y() - eye.y(), 2)
+                  + Math.pow(center.z() - eye.z(), 2));
+          double angle = angleBetween(direction, new Vec3(
+              center.x() - eye.x(), center.y() - eye.y(), center.z() - eye.z()));
+
+          if (Double.isFinite(angle) && targetDistance <= 4.25 && angle >= 25.0) {
             int streak = state.aimMissStreaks.merge(attack.entityId(), 1, Integer::sum);
-            if (streak >= 3) {
-              findings.add(hard(playerId, frame, "Aim",
+            if (streak >= 4) {
+              findings.add(uncertain(playerId, frame, "Aim",
                   String.format(Locale.ROOT,
-                      "three consecutive attacks targeted an in-range entity while the compensated view ray missed its hitbox (streak=%d)",
-                      streak),
-                  Math.min(1.0, streak / 6.0)));
+                      "reconstructed target center remained %.1f degrees from the observed view across %d attacks",
+                      angle, streak),
+                  Math.min(1.0, (angle / 90.0) * (streak / 8.0))));
               state.aimMissStreaks.put(attack.entityId(), 0);
             }
           } else {
             state.aimMissStreaks.remove(attack.entityId());
+          }
+
+          if (centerDistance <= 0.0) {
+            findings.add(uncertain(playerId, frame, "Aim",
+                "target center collapsed onto the eye reconstruction; aim angle is undefined",
+                0.1));
           }
         }
 
@@ -629,8 +726,73 @@ public final class AccuracyChecks {
       int count = placementsPerTick.get(tick);
       if (count > 2) {
         findings.add(uncertain(playerId, frame, "Scaffold",
-            "multiple block-placement actions landed on the same client tick",
+            "multiple block-placement actions landed on the same reconstructed client tick",
             Math.min(1.0, count / 4.0)));
+      }
+
+      int bx = place.position().x();
+      int by = place.position().y();
+      int bz = place.position().z();
+      if (frame.world().coverageAt(bx, by, bz) != dev.phantom.ac.world.Coverage.KNOWN) {
+        findings.add(uncertain(playerId, frame, "Scaffold",
+            "clicked placement surface is outside the client-visible world snapshot",
+            0.9));
+        continue;
+      }
+
+      Vec3 eye = eyePosition(frame.observedAfter());
+      Vec3 direction = lookDirection(frame.observedAfter().yaw(), frame.observedAfter().pitch());
+      BlockBox clicked = new BlockBox(bx, by, bz, bx + 1.0, by + 1.0, bz + 1.0);
+      double clickRay = rayEntryDistance(
+          eye, direction, clicked, 5.0);
+      if (!Double.isFinite(clickRay)) {
+        findings.add(finding(playerId, frame.serverTick(), "Place",
+            "placement packet selected a known clicked block that the reconstructed view ray never entered",
+            1.0, frame.sequence()));
+      }
+
+      if (place.faceId() < 0 || place.faceId() > 5) {
+        findings.add(finding(playerId, frame.serverTick(), "Place",
+            "placement packet used an invalid clicked-face id",
+            1.0, frame.sequence()));
+        continue;
+      }
+
+      if (place.cursorPresent() && !cursorMatchesFace(place.cursor(), place.faceId())) {
+        findings.add(finding(playerId, frame.serverTick(), "Place",
+            "placement cursor does not lie on the selected block face",
+            1.0, frame.sequence()));
+      }
+
+      int tx = bx;
+      int ty = by;
+      int tz = bz;
+      switch (place.faceId()) {
+        case 0 -> ty--;
+        case 1 -> ty++;
+        case 2 -> tz--;
+        case 3 -> tz++;
+        case 4 -> tx--;
+        case 5 -> tx++;
+        default -> {}
+      }
+
+      var targetCoverage = frame.world().coverageAt(tx, ty, tz);
+      if (targetCoverage == dev.phantom.ac.world.Coverage.KNOWN) {
+        BlockState target = frame.world().blockAtOrNull(tx, ty, tz);
+        if (target != null && !target.isAir() && target.variant() != BlockState.Variant.FLUID) {
+          findings.add(uncertain(playerId, frame, "Scaffold",
+              "placement target is already occupied in the client-visible world; item-specific replaceability was not asserted",
+              0.7));
+        } else if (target == null) {
+          findings.add(uncertain(playerId, frame, "Scaffold",
+              "placement target state was unavailable despite known coverage",
+              0.8));
+        }
+      } else {
+        findings.add(uncertain(playerId, frame, "Scaffold",
+            "placement target is outside the client-visible world snapshot",
+            0.8));
       }
 
       float pitch = frame.observedAfter().pitch();
@@ -643,22 +805,28 @@ public final class AccuracyChecks {
 
       if (state.scaffoldConsecutive >= 6) {
         findings.add(uncertain(playerId, frame, "Scaffold",
-            "sustained near-downward placement pattern accompanied forward movement",
+            String.format(Locale.ROOT,
+                "six or more causally reconstructed placements occurred with sustained near-downward view (heldItem=%s)",
+                place.heldItemType()),
             Math.min(1.0, state.scaffoldConsecutive / 10.0)));
         state.scaffoldConsecutive = 0;
-      }
-
-      if (place.cursorPresent()
-          && (place.cursor().x() < 0.0 || place.cursor().x() > 1.0
-              || place.cursor().y() < 0.0 || place.cursor().y() > 1.0
-              || place.cursor().z() < 0.0 || place.cursor().z() > 1.0)) {
-        findings.add(hard(playerId, frame, "Place",
-            "placement cursor escaped the legal block-face interval",
-            1.0));
       }
     }
 
     return List.copyOf(findings);
+  }
+
+  private static boolean cursorMatchesFace(Vec3 cursor, int faceId) {
+    double epsilon = 0.075;
+    return switch (faceId) {
+      case 0 -> Math.abs(cursor.y()) <= epsilon;
+      case 1 -> Math.abs(cursor.y() - 1.0) <= epsilon;
+      case 2 -> Math.abs(cursor.z()) <= epsilon;
+      case 3 -> Math.abs(cursor.z() - 1.0) <= epsilon;
+      case 4 -> Math.abs(cursor.x()) <= epsilon;
+      case 5 -> Math.abs(cursor.x() - 1.0) <= epsilon;
+      default -> false;
+    };
   }
 
   private static List<ProductionCheckEngine.Finding> vehicleSafety(
@@ -667,29 +835,60 @@ public final class AccuracyChecks {
       Map<Long, PredictionFrame> frames,
       State state) {
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
+
     for (Packets.RawPacket packet : packets) {
-      if (!(packet.packet() instanceof Packets.VehicleMove move)) continue;
-      if (state.previousVehiclePosition != null) {
-        Vec3 previous = state.previousVehiclePosition;
-        Vec3 delta = new Vec3(
-            move.position().x() - previous.x(),
-            move.position().y() - previous.y(),
-            move.position().z() - previous.z());
-        double horizontal = Math.hypot(delta.x(), delta.z());
-        if (packet.receivedNanos() >= state.previousVehicleNanos
-            && packet.receivedNanos() - state.previousVehicleNanos <= 100_000_000L
-            && (horizontal > 3.0 || Math.abs(delta.y()) > 2.5)) {
-          PredictionFrame frame = frameAt(frames, packet.sequence());
-          findings.add(uncertain(playerId, frame, "Vehicle",
-              String.format(Locale.ROOT,
-                  "vehicle movement displaced %.3f horizontal / %.3f vertical blocks; vehicle causality requires interpolation and passenger-state modeling",
-                  horizontal, Math.abs(delta.y())),
-              1.0));
-        }
+      if (!(packet.packet() instanceof Packets.VehicleMove vehicle)) continue;
+      PredictionFrame frame = frameAt(frames, packet.sequence());
+      if (frame == null || frame.uncertaintySources().isEmpty() == false
+          || frame.predictedAfter().isEmpty()) {
+        state.previousVehiclePosition = vehicle.position();
+        state.previousVehicleNanos = packet.receivedNanos();
+        continue;
       }
-      state.previousVehiclePosition = move.position();
+
+      if (!state.vehicleOffsetKnown) {
+        state.vehiclePlayerOffset = new Vec3(
+            frame.observedAfter().position().x() - vehicle.position().x(),
+            frame.observedAfter().position().y() - vehicle.position().y(),
+            frame.observedAfter().position().z() - vehicle.position().z());
+        state.vehicleOffsetKnown = true;
+      }
+
+      Vec3 expectedPlayer = new Vec3(
+          vehicle.position().x() + state.vehiclePlayerOffset.x(),
+          vehicle.position().y() + state.vehiclePlayerOffset.y(),
+          vehicle.position().z() + state.vehiclePlayerOffset.z());
+
+      double minResidual = Double.POSITIVE_INFINITY;
+      boolean vehicleCandidateSeen = false;
+      for (Candidate candidate : frame.predictedAfter()) {
+        boolean vehicleMode = candidate.movementMode() == Phase6Reachability.MovementMode.VEHICLE
+            || candidate.context().movementEnvironment().vehicle().active();
+        if (!vehicleMode) continue;
+        vehicleCandidateSeen = true;
+        Vec3 position = candidate.context().player().position();
+        minResidual = Math.min(minResidual, Math.sqrt(
+            Math.pow(position.x() - expectedPlayer.x(), 2)
+                + Math.pow(position.y() - expectedPlayer.y(), 2)
+                + Math.pow(position.z() - expectedPlayer.z(), 2)));
+      }
+
+      if (!vehicleCandidateSeen) {
+        findings.add(uncertain(playerId, frame, "Vehicle",
+            "vehicle movement arrived without a causally reconstructed vehicle-mode prediction candidate",
+            0.8));
+      } else if (minResidual >= 0.08) {
+        findings.add(hard(playerId, frame, "Vehicle",
+            String.format(Locale.ROOT,
+                "vehicle claim remained %.3f blocks outside every causally predicted vehicle-mode rider state",
+                minResidual),
+            Math.min(1.0, minResidual / 0.50)));
+      }
+
+      state.previousVehiclePosition = vehicle.position();
       state.previousVehicleNanos = packet.receivedNanos();
     }
+
     return List.copyOf(findings);
   }
 
@@ -732,28 +931,43 @@ public final class AccuracyChecks {
 
     BlockBox compensated(long attackNanos) {
       if (samples.isEmpty()) return null;
-      /*
-       * Grim compensates entity interpolation rather than using a single latest
-       * server box. We do not have the client-side interpolation step counter
-       * here, so conservatively enclose recent causally available samples.
-       * This removes a major false-positive source for moving targets without
-       * pretending to know an exact target transform that was never captured.
-       */
-      BlockBox result = null;
-      int used = 0;
+      EntitySample before = null;
+      EntitySample after = null;
       for (EntitySample sample : samples) {
-        if (sample.receivedNanos() > attackNanos) continue;
-        if (attackNanos - sample.receivedNanos() > 150_000_000L) continue;
-        result = result == null ? sample.box() : result.enclose(sample.box());
-        if (++used >= 3) break;
+        if (sample.receivedNanos() <= attackNanos) before = sample;
+        else { after = sample; break; }
       }
-      return result == null ? samples.getLast().box() : result;
+      if (before == null) return samples.getFirst().box();
+      if (after == null) return samples.getLast().box();
+      long span = after.receivedNanos() - before.receivedNanos();
+      if (span <= 0L) return before.box();
+      double alpha = Math.max(0.0, Math.min(1.0,
+          (attackNanos - before.receivedNanos()) / (double) span));
+      return interpolateBox(before.box(), after.box(), alpha);
     }
   }
 
   private record EntitySample(long receivedNanos, BlockBox box) {}
 
-  private record PendingImpulse(long sequence, long receivedNanos, Vec3 velocity, int badMoves) {}
+  private static BlockBox interpolateBox(BlockBox a, BlockBox b, double alpha) {
+    return new BlockBox(
+        lerp(a.minX(), b.minX(), alpha),
+        lerp(a.minY(), b.minY(), alpha),
+        lerp(a.minZ(), b.minZ(), alpha),
+        lerp(a.maxX(), b.maxX(), alpha),
+        lerp(a.maxY(), b.maxY(), alpha),
+        lerp(a.maxZ(), b.maxZ(), alpha));
+  }
+
+  private static double lerp(double a, double b, double alpha) {
+    return a + (b - a) * alpha;
+  }
+
+
+  private record ItemSlotState(String itemType, int amount, int stateId) {}
+
+  private record PendingImpulse(
+      long sequence, long receivedNanos, Vec3 velocity, int badMoves, String source) {}
 
   private static PredictionFrame frameAt(Map<Long, PredictionFrame> frames, long sequence) {
     if (frames instanceof NavigableMap<?, ?> rawNavigable) {
@@ -797,6 +1011,28 @@ public final class AccuracyChecks {
       if (tMin > tMax) return Double.POSITIVE_INFINITY;
     }
     return tMin >= 0.0 && tMin <= maxDistance ? tMin : Double.POSITIVE_INFINITY;
+  }
+
+  private static double vectorDistance(Vec3 a, Vec3 b) {
+    return Math.sqrt(
+        Math.pow(a.x() - b.x(), 2)
+            + Math.pow(a.y() - b.y(), 2)
+            + Math.pow(a.z() - b.z(), 2));
+  }
+
+  private static double angleBetween(Vec3 left, Vec3 right) {
+    double leftLength = Math.sqrt(
+        left.x() * left.x() + left.y() * left.y() + left.z() * left.z());
+    double rightLength = Math.sqrt(
+        right.x() * right.x() + right.y() * right.y() + right.z() * right.z());
+    if (!Double.isFinite(leftLength) || !Double.isFinite(rightLength)
+        || leftLength <= 1.0e-12 || rightLength <= 1.0e-12) {
+      return Double.NaN;
+    }
+    double cosine = (
+        left.x() * right.x() + left.y() * right.y() + left.z() * right.z())
+        / (leftLength * rightLength);
+    return Math.toDegrees(Math.acos(Math.max(-1.0, Math.min(1.0, cosine))));
   }
 
   private static double pointAabbDistance(Vec3 point, BlockBox box) {

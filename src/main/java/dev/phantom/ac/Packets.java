@@ -7,8 +7,8 @@ import static dev.phantom.ac.Maths.Vec3;
 public final class Packets {
   private Packets() {}
 
-  public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm, UseItem, ContainerState, SlotStateChange, BlockAck,
-      Velocity, Effect, Gamemode, PlayerContext, FlightToggle, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange,
+  public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm, UseItem, ContainerState, InventorySlotState, SlotStateChange, BlockAck,
+      Velocity, ExplosionImpulse, Effect, Gamemode, PlayerContext, FlightToggle, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange,
       WorldTransactionSend, WorldTransactionAck, PaperMovementRejection, ClientBlockBreak, EntitySpawn, EntityMove, EntityDespawn,
       InteractEntity, BlockPlace, VehicleMove, HeldItemChange, EntityAction, DigAction, InventoryClick {
     default boolean mutatesWorld() {
@@ -63,11 +63,43 @@ public final class Packets {
   /** Server-side event evidence that the client attempted to toggle flying. */
   public record FlightToggle(boolean flying, boolean cancelled) implements Packet {}
   /** Client-side block-break prediction intent used for the short pre-authoritative-update window. */
-  public record ClientBlockBreak(dev.phantom.ac.world.Pos position, int actionSequence, Long clientTick) implements Packet {
+  public record ClientBlockBreak(
+      dev.phantom.ac.world.Pos position,
+      int actionSequence,
+      Long clientTick,
+      Double breakSpeedPerTick,
+      String heldItemType,
+      int heldItemAmount) implements Packet {
     public ClientBlockBreak {
       Objects.requireNonNull(position, "position");
       if (actionSequence < 0) throw new IllegalArgumentException("actionSequence must be non-negative");
       if (clientTick != null && clientTick < 0) throw new IllegalArgumentException("clientTick must be non-negative");
+      if (breakSpeedPerTick != null
+          && (!Double.isFinite(breakSpeedPerTick) || breakSpeedPerTick < 0.0)) {
+        throw new IllegalArgumentException("breakSpeedPerTick must be finite and non-negative");
+      }
+      Objects.requireNonNull(heldItemType, "heldItemType");
+      if (heldItemAmount < 0) throw new IllegalArgumentException("heldItemAmount must be non-negative");
+    }
+
+    public ClientBlockBreak(dev.phantom.ac.world.Pos position, int actionSequence, Long clientTick) {
+      this(position, actionSequence, clientTick, null, "minecraft:air", 0);
+    }
+  }
+
+  public record InventorySlotState(
+      int windowId,
+      int slot,
+      int stateId,
+      String itemType,
+      int itemAmount,
+      boolean cursor) implements Packet {
+    public InventorySlotState {
+      if (windowId < -1 || slot < -2 || stateId < -1) {
+        throw new IllegalArgumentException("invalid inventory slot state");
+      }
+      Objects.requireNonNull(itemType, "itemType");
+      if (itemAmount < 0) throw new IllegalArgumentException("itemAmount must be non-negative");
     }
   }
 
@@ -85,17 +117,29 @@ public final class Packets {
       dev.phantom.ac.world.Pos position,
       int faceId,
       Vec3 cursor,
-      boolean cursorPresent) implements Packet {
+      boolean cursorPresent,
+      String heldItemType,
+      int heldItemAmount) implements Packet {
     public BlockPlace {
       Objects.requireNonNull(position, "position");
       Objects.requireNonNull(cursor, "cursor");
       if (cursorPresent && (!Double.isFinite(cursor.x()) || !Double.isFinite(cursor.y()) || !Double.isFinite(cursor.z()))) {
         throw new IllegalArgumentException("cursor must be finite when present");
       }
+      Objects.requireNonNull(heldItemType, "heldItemType");
+      if (heldItemAmount < 0) throw new IllegalArgumentException("heldItemAmount must be non-negative");
     }
 
     public BlockPlace(dev.phantom.ac.world.Pos position) {
-      this(position, -1, Vec3.ZERO, false);
+      this(position, -1, Vec3.ZERO, false, "minecraft:air", 0);
+    }
+
+    public BlockPlace(
+        dev.phantom.ac.world.Pos position,
+        int faceId,
+        Vec3 cursor,
+        boolean cursorPresent) {
+      this(position, faceId, cursor, cursorPresent, "minecraft:air", 0);
     }
   }
 
@@ -127,12 +171,28 @@ public final class Packets {
     }
   }
 
-  /** Full digging action provenance used for safe break/timing analysis. */
-  public record DigAction(String action, dev.phantom.ac.world.Pos position, int sequence) implements Packet {
+  /** Full digging action provenance used for causal break/timing analysis. */
+  public record DigAction(
+      String action,
+      dev.phantom.ac.world.Pos position,
+      int sequence,
+      Double breakSpeedPerTick,
+      String heldItemType,
+      int heldItemAmount) implements Packet {
     public DigAction {
       if (action == null || action.isBlank()) throw new IllegalArgumentException("action is required");
       Objects.requireNonNull(position, "position");
       if (sequence < 0) throw new IllegalArgumentException("sequence must be non-negative");
+      if (breakSpeedPerTick != null
+          && (!Double.isFinite(breakSpeedPerTick) || breakSpeedPerTick < 0.0)) {
+        throw new IllegalArgumentException("breakSpeedPerTick must be finite and non-negative");
+      }
+      Objects.requireNonNull(heldItemType, "heldItemType");
+      if (heldItemAmount < 0) throw new IllegalArgumentException("heldItemAmount must be non-negative");
+    }
+
+    public DigAction(String action, dev.phantom.ac.world.Pos position, int sequence) {
+      this(action, position, sequence, null, "minecraft:air", 0);
     }
   }
 
@@ -155,6 +215,14 @@ public final class Packets {
   /** Client acknowledgement of a synthetic world transaction barrier. */
   public record WorldTransactionAck(short id) implements Packet {}
   public record Velocity(Vec3 velocity) implements Packet { public Velocity { Objects.requireNonNull(velocity,"velocity"); } }
+
+  public record ExplosionImpulse(Vec3 velocity, String cause) implements Packet {
+    public ExplosionImpulse {
+      Objects.requireNonNull(velocity, "velocity");
+      Objects.requireNonNull(cause, "cause");
+      if (cause.isBlank()) throw new IllegalArgumentException("cause must not be blank");
+    }
+  }
   public record Effect(String id, int amplifier, boolean removed) implements Packet { public Effect { Objects.requireNonNull(id,"id"); } }
   public record Gamemode(String value) implements Packet { public Gamemode { if(value==null||value.isBlank()) throw new IllegalArgumentException("gamemode is required"); } }
   /** Main-thread authoritative server snapshot, deliberately separate from client movement claims. */
@@ -247,7 +315,9 @@ public final class Packets {
           ||packet instanceof InteractEntity||packet instanceof BlockPlace||packet instanceof VehicleMove||packet instanceof UseItem||packet instanceof BlockAck
           ||packet instanceof HeldItemChange||packet instanceof EntityAction||packet instanceof DigAction
           ||packet instanceof InventoryClick||packet instanceof SlotStateChange)return "CLIENT_TO_SERVER";
-      if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof Effect||packet instanceof Gamemode||packet instanceof PlayerContext||packet instanceof WorldTransactionSend||packet.mutatesWorld())return "SERVER_TO_CLIENT";
+      if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof ExplosionImpulse
+          ||packet instanceof Effect||packet instanceof Gamemode||packet instanceof PlayerContext
+          ||packet instanceof InventorySlotState||packet instanceof WorldTransactionSend||packet.mutatesWorld())return "SERVER_TO_CLIENT";
       return "UNKNOWN";
     }
   }

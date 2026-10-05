@@ -3,6 +3,7 @@ package dev.phantom.ac.paper;
 import io.netty.channel.Channel;
 import dev.phantom.ac.AccuracyChecks;
 import com.github.retrooper.packetevents.PacketEvents;
+import io.papermc.paper.event.entity.EntityKnockbackEvent;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
@@ -147,6 +148,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private ExecutorService chunkExecutor;
   private ExecutorService worldPublishExecutor;
   private ExecutorService validationExecutor;
+  private final AtomicLong authoritativeServerTick = new AtomicLong(-1L);
   private volatile int chunkDecoderThreads;
   private final AtomicInteger chunkInFlight=new AtomicInteger();
 
@@ -243,13 +245,21 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         var position=placement.getBlockPosition();
         if(position!=null){
           var cursor=placement.getCursorPosition();
+          org.bukkit.entity.Player bukkitPlayer = getServer().getPlayer(playerId);
+          org.bukkit.inventory.ItemStack heldItem =
+              bukkitPlayer == null ? null : bukkitPlayer.getInventory().getItemInMainHand();
+          String heldItemType = heldItem == null || heldItem.getType().isAir()
+              ? "minecraft:air" : heldItem.getType().getKey().toString();
+          int heldItemAmount = heldItem == null ? 0 : heldItem.getAmount();
           Packets.BlockPlace packet=new Packets.BlockPlace(
               new dev.phantom.ac.world.Pos(position.x,position.y,position.z),
               placement.getFaceId(),
               cursor==null
                   ?dev.phantom.ac.Maths.Vec3.ZERO
                   :new dev.phantom.ac.Maths.Vec3(cursor.x,cursor.y,cursor.z),
-              cursor!=null);
+              cursor!=null,
+              heldItemType,
+              heldItemAmount);
           record(capture,packet);
           schedulePredictionValidation(capture);
         }
@@ -287,6 +297,15 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         var held=new WrapperPlayClientHeldItemChange(event);
         Packets.HeldItemChange packet=new Packets.HeldItemChange(held.getSlot());
         record(capture,packet);
+        org.bukkit.entity.Player bukkitPlayer = getServer().getPlayer(playerId);
+        if (bukkitPlayer != null && held.getSlot() >= 0 && held.getSlot() < 9) {
+          org.bukkit.inventory.ItemStack item = bukkitPlayer.getInventory().getItem(held.getSlot());
+          String itemType = item == null || item.getType().isAir()
+              ? "minecraft:air" : item.getType().getKey().toString();
+          int amount = item == null ? 0 : item.getAmount();
+          record(capture, new Packets.InventorySlotState(
+              0, held.getSlot(), -1, itemType, amount, false));
+        }
         schedulePredictionValidation(capture);
       }else if(event.getPacketType()==PacketType.Play.Client.ENTITY_ACTION){
         var action=new WrapperPlayClientEntityAction(event);
@@ -300,10 +319,29 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         var digBlockPosition=digging.getBlockPosition();
         if(digBlockPosition!=null){
           int diggingSequence=digging.getSequence();
+          dev.phantom.ac.world.Pos digPosition =
+              new dev.phantom.ac.world.Pos(digBlockPosition.x,digBlockPosition.y,digBlockPosition.z);
+          org.bukkit.entity.Player bukkitPlayer = getServer().getPlayer(playerId);
+          Double breakSpeed = null;
+          String heldItemType = "minecraft:air";
+          int heldItemAmount = 0;
+          if (bukkitPlayer != null) {
+            org.bukkit.block.Block liveBlock =
+                bukkitPlayer.getWorld().getBlockAt(digPosition.x(), digPosition.y(), digPosition.z());
+            breakSpeed = (double) liveBlock.getBreakSpeed(bukkitPlayer);
+            org.bukkit.inventory.ItemStack heldItem = bukkitPlayer.getInventory().getItemInMainHand();
+            if (heldItem != null && !heldItem.getType().isAir()) {
+              heldItemType = heldItem.getType().getKey().toString();
+              heldItemAmount = heldItem.getAmount();
+            }
+          }
           Packets.DigAction digAction=new Packets.DigAction(
               digging.getAction().name(),
-              new dev.phantom.ac.world.Pos(digBlockPosition.x,digBlockPosition.y,digBlockPosition.z),
-              diggingSequence);
+              digPosition,
+              diggingSequence,
+              breakSpeed,
+              heldItemType,
+              heldItemAmount);
           record(capture,digAction);
         }
         if(digging.getAction()==DiggingAction.FINISHED_DIGGING){
@@ -316,8 +354,29 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           Long clientTick=capture.clientTickTracker.hasObservedBoundary()
               ?capture.clientTickTracker.clientTickForMovement()
               :null;
+          org.bukkit.entity.Player bukkitPlayer = getServer().getPlayer(playerId);
+          org.bukkit.inventory.ItemStack heldItem =
+              bukkitPlayer == null ? null : bukkitPlayer.getInventory().getItemInMainHand();
+          Double breakSpeed = null;
+          String heldItemType = "minecraft:air";
+          int heldItemAmount = 0;
+          if (bukkitPlayer != null) {
+            org.bukkit.block.Block liveBlock =
+                bukkitPlayer.getWorld().getBlockAt(position.x(), position.y(), position.z());
+            breakSpeed = (double) liveBlock.getBreakSpeed(bukkitPlayer);
+            if (heldItem != null && !heldItem.getType().isAir()) {
+              heldItemType = heldItem.getType().getKey().toString();
+              heldItemAmount = heldItem.getAmount();
+            }
+          }
           Packets.ClientBlockBreak breakPacket =
-              new Packets.ClientBlockBreak(position,digging.getSequence(),clientTick);
+              new Packets.ClientBlockBreak(
+                  position,
+                  digging.getSequence(),
+                  clientTick,
+                  breakSpeed,
+                  heldItemType,
+                  heldItemAmount);
           WorldSnapshot visibleWorld =
               capture.clientWorld.snapshotAtOrBeforeIncludingPending(sequence);
           boolean knownSolid=visibleWorld!=null
@@ -581,7 +640,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       thread.setDaemon(true);
       return thread;
     });
-    stateTask=getServer().getScheduler().runTaskTimer(this,this::drainChunkQueues,1L,1L);
+    stateTask=getServer().getScheduler().runTaskTimer(this,this::onAuthoritativeServerTick,1L,1L);
     getLogger().info("[PhantomAC] Hardened Phase 8 adapter enabled; movement validation runs on per-connection Netty EventLoops");
   }
 
@@ -604,6 +663,19 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   @EventHandler public void onJoin(PlayerJoinEvent event){
     UUID playerId=event.getPlayer().getUniqueId();
     captures.computeIfAbsent(playerId,id->new Capture(id,System.nanoTime(),validationBudget));
+  }
+
+  @EventHandler
+  public void onEntityKnockback(EntityKnockbackEvent event) {
+    if (!(event.getEntity() instanceof Player player) || event.isCancelled()) return;
+    Capture capture = captures.get(player.getUniqueId());
+    if (capture == null) return;
+    var knockback = event.getKnockback();
+    Packets.ExplosionImpulse impulse = new Packets.ExplosionImpulse(
+        new Vec3(knockback.getX(), knockback.getY(), knockback.getZ()),
+        event.getCause().name());
+    record(capture, impulse);
+    schedulePredictionValidation(capture);
   }
 
   // Re-anchoring is driven by the clientbound position-correction packet.
@@ -856,8 +928,20 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
   }
 
+  private void onAuthoritativeServerTick() {
+    long tick = authoritativeServerTick.incrementAndGet();
+    for (Player player : getServer().getOnlinePlayers()) {
+      Capture capture = captures.get(player.getUniqueId());
+      if (capture == null) continue;
+      capture.authoritativeServerTick.set(tick);
+      sendStateBarrier(player, capture);
+    }
+    drainChunkQueues();
+  }
+
   private static Long authoritativeTick(Capture capture){
-    return null;
+    long tick = capture.authoritativeServerTick.get();
+    return tick >= 0L ? tick : null;
   }
 
   private static boolean isNearChunk(Capture capture,Column column){
@@ -1647,11 +1731,25 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       implements Serializable {}
 
   private void recordEntitySpawn(Capture capture,int entityId,Vec3 packetPosition){
-    // Entity dimensions are intentionally not sourced from Bukkit. Until the
-    // packet metadata/entity-type hitbox catalogue is complete, keep collision
-    // state explicitly incomplete so dependent checks become UNCERTAIN.
+    // Unknown entity metadata is still incomplete; never synthesize dimensions.
     capture.clientEntities.remove(entityId);
     capture.clientWorld.markEntityTrackingIncomplete();
+  }
+
+  private void recordEntitySpawn(
+      Capture capture,
+      int entityId,
+      Vec3 packetPosition,
+      dev.phantom.ac.geometry.BlockBox box) {
+    Objects.requireNonNull(packetPosition);
+    Objects.requireNonNull(box);
+    capture.clientEntities.put(entityId, new ClientEntityTrack(entityId, packetPosition, box));
+    long sequence=capture.sequence.incrementAndGet();
+    long receivedNanos=System.nanoTime();
+    Packets.EntitySpawn packet=new Packets.EntitySpawn(entityId,box);
+    appendPacket(capture,new RawPacket(
+        sequence,receivedNanos,packet,
+        Packets.CaptureProvenance.fromAdapter("paper-entity-spawn",packet,authoritativeTick(capture))));
   }
 
   private void recordEntityRelativeMove(Capture capture,int entityId,double dx,double dy,double dz){
@@ -1709,6 +1807,19 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   private static void appendPacket(Capture capture,RawPacket packet){
+    Objects.requireNonNull(capture,"capture");
+    Objects.requireNonNull(packet,"packet");
+    Long authoritative = authoritativeTick(capture);
+    Packets.CaptureProvenance provenance = packet.provenance();
+    if (authoritative != null && provenance.authoritativeServerTick() == null) {
+      provenance = new Packets.CaptureProvenance(
+          provenance.sourceId(),
+          provenance.direction(),
+          provenance.packetType(),
+          authoritative,
+          provenance.authoritativeClientTick());
+      packet = new RawPacket(packet.sequence(), packet.receivedNanos(), packet.packet(), provenance);
+    }
     capture.packets.addLast(packet);
     while(capture.packets.size()>MAX_CAPTURE_PACKETS)capture.packets.pollFirst();
   }
