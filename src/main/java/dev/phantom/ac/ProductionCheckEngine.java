@@ -311,11 +311,7 @@ public final class ProductionCheckEngine {
           : old.retainActive(finding.serverTick(), nowMillis, config, finding.rule());
 
       GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(finding.rule());
-      double level = Math.min(
-          config.maximumViolationLevel(),
-          next.activeEvidence().values().stream()
-              .mapToDouble(EvidenceStamp::score)
-              .sum() * config.violationIncrement());
+      double level = Math.min(config.maximumViolationLevel(), next.violationLevel());
       next = new State(next.supportingEvents(), next.lastObservationTick(),
           next.lastAlertTick(), level, next.lastAlertViolationLevel(),
           next.violationTimesMillis(), next.activeEvidence());
