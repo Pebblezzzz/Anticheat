@@ -24,4 +24,14 @@ jobs:
           cache: maven
 
       - name: Run full test suite
-        run: mvn -B -ntp clean test
+        run: mvn -B -ntp clean test 2>&1 | tee maven-tests.log
+
+      - name: Upload Maven diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maven-tests-diagnostics
+          path: |
+            maven-tests.log
+            target/surefire-reports/**
+          if-no-files-found: warn
