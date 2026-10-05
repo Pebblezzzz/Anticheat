@@ -202,6 +202,35 @@ class Phase8MovementValidationTest {
     assertEquals(replay.replay().evidence(), replay.replay().evidence());
   }
 
+  @Test
+  void everyViolationLevelEmitsAnAlert() {
+    Player p = Player.initial(new Maths.Vec3(0, 65, 0));
+    var evidence = Phase8MovementValidation.validate(
+        "alice", 40, p, Player.initial(new Maths.Vec3(20, 65, 0)),
+        world(), "world:test:every-vl", stable(),
+        List.of("input known"), possible(p), "replay:every-vl").evidence();
+
+    var config = new Phase8MovementValidation.Config(
+        1.0, 0, true, true, 1.0, 0.0, 100.0, 1.0,
+        new GrimAlertPolicy.Config(
+            List.of(),
+            GrimAlertPolicy.CommandRule.parse("1:1"),
+            GrimAlertPolicy.CommandRule.parse("1:1"),
+            300_000L));
+
+    var first = Phase8MovementValidation.Accumulator.empty().accept(evidence, config);
+    assertTrue(first.alert().isPresent());
+    assertEquals(1.0, first.alert().orElseThrow().violationLevel());
+
+    var second = first.state().accept(evidence, config);
+    assertTrue(second.alert().isPresent());
+    assertEquals(2.0, second.alert().orElseThrow().violationLevel());
+
+    var third = second.state().accept(evidence, config);
+    assertTrue(third.alert().isPresent());
+    assertEquals(3.0, third.alert().orElseThrow().violationLevel());
+  }
+
   @Test void alertIsObservationOnlyAndHasOperatorFormat() {
     Player p = Player.initial(new Maths.Vec3(0, 65, 0));
     var evidence = Phase8MovementValidation.validate("alice", 40, p, Player.initial(new Maths.Vec3(20, 65, 0)), world(), "world:test:40", stable(),
