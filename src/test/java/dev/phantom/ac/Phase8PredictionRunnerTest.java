@@ -2213,27 +2213,37 @@ class Phase8PredictionRunnerTest {
     assertEquals(3, report.movementObservations(), report.results().toString());
     assertTrue(
         report.results().stream().allMatch(
-            result -> result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE),
+            result -> result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE),
+        report.results().toString());
+    assertTrue(report.results().stream().allMatch(
+        result -> result.verdict() == Phase8MovementValidation.Verdict.UNCERTAIN),
         report.results().toString());
     assertTrue(report.candidateFrontierRetained(), report.toString());
 
-    assertTrue(report.frames().stream()
-        .allMatch(frame -> frame.predictionOffset().evaluated()),
-        report.frames().toString());
+    assertTrue(report.frames().getFirst().predictedAfter().stream()
+        .anyMatch(candidate ->
+            candidate.provenance().input().equals("CLIENT_MOVEMENT_BOOTSTRAP_PROVISIONAL")
+                && candidate.context().simulationTick() == 1L),
+        report.frames().getFirst().toString());
+
     List<String> trace = report.frames().stream()
         .flatMap(frame -> frame.trace().stream())
         .toList();
     assertTrue(
         trace.stream().anyMatch(line ->
-            line.contains("PREDICT_FORWARD startTick=0 targetTick=1")),
+            line.contains("STATIONARY_GATE stationary=true visibleAuthority=false observationOnly=false")),
+        trace.toString());
+    assertFalse(
+        trace.stream().anyMatch(line ->
+            line.contains("OBSERVATION stationary-position packet")),
         trace.toString());
     assertTrue(
         trace.stream().anyMatch(line ->
-            line.contains("PREDICT_FORWARD startTick=1 targetTick=2")),
+            line.contains("FRONTIER_BOOTSTRAPPED source=CLIENT_MOVEMENT_OBSERVATION")),
         trace.toString());
     assertTrue(
         trace.stream().anyMatch(line ->
-            line.contains("PREDICT_FORWARD startTick=2 targetTick=3")),
+            line.contains("FRONTIER_ADVANCED_UNCERTAIN")),
         trace.toString());
   }
 
