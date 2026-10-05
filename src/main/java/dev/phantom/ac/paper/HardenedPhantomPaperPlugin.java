@@ -1722,6 +1722,19 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   private static void appendPacket(Capture capture,RawPacket packet){
+    Objects.requireNonNull(capture,"capture");
+    Objects.requireNonNull(packet,"packet");
+    Long authoritative = authoritativeTick(capture);
+    Packets.CaptureProvenance provenance = packet.provenance();
+    if (authoritative != null && provenance.authoritativeServerTick() == null) {
+      provenance = new Packets.CaptureProvenance(
+          provenance.sourceId(),
+          provenance.direction(),
+          provenance.packetType(),
+          authoritative,
+          provenance.authoritativeClientTick());
+      packet = new RawPacket(packet.sequence(), packet.receivedNanos(), packet.packet(), provenance);
+    }
     capture.packets.addLast(packet);
     while(capture.packets.size()>MAX_CAPTURE_PACKETS)capture.packets.pollFirst();
   }
