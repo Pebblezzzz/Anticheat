@@ -53,6 +53,79 @@ class Phase8PersistentSprintRegressionTest {
   }
 
   @Test
+  void physicalSprintCanUseWalkingSpeedWhileSprintAttributeLags() {
+    WorldSnapshot world = floorWorld();
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    Player start = player(new Maths.Vec3(0.5, 70.0, 0.5), new Maths.Vec3(0.0, 0.0, 0.2));
+    var walkingEnvironment = MovementEnvironment.dry(false, false, false);
+
+    var first = physics.step(new Vanilla12111RichPhysics.Context(
+        0L,
+        start,
+        new Simulation.AdvancedInput(1, 0, false, true, false),
+        world,
+        Simulation.Environment.DRY,
+        start.attributes(),
+        Phase5Mechanics.MovementEffects.NONE,
+        Pose.STANDING,
+        walkingEnvironment,
+        false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    var second = physics.step(new Vanilla12111RichPhysics.Context(
+        1L,
+        first,
+        new Simulation.AdvancedInput(1, 0, false, true, false),
+        world,
+        Simulation.Environment.DRY,
+        first.attributes(),
+        Phase5Mechanics.MovementEffects.NONE,
+        Pose.STANDING,
+        walkingEnvironment,
+        false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+
+    var sprintAuthority = new PlayerContext(
+        "survival",
+        start.attributes(),
+        Map.of(),
+        Pose.STANDING,
+        MovementEnvironment.dry(false, true, false),
+        start.position(),
+        start.velocity(),
+        false,
+        false,
+        false,
+        List.of());
+
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    var report = runner.process(
+        "sprint-speed-attribute-lag",
+        List.of(
+            new RawPacket(1, 10L, sprintAuthority),
+            new RawPacket(2, 20L, new ClientInput(
+                true, false, false, false, false, false, true)),
+            new RawPacket(3, 30L, new Move(first.position(), 0f, 0f, false, 1L)),
+            new RawPacket(4, 40L, new ClientInput(
+                true, false, false, false, false, false, true)),
+            new RawPacket(5, 50L, new Move(second.position(), 0f, 0f, false, 2L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(2, report.movementObservations(), report.toString());
+    assertEquals(0, report.impossible(), report.toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getLast().verdict(),
+        report.results().toString());
+    assertTrue(
+        report.frames().stream().flatMap(frame -> frame.trace().stream())
+            .anyMatch(line -> line.contains("SPRINT_SPEED_STATE_ALTERNATIVE")),
+        report.frames().toString());
+  }
+
+  @Test
   void heldSprintCanBecomeAConservativePhysicalAlternativeAfterFrontierPersists() {
     WorldSnapshot world = floorWorld();
     Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
