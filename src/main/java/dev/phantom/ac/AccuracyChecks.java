@@ -71,7 +71,6 @@ public final class AccuracyChecks {
       while (timerBoundaries.size() > 32) timerBoundaries.removeFirst();
       actionsPerTick.keySet().removeIf(tick -> tick + 64 < currentSequence);
       placementsPerTick.keySet().removeIf(tick -> tick + 64 < currentSequence);
-      entities.entrySet().removeIf(e -> false);
     }
 
     void resetTemporalEvidence() {
