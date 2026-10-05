@@ -37,14 +37,32 @@ class ProductionMovementAnomalyTest {
         Set.of());
   }
 
+  private static Phase6Reachability.Candidate candidateAt(long tick, Player player) {
+    Phase6Reachability.Context context = new Phase6Reachability.Context(
+        tick,
+        player,
+        Simulation.Environment.DRY,
+        Simulation.Attributes.DEFAULT,
+        Phase5Mechanics.MovementEffects.NONE,
+        Pose.STANDING,
+        Phase5Mechanics.MovementEnvironment.dry(player.onGround(), false, false),
+        false);
+    return new Phase6Reachability.Candidate(
+        tick,
+        context,
+        new Phase6Reachability.Provenance(
+            tick, -1, tick, "INPUT", "WORLD", "None", List.of("test"), 1, List.of()));
+  }
+
   private static PredictionFrame frame(
       long sequence, Player before, Player after) {
     Packets.Move move = new Packets.Move(
         after.position(), 0.0f, 0.0f, after.onGround(), 1L);
+    Phase6Reachability.Candidate candidate = candidateAt(sequence, before);
     return new PredictionFrame(
         sequence, sequence * 50_000_000L, sequence, sequence,
         move, before, after,
-        Set.of(), Set.of(),
+        Set.of(candidate), Set.of(candidate),
         WorldSnapshot.emptyOverworld12111(),
         List.of(), List.of());
   }
