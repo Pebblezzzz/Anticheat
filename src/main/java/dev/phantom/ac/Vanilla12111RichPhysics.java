@@ -228,7 +228,6 @@ public final class Vanilla12111RichPhysics {
                 double slipperiness = BlockCatalogue12111.slipperiness(support);
                 double movementSpeed = context.attributes().value() * context.effects().speedMultiplier();
                 if (context.movementEnvironment().sprinting()) movementSpeed *= SPRINTING_SPEED_MULTIPLIER;
-                if (context.movementEnvironment().sneaking()) movementSpeed *= context.effects().sneakingSpeedMultiplier();
 
                 /*
                  * Soul Speed is represented by the modern movement-efficiency
@@ -262,6 +261,16 @@ public final class Vanilla12111RichPhysics {
          * stays in the same deterministic path as ordinary movement.
          */
         inputAcceleration *= context.movementEnvironment().itemUseSpeedMultiplier();
+
+        /*
+         * Grim's modern input transformer applies the sneaking-speed attribute
+         * to the input vector before the movement ticker, not only to grounded
+         * friction. In particular, S + Shift + Jump must retain the reduced
+         * backward air control while the player is airborne.
+         */
+        if (context.movementEnvironment().sneaking()) {
+            inputAcceleration *= context.effects().sneakingSpeedMultiplier();
+        }
 
         /*
          * Inputs are applied after the starting-vector adjustments. This mirrors

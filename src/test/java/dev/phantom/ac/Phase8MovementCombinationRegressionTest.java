@@ -188,6 +188,91 @@ class Phase8MovementCombinationRegressionTest {
   }
 
   @Test
+  void sneakingScalesAirInputBeforeJumpPrediction() {
+    WorldSnapshot world = floorWorld();
+    Player airborne = new Player(
+        new Maths.Vec3(0.5, 64.5, 0.5),
+        new Maths.Vec3(0.0, 0.24813599859094576, 0.0),
+        0f,
+        0f,
+        false,
+        "survival",
+        Map.of(),
+        OptionalInt.empty(),
+        false,
+        Optional.empty(),
+        new Simulation.Attributes(VANILLA_BASE_MOVEMENT_SPEED),
+        Pose.STANDING,
+        State.Environment.DRY,
+        State.TickRange.exact(0),
+        State.Provenance.UNKNOWN,
+        Set.of());
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    EntityCollisions noEntities = EntityCollisions.of(List.of());
+
+    var walking = physics.step(new Vanilla12111RichPhysics.Context(
+        1L,
+        airborne,
+        new Simulation.AdvancedInput(-1, 0, true, true, false),
+        world,
+        Simulation.Environment.DRY,
+        airborne.attributes(),
+        MovementEffects.NONE,
+        Pose.STANDING,
+        MovementEnvironment.dry(false, true, false),
+        false,
+        false,
+        noEntities));
+
+    var sneaking = physics.step(new Vanilla12111RichPhysics.Context(
+        1L,
+        airborne,
+        new Simulation.AdvancedInput(-1, 0, true, true, true),
+        world,
+        Simulation.Environment.DRY,
+        airborne.attributes(),
+        MovementEffects.NONE,
+        Pose.STANDING,
+        MovementEnvironment.dry(false, true, true),
+        false,
+        false,
+        noEntities));
+
+    double walkingSpeed = Math.abs(walking.clientVelocityAfterTick().z());
+    double sneakingSpeed = Math.abs(sneaking.clientVelocityAfterTick().z());
+    assertTrue(walkingSpeed > 0.0, walking.toString());
+    assertFalse(walking.state().uncertain(), walking.toString());
+    assertFalse(sneaking.state().uncertain(), sneaking.toString());
+    assertEquals(0.3, sneakingSpeed / walkingSpeed, 1e-9, sneaking.toString());
+  }
+
+  @Test
+  void sprintSneakJumpBackwardRemainsPossibleAcrossAirborneTicks() {
+    Simulation.AdvancedInput sprintSneakJumpBack =
+        new Simulation.AdvancedInput(-1, 0, true, true, true);
+    Simulation.AdvancedInput sprintSneakBack =
+        new Simulation.AdvancedInput(-1, 0, false, true, true);
+
+    var report = runSequence(
+        "sprint-sneak-backward-jump",
+        List.of(
+            sprintSneakBack,
+            sprintSneakJumpBack,
+            sprintSneakJumpBack,
+            sprintSneakBack,
+            sprintSneakBack,
+            sprintSneakJumpBack,
+            sprintSneakBack));
+
+    assertEquals(7, report.movementObservations(), report.toString());
+    assertEquals(0, report.impossible(), report.results().toString());
+    assertTrue(
+        report.results().stream().allMatch(
+            result -> result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE),
+        report.results().toString());
+  }
+
+  @Test
   void sprintJumpWithSneakFalseRemainsPossibleAcrossAirborneTicks() {
     Simulation.AdvancedInput sprint = new Simulation.AdvancedInput(1, 0, false, true, false);
     Simulation.AdvancedInput sprintJump = new Simulation.AdvancedInput(1, 0, true, true, false);
