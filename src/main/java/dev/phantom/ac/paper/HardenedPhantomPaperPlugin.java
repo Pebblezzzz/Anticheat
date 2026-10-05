@@ -244,13 +244,21 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         var position=placement.getBlockPosition();
         if(position!=null){
           var cursor=placement.getCursorPosition();
+          org.bukkit.entity.Player bukkitPlayer = getServer().getPlayer(playerId);
+          org.bukkit.inventory.ItemStack heldItem =
+              bukkitPlayer == null ? null : bukkitPlayer.getInventory().getItemInMainHand();
+          String heldItemType = heldItem == null || heldItem.getType().isAir()
+              ? "minecraft:air" : heldItem.getType().getKey().toString();
+          int heldItemAmount = heldItem == null ? 0 : heldItem.getAmount();
           Packets.BlockPlace packet=new Packets.BlockPlace(
               new dev.phantom.ac.world.Pos(position.x,position.y,position.z),
               placement.getFaceId(),
               cursor==null
                   ?dev.phantom.ac.Maths.Vec3.ZERO
                   :new dev.phantom.ac.Maths.Vec3(cursor.x,cursor.y,cursor.z),
-              cursor!=null);
+              cursor!=null,
+              heldItemType,
+              heldItemAmount);
           record(capture,packet);
           schedulePredictionValidation(capture);
         }
