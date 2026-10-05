@@ -110,7 +110,10 @@ final class MovementAdvantageTracker {
     double observedDy = observedAfter.y() - origin.y();
     double observedDz = observedAfter.z() - origin.z();
 
-    double minObservedHorizontalDistance = Double.POSITIVE_INFINITY;
+    double maxHorizontalProjection = Double.NEGATIVE_INFINITY;
+    double horizontalLength = Math.hypot(observedDx, observedDz);
+    double directionX = horizontalLength > EPSILON ? observedDx / horizontalLength : 0.0D;
+    double directionZ = horizontalLength > EPSILON ? observedDz / horizontalLength : 0.0D;
     double minVertical = Double.POSITIVE_INFINITY;
     double maxVertical = Double.NEGATIVE_INFINITY;
 
@@ -120,32 +123,30 @@ final class MovementAdvantageTracker {
       double dz = reachable.z() - origin.z();
       if (!Double.isFinite(dx) || !Double.isFinite(dy) || !Double.isFinite(dz)) continue;
 
-      double horizontalError = Math.hypot(observedDx - dx, observedDz - dz);
-      if (Double.isFinite(horizontalError)) {
-        minObservedHorizontalDistance =
-            Math.min(minObservedHorizontalDistance, horizontalError);
+      if (horizontalLength > EPSILON) {
+        double support = dx * directionX + dz * directionZ;
+        if (Double.isFinite(support)) maxHorizontalProjection = Math.max(maxHorizontalProjection, support);
       }
 
       minVertical = Math.min(minVertical, dy);
       maxVertical = Math.max(maxVertical, dy);
     }
 
-    boolean horizontalEvaluated = Double.isFinite(minObservedHorizontalDistance);
+    boolean horizontalEvaluated = horizontalLength <= EPSILON || Double.isFinite(maxHorizontalProjection);
     boolean verticalEvaluated =
         Double.isFinite(minVertical) && Double.isFinite(maxVertical);
 
     /*
-     * The old tracker projected the observed movement onto one axis (the
-     * direction of the observed displacement). That could report a large
-     * "advantage" even when a reachable candidate was only displaced
-     * laterally, and could miss a real 2-D miss in the opposite direction.
-     *
-     * Measure the actual closest horizontal residual instead. The candidate
-     * frontier already contains the complete modeled input/world alternatives,
-     * so the closest point is the meaningful geometric error signal.
+     * Measure the outward support envelope in the observed movement direction.
+     * This is the furthest reachable projection along the actual observed ray,
+     * not the distance to the nearest candidate. Lateral candidates therefore
+     * cannot erase a real outward excess, while sideways error is not misread as
+     * additional reach.
      */
     double signedHorizontal =
-        horizontalEvaluated ? minObservedHorizontalDistance : 0.0D;
+        horizontalEvaluated && horizontalLength > EPSILON && Double.isFinite(maxHorizontalProjection)
+            ? Math.max(0.0D, horizontalLength - maxHorizontalProjection)
+            : 0.0D;
 
     double signedVertical =
         verticalEvaluated
