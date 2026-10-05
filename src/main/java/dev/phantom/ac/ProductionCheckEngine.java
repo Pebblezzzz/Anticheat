@@ -934,21 +934,42 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
 
     BlockBox compensated(long interactionNanos) {
       if (samples.isEmpty()) return null;
-      BlockBox result = null;
-      int used = 0;
-      java.util.Iterator<EntitySample> iterator = samples.descendingIterator();
-      while (iterator.hasNext()) {
-        EntitySample sample = iterator.next();
-        if (sample.receivedNanos() > interactionNanos) continue;
-        if (interactionNanos - sample.receivedNanos() > 150_000_000L) continue;
-        result = result == null ? sample.box() : result.enclose(sample.box());
-        if (++used >= 3) break;
+      EntitySample before = null;
+      EntitySample after = null;
+      for (EntitySample sample : samples) {
+        if (sample.receivedNanos() <= interactionNanos) {
+          before = sample;
+        } else {
+          after = sample;
+          break;
+        }
       }
-      return result == null ? samples.getLast().box() : result;
+      if (before == null) return samples.getFirst().box();
+      if (after == null) return samples.getLast().box();
+      long span = after.receivedNanos() - before.receivedNanos();
+      if (span <= 0L) return before.box();
+      double alpha = Math.max(0.0, Math.min(1.0,
+          (interactionNanos - before.receivedNanos()) / (double) span));
+      return interpolateBox(before.box(), after.box(), alpha);
     }
   }
 
   private record EntitySample(long receivedNanos, BlockBox box) {}
+
+  private static BlockBox interpolateBox(BlockBox a, BlockBox b, double alpha) {
+    return new BlockBox(
+        lerp(a.minX(), b.minX(), alpha),
+        lerp(a.minY(), b.minY(), alpha),
+        lerp(a.minZ(), b.minZ(), alpha),
+        lerp(a.maxX(), b.maxX(), alpha),
+        lerp(a.maxY(), b.maxY(), alpha),
+        lerp(a.maxZ(), b.maxZ(), alpha));
+  }
+
+  private static double lerp(double a, double b, double alpha) {
+    return a + (b - a) * alpha;
+  }
+
 
   private static boolean positionExactlyMatches(Vec3 a, Vec3 b) {
     return a != null && b != null
