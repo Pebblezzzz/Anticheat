@@ -36,6 +36,23 @@ class Phase8MovementValidationTest {
     return new Validation.SyncWindow(20, 20, false, List.of("stable timing"));
   }
 
+  @Test
+  void positionRotationMovementDoesNotTreatRotationAsKinematicConstraint() {
+    Packets.Move move = new Packets.Move(
+        new Maths.Vec3(1.0, 65.0, 2.0),
+        90.0f,
+        10.0f,
+        true,
+        20L,
+        Packets.MovementKind.POSITION_ROTATION);
+
+    var fields = Phase8PredictionRunner.observedFieldsFor(move);
+
+    assertTrue(fields.contains(Phase6Reachability.ObservedField.POSITION));
+    assertTrue(fields.contains(Phase6Reachability.ObservedField.GROUND));
+    assertFalse(fields.contains(Phase6Reachability.ObservedField.ROTATION));
+  }
+
   @Test void legitimateObservationIsPossible() {
     Player observed = Player.initial(new Maths.Vec3(0.5, 65, 0.5));
     var result = Phase8MovementValidation.validate("alice", 20, observed, observed, world(), "world:test:20", stable(),
