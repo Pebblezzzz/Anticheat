@@ -4562,8 +4562,15 @@ public final class Phase8PredictionRunner {
     for (Candidate candidate : candidates) {
       Player state = candidate.context().player();
       if (!positionMatches(state.position(), observed.position())) continue;
-      if (move.yaw() != null && Float.compare(state.yaw(), observed.yaw()) != 0) continue;
-      if (move.pitch() != null && Float.compare(state.pitch(), observed.pitch()) != 0) continue;
+      /*
+       * Position-bearing movement packets validate kinematics first; rotation
+       * is a separate client-state observation. Do not let yaw/pitch eliminate
+       * a candidate that already reproduces the reported movement.
+       */
+      if (move.position() == null) {
+        if (move.yaw() != null && Float.compare(state.yaw(), observed.yaw()) != 0) continue;
+        if (move.pitch() != null && Float.compare(state.pitch(), observed.pitch()) != 0) continue;
+      }
       if (includeGround
           && move.onGround() != null
           && state.onGround() != observed.onGround()) continue;
@@ -4610,13 +4617,7 @@ public final class Phase8PredictionRunner {
       boolean timingExhaustivelyModeled) {
     return validate(
         playerId, packet, move, prior, observed, world, tick, uncertainty,
-        search, timingExhaustivelyModeled,
-        move.position() == null
-            ? EnumSet.of(Phase6Reachability.ObservedField.ROTATION)
-            : EnumSet.of(
-                Phase6Reachability.ObservedField.POSITION,
-                Phase6Reachability.ObservedField.ROTATION,
-                Phase6Reachability.ObservedField.GROUND));
+        search, timingExhaustivelyModeled, observedFieldsFor(move));
   }
 
   private Phase8MovementValidation.Result validate(
