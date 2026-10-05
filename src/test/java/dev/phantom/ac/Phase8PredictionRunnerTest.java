@@ -165,7 +165,7 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
-  void itemUseAuthorityClearsCausalGapAndPreservesHardMismatchDetection() {
+  void itemUseAuthorityClearsCausalGapBeforeNextPrediction() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     WorldSnapshot world = floorWorld();
 
@@ -202,8 +202,11 @@ class Phase8PredictionRunnerTest {
         null,
         -1L);
 
-    assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE,
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getFirst().verdict(), report.results().toString());
+    assertFalse(report.results().getFirst().evidence().uncertaintySources().stream()
+        .anyMatch(reason -> reason.contains("use_effects")),
+        report.results().getFirst().evidence().uncertaintySources().toString());
   }
 
   @Test
