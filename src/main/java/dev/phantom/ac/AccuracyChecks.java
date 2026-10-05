@@ -208,7 +208,7 @@ public final class AccuracyChecks {
         continue;
       }
 
-      if (tracking && after.onGround()) {
+      if (state.noFallTracking && after.onGround()) {
         double fallDistance = state.fallOriginY - after.position().y();
         boolean predictedLanding = frame.predictedAfter().stream()
             .anyMatch(candidate -> candidate.context().player().onGround());
@@ -361,9 +361,9 @@ public final class AccuracyChecks {
         if (move.yaw() != null && Float.isFinite(move.yaw())) {
           if (Float.isFinite(state.previousYaw)) {
             double delta = Math.abs(Math.IEEEremainder(move.yaw() - state.previousYaw, 360.0));
-            double pitchDelta = move.pitch() == null || !Float.isFinite(previousPitch)
+            double pitchDelta = move.pitch() == null || !Float.isFinite(state.previousPitch)
                 ? 0.0
-                : Math.abs(move.pitch() - previousPitch);
+                : Math.abs(move.pitch() - state.previousPitch);
             if (delta >= 75.0 || pitchDelta >= 55.0) state.snapStreak++;
             else state.snapStreak = Math.max(0, state.snapStreak - 1);
           }
