@@ -3589,15 +3589,15 @@ class Phase8PredictionRunnerTest {
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.startsWith("UNCERTAINTY_RECOVERY cleared=[TIMING]")),
         report.frames().getLast().trace().toString());
-    assertTrue(report.frames().getLast().trace().stream()
+    assertTrue(report.frames().get(1).trace().stream()
         .anyMatch(line -> line.startsWith("CLIENT_TICK 2")
             && line.contains("exact=true")
             && line.contains("timingUncertain=true")),
-        report.frames().getLast().trace().toString());
-    assertTrue(report.frames().getLast().trace().stream()
+        report.frames().get(1).trace().toString());
+    assertTrue(report.frames().get(1).trace().stream()
         .anyMatch(line -> line.contains("TICK_RELIABILITY")
             && line.contains("sequenceGap=true")),
-        report.frames().getLast().trace().toString());
+        report.frames().get(1).trace().toString());
   }
 
 
