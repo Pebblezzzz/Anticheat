@@ -91,13 +91,14 @@ class AccuracyChecksTest {
         "STOP_JUMPING_WITH_HORSE",
         "START_FLYING_WITH_ELYTRA");
     for (int i = 0; i < actions.size(); i++) {
+      String action = actions.get(i);
       var findings = AccuracyChecks.analyze(
           "p",
           List.of(new Packets.RawPacket(i + 1L, i + 1L,
-              new Packets.EntityAction(actions.get(i), 0))),
+              new Packets.EntityAction(action, 0))),
           List.of());
       assertTrue(findings.stream().noneMatch(f -> f.rule().equals("EntityAction")),
-          () -> actions.get(i) + ": " + findings);
+          () -> action + ": " + findings);
     }
   }
 
