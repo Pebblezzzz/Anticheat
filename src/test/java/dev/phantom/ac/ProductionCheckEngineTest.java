@@ -408,18 +408,36 @@ class ProductionCheckEngineTest {
 
     var result = ProductionCheckEngine.analyze("p", packets, report(frame(2, player(0, 0))), CONFIG);
 
-    assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("Reach")));
-    assertTrue(result.findings().stream().filter(f -> f.rule().equals("Reach"))
-        .allMatch(f -> f.verdict() == ProductionCheckEngine.Verdict.UNCERTAIN));
+    var reach = result.findings().stream()
+        .filter(f -> f.rule().equals("Reach"))
+        .findFirst()
+        .orElseThrow();
+    assertEquals(ProductionCheckEngine.Verdict.IMPOSSIBLE, reach.verdict());
+    assertEquals(ProductionCheckEngine.EvidenceClass.IMPOSSIBLE, reach.evidenceClass());
+    assertEquals(1.0, reach.normalizedScore(), 1.0e-9);
 
-    var accumulator = ProductionCheckEngine.Accumulator.empty();
-    for (var finding : result.findings()) {
-      var accepted = accumulator.accept(finding, CONFIG);
-      assertTrue(accepted.alert().isEmpty());
-      accumulator = accepted.state();
-    }
+    var accepted = ProductionCheckEngine.Accumulator.empty().accept(reach, CONFIG);
+    assertTrue(accepted.alert().isEmpty());
+    assertEquals(1.0, accepted.state().rules().get("Reach").violationLevel(), 1.0e-9);
   }
 
+
+  @Test
+  void movingTargetUsesInterpolatedClientVisibleHitbox() {
+    BlockBox first = new BlockBox(-0.5, 1.0, 2.5, 0.5, 2.0, 3.5);
+    BlockBox second = new BlockBox(3.5, 1.0, 2.5, 4.5, 2.0, 3.5);
+    Packets.Move move = new Packets.Move(new Vec3(0, 0, 0), 307.0f, 0.0f, true, 1L);
+    PredictionFrame prediction = frame(3, player(307.0f, 0.0f));
+    List<Packets.RawPacket> packets = List.of(
+        new Packets.RawPacket(1, 0L, new Packets.EntitySpawn(10, first)),
+        new Packets.RawPacket(2, 100L, new Packets.EntityMove(10, second)),
+        new Packets.RawPacket(3, 50L, new Packets.InteractEntity(10, Packets.InteractAction.ATTACK)));
+
+    var result = ProductionCheckEngine.analyze("p", packets, report(prediction), CONFIG);
+
+    assertTrue(result.findings().stream().anyMatch(f -> f.rule().equals("Hitbox")
+        || f.rule().equals("Reach")));
+  }
 
   @Test
   void bestPredictionResidualDetectsSubBlockSpeed() {
