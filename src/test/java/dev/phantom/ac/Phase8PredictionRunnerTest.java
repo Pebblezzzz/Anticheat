@@ -127,6 +127,86 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void itemUseBeforeCausalAuthorityIsUncertainInsteadOfImpossible() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    UseItem useItem = new UseItem(0, 1, 0f, 0f);
+    Move movement = new Move(
+        new Maths.Vec3(1.7, 64.0, .5), 0f, 0f, true, 1L);
+
+    var report = runner.process(
+        "item-use-causal-gap",
+        List.of(
+            new RawPacket(1L, 10L, authority,
+                Packets.CaptureProvenance.fromAdapter("authority", authority, 1L, 0L)),
+            new RawPacket(2L, 15L, useItem,
+                Packets.CaptureProvenance.fromAdapter("use-item", useItem, 1L, 0L)),
+            new RawPacket(3L, 20L, movement,
+                Packets.CaptureProvenance.fromAdapter("movement", movement, 1L, 1L))),
+        world,
+        null,
+        -1L);
+
+    assertEquals(Phase8MovementValidation.Verdict.UNCERTAIN,
+        report.results().getFirst().verdict(), report.results().toString());
+    assertTrue(report.results().getFirst().evidence().uncertaintySources().stream()
+        .anyMatch(reason -> reason.contains("use_effects")),
+        report.results().getFirst().evidence().uncertaintySources().toString());
+    assertTrue(report.frames().getFirst().trace().stream()
+        .anyMatch(line -> line.startsWith("ITEM_USE_OBSERVED")),
+        report.frames().getFirst().trace().toString());
+  }
+
+  @Test
+  void itemUseAuthorityClearsCausalGapAndPreservesHardMismatchDetection() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+    PlayerContext usingAuthority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING,
+        new MovementEnvironment(
+            Phase5Mechanics.Fluid.NONE, false, false, true,
+            false, false, false, false, 1.0, 1.0, 1.0, 0.2),
+        new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    UseItem useItem = new UseItem(0, 1, 0f, 0f);
+    Move movement = new Move(
+        new Maths.Vec3(1.7, 64.0, .5), 0f, 0f, true, 1L);
+
+    var report = runner.process(
+        "item-use-authority-visible",
+        List.of(
+            new RawPacket(1L, 10L, authority,
+                Packets.CaptureProvenance.fromAdapter("authority", authority, 1L, 0L)),
+            new RawPacket(2L, 15L, useItem,
+                Packets.CaptureProvenance.fromAdapter("use-item", useItem, 1L, 0L)),
+            new RawPacket(3L, 18L, usingAuthority,
+                Packets.CaptureProvenance.fromAdapter("authority", usingAuthority, 1L, 0L)),
+            new RawPacket(4L, 20L, movement,
+                Packets.CaptureProvenance.fromAdapter("movement", movement, 1L, 1L))),
+        world,
+        null,
+        -1L);
+
+    assertEquals(Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        report.results().getFirst().verdict(), report.results().toString());
+  }
+
+  @Test
   void firstMovementWithoutCausalAnchorIsUncertainInsteadOfSelfAnchored() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     WorldSnapshot world = floorWorld();
