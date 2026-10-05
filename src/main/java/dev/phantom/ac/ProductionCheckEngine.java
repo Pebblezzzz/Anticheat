@@ -917,8 +917,9 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
       if (samples.isEmpty()) return null;
       BlockBox result = null;
       int used = 0;
-      for (EntitySample sample : samples.descendingIterator()::forEachRemaining) {}
-      for (EntitySample sample : samples) {
+      java.util.Iterator<EntitySample> iterator = samples.descendingIterator();
+      while (iterator.hasNext()) {
+        EntitySample sample = iterator.next();
         if (sample.receivedNanos() > interactionNanos) continue;
         if (interactionNanos - sample.receivedNanos() > 150_000_000L) continue;
         result = result == null ? sample.box() : result.enclose(sample.box());
