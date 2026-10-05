@@ -4528,6 +4528,7 @@ public final class Phase8PredictionRunner {
       SearchResult search,
       boolean timingExhaustivelyModeled,
       Set<Phase6Reachability.ObservedField> observedFields) {
+    uncertainty = new ArrayList<>(uncertainty);
     List<String> timingReasons = new ArrayList<>();
     if (tick.timingUncertain()) {
       timingReasons.add(tick.uncertaintyReason());
