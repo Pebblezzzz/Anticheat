@@ -45,7 +45,11 @@ public final class ProductionCheckEngine {
     final Map<Pos, PredictionFrame> diggingStartFrames = new HashMap<>();
 
     void prune(long currentSequence) {
-      diggingStarts.entrySet().removeIf(e -> currentSequence - e.getValue() > 64);
+      while (diggingStarts.size() > 64) {
+        diggingStarts.keySet().iterator().next();
+        Pos oldest = diggingStarts.keySet().iterator().next();
+        diggingStarts.remove(oldest);
+      }
       diggingStartFrames.keySet().retainAll(diggingStarts.keySet());
     }
   }
