@@ -2047,7 +2047,7 @@ public final class Phase8PredictionRunner {
         frames);
   }
 
-  private static EnumSet<Phase6Reachability.ObservedField> observedFieldsFor(Packets.Move move) {
+  static EnumSet<Phase6Reachability.ObservedField> observedFieldsFor(Packets.Move move) {
     EnumSet<Phase6Reachability.ObservedField> fields =
         EnumSet.noneOf(Phase6Reachability.ObservedField.class);
     Packets.MovementKind kind = move.movementKind();
