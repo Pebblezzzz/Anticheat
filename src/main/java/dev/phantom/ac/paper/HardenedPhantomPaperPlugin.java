@@ -638,7 +638,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       thread.setDaemon(true);
       return thread;
     });
-    int validationThreads=Math.max(1,Math.min(4,Math.max(1,processors/2)));
+    int validationThreads=Math.max(1,Math.min(2,Math.max(1,processors/2)));
     validationExecutor=Executors.newFixedThreadPool(validationThreads,r->{
       Thread thread=new Thread(r,"Phantom-Phase8Validator");
       thread.setDaemon(true);
@@ -984,6 +984,21 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     boolean gliding = player.isGliding();
     boolean sleeping = player.isSleeping();
 
+    double itemUseSpeedMultiplier = 1.0D;
+    if (player.hasActiveItem()) {
+      org.bukkit.inventory.ItemStack activeItem = player.getActiveItem();
+      if (activeItem != null && !activeItem.getType().isAir()) {
+        io.papermc.paper.datacomponent.item.UseEffects useEffects =
+            activeItem.getDataOrDefault(
+                io.papermc.paper.datacomponent.DataComponentTypes.USE_EFFECTS,
+                activeItem.getType().getDefaultData(
+                    io.papermc.paper.datacomponent.DataComponentTypes.USE_EFFECTS));
+        if (useEffects != null && Float.isFinite(useEffects.speedMultiplier())) {
+          itemUseSpeedMultiplier = Math.max(0.0D, Math.min(1.0D, useEffects.speedMultiplier()));
+        }
+      }
+    }
+
     Material feet = location.getBlock().getType();
     String materialName = feet.name();
     boolean climbable =
@@ -998,15 +1013,15 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     if (inLava) {
       movementEnvironment = new Phase5Mechanics.MovementEnvironment(
           Phase5Mechanics.Fluid.LAVA, true, climbable, onGround,
-          sprinting, sneaking, false, gliding, 1.0D, 0.5D, 0.25D);
+          sprinting, sneaking, false, gliding, 1.0D, 0.5D, 0.25D, itemUseSpeedMultiplier);
     } else if (inWater) {
       movementEnvironment = new Phase5Mechanics.MovementEnvironment(
           Phase5Mechanics.Fluid.WATER, true, climbable, onGround,
-          sprinting, sneaking, swimmingInput, gliding, 1.0D, 0.8D, 1.0D);
+          sprinting, sneaking, swimmingInput, gliding, 1.0D, 0.8D, 1.0D, itemUseSpeedMultiplier);
     } else {
       movementEnvironment = new Phase5Mechanics.MovementEnvironment(
           Phase5Mechanics.Fluid.NONE, false, climbable, onGround,
-          sprinting, sneaking, false, gliding, 1.0D, 1.0D, 1.0D);
+          sprinting, sneaking, false, gliding, 1.0D, 1.0D, 1.0D, itemUseSpeedMultiplier);
     }
 
     Phase5Mechanics.Pose pose =
@@ -1121,6 +1136,27 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
    * Only immutable results are handed back to Bukkit for alerts/enforcement.</p>
    */
   private void processLivePacket(Capture capture){
+    if(capture==null || !acceptingAsyncValidation.get() || !isEnabled())return;
+    if(validationExecutor==null)return;
+    if(!capture.predictionValidationQueued.compareAndSet(false,true))return;
+    try{
+      validationExecutor.execute(()->{
+        try{
+          performLiveValidation(capture);
+        }finally{
+          capture.predictionValidationQueued.set(false);
+          if(acceptingAsyncValidation.get() && isEnabled()
+              && !capture.copySince(capture.movementRunner.lastProcessedSequence()).isEmpty()){
+            processLivePacket(capture);
+          }
+        }
+      });
+    }catch(RejectedExecutionException rejected){
+      capture.predictionValidationQueued.set(false);
+    }
+  }
+
+  private void performLiveValidation(Capture capture){
     if(capture==null || !acceptingAsyncValidation.get() || !isEnabled())return;
 
     List<RawPacket> raw=capture.copySince(capture.movementRunner.lastProcessedSequence());
