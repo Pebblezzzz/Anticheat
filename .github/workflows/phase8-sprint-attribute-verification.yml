@@ -9,6 +9,8 @@ on:
 permissions:
   contents: write
 
+# Temporary PR verification; removed after successful test proof.
+
 jobs:
   verify:
     runs-on: ubuntu-latest
