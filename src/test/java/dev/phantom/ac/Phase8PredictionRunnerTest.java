@@ -3304,6 +3304,53 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void rotationOnlyPacketCannotContradictRetainedGroundState() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+
+    Player start = new Player(
+        new Maths.Vec3(.5, 70.0, .5),
+        Maths.Vec3.ZERO,
+        0f, 0f, false, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
+
+    PlayerContext authority = new PlayerContext(
+        "survival",
+        start.attributes(),
+        Map.of(),
+        Pose.STANDING,
+        MovementEnvironment.dry(false, false, false),
+        start.position(),
+        start.velocity(),
+        false,
+        false,
+        false,
+        List.of());
+
+    var report = runner.process(
+        "rotation-only-ground",
+        List.of(
+            new RawPacket(1L, 10L, authority),
+            new RawPacket(2L, 20L, new Move(
+                null, 90f, 20f, true, 1L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(1, report.movementObservations(), report.toString());
+    assertNotEquals(
+        Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(
+        report.results().getFirst().evidence().uncertaintySources().isEmpty()
+            || report.results().getFirst().verdict() == Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().toString());
+  }
+
+  @Test
   void firstImpossibleMovementIsDetectedAcrossLivePacketBoundaries() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     WorldSnapshot world = floorWorld();
