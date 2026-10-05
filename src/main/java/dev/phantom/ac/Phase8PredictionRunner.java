@@ -336,6 +336,8 @@ public final class Phase8PredictionRunner {
   private long lastObservedMovementClientTick = -1L;
   private boolean lastObservedMovementPriorGround;
   private long nextCandidateId;
+  private long lastItemUseSequence = -1L;
+  private boolean itemUseAuthorityPending;
   private Continuation latestContinuation = Continuation.UNANCHORED;
 
   public Phase8PredictionRunner(int maximumCandidates) {
@@ -600,6 +602,9 @@ public final class Phase8PredictionRunner {
           pendingAuthorityContexts.put(barrierId, anchor);
         } else {
           applyClientVisibleAuthority(anchor);
+          if (itemUseAuthorityPending && sequence > lastItemUseSequence) {
+            itemUseAuthorityPending = false;
+          }
           if (clientState == null) {
             /*
              * The first client-visible authority in a capture is the legitimate
@@ -619,6 +624,14 @@ public final class Phase8PredictionRunner {
         recentClientBlockBreaks.put(sequence, clientBlockBreak);
         recentClientBlockBreaks.headMap(
             sequence - CLIENT_BLOCK_BREAK_UNCERTAINTY_SEQUENCE_WINDOW, true).clear();
+        continue;
+      }
+
+      if (value instanceof Packets.UseItem) {
+        lastItemUseSequence = sequence;
+        itemUseAuthorityPending = true;
+        trace.add("ITEM_USE_OBSERVED sequence=" + sequence
+            + " action=WAIT_FOR_CAUSAL_AUTHORITY");
         continue;
       }
 
@@ -3823,6 +3836,7 @@ public final class Phase8PredictionRunner {
         base.fluidSpeedMultiplier(),
         base.fluidDrag(),
         base.gravityMultiplier(),
+        base.itemUseSpeedMultiplier(),
         base.vehicle());
   }
 
@@ -3841,6 +3855,7 @@ public final class Phase8PredictionRunner {
         environment.fluidSpeedMultiplier(),
         environment.fluidDrag(),
         environment.gravityMultiplier(),
+        environment.itemUseSpeedMultiplier(),
         vehicle);
   }
 
@@ -3940,6 +3955,7 @@ public final class Phase8PredictionRunner {
         authority.fluidSpeedMultiplier(),
         authority.fluidDrag(),
         authority.gravityMultiplier(),
+        authority.itemUseSpeedMultiplier(),
         authority.vehicle());
   }
 
@@ -4046,7 +4062,8 @@ public final class Phase8PredictionRunner {
             oldEnvironment.gliding(),
             oldEnvironment.fluidSpeedMultiplier(),
             oldEnvironment.fluidDrag(),
-            oldEnvironment.gravityMultiplier())
+            oldEnvironment.gravityMultiplier(),
+            oldEnvironment.itemUseSpeedMultiplier())
         : environmentOverride;
     Context context = new Context(
         old.simulationTick(),
@@ -4533,7 +4550,21 @@ public final class Phase8PredictionRunner {
     assumptions.add("movement hypotheses remain as a bounded set of candidate client states rather than one forced trajectory");
     assumptions.add("tick reliability is tracked independently from movement physics so timing uncertainty is not mistaken for kinematic impossibility");
     assumptions.add("trusted prediction candidates are retained only while they remain valid physics states; observation witnesses are not reused as physics roots");
+    assumptions.add("active item use is modeled from the authoritative use_effects speed multiplier");
+    assumptions.add("item-use movement is not treated as exhaustive until a causally visible authoritative use_effects snapshot follows the UseItem packet");
     assumptions.addAll(uncertainty);
+
+    boolean itemUseCausalStatePending =
+        itemUseAuthorityPending
+            && packet.sequence() > lastItemUseSequence;
+    if (itemUseCausalStatePending) {
+      String itemUseReason =
+          "item-use packet arrived before a causally visible authoritative use_effects snapshot";
+      assumptions.add(itemUseReason);
+      uncertainty.add(itemUseReason);
+      search = uncertainSearch(search.candidates(), itemUseReason);
+      timingExhaustivelyModeled = false;
+    }
 
     Phase8MovementValidation.Result result = Phase8MovementValidation.validate(
         playerId,
