@@ -30,7 +30,9 @@ public final class ProductionCheckEngine {
   private static final Set<String> ENTITY_ACTIONS = Set.of(
       "START_SPRINTING", "STOP_SPRINTING",
       "START_SNEAKING", "STOP_SNEAKING",
-      "START_FLYING_WITH_ELYTRA", "START_JUMPING_WITH_HORSE");
+      "LEAVE_BED", "OPEN_HORSE_INVENTORY",
+      "START_FLYING_WITH_ELYTRA", "START_JUMPING_WITH_HORSE",
+      "STOP_JUMPING_WITH_HORSE");
   private static final Set<String> WINDOW_CLICK_TYPES = Set.of(
       "PICKUP", "QUICK_MOVE", "SWAP", "CLONE", "THROW", "QUICK_CRAFT", "PICKUP_ALL");
 
