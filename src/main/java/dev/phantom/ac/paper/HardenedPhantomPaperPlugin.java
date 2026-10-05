@@ -1690,11 +1690,25 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       implements Serializable {}
 
   private void recordEntitySpawn(Capture capture,int entityId,Vec3 packetPosition){
-    // Entity dimensions are intentionally not sourced from Bukkit. Until the
-    // packet metadata/entity-type hitbox catalogue is complete, keep collision
-    // state explicitly incomplete so dependent checks become UNCERTAIN.
+    // Unknown entity metadata is still incomplete; never synthesize dimensions.
     capture.clientEntities.remove(entityId);
     capture.clientWorld.markEntityTrackingIncomplete();
+  }
+
+  private void recordEntitySpawn(
+      Capture capture,
+      int entityId,
+      Vec3 packetPosition,
+      dev.phantom.ac.geometry.BlockBox box) {
+    Objects.requireNonNull(packetPosition);
+    Objects.requireNonNull(box);
+    capture.clientEntities.put(entityId, new ClientEntityTrack(entityId, packetPosition, box));
+    long sequence=capture.sequence.incrementAndGet();
+    long receivedNanos=System.nanoTime();
+    Packets.EntitySpawn packet=new Packets.EntitySpawn(entityId,box);
+    appendPacket(capture,new RawPacket(
+        sequence,receivedNanos,packet,
+        Packets.CaptureProvenance.fromAdapter("paper-entity-spawn",packet,authoritativeTick(capture))));
   }
 
   private void recordEntityRelativeMove(Capture capture,int entityId,double dx,double dy,double dz){
