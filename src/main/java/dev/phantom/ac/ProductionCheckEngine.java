@@ -235,10 +235,14 @@ public final class ProductionCheckEngine {
         active.put(finding.independenceKey(), new EvidenceStamp(nowMillis, finding.normalizedScore()));
       }
 
-      double level = active.values().stream()
+      double rawLevel = active.values().stream()
           .mapToDouble(EvidenceStamp::score)
           .sum() * config.violationIncrement();
-      level = Math.min(config.maximumViolationLevel(), level);
+      long gapTicks = lastObservationTick >= 0L && tick >= lastObservationTick
+          ? tick - lastObservationTick : 0L;
+      double level = Math.min(
+          config.maximumViolationLevel(),
+          Math.max(0.0, rawLevel - gapTicks * config.violationDecayPerTick()));
 
       List<Long> timestamps = active.values().stream()
           .map(EvidenceStamp::seenMillis)
@@ -261,10 +265,13 @@ public final class ProductionCheckEngine {
       for (var entry : activeEvidence.entrySet()) {
         if (entry.getValue().seenMillis() > cutoff) active.put(entry.getKey(), entry.getValue());
       }
+      double rawLevel = active.values().stream().mapToDouble(EvidenceStamp::score).sum()
+          * config.violationIncrement();
+      long gapTicks = lastObservationTick >= 0L && tick >= lastObservationTick
+          ? tick - lastObservationTick : 0L;
       double level = Math.min(
           config.maximumViolationLevel(),
-          active.values().stream().mapToDouble(EvidenceStamp::score).sum()
-              * config.violationIncrement());
+          Math.max(0.0, rawLevel - gapTicks * config.violationDecayPerTick()));
       List<Long> timestamps = active.values().stream()
           .map(EvidenceStamp::seenMillis)
           .sorted()
@@ -294,24 +301,41 @@ public final class ProductionCheckEngine {
 
       Map<String, State> updated = new LinkedHashMap<>(rules);
       State old = rules.getOrDefault(finding.rule(), State.empty());
+      if (old.lastObservationTick() >= 0L
+          && finding.serverTick() >= old.lastObservationTick()
+          && finding.serverTick() - old.lastObservationTick() >= config.resetAfterTicks()) {
+        old = State.empty();
+      }
       State next = finding.verdict() == Verdict.IMPOSSIBLE
           ? old.addViolation(finding, finding.serverTick(), nowMillis, config)
           : old.retainActive(finding.serverTick(), nowMillis, config, finding.rule());
 
       GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(finding.rule());
-      int activeCount = next.violationTimesMillis().size();
-      double level = activeCount * config.violationIncrement();
+      double level = Math.min(
+          config.maximumViolationLevel(),
+          next.activeEvidence().values().stream()
+              .mapToDouble(EvidenceStamp::score)
+              .sum() * config.violationIncrement());
       next = new State(next.supportingEvents(), next.lastObservationTick(),
-          next.lastAlertTick(), level, next.lastAlertViolationLevel(), next.violationTimesMillis());
+          next.lastAlertTick(), level, next.lastAlertViolationLevel(),
+          next.violationTimesMillis(), next.activeEvidence());
 
       Optional<Finding> alert = Optional.empty();
       Optional<Finding> log = Optional.empty();
 
-      boolean thresholdReached = thresholdReached(level, policy.alert());
-      boolean crossedNextInterval = boundaryCrossed(level, policy.alert(), next.lastAlertViolationLevel());
+      double alertThreshold = Math.max(config.alertViolationThreshold(), policy.alert().threshold());
+      double alertInterval = Math.max(config.alertViolationInterval(), policy.alert().interval());
+      GrimAlertPolicy.CommandRule alertRule =
+          new GrimAlertPolicy.CommandRule(alertThreshold, alertInterval);
+      boolean thresholdReached = level + 1.0e-9 >= alertRule.threshold();
+      boolean crossedNextInterval = boundaryCrossed(
+          level, alertRule, next.lastAlertViolationLevel());
+      boolean debounceSatisfied =
+          next.lastAlertTick() < 0L
+              || finding.serverTick() - next.lastAlertTick() >= config.alertDebounceTicks();
 
       if (finding.verdict() == Verdict.IMPOSSIBLE
-          && thresholdReached && crossedNextInterval) {
+          && thresholdReached && crossedNextInterval && debounceSatisfied) {
         alert = Optional.of(finding);
         next = next.alerted(finding.serverTick(), level);
       }
