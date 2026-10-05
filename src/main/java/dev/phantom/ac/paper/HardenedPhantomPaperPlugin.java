@@ -983,9 +983,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         case ADD_SCALAR -> Phase5Mechanics.ModifierOperation.ADD_MULTIPLIED_BASE;
         case MULTIPLY_SCALAR_1 -> Phase5Mechanics.ModifierOperation.ADD_MULTIPLIED_TOTAL;
       };
-      String id = modifier.getKey() == null
-          ? modifier.getUniqueId().toString()
-          : modifier.getKey().toString();
+      String id = modifier.getUniqueId().toString();
       converted.add(new Phase5Mechanics.AttributeModifier(id, modifier.getAmount(), operation));
     }
     return new Simulation.Attributes(finiteBase, converted);
