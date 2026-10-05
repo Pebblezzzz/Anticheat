@@ -165,6 +165,48 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void itemUseJumpCausalGapPropagatesUncertaintyIntoMovementFrame() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+
+    Player start = anchor();
+    PlayerContext authority = new PlayerContext(
+        "survival", start.attributes(), Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        start.position(), start.velocity(),
+        false, false, false, List.of());
+
+    UseItem useItem = new UseItem(0, 1, 0f, 0f);
+    ClientInput jumpAndMove = new ClientInput(
+        true, false, false, false, true, false, false);
+    Move movement = new Move(
+        new Maths.Vec3(0.55, 64.33333333333333, 0.75),
+        0f, 0f, false, 1L);
+
+    var report = runner.process(
+        "item-use-jump-causal-gap",
+        List.of(
+            new RawPacket(1L, 10L, authority,
+                Packets.CaptureProvenance.fromAdapter("authority", authority, 1L, 0L)),
+            new RawPacket(2L, 15L, useItem,
+                Packets.CaptureProvenance.fromAdapter("use-item", useItem, 1L, 0L)),
+            new RawPacket(3L, 18L, jumpAndMove,
+                Packets.CaptureProvenance.fromAdapter("client-input", jumpAndMove, 1L, 0L)),
+            new RawPacket(4L, 20L, movement,
+                Packets.CaptureProvenance.fromAdapter("movement", movement, 1L, 1L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(1, report.movementObservations(), report.toString());
+    assertTrue(report.frames().getFirst().uncertaintySources().stream()
+        .anyMatch(reason -> reason.contains("item-use packet arrived before a causally visible authoritative use_effects snapshot")),
+        report.frames().getFirst().toString());
+    assertFalse(report.frames().getFirst().movementAdvantage().evaluated(),
+        report.frames().getFirst().toString());
+  }
+
+  @Test
   void itemUseCausalUncertaintySurvivesImmutableObservationSource() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     WorldSnapshot world = floorWorld();
