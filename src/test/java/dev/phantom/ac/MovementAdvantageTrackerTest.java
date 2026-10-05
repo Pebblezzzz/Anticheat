@@ -31,7 +31,7 @@ class MovementAdvantageTrackerTest {
   }
 
   @Test
-  void signedNegativeEnvelopeExcessPaysDownPriorAdvantage() {
+  void closerGeometryResidualsDoNotBecomeNegativeByDirection() {
     MovementAdvantageTracker tracker = new MovementAdvantageTracker();
     Maths.Vec3 origin = new Maths.Vec3(0.0, 64.0, 0.0);
     List<Maths.Vec3> reachable = List.of(
@@ -43,10 +43,14 @@ class MovementAdvantageTrackerTest {
     var payingBack = tracker.observe(
         reachable, origin, new Maths.Vec3(0.05, 64.0, 0.0), true);
 
-    assertEquals(-0.05, payingBack.signedHorizontal(), 1.0E-12);
+    assertEquals(0.05, payingBack.signedHorizontal(), 1.0E-12);
+    assertTrue(
+        payingBack.accumulatedHorizontal() > 0.0,
+        () -> "geometric residuals remain positive evidence even when the observation is short of the farthest candidate: "
+            + payingBack);
     assertTrue(
         payingBack.accumulatedHorizontal() < positive.accumulatedHorizontal(),
-        () -> "negative signed envelope excess should pay down prior advantage: "
+        () -> "a smaller residual should still decay accumulated evidence: "
             + payingBack);
   }
 
