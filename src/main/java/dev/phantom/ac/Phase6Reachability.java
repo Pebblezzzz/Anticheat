@@ -1070,15 +1070,63 @@ public final class Phase6Reachability {
   }
 
   private static Candidate selectBudgetCandidate(Collection<Candidate> candidates) {
+    if (candidates.isEmpty()) return null;
+
     Map<MovementMode, Integer> modeCounts = new EnumMap<>(MovementMode.class);
+    double minX = Double.POSITIVE_INFINITY, maxX = Double.NEGATIVE_INFINITY;
+    double minY = Double.POSITIVE_INFINITY, maxY = Double.NEGATIVE_INFINITY;
+    double minZ = Double.POSITIVE_INFINITY, maxZ = Double.NEGATIVE_INFINITY;
+    double minVx = Double.POSITIVE_INFINITY, maxVx = Double.NEGATIVE_INFINITY;
+    double minVy = Double.POSITIVE_INFINITY, maxVy = Double.NEGATIVE_INFINITY;
+    double minVz = Double.POSITIVE_INFINITY, maxVz = Double.NEGATIVE_INFINITY;
+
     for (Candidate candidate : candidates) {
       modeCounts.merge(candidate.movementMode(), 1, Integer::sum);
+      var p = candidate.context().player().position();
+      var v = candidate.context().clientVelocity();
+      minX = Math.min(minX, p.x()); maxX = Math.max(maxX, p.x());
+      minY = Math.min(minY, p.y()); maxY = Math.max(maxY, p.y());
+      minZ = Math.min(minZ, p.z()); maxZ = Math.max(maxZ, p.z());
+      minVx = Math.min(minVx, v.x()); maxVx = Math.max(maxVx, v.x());
+      minVy = Math.min(minVy, v.y()); maxVy = Math.max(maxVy, v.y());
+      minVz = Math.min(minVz, v.z()); maxVz = Math.max(maxVz, v.z());
     }
+
+    final double fx = minX, fX = maxX, fy = minY, fY = maxY;
+    final double fz = minZ, fZ = maxZ, fvx = minVx, fVx = maxVx;
+    final double fvy = minVy, fVy = maxVy, fvz = minVz, fVz = maxVz;
+
+    /*
+     * Compression is envelope-aware rather than merely "most common mode".
+     * Candidates that define the min/max position or velocity bounds are protected
+     * because deleting them narrows the reachable set in a way that can turn an
+     * otherwise uncertain search into a false impossibility.
+     */
     return candidates.stream()
         .max(Comparator
-            .comparingDouble((Candidate candidate) -> budgetPruneScore(candidate, modeCounts))
+            .comparingDouble((Candidate candidate) ->
+                budgetPruneScore(candidate, modeCounts)
+                    + envelopeInteriorScore(candidate, fx, fX, fy, fY, fz, fZ, fvx, fVx, fvy, fVy, fvz, fVz))
             .thenComparingLong(Candidate::id))
         .orElse(null);
+  }
+
+  private static double envelopeInteriorScore(
+      Candidate candidate,
+      double minX, double maxX, double minY, double maxY,
+      double minZ, double maxZ, double minVx, double maxVx,
+      double minVy, double maxVy, double minVz, double maxVz) {
+    var p = candidate.context().player().position();
+    var v = candidate.context().clientVelocity();
+    double score = 0.0;
+
+    if (Math.abs(p.x() - minX) > 1.0e-9 && Math.abs(p.x() - maxX) > 1.0e-9) score += 0.20;
+    if (Math.abs(p.y() - minY) > 1.0e-9 && Math.abs(p.y() - maxY) > 1.0e-9) score += 0.20;
+    if (Math.abs(p.z() - minZ) > 1.0e-9 && Math.abs(p.z() - maxZ) > 1.0e-9) score += 0.20;
+    if (Math.abs(v.x() - minVx) > 1.0e-9 && Math.abs(v.x() - maxVx) > 1.0e-9) score += 0.10;
+    if (Math.abs(v.y() - minVy) > 1.0e-9 && Math.abs(v.y() - maxVy) > 1.0e-9) score += 0.10;
+    if (Math.abs(v.z() - minVz) > 1.0e-9 && Math.abs(v.z() - maxVz) > 1.0e-9) score += 0.10;
+    return score;
   }
 
   private static double budgetPruneScore(
