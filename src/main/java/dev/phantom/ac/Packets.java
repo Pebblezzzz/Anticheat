@@ -63,11 +63,43 @@ public final class Packets {
   /** Server-side event evidence that the client attempted to toggle flying. */
   public record FlightToggle(boolean flying, boolean cancelled) implements Packet {}
   /** Client-side block-break prediction intent used for the short pre-authoritative-update window. */
-  public record ClientBlockBreak(dev.phantom.ac.world.Pos position, int actionSequence, Long clientTick) implements Packet {
+  public record ClientBlockBreak(
+      dev.phantom.ac.world.Pos position,
+      int actionSequence,
+      Long clientTick,
+      Double breakSpeedPerTick,
+      String heldItemType,
+      int heldItemAmount) implements Packet {
     public ClientBlockBreak {
       Objects.requireNonNull(position, "position");
       if (actionSequence < 0) throw new IllegalArgumentException("actionSequence must be non-negative");
       if (clientTick != null && clientTick < 0) throw new IllegalArgumentException("clientTick must be non-negative");
+      if (breakSpeedPerTick != null
+          && (!Double.isFinite(breakSpeedPerTick) || breakSpeedPerTick < 0.0)) {
+        throw new IllegalArgumentException("breakSpeedPerTick must be finite and non-negative");
+      }
+      Objects.requireNonNull(heldItemType, "heldItemType");
+      if (heldItemAmount < 0) throw new IllegalArgumentException("heldItemAmount must be non-negative");
+    }
+
+    public ClientBlockBreak(dev.phantom.ac.world.Pos position, int actionSequence, Long clientTick) {
+      this(position, actionSequence, clientTick, null, "minecraft:air", 0);
+    }
+  }
+
+  public record InventorySlotState(
+      int windowId,
+      int slot,
+      int stateId,
+      String itemType,
+      int itemAmount,
+      boolean cursor) implements Packet {
+    public InventorySlotState {
+      if (windowId < -1 || slot < -2 || stateId < -1) {
+        throw new IllegalArgumentException("invalid inventory slot state");
+      }
+      Objects.requireNonNull(itemType, "itemType");
+      if (itemAmount < 0) throw new IllegalArgumentException("itemAmount must be non-negative");
     }
   }
 
