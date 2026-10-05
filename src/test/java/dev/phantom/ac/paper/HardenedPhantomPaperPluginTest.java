@@ -77,7 +77,7 @@ class HardenedPhantomPaperPluginTest {
     assertEquals(0.1D, attributes.movementSpeed(), 1.0e-12);
     assertEquals(1, attributes.modifiers().size());
     var retained = attributes.modifiers().getFirst();
-    assertEquals("custom-speed", retained.id());
+    assertEquals("9d4f8b9b-8bd8-4a59-9f6c-67d2b1a71f44", retained.id());
     assertEquals(0.2D, retained.amount(), 1.0e-12);
     assertEquals(dev.phantom.ac.Phase5Mechanics.ModifierOperation.ADD_MULTIPLIED_BASE, retained.operation());
   }
