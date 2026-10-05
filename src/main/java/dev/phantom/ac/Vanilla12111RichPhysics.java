@@ -264,6 +264,16 @@ public final class Vanilla12111RichPhysics {
         inputAcceleration *= context.movementEnvironment().itemUseSpeedMultiplier();
 
         /*
+         * Grim's modern input transformer applies the sneaking-speed attribute
+         * to the input vector before the movement ticker, not only to grounded
+         * friction. In particular, S + Shift + Jump must retain the reduced
+         * backward air control while the player is airborne.
+         */
+        if (context.movementEnvironment().sneaking()) {
+            inputAcceleration *= context.effects().sneakingSpeedMultiplier();
+        }
+
+        /*
          * Inputs are applied after the starting-vector adjustments. This mirrors
          * Grim's prediction ordering: current/knockback-like state survives until
          * the input transform rather than being replaced by packet arrival order.
