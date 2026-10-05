@@ -23,6 +23,7 @@ public final class AccuracyChecks {
   private static final double MOVEMENT_ADVANTAGE_MIN_TICK = 0.018;
   private static final double MOVEMENT_ADVANTAGE_IMMEDIATE = 0.10;
   private static final double VERTICAL_ADVANTAGE_HARD = 0.22;
+  private static final double VERTICAL_ADVANTAGE_MIN_TICK = 0.025;
   private static final double VERTICAL_ADVANTAGE_IMMEDIATE = 0.10;
 
   private static final long CLIENT_TICK_NANOS = 50_000_000L;
