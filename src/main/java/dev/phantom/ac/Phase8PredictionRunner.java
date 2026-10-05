@@ -725,7 +725,7 @@ public final class Phase8PredictionRunner {
        * available because that velocity is not an atomic client-boundary state.
        */
       boolean stationaryWithoutCausalAuthority =
-          stationaryPositionObservation && latestCausalAuthority(packet) == null;
+          stationaryPositionObservation && latestAuthority == null;
       boolean observationOnlyMovement = move.position() == null
           || (stationaryPositionObservation && !stationaryWithoutCausalAuthority);
       if (observationOnlyMovement && tick.timingUncertain()) {
