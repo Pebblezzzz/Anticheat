@@ -4836,10 +4836,23 @@ public final class Phase8PredictionRunner {
        * observed. Mirror Grim's explicit current/last-jump state separation by
        * retaining the pre-transition held state as a sibling hypothesis.
        */
-      InputConstraint previous = inputBeforeSequence(
-          history, simulationTick, currentInputSequence, movementSequence);
-      if (!previous.equals(currentInput)) {
-        options.add(previous);
+      /*
+       * Grim's PLAYER_INPUT is a persistent KnownInput. At the live movement
+       * boundary, a newest input packet already observed before this movement
+       * replaces the historical held state; it is not merely another sibling.
+       * Earlier catch-up ticks still use the Phase 7 historical envelope above.
+       */
+      boolean currentHeldStateIsCausallyNewer =
+          currentInputSequence >= 0L && currentInputSequence < movementSequence;
+      if (currentHeldStateIsCausallyNewer) {
+        options.clear();
+        options.add(currentInput);
+      } else {
+        InputConstraint previous = inputBeforeSequence(
+            history, simulationTick, currentInputSequence, movementSequence);
+        if (!previous.equals(currentInput)) {
+          options.add(previous);
+        }
       }
     }
 
