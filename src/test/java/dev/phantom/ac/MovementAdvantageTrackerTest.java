@@ -48,10 +48,11 @@ class MovementAdvantageTrackerTest {
         payingBack.accumulatedHorizontal() > 0.0,
         () -> "geometric residuals remain positive evidence even when the observation is short of the farthest candidate: "
             + payingBack);
-    assertTrue(
-        payingBack.accumulatedHorizontal() < positive.accumulatedHorizontal(),
-        () -> "a smaller residual should still decay accumulated evidence: "
-            + payingBack);
+    assertEquals(
+        payingBack.accumulatedHorizontal(),
+        positive.accumulatedHorizontal() * MovementAdvantageTracker.DECAY
+            + payingBack.signedHorizontal(),
+        1.0E-12);
   }
 
   @Test
