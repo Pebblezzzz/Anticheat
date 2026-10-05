@@ -1368,6 +1368,7 @@ public final class Phase6Reachability {
         environment.fluidSpeedMultiplier(),
         environment.fluidDrag(),
         environment.gravityMultiplier(),
+        environment.itemUseSpeedMultiplier(),
         vehicle);
   }
 
