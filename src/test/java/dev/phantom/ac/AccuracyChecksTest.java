@@ -103,7 +103,7 @@ class AccuracyChecksTest {
   }
 
   @Test
-  void extremeVehicleDisplacementProducesVehicleFinding() {
+  void extremeVehicleDisplacementProducesNonPunitiveVehicleEvidence() {
     List<Packets.RawPacket> packets = List.of(
         new Packets.RawPacket(1L, 1L,
             new Packets.VehicleMove(new Maths.Vec3(0.0, 64.0, 0.0), 0f, 0f, true)),
@@ -115,7 +115,7 @@ class AccuracyChecksTest {
 
     assertTrue(findings.stream().anyMatch(f ->
         f.rule().equals("Vehicle")
-            && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE));
+            && f.verdict() == ProductionCheckEngine.Verdict.UNCERTAIN));
   }
 
   @Test
