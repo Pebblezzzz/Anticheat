@@ -165,6 +165,44 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void itemUseCausalUncertaintySurvivesImmutableObservationSource() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+
+    PlayerContext authority = new PlayerContext(
+        "survival", Simulation.Attributes.DEFAULT, Map.of(),
+        Pose.STANDING, MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.5, 64.0, .5), Maths.Vec3.ZERO,
+        false, false, false, List.of());
+
+    UseItem useItem = new UseItem(0, 1, 0f, 0f);
+    Move rotation = new Move(null, 90f, 0f, true, 1L);
+
+    var report = runner.process(
+        "item-use-immutable-observation",
+        List.of(
+            new RawPacket(1L, 10L, authority,
+                Packets.CaptureProvenance.fromAdapter("authority", authority, 1L, 0L)),
+            new RawPacket(2L, 15L, useItem,
+                Packets.CaptureProvenance.fromAdapter("use-item", useItem, 1L, 0L)),
+            new RawPacket(3L, 20L, rotation,
+                Packets.CaptureProvenance.fromAdapter("rotation", rotation, 1L, 1L))),
+        world,
+        null,
+        -1L);
+
+    assertEquals(1, report.movementObservations(), report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.UNCERTAIN,
+        report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(
+        report.results().getFirst().evidence().uncertaintySources().stream()
+            .anyMatch(reason -> reason.contains("use_effects")),
+        report.results().getFirst().toString());
+  }
+
+  @Test
   void itemUseAuthorityClearsCausalGapBeforeNextPrediction() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     WorldSnapshot world = floorWorld();
