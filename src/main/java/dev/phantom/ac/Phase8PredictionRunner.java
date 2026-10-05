@@ -4763,8 +4763,24 @@ public final class Phase8PredictionRunner {
        * carry the ambiguity instead of building every input chronology up front.
        */
       if (ambiguousInputTimingAt(selected.sequence(), simulationTick, movementSequence)) {
-        options.add(inputBeforeSequence(
-            history, simulationTick, selected.sequence(), movementSequence));
+        /*
+         * Grim's PLAYER_INPUT is a persistent KnownInput. Once the newest input
+         * packet has been observed before this movement packet, that held state
+         * replaces the older state; Phase 7 timing ambiguity must not resurrect
+         * the immediately previous jump/sneak state as a sibling at the same live
+         * movement boundary.
+         *
+         * Keep the previous-state sibling only for an older historical input.
+         * The current held state itself is already represented by selected.
+         */
+        boolean selectedIsCurrentHeldState =
+            selected.sequence() == currentInputSequence
+                && currentInputSequence >= 0L
+                && currentInputSequence < movementSequence;
+        if (!selectedIsCurrentHeldState) {
+          options.add(inputBeforeSequence(
+              history, simulationTick, selected.sequence(), movementSequence));
+        }
       }
     }
 
