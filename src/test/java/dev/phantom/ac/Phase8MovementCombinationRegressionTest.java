@@ -189,17 +189,7 @@ class Phase8MovementCombinationRegressionTest {
 
   @Test
   void sneakingScalesAirInputBeforeJumpPrediction() {
-    var air = BlockCatalogue12111.decode("minecraft:air", Map.of());
-    var stone = BlockCatalogue12111.decode("minecraft:stone", Map.of());
-    var builder = WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0, 0);
-    for (int x = 0; x <= 1; x++) {
-      for (int y = 63; y <= 70; y++) {
-        for (int z = 0; z <= 1; z++) {
-          builder.setBlock(x, y, z, y == 63 ? stone : air);
-        }
-      }
-    }
-    WorldSnapshot world = builder.build();
+    WorldSnapshot world = floorWorld();
     Player airborne = new Player(
         new Maths.Vec3(0.5, 64.5, 0.5),
         new Maths.Vec3(0.0, 0.24813599859094576, 0.0),
@@ -218,6 +208,7 @@ class Phase8MovementCombinationRegressionTest {
         State.Provenance.UNKNOWN,
         Set.of());
     Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
+    EntityCollisions noEntities = EntityCollisions.of(List.of());
 
     var walking = physics.step(new Vanilla12111RichPhysics.Context(
         1L,
@@ -231,7 +222,7 @@ class Phase8MovementCombinationRegressionTest {
         MovementEnvironment.dry(false, false, false),
         false,
         false,
-        EntityCollisions.NONE_TRACKED));
+        noEntities));
 
     var sneaking = physics.step(new Vanilla12111RichPhysics.Context(
         1L,
@@ -245,7 +236,7 @@ class Phase8MovementCombinationRegressionTest {
         MovementEnvironment.dry(false, true, true),
         false,
         false,
-        EntityCollisions.NONE_TRACKED));
+        noEntities));
 
     double walkingSpeed = Math.abs(walking.clientVelocityAfterTick().z());
     double sneakingSpeed = Math.abs(sneaking.clientVelocityAfterTick().z());
