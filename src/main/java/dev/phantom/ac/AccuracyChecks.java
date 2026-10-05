@@ -54,6 +54,7 @@ public final class AccuracyChecks {
     PendingImpulse pendingImpulse;
     final Map<Long, Integer> actionsPerTick = new HashMap<>();
     final Map<Long, Integer> placementsPerTick = new HashMap<>();
+    final Map<Integer, Integer> aimMissStreaks = new HashMap<>();
     int scaffoldConsecutive;
     boolean noFallTracking;
     double fallOriginY;
@@ -404,7 +405,7 @@ public final class AccuracyChecks {
       Map<Long, PredictionFrame> frames,
       State state) {
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
-    Map<Integer, BlockBox> entities = state.entities;
+    Map<Integer, EntityHistory> entities = state.entities;
 
     for (Packets.RawPacket packet : packets) {
       if (packet.packet() instanceof Packets.EntitySpawn spawn) {
@@ -690,6 +691,31 @@ public final class AccuracyChecks {
       state.previousVehicleNanos = packet.receivedNanos();
     }
     return List.copyOf(findings);
+  }
+
+  private static Vec3 eyePosition(State.Player player) {
+    double eye = switch (player.pose()) {
+      case CROUCHING -> 1.27;
+      case SWIMMING, FALL_FLYING, SLEEPING -> 0.4;
+      default -> 1.62;
+    };
+    return player.position().add(new Vec3(0.0, eye, 0.0));
+  }
+
+  private static Vec3 lookDirection(float yaw, float pitch) {
+    double yawRadians = Math.toRadians(yaw);
+    double pitchRadians = Math.toRadians(pitch);
+    double cosPitch = Math.cos(pitchRadians);
+    Vec3 direction = new Vec3(
+        -Math.sin(yawRadians) * cosPitch,
+        -Math.sin(pitchRadians),
+        Math.cos(yawRadians) * cosPitch);
+    double length = Math.sqrt(
+        direction.x() * direction.x()
+        + direction.y() * direction.y()
+        + direction.z() * direction.z());
+    return length <= 1.0e-12 ? new Vec3(0.0, 0.0, 0.0)
+        : new Vec3(direction.x() / length, direction.y() / length, direction.z() / length);
   }
 
   private static final class EntityHistory {
