@@ -2047,19 +2047,25 @@ public final class Phase8PredictionRunner {
         frames);
   }
 
-  private static EnumSet<Phase6Reachability.ObservedField> observedFieldsFor(Packets.Move move) {
+  static EnumSet<Phase6Reachability.ObservedField> observedFieldsFor(Packets.Move move) {
     EnumSet<Phase6Reachability.ObservedField> fields =
         EnumSet.noneOf(Phase6Reachability.ObservedField.class);
     Packets.MovementKind kind = move.movementKind();
     if (kind == Packets.MovementKind.POSITION || kind == Packets.MovementKind.POSITION_ROTATION) {
       fields.add(Phase6Reachability.ObservedField.POSITION);
+      fields.add(Phase6Reachability.ObservedField.GROUND);
+      /*
+       * Grim keeps rotation as a separate client-state observation. A
+       * position-bearing movement packet must not become kinematically
+       * impossible merely because its reported yaw/pitch differs from the
+       * physics candidate that produced the position. Rotation-only packets
+       * are still validated against rotation explicitly.
+       */
+      return fields;
     }
-    if (kind == Packets.MovementKind.ROTATION || kind == Packets.MovementKind.POSITION_ROTATION) {
+    if (kind == Packets.MovementKind.ROTATION) {
       fields.add(Phase6Reachability.ObservedField.ROTATION);
-    }
-    if (kind == Packets.MovementKind.STATUS
-        || kind == Packets.MovementKind.POSITION
-        || kind == Packets.MovementKind.POSITION_ROTATION) {
+    } else if (kind == Packets.MovementKind.STATUS) {
       fields.add(Phase6Reachability.ObservedField.GROUND);
     }
     return fields;
@@ -4556,8 +4562,15 @@ public final class Phase8PredictionRunner {
     for (Candidate candidate : candidates) {
       Player state = candidate.context().player();
       if (!positionMatches(state.position(), observed.position())) continue;
-      if (move.yaw() != null && Float.compare(state.yaw(), observed.yaw()) != 0) continue;
-      if (move.pitch() != null && Float.compare(state.pitch(), observed.pitch()) != 0) continue;
+      /*
+       * Position-bearing movement packets validate kinematics first; rotation
+       * is a separate client-state observation. Do not let yaw/pitch eliminate
+       * a candidate that already reproduces the reported movement.
+       */
+      if (move.position() == null) {
+        if (move.yaw() != null && Float.compare(state.yaw(), observed.yaw()) != 0) continue;
+        if (move.pitch() != null && Float.compare(state.pitch(), observed.pitch()) != 0) continue;
+      }
       if (includeGround
           && move.onGround() != null
           && state.onGround() != observed.onGround()) continue;
@@ -4604,13 +4617,7 @@ public final class Phase8PredictionRunner {
       boolean timingExhaustivelyModeled) {
     return validate(
         playerId, packet, move, prior, observed, world, tick, uncertainty,
-        search, timingExhaustivelyModeled,
-        move.position() == null
-            ? EnumSet.of(Phase6Reachability.ObservedField.ROTATION)
-            : EnumSet.of(
-                Phase6Reachability.ObservedField.POSITION,
-                Phase6Reachability.ObservedField.ROTATION,
-                Phase6Reachability.ObservedField.GROUND));
+        search, timingExhaustivelyModeled, observedFieldsFor(move));
   }
 
   private Phase8MovementValidation.Result validate(
