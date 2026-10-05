@@ -591,39 +591,44 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
         BlockBox target = targetHistory == null
             ? null
             : targetHistory.compensated(raw.receivedNanos());
-        if (target == null || frame == null) continue;
+        if (frame == null) continue;
+
+        if (target == null) {
+          findings.add(uncertainFinding(playerId, serverTick, "Hitbox",
+              "attack target has no causally reconstructed client-visible hitbox",
+              1.0, sequence));
+          continue;
+        }
 
         Vec3 eye = eyePosition(frame.observedAfter());
         Vec3 direction = lookDirection(frame.observedAfter().yaw(), frame.observedAfter().pitch());
-        double hitDistance = rayEntryDistance(eye, direction, target, config.attackReach());
-        double fallbackDistance = pointAabbDistance(eye, target);
+        double rayDistance = rayEntryDistance(eye, direction, target, config.attackReach());
+        double pointDistance = pointAabbDistance(eye, target);
 
-        // The packet has no hit vector for an ATTACK action. Use the compensated
-        // entity box and a conservative 4-block interaction envelope.
-        if (!Double.isFinite(hitDistance)
-            && fallbackDistance > config.attackReach() + 0.25) {
-          findings.add(uncertainFinding(playerId, serverTick, "Reach",
-              "attack ray does not intersect the compensated target within the interaction envelope",
-              Math.min(1.0, Math.max(0.0, (fallbackDistance - config.attackReach()) / 2.0)),
-              sequence));
-        }
-      }
-
-      if (packet instanceof Packets.DigAction digAction) {
-        if (digAction.action().contains("STARTED_DIGGING")) {
-          state.diggingStarts.put(digAction.position(), raw.receivedNanos());
-          state.diggingStartFrames.put(digAction.position(), frame);
-          if (digAction.breakSpeedPerTick() != null) {
-            state.diggingStartSpeeds.put(digAction.position(), digAction.breakSpeedPerTick());
+        if (!Double.isFinite(rayDistance)) {
+          if (pointDistance > config.attackReach() + 1.0e-6) {
+            findings.add(finding(playerId, serverTick, "Reach",
+                String.format(Locale.ROOT,
+                    "attack target hitbox was %.3f blocks from the eye, beyond configured %.3f block reach",
+                    pointDistance, config.attackReach()),
+                Math.min(1.0,
+                    (pointDistance - config.attackReach())
+                        / Math.max(0.5, config.attackReach() * 0.5)),
+                sequence));
+          } else if (frame.uncertaintySources().isEmpty()) {
+            findings.add(finding(playerId, serverTick, "Hitbox",
+                String.format(Locale.ROOT,
+                    "target was within %.3f blocks but the observed client view ray never entered the reconstructed hitbox",
+                    config.attackReach()),
+                Math.min(1.0, Math.max(0.0,
+                    (config.attackReach() - pointDistance)
+                        / Math.max(0.5, config.attackReach()))),
+                sequence));
           } else {
-            state.diggingStartSpeeds.remove(digAction.position());
+            findings.add(uncertainFinding(playerId, serverTick, "Hitbox",
+                "target geometry is within interaction range, but movement/timing uncertainty prevents a hard ray contradiction",
+                0.75, sequence));
           }
-          state.diggingStartItems.put(digAction.position(), digAction.heldItemType());
-        } else if (digAction.action().contains("CANCELLED_DIGGING")) {
-          state.diggingStarts.remove(digAction.position());
-          state.diggingStartSpeeds.remove(digAction.position());
-          state.diggingStartItems.remove(digAction.position());
-          state.diggingStartFrames.remove(digAction.position());
         }
       }
 
