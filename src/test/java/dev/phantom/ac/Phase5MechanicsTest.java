@@ -32,6 +32,29 @@ class Phase5MechanicsTest {
     assertEquals(fast,repeat);
     assertFalse(fast.state().uncertain());
   }
+
+  @Test void itemUseSpeedMultiplierScalesMovementInput() {
+    var physics = new Vanilla12111Physics();
+    var state = Player.initial(Vec3.ZERO);
+
+    var normal = physics.step(new PhysicsContext(
+        2, state, new AdvancedInput(1, 0, false), air(),
+        Simulation.Environment.DRY, new Attributes(.1), Phase5Mechanics.MovementEffects.NONE,
+        Phase5Mechanics.Pose.STANDING,
+        Phase5Mechanics.MovementEnvironment.dry(true, false, false)));
+
+    var itemUse = physics.step(new PhysicsContext(
+        2, state, new AdvancedInput(1, 0, false), air(),
+        Simulation.Environment.DRY, new Attributes(.1), Phase5Mechanics.MovementEffects.NONE,
+        Phase5Mechanics.Pose.STANDING,
+        new Phase5Mechanics.MovementEnvironment(
+            Phase5Mechanics.Fluid.NONE, false, false, true,
+            false, false, false, false, 1.0, 1.0, 1.0, 0.2)));
+
+    assertTrue(
+        Math.abs(itemUse.state().velocity().z()) < Math.abs(normal.state().velocity().z()),
+        "item use must reduce the vanilla movement input");
+  }
   @Test void diagonalGroundInputMatchesTraceDerivedFirstStep() {
     var physics=new Vanilla12111Physics(); var state=Player.initial(Vec3.ZERO);
     var diagonal=physics.step(new PhysicsContext(3,state,new AdvancedInput(1,1,false),air(),Simulation.Environment.DRY,new Attributes(.1)));
