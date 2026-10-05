@@ -46,6 +46,7 @@ public final class AccuracyChecks {
     final Set<Short> openTransactions = new HashSet<>();
     final Set<Short> acknowledgedTransactions = new HashSet<>();
     final ArrayDeque<Long> attackTimes = new ArrayDeque<>();
+    final ArrayDeque<Double> knockbackResiduals = new ArrayDeque<>();
     final ArrayDeque<Long> timerBoundaries = new ArrayDeque<>();
     long timerBalanceNanos;
     int consecutiveFast;
@@ -61,7 +62,7 @@ public final class AccuracyChecks {
     int snapStreak;
     double previousMovementHorizontal;
     double previousMovementVertical;
-    final Map<Integer, BlockBox> entities = new HashMap<>();
+    final Map<Integer, EntityHistory> entities = new HashMap<>();
     long lastAttackNanos = -1L;
     Vec3 previousVehiclePosition;
     long previousVehicleNanos = -1L;
@@ -82,6 +83,7 @@ public final class AccuracyChecks {
       noFallTracking = false;
       airborneFrames = 0;
       attackTimes.clear();
+      knockbackResiduals.clear();
       timerBoundaries.clear();
       actionsPerTick.clear();
       placementsPerTick.clear();
@@ -294,51 +296,81 @@ public final class AccuracyChecks {
       if (packet.packet() instanceof Packets.Velocity velocity) {
         double horizontal = Math.hypot(velocity.velocity().x(), velocity.velocity().z());
         if (horizontal >= KNOCKBACK_MIN_HORIZONTAL) {
-          state.pendingImpulse = new PendingImpulse(packet.sequence(), packet.receivedNanos(), velocity.velocity(), 0);
+          state.pendingImpulse =
+              new PendingImpulse(packet.sequence(), packet.receivedNanos(), velocity.velocity(), 0);
+          state.knockbackResiduals.clear();
         }
         continue;
       }
 
-      if (!(packet.packet() instanceof Packets.Move move) || move.position() == null || state.pendingImpulse == null) continue;
+      if (!(packet.packet() instanceof Packets.Move move)
+          || move.position() == null
+          || state.pendingImpulse == null) {
+        continue;
+      }
+
       PendingImpulse pending = state.pendingImpulse;
       if (packet.sequence() <= pending.sequence()) continue;
 
       PredictionFrame frame = frameAt(frames, packet.sequence());
-      if (frame == null || !frame.uncertaintySources().isEmpty()) {
+      if (frame == null || frame.uncertaintySources().isEmpty() == false
+          || frame.predictedAfter().isEmpty()) {
         if (packet.sequence() - pending.sequence() > 12L) state.pendingImpulse = null;
         continue;
       }
 
-      Vec3 delta = new Vec3(
-          frame.observedAfter().position().x() - frame.observedBefore().position().x(),
-          frame.observedAfter().position().y() - frame.observedBefore().position().y(),
-          frame.observedAfter().position().z() - frame.observedBefore().position().z());
-      double expectedHorizontal = Math.hypot(pending.velocity().x(), pending.velocity().z());
-      double observedAlongImpulse = delta.x() * pending.velocity().x()
-          + delta.z() * pending.velocity().z();
-      double impulseSquared = expectedHorizontal * expectedHorizontal;
+      /*
+       * The normal Phase 6 frontier has already incorporated the velocity
+       * transition. Measure the actual observation against every surviving
+       * candidate rather than projecting movement onto the raw velocity vector.
+       * This catches velocity cancellation while allowing walls, friction,
+       * input, and subsequent impulses to be explained by vanilla simulation.
+       */
+      double minHorizontalResidual = Double.POSITIVE_INFINITY;
+      double minTotalResidual = Double.POSITIVE_INFINITY;
+      for (Candidate candidate : frame.predictedAfter()) {
+        Vec3 expected = candidate.context().player().position();
+        Vec3 observed = frame.observedAfter().position();
+        double horizontalResidual =
+            Math.hypot(expected.x() - observed.x(), expected.z() - observed.z());
+        double totalResidual =
+            Math.sqrt(
+                Math.pow(expected.x() - observed.x(), 2)
+                    + Math.pow(expected.y() - observed.y(), 2)
+                    + Math.pow(expected.z() - observed.z(), 2));
+        minHorizontalResidual = Math.min(minHorizontalResidual, horizontalResidual);
+        minTotalResidual = Math.min(minTotalResidual, totalResidual);
+      }
 
-      double retained = impulseSquared <= 1.0e-9
-          ? 1.0
-          : observedAlongImpulse / impulseSquared;
-      boolean noReachableExplanation = frame.predictedAfter().stream()
-          .noneMatch(c -> horizontalDistance(c.context().player().position(), frame.observedAfter().position()) <= 0.06);
-      if (impulseSquared > 1.0e-9
-          && retained < KNOCKBACK_REQUIRED_RETAINED_FRACTION
-          && noReachableExplanation) {
+      boolean outsidePredictionEnvelope =
+          Double.isFinite(minHorizontalResidual)
+              && minHorizontalResidual >= 0.08
+              && Double.isFinite(minTotalResidual)
+              && minTotalResidual >= 0.10;
+
+      if (outsidePredictionEnvelope) {
         int badMoves = pending.badMoves() + 1;
         state.pendingImpulse = new PendingImpulse(
             pending.sequence(), pending.receivedNanos(), pending.velocity(), badMoves);
+        state.knockbackResiduals.addLast(minTotalResidual);
+        while (state.knockbackResiduals.size() > 8) state.knockbackResiduals.removeFirst();
+
         if (badMoves >= 2) {
+          double evidence = state.knockbackResiduals.stream()
+              .mapToDouble(Double::doubleValue)
+              .average()
+              .orElse(minTotalResidual);
           findings.add(hard(playerId, frame, "Knockback",
               String.format(Locale.ROOT,
-                  "two consecutive post-velocity observations remained outside the predicted knockback envelope; retained projection was %.1f%%",
-                  Math.max(0.0, retained * 100.0)),
-              Math.min(1.0, 1.0 - Math.max(0.0, retained))));
+                  "post-velocity movement stayed outside every causally predicted response; residual=%.3f blocks",
+                  evidence),
+              Math.min(1.0, evidence / 0.50)));
           state.pendingImpulse = null;
+          state.knockbackResiduals.clear();
         }
-      } else if (packet.sequence() - pending.sequence() > 12L || !noReachableExplanation) {
+      } else if (packet.sequence() - pending.sequence() > 12L) {
         state.pendingImpulse = null;
+        state.knockbackResiduals.clear();
       }
     }
 
@@ -354,9 +386,15 @@ public final class AccuracyChecks {
     Map<Integer, BlockBox> entities = state.entities;
 
     for (Packets.RawPacket packet : packets) {
-      if (packet.packet() instanceof Packets.EntitySpawn spawn) entities.put(spawn.entityId(), spawn.box());
-      else if (packet.packet() instanceof Packets.EntityMove move) entities.put(move.entityId(), move.box());
-      else if (packet.packet() instanceof Packets.EntityDespawn despawn) entities.remove(despawn.entityId());
+      if (packet.packet() instanceof Packets.EntitySpawn spawn) {
+        entities.put(spawn.entityId(), new EntityHistory(raw.receivedNanos(), spawn.box()));
+      } else if (packet.packet() instanceof Packets.EntityMove move) {
+        entities.computeIfAbsent(
+                move.entityId(), ignored -> new EntityHistory(raw.receivedNanos(), move.box()))
+            .add(raw.receivedNanos(), move.box());
+      } else if (packet.packet() instanceof Packets.EntityDespawn despawn) {
+        entities.remove(despawn.entityId());
+      }
 
       if (packet.packet() instanceof Packets.Move move) {
         if (move.yaw() != null && Float.isFinite(move.yaw())) {
@@ -384,10 +422,13 @@ public final class AccuracyChecks {
               Math.min(1.0, state.snapStreak / 8.0)));
         }
 
-        BlockBox target = entities.get(attack.entityId());
+        EntityHistory history = entities.get(attack.entityId());
+        BlockBox target = history == null
+            ? null
+            : history.compensated(raw.receivedNanos());
         if (target == null) {
           findings.add(uncertain(playerId, frame, "Interact",
-              "attack referenced an entity whose compensated hitbox was not reconstructed",
+              "attack referenced an entity whose compensated/interpolated hitbox was not reconstructed",
               1.0));
         }
 
@@ -417,6 +458,7 @@ public final class AccuracyChecks {
         state.attackTimes.addLast(packet.receivedNanos());
       }
     }
+    while (state.attackTimes.size() > 128) state.attackTimes.removeFirst();
     if (state.attackTimes.size() < 49) return List.of();
 
     List<Long> attacks = List.copyOf(state.attackTimes);
@@ -429,21 +471,51 @@ public final class AccuracyChecks {
 
     double mean = intervals.stream().mapToLong(Long::longValue).average().orElse(0.0);
     if (mean <= 0.0) return List.of();
+
     double variance = 0.0;
-    for (long interval : intervals) {
-      double d = interval - mean;
+    double meanAbsStep = 0.0;
+    for (int i = 0; i < intervals.size(); i++) {
+      double d = intervals.get(i) - mean;
       variance += d * d;
+      if (i > 0) meanAbsStep += Math.abs(intervals.get(i) - intervals.get(i - 1));
     }
     double cv = Math.sqrt(variance / intervals.size()) / mean;
-    if (cv < 0.02) {
+    double normalizedMeanAbsStep =
+        intervals.size() <= 1 ? Double.POSITIVE_INFINITY
+            : (meanAbsStep / (intervals.size() - 1)) / mean;
+
+    long[] buckets = intervals.stream()
+        .mapToLong(v -> v / 5_000_000L)
+        .distinct()
+        .sorted()
+        .toArray();
+
+    /*
+     * CV alone is easy to defeat with a little random jitter. Combine three
+     * independent signals: low coefficient of variation, tiny interval-to-
+     * interval movement, and low timing alphabet. Constant/near-constant
+     * automation therefore remains a hard signal while human-ish timing stays
+     * outside the hard threshold.
+     */
+    boolean mechanical =
+        cv < 0.030
+            && normalizedMeanAbsStep < 0.045
+            && buckets.length <= 8;
+    boolean heavilyHumanizedButPeriodic =
+        cv < AUTOCLICK_MAX_CV
+            && normalizedMeanAbsStep < 0.060
+            && buckets.length <= 5;
+
+    if (mechanical || heavilyHumanizedButPeriodic) {
       PredictionFrame frame = frameAt(frames,
           packets.stream().filter(p -> p.packet() instanceof Packets.InteractEntity)
               .mapToLong(Packets.RawPacket::sequence).max().orElse(0L));
+      double severity = mechanical ? 1.0 : 0.75;
       return List.of(hard(playerId, frame, "Autoclicker",
           String.format(Locale.ROOT,
-              "attack intervals were unusually periodic (n=%d, mean=%.1fms, cv=%.4f)",
-              intervals.size(), mean / 1_000_000.0, cv),
-          Math.min(1.0, (0.02 - cv) / 0.02)));
+              "attack timing was highly periodic (n=%d, mean=%.1fms, cv=%.4f, step=%.4f, timingBuckets=%d)",
+              intervals.size(), mean / 1_000_000.0, cv, normalizedMeanAbsStep, buckets.length),
+          severity));
     }
     return List.of();
   }
@@ -565,9 +637,9 @@ public final class AccuracyChecks {
             && packet.receivedNanos() - state.previousVehicleNanos <= 100_000_000L
             && (horizontal > 3.0 || Math.abs(delta.y()) > 2.5)) {
           PredictionFrame frame = frameAt(frames, packet.sequence());
-          findings.add(hard(playerId, frame, "Vehicle",
+          findings.add(uncertain(playerId, frame, "Vehicle",
               String.format(Locale.ROOT,
-                  "vehicle movement displaced %.3f horizontal / %.3f vertical blocks in one packet",
+                  "vehicle movement displaced %.3f horizontal / %.3f vertical blocks; vehicle causality requires interpolation and passenger-state modeling",
                   horizontal, Math.abs(delta.y())),
               1.0));
         }
@@ -577,6 +649,41 @@ public final class AccuracyChecks {
     }
     return List.copyOf(findings);
   }
+
+  private static final class EntityHistory {
+    private final ArrayDeque<EntitySample> samples = new ArrayDeque<>();
+
+    EntityHistory(long receivedNanos, BlockBox box) {
+      add(receivedNanos, box);
+    }
+
+    void add(long receivedNanos, BlockBox box) {
+      samples.addLast(new EntitySample(receivedNanos, box));
+      while (samples.size() > 4) samples.removeFirst();
+    }
+
+    BlockBox compensated(long attackNanos) {
+      if (samples.isEmpty()) return null;
+      /*
+       * Grim compensates entity interpolation rather than using a single latest
+       * server box. We do not have the client-side interpolation step counter
+       * here, so conservatively enclose recent causally available samples.
+       * This removes a major false-positive source for moving targets without
+       * pretending to know an exact target transform that was never captured.
+       */
+      BlockBox result = null;
+      int used = 0;
+      for (EntitySample sample : samples) {
+        if (sample.receivedNanos() > attackNanos) continue;
+        if (attackNanos - sample.receivedNanos() > 150_000_000L) continue;
+        result = result == null ? sample.box() : result.enclose(sample.box());
+        if (++used >= 3) break;
+      }
+      return result == null ? samples.getLast().box() : result;
+    }
+  }
+
+  private record EntitySample(long receivedNanos, BlockBox box) {}
 
   private record PendingImpulse(long sequence, long receivedNanos, Vec3 velocity, int badMoves) {}
 
