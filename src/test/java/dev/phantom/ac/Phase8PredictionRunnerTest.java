@@ -2193,6 +2193,57 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void zeroDeltaMovementWithoutCausalAuthorityAdvancesPhysicsFrontier() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    Maths.Vec3 position = new Maths.Vec3(.5, 64.0, .5);
+
+    var report = runner.process(
+        "zero-delta-frontier",
+        List.of(
+            new RawPacket(1, 10L, new ClientTickEnd()),
+            new RawPacket(2, 20L, new Move(position, 0f, 0f, true, 1L)),
+            new RawPacket(3, 30L, new ClientTickEnd()),
+            new RawPacket(4, 40L, new Move(position, 0f, 0f, true, 2L)),
+            new RawPacket(5, 50L, new ClientTickEnd()),
+            new RawPacket(6, 60L, new Move(position, 0f, 0f, true, 3L))),
+        floorWorld(),
+        anchor(),
+        0L);
+
+    assertEquals(3, report.movementObservations(), report.results().toString());
+    assertTrue(
+        report.results().stream().allMatch(
+            result -> result.verdict() == Phase8MovementValidation.Verdict.POSSIBLE),
+        report.results().toString());
+    assertTrue(report.candidateFrontierRetained(), report.toString());
+
+    assertEquals(1L,
+        report.frames().get(0).predictedAfter().stream()
+            .mapToLong(candidate -> candidate.context().simulationTick())
+            .max().orElseThrow());
+    assertEquals(2L,
+        report.frames().get(1).predictedAfter().stream()
+            .mapToLong(candidate -> candidate.context().simulationTick())
+            .max().orElseThrow());
+    assertEquals(3L,
+        report.frames().get(2).predictedAfter().stream()
+            .mapToLong(candidate -> candidate.context().simulationTick())
+            .max().orElseThrow());
+
+    assertTrue(report.frames().stream()
+        .allMatch(frame -> frame.predictionOffset().evaluated()),
+        report.frames().toString());
+    assertTrue(report.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
+        .anyMatch(line -> line.contains("PREDICT_FORWARD startTick=0 targetTick=1")),
+        report.frames().toString());
+    assertTrue(report.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
+        .anyMatch(line -> line.contains("PREDICT_FORWARD startTick=2 targetTick=3")),
+        report.frames().toString());
+  }
+
+  @Test
   void stationaryObservationUsesObservedWitnessWithoutClearingFrontier() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     var report = runner.process(
