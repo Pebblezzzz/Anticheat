@@ -119,7 +119,7 @@ public final class AccuracyChecks {
     Map<Long, PredictionFrame> framesBySequence = new TreeMap<>();
     for (PredictionFrame frame : frames) framesBySequence.put(frame.sequence(), frame);
 
-    findings.addAll(movementAdvantage(playerId, frames));
+    findings.addAll(movementAdvantage(playerId, frames, state));
     findings.addAll(noFallContinuity(playerId, frames, state));
     findings.addAll(timerBalance(playerId, ordered, framesBySequence, state));
     findings.addAll(knockbackResponse(playerId, ordered, framesBySequence, state));
@@ -132,7 +132,7 @@ public final class AccuracyChecks {
   }
 
   private static List<ProductionCheckEngine.Finding> movementAdvantage(
-      String playerId, List<PredictionFrame> frames) {
+      String playerId, List<PredictionFrame> frames, State state) {
     if (frames.isEmpty()) return List.of();
 
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();

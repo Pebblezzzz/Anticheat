@@ -575,12 +575,12 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
               && raw.receivedNanos() - started <= 35_000_000L
               && ("survival".equalsIgnoreCase(frame.observedAfter().gamemode())
                   || "adventure".equalsIgnoreCase(frame.observedAfter().gamemode()))) {
-            var state = worldFrame.world().blockAtOrNull(
+            var blockState = worldFrame.world().blockAtOrNull(
                 dig.position().x(), dig.position().y(), dig.position().z());
-            if (state != null
-                && !state.isAir()
-                && !state.isUnsupported()
-                && isSlowBreakBlock(state.blockId())) {
+            if (blockState != null
+                && !blockState.isAir()
+                && !blockState.isUnsupported()
+                && isSlowBreakBlock(blockState.blockId())) {
               long startClientTick = startedFrame.clientTick();
             long finishClientTick = frame.clientTick();
             long clientTickDelta = startClientTick >= 0L && finishClientTick >= startClientTick
