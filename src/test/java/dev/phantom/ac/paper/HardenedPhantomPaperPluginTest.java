@@ -37,6 +37,22 @@ class HardenedPhantomPaperPluginTest {
   }
 
   @Test
+  void everyViolationAlertCompatibilityOverridesLegacyThreshold() {
+    assertEquals(1.0,
+        HardenedPhantomPaperPlugin.effectiveAlertRule(true,
+            dev.phantom.ac.GrimAlertPolicy.CommandRule.parse("100:40")).threshold());
+    assertEquals(1.0,
+        HardenedPhantomPaperPlugin.effectiveAlertRule(true,
+            dev.phantom.ac.GrimAlertPolicy.CommandRule.parse("100:40")).interval());
+    assertEquals(100.0,
+        HardenedPhantomPaperPlugin.effectiveAlertRule(false,
+            dev.phantom.ac.GrimAlertPolicy.CommandRule.parse("100:40")).threshold());
+    assertEquals(40.0,
+        HardenedPhantomPaperPlugin.effectiveAlertRule(false,
+            dev.phantom.ac.GrimAlertPolicy.CommandRule.parse("100:40")).interval());
+  }
+
+  @Test
   void unsupportedBlockChangesAreRecordedAsUnsupportedPackets() {
     Pos position = new Pos(1, 64, 1);
     BlockState unsupported = BlockState.unsupported("minecraft:future_block");
