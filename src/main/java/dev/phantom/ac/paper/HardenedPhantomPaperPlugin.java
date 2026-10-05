@@ -1014,7 +1014,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
       Phase8PredictionRunner.Report report=incremental;
       ProductionCheckEngine.Report productionChecks =
-          ProductionCheckEngine.analyze(playerName, raw, incremental, productionCheckConfig);
+          ProductionCheckEngine.analyze(playerName, raw, incremental, productionCheckConfig, capture.productionCheckState);
       capture.lastDebugReport=incremental;
 
       DebugLevel debug=debugLevel(capture.playerId);
@@ -1925,6 +1925,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     volatile int paperMoveFailureCount;
     volatile Phase8MovementValidation.Accumulator accumulator=Phase8MovementValidation.Accumulator.empty();
     volatile ProductionCheckEngine.Accumulator productionChecks=ProductionCheckEngine.Accumulator.empty();
+    final AccuracyChecks.State accuracyState=new AccuracyChecks.State();
+    final ProductionCheckEngine.SessionState productionCheckState=new ProductionCheckEngine.SessionState();
     final ValidationResultGate validationGate=new ValidationResultGate();
     final AtomicLong validationRuns=new AtomicLong();
     final AtomicLong validationPackets=new AtomicLong();
