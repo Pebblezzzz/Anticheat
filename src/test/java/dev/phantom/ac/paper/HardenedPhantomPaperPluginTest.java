@@ -9,6 +9,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class HardenedPhantomPaperPluginTest {
   @Test
+  void invalidBreakSpeedIsDowngradedToUnknown() {
+    assertEquals(0.25, HardenedPhantomPaperPlugin.sanitizeBreakSpeed(0.25));
+    assertNull(HardenedPhantomPaperPlugin.sanitizeBreakSpeed(-1.0));
+    assertNull(HardenedPhantomPaperPlugin.sanitizeBreakSpeed(Double.NaN));
+    assertNull(HardenedPhantomPaperPlugin.sanitizeBreakSpeed(Double.POSITIVE_INFINITY));
+  }
+
+  @Test
   void unqualifiedPacketEventsBlockIdsUseTheMinecraftNamespace() {
     assertEquals("minecraft:stone", HardenedPhantomPaperPlugin.normalizeBlockId("stone"));
     assertEquals("minecraft:cobblestone", HardenedPhantomPaperPlugin.normalizeBlockId("cobblestone"));

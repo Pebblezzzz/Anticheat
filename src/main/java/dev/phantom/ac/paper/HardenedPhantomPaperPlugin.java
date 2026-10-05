@@ -332,7 +332,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           if (bukkitPlayer != null) {
             org.bukkit.block.Block liveBlock =
                 bukkitPlayer.getWorld().getBlockAt(digPosition.x(), digPosition.y(), digPosition.z());
-            breakSpeed = (double) liveBlock.getBreakSpeed(bukkitPlayer);
+            breakSpeed = sanitizeBreakSpeed(liveBlock.getBreakSpeed(bukkitPlayer));
             org.bukkit.inventory.ItemStack heldItem = bukkitPlayer.getInventory().getItemInMainHand();
             if (heldItem != null && !heldItem.getType().isAir()) {
               heldItemType = heldItem.getType().getKey().toString();
@@ -368,7 +368,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
           if (bukkitPlayer != null) {
             org.bukkit.block.Block liveBlock =
                 bukkitPlayer.getWorld().getBlockAt(position.x(), position.y(), position.z());
-            breakSpeed = (double) liveBlock.getBreakSpeed(bukkitPlayer);
+            breakSpeed = sanitizeBreakSpeed(liveBlock.getBreakSpeed(bukkitPlayer));
             if (heldItem != null && !heldItem.getType().isAir()) {
               heldItemType = heldItem.getType().getKey().toString();
               heldItemAmount = heldItem.getAmount();
@@ -1881,6 +1881,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
     capture.packets.addLast(packet);
     while(capture.packets.size()>MAX_CAPTURE_PACKETS)capture.packets.pollFirst();
+  }
+
+  /**
+   * Paper's live break-speed lookup is optional provenance for FastBreak analysis.
+   * Invalid values must never enter the packet contract as fake physics state.
+   */
+  static Double sanitizeBreakSpeed(double speed){
+    return Double.isFinite(speed) && speed >= 0.0 ? speed : null;
   }
 
   private static Vec3 vector(double x,double y,double z){return new Vec3(x,y,z);}
