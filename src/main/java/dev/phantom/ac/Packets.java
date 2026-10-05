@@ -8,7 +8,7 @@ public final class Packets {
   private Packets() {}
 
   public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm, UseItem, ContainerState, InventorySlotState, SlotStateChange, BlockAck,
-      Velocity, Effect, Gamemode, PlayerContext, FlightToggle, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange,
+      Velocity, ExplosionImpulse, Effect, Gamemode, PlayerContext, FlightToggle, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange,
       WorldTransactionSend, WorldTransactionAck, PaperMovementRejection, ClientBlockBreak, EntitySpawn, EntityMove, EntityDespawn,
       InteractEntity, BlockPlace, VehicleMove, HeldItemChange, EntityAction, DigAction, InventoryClick {
     default boolean mutatesWorld() {
@@ -215,6 +215,14 @@ public final class Packets {
   /** Client acknowledgement of a synthetic world transaction barrier. */
   public record WorldTransactionAck(short id) implements Packet {}
   public record Velocity(Vec3 velocity) implements Packet { public Velocity { Objects.requireNonNull(velocity,"velocity"); } }
+
+  public record ExplosionImpulse(Vec3 velocity, String cause) implements Packet {
+    public ExplosionImpulse {
+      Objects.requireNonNull(velocity, "velocity");
+      Objects.requireNonNull(cause, "cause");
+      if (cause.isBlank()) throw new IllegalArgumentException("cause must not be blank");
+    }
+  }
   public record Effect(String id, int amplifier, boolean removed) implements Packet { public Effect { Objects.requireNonNull(id,"id"); } }
   public record Gamemode(String value) implements Packet { public Gamemode { if(value==null||value.isBlank()) throw new IllegalArgumentException("gamemode is required"); } }
   /** Main-thread authoritative server snapshot, deliberately separate from client movement claims. */
