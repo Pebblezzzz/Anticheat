@@ -985,6 +985,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     boolean sleeping = player.isSleeping();
 
     double itemUseSpeedMultiplier = 1.0D;
+    boolean itemUseCanSprint = true;
     if (player.hasActiveItem()) {
       org.bukkit.inventory.ItemStack activeItem = player.getActiveItem();
       if (activeItem != null && !activeItem.getType().isAir()) {
@@ -993,11 +994,15 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
                 io.papermc.paper.datacomponent.DataComponentTypes.USE_EFFECTS,
                 activeItem.getType().getDefaultData(
                     io.papermc.paper.datacomponent.DataComponentTypes.USE_EFFECTS));
-        if (useEffects != null && Float.isFinite(useEffects.speedMultiplier())) {
-          itemUseSpeedMultiplier = Math.max(0.0D, Math.min(1.0D, useEffects.speedMultiplier()));
+        if (useEffects != null) {
+          itemUseCanSprint = useEffects.canSprint();
+          if (Float.isFinite(useEffects.speedMultiplier())) {
+            itemUseSpeedMultiplier = Math.max(0.0D, Math.min(1.0D, useEffects.speedMultiplier()));
+          }
         }
       }
     }
+    sprinting = sprinting && itemUseCanSprint;
 
     Material feet = location.getBlock().getType();
     String materialName = feet.name();
