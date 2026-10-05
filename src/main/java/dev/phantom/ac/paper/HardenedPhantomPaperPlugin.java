@@ -148,6 +148,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private ExecutorService chunkExecutor;
   private ExecutorService worldPublishExecutor;
   private ExecutorService validationExecutor;
+  private final AtomicBoolean acceptingAsyncValidation = new AtomicBoolean(false);
   private final AtomicLong authoritativeServerTick = new AtomicLong(-1L);
   private volatile int chunkDecoderThreads;
   private final AtomicInteger chunkInFlight=new AtomicInteger();
@@ -640,11 +641,13 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       thread.setDaemon(true);
       return thread;
     });
+    acceptingAsyncValidation.set(true);
     stateTask=getServer().getScheduler().runTaskTimer(this,this::onAuthoritativeServerTick,1L,1L);
     getLogger().info("[PhantomAC] Hardened Phase 8 adapter enabled; movement validation runs on per-connection Netty EventLoops");
   }
 
   @Override public void onDisable(){
+    acceptingAsyncValidation.set(false);
     if(stateTask!=null)stateTask.cancel();
     if(chunkExecutor!=null){
       chunkExecutor.shutdownNow();
@@ -1005,7 +1008,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
    * server's main thread.
    */
   private void schedulePredictionValidation(Capture capture){
-    if(capture==null)return;
+    if(capture==null || !acceptingAsyncValidation.get() || !isEnabled())return;
     ExecutorService executor=validationExecutor;
     if(executor==null)return;
 
@@ -1030,7 +1033,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
            * follow-up batch so the predictor catches up without unbounded task
            * accumulation.
            */
-          if(validationExecutor!=null
+          if(acceptingAsyncValidation.get()
+              && validationExecutor!=null
               && !capture.copySince(capture.movementRunner.lastProcessedSequence()).isEmpty()){
             schedulePredictionValidation(capture);
           }
@@ -1073,6 +1077,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   private void runPredictionValidation(Capture capture){
+    if(!acceptingAsyncValidation.get() || !isEnabled())return;
     long startedNanos=System.nanoTime();
     capture.validationRuns.incrementAndGet();
     try{
@@ -1162,7 +1167,18 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
       }
 
       // The only hop back is the immutable validation report for Bukkit actions.
-      getServer().getScheduler().runTask(this,()->applyResult(capture,report,productionChecks));
+      // Shutdown can race an already-running async validation, so guard both the
+      // lifecycle state and the scheduler call itself.
+      if(!acceptingAsyncValidation.get() || !isEnabled())return;
+      try{
+        getServer().getScheduler().runTask(this,()->{
+          if(!acceptingAsyncValidation.get() || !isEnabled())return;
+          applyResult(capture,report,productionChecks);
+        });
+      }catch(IllegalPluginAccessException ignored){
+        // Paper disables the plugin before an in-flight validation worker necessarily exits.
+        // A result produced during that window is intentionally discarded.
+      }
     }catch(RuntimeException failure){
       capture.lastValidationElapsedMicros=(System.nanoTime()-startedNanos)/1_000L;
       getLogger().log(java.util.logging.Level.WARNING,
