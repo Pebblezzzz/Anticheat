@@ -117,7 +117,7 @@ class Phase8GrimKnownInputLifecycleTest {
             new RawPacket(1, 10L, authority),
             // Historical input that Phase 7 can assign before the final movement.
             new RawPacket(2, 20L, new ClientInput(
-                true, false, false, false, false, false, true)),
+                true, false, false, false, true, false, true)),
             new RawPacket(3, 30L, new Move(first.position(), 0f, 0f, false, 1L)),
             // Latest known input observed before the final movement: stop moving,
             // but remain physically sprinting.
@@ -139,6 +139,11 @@ class Phase8GrimKnownInputLifecycleTest {
         .orElseThrow();
     assertTrue(finalInputTrace.contains("forward=OptionalInt[0]"),
         finalInputTrace);
+    assertTrue(finalInputTrace.contains("jump=Optional[false]"),
+        finalInputTrace);
+    assertFalse(finalInputTrace.contains("jump=Optional[true]"),
+        "the previous jump packet must not be resurrected beside the latest held input: "
+            + finalInputTrace);
     assertTrue(
         report.frames().getLast().trace().stream()
             .anyMatch(line -> line.contains("currentKeyState")
