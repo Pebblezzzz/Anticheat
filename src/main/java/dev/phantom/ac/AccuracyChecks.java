@@ -461,21 +461,36 @@ public final class AccuracyChecks {
         if (target != null) {
           Vec3 eye = eyePosition(frame.observedAfter());
           Vec3 direction = lookDirection(frame.observedAfter().yaw(), frame.observedAfter().pitch());
-          double rayDistance = rayEntryDistance(eye, direction, target, 4.25);
-          double pointDistance = pointAabbDistance(eye, target);
-          if (!Double.isFinite(rayDistance) && pointDistance <= 4.25
-              && frame.uncertaintySources().isEmpty()) {
+          Vec3 center = new Vec3(
+              (target.minX() + target.maxX()) * 0.5,
+              (target.minY() + target.maxY()) * 0.5,
+              (target.minZ() + target.maxZ()) * 0.5);
+          double targetDistance = pointAabbDistance(eye, target);
+          double centerDistance = Math.sqrt(
+              Math.pow(center.x() - eye.x(), 2)
+                  + Math.pow(center.y() - eye.y(), 2)
+                  + Math.pow(center.z() - eye.z(), 2));
+          double angle = angleBetween(direction, new Vec3(
+              center.x() - eye.x(), center.y() - eye.y(), center.z() - eye.z()));
+
+          if (Double.isFinite(angle) && targetDistance <= 4.25 && angle >= 25.0) {
             int streak = state.aimMissStreaks.merge(attack.entityId(), 1, Integer::sum);
-            if (streak >= 3) {
-              findings.add(hard(playerId, frame, "Aim",
+            if (streak >= 4) {
+              findings.add(uncertain(playerId, frame, "Aim",
                   String.format(Locale.ROOT,
-                      "three consecutive attacks targeted an in-range entity while the compensated view ray missed its hitbox (streak=%d)",
-                      streak),
-                  Math.min(1.0, streak / 6.0)));
+                      "reconstructed target center remained %.1f degrees from the observed view across %d attacks",
+                      angle, streak),
+                  Math.min(1.0, (angle / 90.0) * (streak / 8.0))));
               state.aimMissStreaks.put(attack.entityId(), 0);
             }
           } else {
             state.aimMissStreaks.remove(attack.entityId());
+          }
+
+          if (centerDistance <= 0.0) {
+            findings.add(uncertain(playerId, frame, "Aim",
+                "target center collapsed onto the eye reconstruction; aim angle is undefined",
+                0.1));
           }
         }
 
@@ -844,6 +859,21 @@ public final class AccuracyChecks {
       if (tMin > tMax) return Double.POSITIVE_INFINITY;
     }
     return tMin >= 0.0 && tMin <= maxDistance ? tMin : Double.POSITIVE_INFINITY;
+  }
+
+  private static double angleBetween(Vec3 left, Vec3 right) {
+    double leftLength = Math.sqrt(
+        left.x() * left.x() + left.y() * left.y() + left.z() * left.z());
+    double rightLength = Math.sqrt(
+        right.x() * right.x() + right.y() * right.y() + right.z() * right.z());
+    if (!Double.isFinite(leftLength) || !Double.isFinite(rightLength)
+        || leftLength <= 1.0e-12 || rightLength <= 1.0e-12) {
+      return Double.NaN;
+    }
+    double cosine = (
+        left.x() * right.x() + left.y() * right.y() + left.z() * right.z())
+        / (leftLength * rightLength);
+    return Math.toDegrees(Math.acos(Math.max(-1.0, Math.min(1.0, cosine))));
   }
 
   private static double pointAabbDistance(Vec3 point, BlockBox box) {
