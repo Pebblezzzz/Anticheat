@@ -270,7 +270,10 @@ public final class AccuracyChecks {
         continue;
       }
 
-      Vec3 delta = frame.observedAfter().position().subtract(frame.observedBefore().position());
+      Vec3 delta = new Vec3(
+          frame.observedAfter().position().x() - frame.observedBefore().position().x(),
+          frame.observedAfter().position().y() - frame.observedBefore().position().y(),
+          frame.observedAfter().position().z() - frame.observedBefore().position().z());
       double expectedHorizontal = Math.hypot(pending.velocity().x(), pending.velocity().z());
       double observedAlongImpulse = delta.x() * pending.velocity().x()
           + delta.z() * pending.velocity().z();
@@ -507,7 +510,10 @@ public final class AccuracyChecks {
     for (Packets.RawPacket packet : packets) {
       if (!(packet.packet() instanceof Packets.VehicleMove move)) continue;
       if (previous != null) {
-        Vec3 delta = move.position().subtract(previous);
+        Vec3 delta = new Vec3(
+            move.position().x() - previous.x(),
+            move.position().y() - previous.y(),
+            move.position().z() - previous.z());
         double horizontal = Math.hypot(delta.x(), delta.z());
         if (horizontal > 3.0 || Math.abs(delta.y()) > 2.5) {
           PredictionFrame frame = frameAt(frames, packet.sequence());
