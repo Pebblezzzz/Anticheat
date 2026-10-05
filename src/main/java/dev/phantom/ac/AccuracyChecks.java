@@ -648,8 +648,73 @@ public final class AccuracyChecks {
       int count = placementsPerTick.get(tick);
       if (count > 2) {
         findings.add(uncertain(playerId, frame, "Scaffold",
-            "multiple block-placement actions landed on the same client tick",
+            "multiple block-placement actions landed on the same reconstructed client tick",
             Math.min(1.0, count / 4.0)));
+      }
+
+      int bx = place.position().x();
+      int by = place.position().y();
+      int bz = place.position().z();
+      if (frame.world().coverageAt(bx, by, bz) != dev.phantom.ac.world.Coverage.KNOWN) {
+        findings.add(uncertain(playerId, frame, "Scaffold",
+            "clicked placement surface is outside the client-visible world snapshot",
+            0.9));
+        continue;
+      }
+
+      Vec3 eye = eyePosition(frame.observedAfter());
+      Vec3 direction = lookDirection(frame.observedAfter().yaw(), frame.observedAfter().pitch());
+      BlockBox clicked = new BlockBox(bx, by, bz, bx + 1.0, by + 1.0, bz + 1.0);
+      double clickRay = rayEntryDistance(
+          eye, direction, clicked, 5.0);
+      if (!Double.isFinite(clickRay)) {
+        findings.add(finding(playerId, frame.serverTick(), "Place",
+            "placement packet selected a known clicked block that the reconstructed view ray never entered",
+            1.0, frame.sequence()));
+      }
+
+      if (place.faceId() < 0 || place.faceId() > 5) {
+        findings.add(finding(playerId, frame.serverTick(), "Place",
+            "placement packet used an invalid clicked-face id",
+            1.0, frame.sequence()));
+        continue;
+      }
+
+      if (place.cursorPresent() && !cursorMatchesFace(place.cursor(), place.faceId())) {
+        findings.add(finding(playerId, frame.serverTick(), "Place",
+            "placement cursor does not lie on the selected block face",
+            1.0, frame.sequence()));
+      }
+
+      int tx = bx;
+      int ty = by;
+      int tz = bz;
+      switch (place.faceId()) {
+        case 0 -> ty--;
+        case 1 -> ty++;
+        case 2 -> tz--;
+        case 3 -> tz++;
+        case 4 -> tx--;
+        case 5 -> tx++;
+        default -> {}
+      }
+
+      var targetCoverage = frame.world().coverageAt(tx, ty, tz);
+      if (targetCoverage == dev.phantom.ac.world.Coverage.KNOWN) {
+        BlockState target = frame.world().blockAtOrNull(tx, ty, tz);
+        if (target != null && !target.isAir() && target.variant() != BlockState.Variant.FLUID) {
+          findings.add(uncertain(playerId, frame, "Scaffold",
+              "placement target is already occupied in the client-visible world; item-specific replaceability was not asserted",
+              0.7));
+        } else if (target == null) {
+          findings.add(uncertain(playerId, frame, "Scaffold",
+              "placement target state was unavailable despite known coverage",
+              0.8));
+        }
+      } else {
+        findings.add(uncertain(playerId, frame, "Scaffold",
+            "placement target is outside the client-visible world snapshot",
+            0.8));
       }
 
       float pitch = frame.observedAfter().pitch();
@@ -662,22 +727,28 @@ public final class AccuracyChecks {
 
       if (state.scaffoldConsecutive >= 6) {
         findings.add(uncertain(playerId, frame, "Scaffold",
-            "sustained near-downward placement pattern accompanied forward movement",
+            String.format(Locale.ROOT,
+                "six or more causally reconstructed placements occurred with sustained near-downward view (heldItem=%s)",
+                place.heldItemType()),
             Math.min(1.0, state.scaffoldConsecutive / 10.0)));
         state.scaffoldConsecutive = 0;
-      }
-
-      if (place.cursorPresent()
-          && (place.cursor().x() < 0.0 || place.cursor().x() > 1.0
-              || place.cursor().y() < 0.0 || place.cursor().y() > 1.0
-              || place.cursor().z() < 0.0 || place.cursor().z() > 1.0)) {
-        findings.add(hard(playerId, frame, "Place",
-            "placement cursor escaped the legal block-face interval",
-            1.0));
       }
     }
 
     return List.copyOf(findings);
+  }
+
+  private static boolean cursorMatchesFace(Vec3 cursor, int faceId) {
+    double epsilon = 0.075;
+    return switch (faceId) {
+      case 0 -> Math.abs(cursor.y()) <= epsilon;
+      case 1 -> Math.abs(cursor.y() - 1.0) <= epsilon;
+      case 2 -> Math.abs(cursor.z()) <= epsilon;
+      case 3 -> Math.abs(cursor.z() - 1.0) <= epsilon;
+      case 4 -> Math.abs(cursor.x()) <= epsilon;
+      case 5 -> Math.abs(cursor.x() - 1.0) <= epsilon;
+      default -> false;
+    };
   }
 
   private static List<ProductionCheckEngine.Finding> vehicleSafety(
