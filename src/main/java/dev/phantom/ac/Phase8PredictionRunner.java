@@ -1874,8 +1874,14 @@ public final class Phase8PredictionRunner {
            */
           prediction = Set.of();
           predictionTick = -1L;
-          trace.add("FRONTIER_RESET reason=OBSERVATION_CONTRADICTION");
+          packetOnlyProvisionalFrontier = false;
+          trace.add("FRONTIER_RESET reason=OBSERVATION_CONTRADICTION"
+              + " candidates=0"
+              + " historyRetained=true"
+              + " causalAuthorityRetained=true"
+              + " movementEvidencePersistent=true");
           trace.add("OBSERVED_MOVEMENT_HISTORY_RETAINED reason=RECOVERY_EVIDENCE");
+          trace.add("FRONTIER_ROOT_PERSISTED reason=RECOVERY_REQUIRES_NEW_CAUSAL_ANCHOR");
         }
         case UNCERTAIN -> {
           uncertain++;
