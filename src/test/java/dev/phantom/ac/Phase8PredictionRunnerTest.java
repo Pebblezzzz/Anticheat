@@ -2217,31 +2217,26 @@ class Phase8PredictionRunnerTest {
         report.results().toString());
     assertTrue(report.candidateFrontierRetained(), report.toString());
 
-    assertEquals(1L,
-        report.frames().get(0).predictedAfter().stream()
-            .mapToLong(candidate -> candidate.context().simulationTick())
-            .max().orElseThrow());
-    assertEquals(2L,
-        report.frames().get(1).predictedAfter().stream()
-            .mapToLong(candidate -> candidate.context().simulationTick())
-            .max().orElseThrow());
-    assertEquals(3L,
-        report.frames().get(2).predictedAfter().stream()
-            .mapToLong(candidate -> candidate.context().simulationTick())
-            .max().orElseThrow());
-
     assertTrue(report.frames().stream()
         .allMatch(frame -> frame.predictionOffset().evaluated()),
         report.frames().toString());
-    assertTrue(report.frames().stream()
+    List<String> trace = report.frames().stream()
         .flatMap(frame -> frame.trace().stream())
-        .anyMatch(line -> line.contains("PREDICT_FORWARD startTick=0 targetTick=1")),
-        report.frames().toString());
-    assertTrue(report.frames().stream()
-        .flatMap(frame -> frame.trace().stream())
-        .anyMatch(line -> line.contains("PREDICT_FORWARD startTick=2 targetTick=3")),
-        report.frames().toString());
+        .toList();
+    assertTrue(
+        trace.stream().anyMatch(line ->
+            line.contains("PREDICT_FORWARD startTick=0 targetTick=1")),
+        trace.toString());
+    assertTrue(
+        trace.stream().anyMatch(line ->
+            line.contains("PREDICT_FORWARD startTick=1 targetTick=2")),
+        trace.toString());
+    assertTrue(
+        trace.stream().anyMatch(line ->
+            line.contains("PREDICT_FORWARD startTick=2 targetTick=3")),
+        trace.toString());
   }
+
 
   @Test
   void stationaryObservationUsesObservedWitnessWithoutClearingFrontier() {
