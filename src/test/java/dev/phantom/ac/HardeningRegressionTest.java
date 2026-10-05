@@ -17,26 +17,24 @@ import java.util.OptionalLong;
 import static org.junit.jupiter.api.Assertions.*;
 
 class HardeningRegressionTest {
-  @Test void oneImpossibleObservationDoesNotAlertWithDefaultConfig() {
+  @Test void oneImpossibleObservationAlertsWithDefaultConfig() {
     Evidence impossible = evidence(Verdict.IMPOSSIBLE, 10);
     var result = Phase8MovementValidation.Accumulator.empty().accept(
         impossible, Phase8MovementValidation.Config.defaults());
-    assertTrue(result.alert().isEmpty(), "a single hard mismatch must not alert by default");
+    assertTrue(result.alert().isPresent(), "the default alert policy should emit at VL 1");
+    assertEquals(1.0, result.state().players().get("player/MOVEMENT_REACHABILITY").violationLevel());
   }
 
-  @Test void defaultConfigUsesAHighActiveVlAlertThreshold() {
+  @Test void defaultConfigAlertsEveryActiveVl() {
     var accumulator = Phase8MovementValidation.Accumulator.empty();
     var config = Phase8MovementValidation.Config.defaults();
 
-    for (int tick = 10; tick < 109; tick++) {
-      var accepted = accumulator.accept(evidence(Verdict.IMPOSSIBLE, tick), config);
+    for (int expectedVl = 1; expectedVl <= 3; expectedVl++) {
+      var accepted = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 9 + expectedVl), config);
       accumulator = accepted.state();
-      assertTrue(accepted.alert().isEmpty(), "default Simulation-style alert threshold should not fire early");
+      assertTrue(accepted.alert().isPresent(), "every active VL should emit an alert");
+      assertEquals(expectedVl, accepted.alert().orElseThrow().violationLevel());
     }
-
-    var threshold = accumulator.accept(evidence(Verdict.IMPOSSIBLE, 109), config);
-    assertTrue(threshold.alert().isPresent());
-    assertEquals(100.0, threshold.state().players().get("player/MOVEMENT_REACHABILITY").violationLevel());
   }
 
   @Test void possibleObservationDoesNotResetActiveViolationHistory() {
