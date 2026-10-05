@@ -190,6 +190,7 @@ public final class Phase5Mechanics {
       double fluidSpeedMultiplier,
       double fluidDrag,
       double gravityMultiplier,
+      double itemUseSpeedMultiplier,
       VehicleState vehicle) implements Serializable {
     public MovementEnvironment(
         Fluid fluid,
@@ -204,16 +205,35 @@ public final class Phase5Mechanics {
         double fluidDrag,
         double gravityMultiplier) {
       this(fluid, submerged, climbable, onGround, sprinting, sneaking, swimmingInput, gliding,
-          fluidSpeedMultiplier, fluidDrag, gravityMultiplier, VehicleState.NONE);
+          fluidSpeedMultiplier, fluidDrag, gravityMultiplier, 1.0D, VehicleState.NONE);
+    }
+
+    public MovementEnvironment(
+        Fluid fluid,
+        boolean submerged,
+        boolean climbable,
+        boolean onGround,
+        boolean sprinting,
+        boolean sneaking,
+        boolean swimmingInput,
+        boolean gliding,
+        double fluidSpeedMultiplier,
+        double fluidDrag,
+        double gravityMultiplier,
+        VehicleState vehicle) {
+      this(fluid, submerged, climbable, onGround, sprinting, sneaking, swimmingInput, gliding,
+          fluidSpeedMultiplier, fluidDrag, gravityMultiplier, 1.0D, vehicle);
     }
 
     public MovementEnvironment {
       Objects.requireNonNull(fluid, "fluid");
       Objects.requireNonNull(vehicle, "vehicle");
-      if (!Double.isFinite(fluidSpeedMultiplier) || !Double.isFinite(fluidDrag) || !Double.isFinite(gravityMultiplier))
+      if (!Double.isFinite(fluidSpeedMultiplier) || !Double.isFinite(fluidDrag)
+          || !Double.isFinite(gravityMultiplier) || !Double.isFinite(itemUseSpeedMultiplier))
         throw new IllegalArgumentException("non-finite environment factor");
-      if (fluidSpeedMultiplier < 0 || fluidDrag < 0 || gravityMultiplier < 0)
-        throw new IllegalArgumentException("negative environment factor");
+      if (fluidSpeedMultiplier < 0 || fluidDrag < 0 || gravityMultiplier < 0
+          || itemUseSpeedMultiplier < 0 || itemUseSpeedMultiplier > 1.0)
+        throw new IllegalArgumentException("invalid environment factor");
     }
 
     public static MovementEnvironment dry(boolean onGround, boolean sprinting, boolean sneaking) {
