@@ -267,6 +267,7 @@ public final class Phase8PredictionRunner {
       new MovementAdvantageTracker();
   private MovementAdvantageTracker.Snapshot latestMovementAdvantage =
       MovementAdvantageTracker.Snapshot.empty();
+  private FrontierResetReason lastFrontierResetReason;
   private final Phase7Timing.Config phase7TimingConfig;
   private final ArrayDeque<Packets.RawPacket> timingHistory = new ArrayDeque<>();
   private long timingEpochNanos = -1L;
@@ -5256,6 +5257,10 @@ public final class Phase8PredictionRunner {
                 + " causallyBounded=" + compensatedWorld.causallyBounded()));
     mergedTrace.add("TICK_RELIABILITY level=" + tickReliability.reliability()
         + " reasons=" + tickReliability.reasons());
+    if (lastFrontierResetReason != null) {
+      mergedTrace.add("FRONTIER_RESET_LAST_REASON=" + lastFrontierResetReason);
+      lastFrontierResetReason = null;
+    }
     mergedTrace.add("FRONTIER candidates=" + predictedAfter.size()
         + " predictionTick=" + predictionTick
         + " retained=" + !predictedAfter.isEmpty());
@@ -5301,6 +5306,7 @@ public final class Phase8PredictionRunner {
     packetOnlyProvisionalFrontier = false;
     movementAdvantageTracker.reset();
     latestMovementAdvantage = MovementAdvantageTracker.Snapshot.empty();
+    lastFrontierResetReason = reason;
     trace.add("FRONTIER_RESET reason=" + reason
         + " replacementCandidates=" + prediction.size()
         + " replacementTick=" + predictionTick
