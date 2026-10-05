@@ -80,6 +80,7 @@ public final class AccuracyChecks {
       consecutiveFast = 0;
       pendingImpulse = null;
       snapStreak = 0;
+      aimMissStreaks.clear();
       scaffoldConsecutive = 0;
       noFallTracking = false;
       airborneFrames = 0;
@@ -264,7 +265,26 @@ public final class AccuracyChecks {
       if (mean < 46_000_000L) state.consecutiveFast++;
       else state.consecutiveFast = Math.max(0, state.consecutiveFast - 2);
 
-      if (state.timerBalanceNanos >= 300_000_000L && state.consecutiveFast >= 12) {
+      List<Long> recentIntervals = new ArrayList<>();
+      List<Long> boundaryList = List.copyOf(boundaries);
+      for (int i = 1; i < boundaryList.size(); i++) {
+        long interval = boundaryList.get(i) - boundaryList.get(i - 1);
+        if (interval > 0L) recentIntervals.add(interval);
+      }
+      recentIntervals.sort(Long::compare);
+      long median = recentIntervals.isEmpty()
+          ? Long.MAX_VALUE
+          : recentIntervals.get(recentIntervals.size() / 2);
+      int p90Index = recentIntervals.isEmpty()
+          ? -1
+          : Math.min(recentIntervals.size() - 1,
+              (int) Math.floor((recentIntervals.size() - 1) * 0.90));
+      long p90 = p90Index < 0 ? Long.MAX_VALUE : recentIntervals.get(p90Index);
+
+      if (state.timerBalanceNanos >= 300_000_000L
+          && state.consecutiveFast >= 12
+          && median < 45_000_000L
+          && p90 < 49_000_000L) {
         PredictionFrame frame = frameAt(frames, packet.sequence());
         findings.add(hard(playerId, frame, "TimerBurst",
             String.format(Locale.ROOT,
@@ -431,6 +451,27 @@ public final class AccuracyChecks {
           findings.add(uncertain(playerId, frame, "Interact",
               "attack referenced an entity whose compensated/interpolated hitbox was not reconstructed",
               1.0));
+        }
+
+        if (target != null) {
+          Vec3 eye = eyePosition(frame.observedAfter());
+          Vec3 direction = lookDirection(frame.observedAfter().yaw(), frame.observedAfter().pitch());
+          double rayDistance = rayEntryDistance(eye, direction, target, 4.25);
+          double pointDistance = pointAabbDistance(eye, target);
+          if (!Double.isFinite(rayDistance) && pointDistance <= 4.25
+              && frame.uncertaintySources().isEmpty()) {
+            int streak = state.aimMissStreaks.merge(attack.entityId(), 1, Integer::sum);
+            if (streak >= 3) {
+              findings.add(hard(playerId, frame, "Aim",
+                  String.format(Locale.ROOT,
+                      "three consecutive attacks targeted an in-range entity while the compensated view ray missed its hitbox (streak=%d)",
+                      streak),
+                  Math.min(1.0, streak / 6.0)));
+              state.aimMissStreaks.put(attack.entityId(), 0);
+            }
+          } else {
+            state.aimMissStreaks.remove(attack.entityId());
+          }
         }
 
         if (state.lastAttackNanos >= 0L) {
@@ -701,6 +742,45 @@ public final class AccuracyChecks {
         .max(Map.Entry.comparingByKey())
         .map(Map.Entry::getValue)
         .orElse(null);
+  }
+
+  private static double rayEntryDistance(
+      Vec3 origin, Vec3 direction, BlockBox box, double maxDistance) {
+    double tMin = 0.0;
+    double tMax = maxDistance;
+    double[] o = {origin.x(), origin.y(), origin.z()};
+    double[] d = {direction.x(), direction.y(), direction.z()};
+    double[] min = {box.minX(), box.minY(), box.minZ()};
+    double[] max = {box.maxX(), box.maxY(), box.maxZ()};
+
+    for (int axis = 0; axis < 3; axis++) {
+      if (Math.abs(d[axis]) < 1.0e-12) {
+        if (o[axis] < min[axis] || o[axis] > max[axis]) return Double.POSITIVE_INFINITY;
+        continue;
+      }
+      double inv = 1.0 / d[axis];
+      double t1 = (min[axis] - o[axis]) * inv;
+      double t2 = (max[axis] - o[axis]) * inv;
+      if (t1 > t2) {
+        double tmp = t1;
+        t1 = t2;
+        t2 = tmp;
+      }
+      tMin = Math.max(tMin, t1);
+      tMax = Math.min(tMax, t2);
+      if (tMin > tMax) return Double.POSITIVE_INFINITY;
+    }
+    return tMin >= 0.0 && tMin <= maxDistance ? tMin : Double.POSITIVE_INFINITY;
+  }
+
+  private static double pointAabbDistance(Vec3 point, BlockBox box) {
+    double dx = point.x() < box.minX() ? box.minX() - point.x()
+        : point.x() > box.maxX() ? point.x() - box.maxX() : 0.0;
+    double dy = point.y() < box.minY() ? box.minY() - point.y()
+        : point.y() > box.maxY() ? point.y() - box.maxY() : 0.0;
+    double dz = point.z() < box.minZ() ? box.minZ() - point.z()
+        : point.z() > box.maxZ() ? point.z() - box.maxZ() : 0.0;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
   }
 
   private static ProductionCheckEngine.Finding hard(
