@@ -732,26 +732,38 @@ public final class AccuracyChecks {
 
     BlockBox compensated(long attackNanos) {
       if (samples.isEmpty()) return null;
-      /*
-       * Grim compensates entity interpolation rather than using a single latest
-       * server box. We do not have the client-side interpolation step counter
-       * here, so conservatively enclose recent causally available samples.
-       * This removes a major false-positive source for moving targets without
-       * pretending to know an exact target transform that was never captured.
-       */
-      BlockBox result = null;
-      int used = 0;
+      EntitySample before = null;
+      EntitySample after = null;
       for (EntitySample sample : samples) {
-        if (sample.receivedNanos() > attackNanos) continue;
-        if (attackNanos - sample.receivedNanos() > 150_000_000L) continue;
-        result = result == null ? sample.box() : result.enclose(sample.box());
-        if (++used >= 3) break;
+        if (sample.receivedNanos() <= attackNanos) before = sample;
+        else { after = sample; break; }
       }
-      return result == null ? samples.getLast().box() : result;
+      if (before == null) return samples.getFirst().box();
+      if (after == null) return samples.getLast().box();
+      long span = after.receivedNanos() - before.receivedNanos();
+      if (span <= 0L) return before.box();
+      double alpha = Math.max(0.0, Math.min(1.0,
+          (attackNanos - before.receivedNanos()) / (double) span));
+      return interpolateBox(before.box(), after.box(), alpha);
     }
   }
 
   private record EntitySample(long receivedNanos, BlockBox box) {}
+
+  private static BlockBox interpolateBox(BlockBox a, BlockBox b, double alpha) {
+    return new BlockBox(
+        lerp(a.minX(), b.minX(), alpha),
+        lerp(a.minY(), b.minY(), alpha),
+        lerp(a.minZ(), b.minZ(), alpha),
+        lerp(a.maxX(), b.maxX(), alpha),
+        lerp(a.maxY(), b.maxY(), alpha),
+        lerp(a.maxZ(), b.maxZ(), alpha));
+  }
+
+  private static double lerp(double a, double b, double alpha) {
+    return a + (b - a) * alpha;
+  }
+
 
   private record PendingImpulse(long sequence, long receivedNanos, Vec3 velocity, int badMoves) {}
 
