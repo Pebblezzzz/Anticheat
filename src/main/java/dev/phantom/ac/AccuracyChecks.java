@@ -323,7 +323,21 @@ public final class AccuracyChecks {
         double horizontal = Math.hypot(velocity.velocity().x(), velocity.velocity().z());
         if (horizontal >= KNOCKBACK_MIN_HORIZONTAL) {
           state.pendingImpulse =
-              new PendingImpulse(packet.sequence(), packet.receivedNanos(), velocity.velocity(), 0);
+              new PendingImpulse(packet.sequence(), packet.receivedNanos(), velocity.velocity(), 0, "KNOCKBACK");
+          state.knockbackResiduals.clear();
+        }
+        continue;
+      }
+
+      if (packet.packet() instanceof Packets.ExplosionImpulse impulse) {
+        double horizontal = Math.hypot(impulse.velocity().x(), impulse.velocity().z());
+        if (horizontal >= KNOCKBACK_MIN_HORIZONTAL) {
+          state.pendingImpulse = new PendingImpulse(
+              packet.sequence(),
+              packet.receivedNanos(),
+              impulse.velocity(),
+              0,
+              "EXPLOSION".equalsIgnoreCase(impulse.cause()) ? "EXPLOSION" : "KNOCKBACK");
           state.knockbackResiduals.clear();
         }
         continue;
@@ -386,10 +400,11 @@ public final class AccuracyChecks {
               .mapToDouble(Double::doubleValue)
               .average()
               .orElse(minTotalResidual);
-          findings.add(hard(playerId, frame, "Knockback",
+          String rule = "EXPLOSION".equals(pending.source()) ? "Explosion" : "Knockback";
+          findings.add(hard(playerId, frame, rule,
               String.format(Locale.ROOT,
-                  "post-velocity movement stayed outside every causally predicted response; residual=%.3f blocks",
-                  evidence),
+                  "post-%s movement stayed outside every causally predicted response; residual=%.3f blocks",
+                  pending.source().toLowerCase(Locale.ROOT), evidence),
               Math.min(1.0, evidence / 0.50)));
           state.pendingImpulse = null;
           state.knockbackResiduals.clear();
@@ -886,7 +901,8 @@ public final class AccuracyChecks {
   }
 
 
-  private record PendingImpulse(long sequence, long receivedNanos, Vec3 velocity, int badMoves) {}
+  private record PendingImpulse(
+      long sequence, long receivedNanos, Vec3 velocity, int badMoves, String source) {}
 
   private static PredictionFrame frameAt(Map<Long, PredictionFrame> frames, long sequence) {
     if (frames instanceof NavigableMap<?, ?> rawNavigable) {
