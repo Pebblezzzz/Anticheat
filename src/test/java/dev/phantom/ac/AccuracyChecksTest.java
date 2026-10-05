@@ -27,7 +27,7 @@ class AccuracyChecksTest {
     List<Packets.RawPacket> packets = new ArrayList<>();
     long sequence = 1L;
     long nanos = 0L;
-    for (int i = 0; i < 28; i++) {
+    for (int i = 0; i < 60; i++) {
       packets.add(new Packets.RawPacket(
           sequence++, nanos,
           new Packets.InteractEntity(7, Packets.InteractAction.ATTACK)));
@@ -40,6 +40,28 @@ class AccuracyChecksTest {
         f.rule().equals("Autoclicker")
             && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
         () -> findings.toString());
+  }
+
+  @Test
+  void transactionStateSurvivesValidationBatchBoundary() {
+    AccuracyChecks.State state = new AccuracyChecks.State();
+
+    var first = AccuracyChecks.analyze(
+        "p",
+        List.of(new Packets.RawPacket(1L, 1L,
+            new Packets.WorldTransactionSend((short) -7))),
+        List.of(),
+        state);
+    assertTrue(first.stream().noneMatch(f -> f.rule().equals("TransactionOrder")));
+
+    var second = AccuracyChecks.analyze(
+        "p",
+        List.of(new Packets.RawPacket(2L, 2L,
+            new Packets.WorldTransactionAck((short) -7))),
+        List.of(),
+        state);
+    assertTrue(second.stream().noneMatch(f -> f.rule().equals("TransactionOrder")),
+        () -> second.toString());
   }
 
   @Test
