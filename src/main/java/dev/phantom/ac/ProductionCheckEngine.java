@@ -581,7 +581,7 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
                 && !blockState.isAir()
                 && !blockState.isUnsupported()
                 && isSlowBreakBlock(blockState.blockId())) {
-              long startClientTick = startedFrame.clientTick();
+              long startClientTick = startedFrame == null ? -1L : startedFrame.clientTick();
             long finishClientTick = frame.clientTick();
             long clientTickDelta = startClientTick >= 0L && finishClientTick >= startClientTick
                 ? finishClientTick - startClientTick

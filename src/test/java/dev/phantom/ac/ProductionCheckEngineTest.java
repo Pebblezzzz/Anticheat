@@ -177,6 +177,7 @@ class ProductionCheckEngineTest {
   @Test
   void reachEntityStateSurvivesValidationBatchBoundary() {
     ProductionCheckEngine.SessionState state = new ProductionCheckEngine.SessionState();
+    AccuracyChecks.State accuracyState = new AccuracyChecks.State();
     BlockBox target = new BlockBox(-0.5, 1.0, 2.5, 0.5, 2.0, 3.5);
 
     var first = ProductionCheckEngine.analyze(
@@ -185,7 +186,7 @@ class ProductionCheckEngineTest {
         report(),
         CONFIG,
         state,
-        new AccuracyChecks.State());
+        accuracyState);
     assertTrue(first.findings().stream().noneMatch(f -> f.rule().equals("Reach")));
 
     var second = ProductionCheckEngine.analyze(
@@ -195,7 +196,7 @@ class ProductionCheckEngineTest {
         report(frame(2, player(0, 0))),
         CONFIG,
         state,
-        new AccuracyChecks.State());
+        accuracyState);
 
     assertTrue(second.findings().stream().noneMatch(f ->
         f.rule().equals("Interact") || f.rule().equals("Reach")),
