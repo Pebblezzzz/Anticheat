@@ -962,15 +962,42 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     drainChunkQueues();
   }
 
+  private static final java.util.UUID VANILLA_SPRINT_SPEED_BOOST =
+      java.util.UUID.fromString("662a6b8d-da3e-4c1c-8813-96ea6097278d");
+
+  static Simulation.Attributes predictionAttributes(
+      double baseValue,
+      java.util.Collection<org.bukkit.attribute.AttributeModifier> modifiers) {
+    double finiteBase = Double.isFinite(baseValue) && baseValue >= 0.0D ? baseValue : 0.1D;
+    java.util.List<Phase5Mechanics.AttributeModifier> converted = new java.util.ArrayList<>();
+    for (org.bukkit.attribute.AttributeModifier modifier : modifiers) {
+      if (VANILLA_SPRINT_SPEED_BOOST.equals(modifier.getUniqueId())) {
+        // Grim models sprinting as a separate physical state and applies the 1.3x
+        // movement-speed multiplier during travel. Do not feed Paper's vanilla
+        // sprint modifier back into the base attribute or sprint would be doubled.
+        continue;
+      }
+      Phase5Mechanics.ModifierOperation operation = switch (modifier.getOperation()) {
+        case ADD_NUMBER -> Phase5Mechanics.ModifierOperation.ADD_VALUE;
+        case ADD_SCALAR -> Phase5Mechanics.ModifierOperation.ADD_MULTIPLIED_BASE;
+        case MULTIPLY_SCALAR_1 -> Phase5Mechanics.ModifierOperation.ADD_MULTIPLIED_TOTAL;
+      };
+      String id = modifier.getKey() == null
+          ? modifier.getUniqueId().toString()
+          : modifier.getKey().toString();
+      converted.add(new Phase5Mechanics.AttributeModifier(id, modifier.getAmount(), operation));
+    }
+    return new Simulation.Attributes(finiteBase, converted);
+  }
+
   private static Packets.PlayerContext authoritativeContext(Player player) {
     Objects.requireNonNull(player, "player");
 
     var location = player.getLocation();
     AttributeInstance movementSpeed = player.getAttribute(Attribute.MOVEMENT_SPEED);
-    double resolvedMovementSpeed =
-        movementSpeed == null || !Double.isFinite(movementSpeed.getValue())
-            ? 0.1D
-            : Math.max(0.0D, movementSpeed.getValue());
+    Simulation.Attributes movementAttributes = movementSpeed == null
+        ? predictionAttributes(0.1D, List.of())
+        : predictionAttributes(movementSpeed.getBaseValue(), movementSpeed.getModifiers());
 
     Map<String, Integer> effects = new LinkedHashMap<>();
     for (PotionEffect effect : player.getActivePotionEffects()) {
@@ -1036,7 +1063,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     org.bukkit.util.Vector velocity = player.getVelocity();
     return new Packets.PlayerContext(
         player.getGameMode().name().toLowerCase(Locale.ROOT),
-        new dev.phantom.ac.Simulation.Attributes(resolvedMovementSpeed),
+        movementAttributes,
         effects,
         pose,
         movementEnvironment,
