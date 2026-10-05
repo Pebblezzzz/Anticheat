@@ -1,5 +1,6 @@
 package dev.phantom.ac;
 
+import dev.phantom.ac.Phase6Reachability.Candidate;
 import dev.phantom.ac.Phase8PredictionRunner.PredictionFrame;
 import dev.phantom.ac.geometry.BlockBox;
 import dev.phantom.ac.world.EntityCollisions;
