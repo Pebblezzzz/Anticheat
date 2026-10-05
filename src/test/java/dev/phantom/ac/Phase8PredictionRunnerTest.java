@@ -3303,4 +3303,58 @@ class Phase8PredictionRunnerTest {
         "the acknowledged snapshot becomes the newest client-visible authority");
   }
 
+  @Test
+  void firstImpossibleMovementIsDetectedAcrossLivePacketBoundaries() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+    Player start = anchor();
+
+    PlayerContext authority = new PlayerContext(
+        "survival",
+        start.attributes(),
+        Map.of(),
+        Pose.STANDING,
+        MovementEnvironment.dry(true, false, false),
+        new Maths.Vec3(.5, 64.0, .5),
+        Maths.Vec3.ZERO,
+        false,
+        false,
+        false,
+        List.of());
+
+    runner.process(
+        "live-speed",
+        List.of(new RawPacket(1L, 10L, authority)),
+        world,
+        start,
+        0L);
+
+    runner.process(
+        "live-speed",
+        List.of(new RawPacket(2L, 20L, new ClientTickEnd())),
+        world,
+        start,
+        0L);
+
+    var result = runner.process(
+        "live-speed",
+        List.of(new RawPacket(
+            3L,
+            30L,
+            new Move(new Maths.Vec3(20.5, 64.0, .5), 0f, 0f, true, 1L))),
+        world,
+        start,
+        0L);
+
+    assertEquals(1, result.movementObservations(), result.toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.IMPOSSIBLE,
+        result.results().getFirst().verdict(),
+        result.results().toString());
+    assertTrue(
+        result.results().getFirst().evidence().uncertaintySources().isEmpty(),
+        result.results().toString());
+  }
+
+
 }
