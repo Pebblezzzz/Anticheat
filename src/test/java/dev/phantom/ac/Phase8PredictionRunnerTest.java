@@ -2193,6 +2193,58 @@ class Phase8PredictionRunnerTest {
   }
 
   @Test
+  void zeroDeltaMovementWithoutCausalAuthorityAdvancesPhysicsFrontier() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    Maths.Vec3 position = new Maths.Vec3(.5, 64.0, .5);
+
+    var report = runner.process(
+        "zero-delta-frontier",
+        List.of(
+            new RawPacket(1, 10L, new ClientTickEnd()),
+            new RawPacket(2, 20L, new Move(position, 0f, 0f, true, 1L)),
+            new RawPacket(3, 30L, new ClientTickEnd()),
+            new RawPacket(4, 40L, new Move(position, 0f, 0f, true, 2L)),
+            new RawPacket(5, 50L, new ClientTickEnd()),
+            new RawPacket(6, 60L, new Move(position, 0f, 0f, true, 3L))),
+        floorWorld(),
+        anchor(),
+        0L);
+
+    assertEquals(3, report.movementObservations(), report.results().toString());
+    assertTrue(
+        report.results().stream().allMatch(
+            result -> result.verdict() != Phase8MovementValidation.Verdict.IMPOSSIBLE),
+        report.results().toString());
+    assertTrue(report.results().stream().allMatch(
+        result -> result.verdict() == Phase8MovementValidation.Verdict.UNCERTAIN),
+        report.results().toString());
+    assertTrue(report.candidateFrontierRetained(), report.toString());
+
+    assertTrue(report.frames().getFirst().predictedAfter().stream()
+        .anyMatch(candidate ->
+            candidate.provenance().input().equals("CLIENT_MOVEMENT_BOOTSTRAP_PROVISIONAL")
+                && candidate.context().simulationTick() == 1L),
+        report.frames().getFirst().toString());
+
+    List<String> trace = report.frames().stream()
+        .flatMap(frame -> frame.trace().stream())
+        .toList();
+    assertFalse(
+        trace.stream().anyMatch(line ->
+            line.contains("OBSERVATION stationary-position packet")),
+        trace.toString());
+    assertTrue(
+        trace.stream().anyMatch(line ->
+            line.contains("FRONTIER_BOOTSTRAPPED source=CLIENT_MOVEMENT_OBSERVATION")),
+        trace.toString());
+    assertTrue(
+        trace.stream().anyMatch(line ->
+            line.contains("FRONTIER_ADVANCED_UNCERTAIN")),
+        trace.toString());
+  }
+
+
+  @Test
   void stationaryObservationUsesObservedWitnessWithoutClearingFrontier() {
     Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
     var report = runner.process(

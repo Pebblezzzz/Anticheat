@@ -717,7 +717,15 @@ public final class Phase8PredictionRunner {
       boolean stationaryPositionObservation = move.position() != null
           && positionExactlyMatches(observedBefore.position(), observedAfter.position())
           && observedAfter.onGround();
-      boolean observationOnlyMovement = move.position() == null || stationaryPositionObservation;
+      /*
+       * A position-bearing zero-delta packet is still a client movement boundary.
+       * When no visible authority exists, let the persistent physics frontier
+       * advance through the same vanilla tick instead of freezing it at the last
+       * observation. Keep the existing observation-witness path when authority is
+       * available because that velocity is not an atomic client-boundary state.
+       */
+      boolean observationOnlyMovement = move.position() == null
+          || (stationaryPositionObservation && latestAuthority != null);
       if (observationOnlyMovement && tick.timingUncertain()) {
         tick = tick.withTimingUncertaintyResolved(
             "observation-only movement does not advance client physics, so Phase 7 chronology uncertainty is not kinematic");
@@ -839,7 +847,7 @@ public final class Phase8PredictionRunner {
         rememberObservedMovement(observedBefore, observedAfter, tick);
       }
 
-      if (move.position() == null || stationaryPositionObservation) {
+      if (observationOnlyMovement) {
         boolean statusObservation = move.position() == null
             && move.movementKind() == Packets.MovementKind.STATUS;
         boolean positionlessRotationObservation = move.position() == null && !statusObservation;
