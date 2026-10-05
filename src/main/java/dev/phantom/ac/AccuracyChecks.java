@@ -59,6 +59,9 @@ public final class AccuracyChecks {
     float previousYaw = Float.NaN;
     float previousPitch = Float.NaN;
     int snapStreak;
+    double previousMovementHorizontal;
+    double previousMovementVertical;
+    final Map<Integer, BlockBox> entities = new HashMap<>();
     long lastAttackNanos = -1L;
     Vec3 previousVehiclePosition;
     long previousVehicleNanos = -1L;
@@ -68,6 +71,7 @@ public final class AccuracyChecks {
       while (timerBoundaries.size() > 32) timerBoundaries.removeFirst();
       actionsPerTick.keySet().removeIf(tick -> tick + 64 < currentSequence);
       placementsPerTick.keySet().removeIf(tick -> tick + 64 < currentSequence);
+      entities.entrySet().removeIf(e -> false);
     }
 
     void resetTemporalEvidence() {
@@ -133,8 +137,6 @@ public final class AccuracyChecks {
     if (frames.isEmpty()) return List.of();
 
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
-    double previousHorizontal = 0.0;
-    double previousVertical = 0.0;
 
     for (PredictionFrame frame : frames) {
       MovementAdvantageTracker.Snapshot advantage = frame.movementAdvantage();
@@ -150,7 +152,7 @@ public final class AccuracyChecks {
       boolean horizontalAccumulated =
           signedHorizontal >= MOVEMENT_ADVANTAGE_MIN_TICK
               && horizontal >= MOVEMENT_ADVANTAGE_HARD
-              && previousHorizontal < MOVEMENT_ADVANTAGE_HARD;
+              && state.previousMovementHorizontal < MOVEMENT_ADVANTAGE_HARD;
       if (horizontalImmediate || horizontalAccumulated) {
         findings.add(hard(playerId, frame, "Speed",
             String.format(Locale.ROOT,
@@ -165,7 +167,7 @@ public final class AccuracyChecks {
       boolean verticalAccumulated =
           signedVertical >= VERTICAL_ADVANTAGE_MIN_TICK
               && vertical >= VERTICAL_ADVANTAGE_HARD
-              && previousVertical < VERTICAL_ADVANTAGE_HARD;
+              && state.previousMovementVertical < VERTICAL_ADVANTAGE_HARD;
       if ((verticalImmediate || verticalAccumulated)
           && !frame.observedAfter().onGround()
           && !frame.observedAfter().input().map(Simulation.AdvancedInput::jump).orElse(false)) {
@@ -177,8 +179,8 @@ public final class AccuracyChecks {
             Math.min(1.0, Math.max(signedVertical, vertical) / 0.60)));
       }
 
-      previousHorizontal = horizontal;
-      previousVertical = vertical;
+      state.previousMovementHorizontal = horizontal;
+      state.previousMovementVertical = vertical;
     }
 
     return List.copyOf(findings);
@@ -350,7 +352,7 @@ public final class AccuracyChecks {
       Map<Long, PredictionFrame> frames,
       State state) {
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
-    Map<Integer, BlockBox> entities = new HashMap<>();
+    Map<Integer, BlockBox> entities = state.entities;
 
     for (Packets.RawPacket packet : packets) {
       if (packet.packet() instanceof Packets.EntitySpawn spawn) entities.put(spawn.entityId(), spawn.box());
