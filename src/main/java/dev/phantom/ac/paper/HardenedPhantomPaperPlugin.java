@@ -65,6 +65,7 @@ import dev.phantom.ac.PhantomDebugFormatter;
 import dev.phantom.ac.PhantomPlayerState;
 import dev.phantom.ac.Phase8EnforcementPolicy;
 import dev.phantom.ac.State;
+import dev.phantom.ac.Simulation;
 import dev.phantom.ac.Timeline;
 import dev.phantom.ac.ValidationResultGate;
 import dev.phantom.ac.World;
