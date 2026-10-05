@@ -117,17 +117,29 @@ public final class Packets {
       dev.phantom.ac.world.Pos position,
       int faceId,
       Vec3 cursor,
-      boolean cursorPresent) implements Packet {
+      boolean cursorPresent,
+      String heldItemType,
+      int heldItemAmount) implements Packet {
     public BlockPlace {
       Objects.requireNonNull(position, "position");
       Objects.requireNonNull(cursor, "cursor");
       if (cursorPresent && (!Double.isFinite(cursor.x()) || !Double.isFinite(cursor.y()) || !Double.isFinite(cursor.z()))) {
         throw new IllegalArgumentException("cursor must be finite when present");
       }
+      Objects.requireNonNull(heldItemType, "heldItemType");
+      if (heldItemAmount < 0) throw new IllegalArgumentException("heldItemAmount must be non-negative");
     }
 
     public BlockPlace(dev.phantom.ac.world.Pos position) {
-      this(position, -1, Vec3.ZERO, false);
+      this(position, -1, Vec3.ZERO, false, "minecraft:air", 0);
+    }
+
+    public BlockPlace(
+        dev.phantom.ac.world.Pos position,
+        int faceId,
+        Vec3 cursor,
+        boolean cursorPresent) {
+      this(position, faceId, cursor, cursorPresent, "minecraft:air", 0);
     }
   }
 
