@@ -37,15 +37,77 @@ public final class AccuracyChecks {
   private static final double AUTOCLICK_MAX_CV = 0.045;
   private static final long AUTOCLICK_MAX_INTERVAL_NANOS = 150_000_000L;
 
+  /**
+   * Persistent per-player evidence state. Validation is intentionally batched,
+   * so temporal checks must not reset at executor batch boundaries.
+   */
+  public static final class State {
+    long lastReceivedNanos = -1L;
+    final Set<Short> openTransactions = new HashSet<>();
+    final Set<Short> acknowledgedTransactions = new HashSet<>();
+    final ArrayDeque<Long> attackTimes = new ArrayDeque<>();
+    final ArrayDeque<Long> timerBoundaries = new ArrayDeque<>();
+    long timerBalanceNanos;
+    int consecutiveFast;
+    PendingImpulse pendingImpulse;
+    final Map<Long, Integer> actionsPerTick = new HashMap<>();
+    final Map<Long, Integer> placementsPerTick = new HashMap<>();
+    int scaffoldConsecutive;
+    boolean noFallTracking;
+    double fallOriginY;
+    int airborneFrames;
+    float previousYaw = Float.NaN;
+    float previousPitch = Float.NaN;
+    int snapStreak;
+    double previousMovementHorizontal;
+    double previousMovementVertical;
+    final Map<Integer, BlockBox> entities = new HashMap<>();
+    long lastAttackNanos = -1L;
+    Vec3 previousVehiclePosition;
+    long previousVehicleNanos = -1L;
+
+    void prune(long currentSequence) {
+      while (attackTimes.size() > 64) attackTimes.removeFirst();
+      while (timerBoundaries.size() > 32) timerBoundaries.removeFirst();
+      actionsPerTick.keySet().removeIf(tick -> tick + 64 < currentSequence);
+      placementsPerTick.keySet().removeIf(tick -> tick + 64 < currentSequence);
+    }
+
+    void resetTemporalEvidence() {
+      timerBalanceNanos = 0L;
+      consecutiveFast = 0;
+      pendingImpulse = null;
+      snapStreak = 0;
+      scaffoldConsecutive = 0;
+      noFallTracking = false;
+      airborneFrames = 0;
+      attackTimes.clear();
+      timerBoundaries.clear();
+      actionsPerTick.clear();
+      placementsPerTick.clear();
+      previousVehiclePosition = null;
+      previousVehicleNanos = -1L;
+    }
+  }
+
   private AccuracyChecks() {}
 
   public static List<ProductionCheckEngine.Finding> analyze(
       String playerId,
       List<Packets.RawPacket> packets,
       List<PredictionFrame> frames) {
+    return analyze(playerId, packets, frames, new State());
+  }
+
+  public static List<ProductionCheckEngine.Finding> analyze(
+      String playerId,
+      List<Packets.RawPacket> packets,
+      List<PredictionFrame> frames,
+      State state) {
     Objects.requireNonNull(playerId);
     Objects.requireNonNull(packets);
     Objects.requireNonNull(frames);
+    Objects.requireNonNull(state);
     if (packets.isEmpty() && frames.isEmpty()) return List.of();
 
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
@@ -57,25 +119,23 @@ public final class AccuracyChecks {
     Map<Long, PredictionFrame> framesBySequence = new TreeMap<>();
     for (PredictionFrame frame : frames) framesBySequence.put(frame.sequence(), frame);
 
-    findings.addAll(movementAdvantage(playerId, frames));
-    findings.addAll(noFallContinuity(playerId, frames));
-    findings.addAll(timerBalance(playerId, ordered, framesBySequence));
-    findings.addAll(knockbackResponse(playerId, ordered, framesBySequence));
-    findings.addAll(rotationAndCombat(playerId, ordered, framesBySequence));
-    findings.addAll(autoClicker(playerId, ordered, framesBySequence));
-    findings.addAll(packetIntegrity(playerId, ordered, framesBySequence));
-    findings.addAll(scaffoldAndPlacement(playerId, ordered, framesBySequence));
-    findings.addAll(vehicleSafety(playerId, ordered, framesBySequence));
+    findings.addAll(movementAdvantage(playerId, frames, state));
+    findings.addAll(noFallContinuity(playerId, frames, state));
+    findings.addAll(timerBalance(playerId, ordered, framesBySequence, state));
+    findings.addAll(knockbackResponse(playerId, ordered, framesBySequence, state));
+    findings.addAll(rotationAndCombat(playerId, ordered, framesBySequence, state));
+    findings.addAll(autoClicker(playerId, ordered, framesBySequence, state));
+    findings.addAll(packetIntegrity(playerId, ordered, framesBySequence, state));
+    findings.addAll(scaffoldAndPlacement(playerId, ordered, framesBySequence, state));
+    findings.addAll(vehicleSafety(playerId, ordered, framesBySequence, state));
     return List.copyOf(findings);
   }
 
   private static List<ProductionCheckEngine.Finding> movementAdvantage(
-      String playerId, List<PredictionFrame> frames) {
+      String playerId, List<PredictionFrame> frames, State state) {
     if (frames.isEmpty()) return List.of();
 
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
-    double previousHorizontal = 0.0;
-    double previousVertical = 0.0;
 
     for (PredictionFrame frame : frames) {
       MovementAdvantageTracker.Snapshot advantage = frame.movementAdvantage();
@@ -91,7 +151,7 @@ public final class AccuracyChecks {
       boolean horizontalAccumulated =
           signedHorizontal >= MOVEMENT_ADVANTAGE_MIN_TICK
               && horizontal >= MOVEMENT_ADVANTAGE_HARD
-              && previousHorizontal < MOVEMENT_ADVANTAGE_HARD;
+              && state.previousMovementHorizontal < MOVEMENT_ADVANTAGE_HARD;
       if (horizontalImmediate || horizontalAccumulated) {
         findings.add(hard(playerId, frame, "Speed",
             String.format(Locale.ROOT,
@@ -106,7 +166,7 @@ public final class AccuracyChecks {
       boolean verticalAccumulated =
           signedVertical >= VERTICAL_ADVANTAGE_MIN_TICK
               && vertical >= VERTICAL_ADVANTAGE_HARD
-              && previousVertical < VERTICAL_ADVANTAGE_HARD;
+              && state.previousMovementVertical < VERTICAL_ADVANTAGE_HARD;
       if ((verticalImmediate || verticalAccumulated)
           && !frame.observedAfter().onGround()
           && !frame.observedAfter().input().map(Simulation.AdvancedInput::jump).orElse(false)) {
@@ -118,8 +178,8 @@ public final class AccuracyChecks {
             Math.min(1.0, Math.max(signedVertical, vertical) / 0.60)));
       }
 
-      previousHorizontal = horizontal;
-      previousVertical = vertical;
+      state.previousMovementHorizontal = horizontal;
+      state.previousMovementVertical = vertical;
     }
 
     return List.copyOf(findings);
@@ -130,11 +190,8 @@ public final class AccuracyChecks {
    * Rotation/status packets therefore cannot erase a legitimate fall origin.
    */
   private static List<ProductionCheckEngine.Finding> noFallContinuity(
-      String playerId, List<PredictionFrame> frames) {
+      String playerId, List<PredictionFrame> frames, State state) {
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
-    boolean tracking = false;
-    double fallOriginY = 0.0;
-    int airborneFrames = 0;
 
     for (PredictionFrame frame : frames) {
       if (frame.movement().position() == null) continue;
@@ -143,34 +200,34 @@ public final class AccuracyChecks {
       var after = frame.observedAfter();
 
       if (!before.onGround() && !after.onGround()) {
-        if (!tracking) {
-          tracking = true;
-          fallOriginY = before.position().y();
-          airborneFrames = 0;
+        if (!state.noFallTracking) {
+          state.noFallTracking = true;
+          state.fallOriginY = before.position().y();
+          state.airborneFrames = 0;
         }
-        airborneFrames++;
+        state.airborneFrames++;
         continue;
       }
 
-      if (tracking && after.onGround()) {
-        double fallDistance = fallOriginY - after.position().y();
+      if (state.noFallTracking && after.onGround()) {
+        double fallDistance = state.fallOriginY - after.position().y();
         boolean predictedLanding = frame.predictedAfter().stream()
             .anyMatch(candidate -> candidate.context().player().onGround());
         if (fallDistance > 2.75
             && !predictedLanding
             && frame.uncertaintySources().isEmpty()
-            && airborneFrames >= 3) {
+            && state.airborneFrames >= 3) {
           findings.add(hard(playerId, frame, "NoFall",
               String.format(Locale.ROOT,
                   "landing after %.3f blocks of tracked airborne descent had no grounded prediction",
                   fallDistance),
               Math.min(1.0, fallDistance / 6.0)));
         }
-        tracking = false;
-        airborneFrames = 0;
+        state.noFallTracking = false;
+        state.airborneFrames = 0;
       } else if (after.onGround()) {
-        tracking = false;
-        airborneFrames = 0;
+        state.noFallTracking = false;
+        state.airborneFrames = 0;
       }
     }
 
@@ -180,16 +237,15 @@ public final class AccuracyChecks {
   private static List<ProductionCheckEngine.Finding> timerBalance(
       String playerId,
       List<Packets.RawPacket> packets,
-      Map<Long, PredictionFrame> frames) {
+      Map<Long, PredictionFrame> frames,
+      State state) {
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
-    ArrayDeque<Long> boundaries = new ArrayDeque<>();
-    long balance = 0L;
-    int consecutiveFast = 0;
+    ArrayDeque<Long> boundaries = state.timerBoundaries;
 
     for (Packets.RawPacket packet : packets) {
       if (!(packet.packet() instanceof Packets.ClientTickEnd)) continue;
       boundaries.addLast(packet.receivedNanos());
-      while (boundaries.size() > 24) boundaries.removeFirst();
+      while (boundaries.size() > 32) boundaries.removeFirst();
       if (boundaries.size() < 8) continue;
 
       Long first = boundaries.peekFirst();
@@ -199,28 +255,28 @@ public final class AccuracyChecks {
       int intervals = boundaries.size() - 1;
       long expected = CLIENT_TICK_NANOS * intervals;
       long delta = expected - elapsed;
-      balance = Math.max(-2_000_000_000L, Math.min(2_000_000_000L, balance + delta));
+      state.timerBalanceNanos = Math.max(-2_000_000_000L, Math.min(2_000_000_000L, state.timerBalanceNanos + delta));
 
       long mean = elapsed / intervals;
-      if (mean < 47_000_000L) consecutiveFast++;
-      else consecutiveFast = Math.max(0, consecutiveFast - 2);
+      if (mean < 46_000_000L) state.consecutiveFast++;
+      else state.consecutiveFast = Math.max(0, state.consecutiveFast - 2);
 
-      if (balance >= TIMER_BALANCE_HARD_NANOS && consecutiveFast >= 8) {
+      if (state.timerBalanceNanos >= 300_000_000L && state.consecutiveFast >= 12) {
         PredictionFrame frame = frameAt(frames, packet.sequence());
         findings.add(hard(playerId, frame, "TimerBurst",
             String.format(Locale.ROOT,
                 "client tick timing accumulated %d ms of positive timer balance over a sustained fast clock",
-                balance / 1_000_000L),
-            Math.min(1.0, balance / 600_000_000.0)));
-        balance /= 2L;
-        consecutiveFast = 0;
-      } else if (balance >= TIMER_BALANCE_SOFT_NANOS && consecutiveFast >= 6) {
+                state.timerBalanceNanos / 1_000_000L),
+            Math.min(1.0, state.timerBalanceNanos / 800_000_000.0)));
+        state.timerBalanceNanos /= 2L;
+        state.consecutiveFast = 0;
+      } else if (state.timerBalanceNanos >= 180_000_000L && state.consecutiveFast >= 8) {
         PredictionFrame frame = frameAt(frames, packet.sequence());
         findings.add(uncertain(playerId, frame, "TimerLimit",
             String.format(Locale.ROOT,
                 "client tick timing accumulated %d ms of positive balance; network timing still warrants caution",
-                balance / 1_000_000L),
-            Math.min(1.0, balance / 400_000_000.0)));
+                state.timerBalanceNanos / 1_000_000L),
+            Math.min(1.0, state.timerBalanceNanos / 500_000_000.0)));
       }
     }
 
@@ -230,25 +286,26 @@ public final class AccuracyChecks {
   private static List<ProductionCheckEngine.Finding> knockbackResponse(
       String playerId,
       List<Packets.RawPacket> packets,
-      Map<Long, PredictionFrame> frames) {
+      Map<Long, PredictionFrame> frames,
+      State state) {
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
-    PendingImpulse pending = null;
 
     for (Packets.RawPacket packet : packets) {
       if (packet.packet() instanceof Packets.Velocity velocity) {
         double horizontal = Math.hypot(velocity.velocity().x(), velocity.velocity().z());
         if (horizontal >= KNOCKBACK_MIN_HORIZONTAL) {
-          pending = new PendingImpulse(packet.sequence(), packet.receivedNanos(), velocity.velocity());
+          state.pendingImpulse = new PendingImpulse(packet.sequence(), packet.receivedNanos(), velocity.velocity(), 0);
         }
         continue;
       }
 
-      if (!(packet.packet() instanceof Packets.Move move) || move.position() == null || pending == null) continue;
+      if (!(packet.packet() instanceof Packets.Move move) || move.position() == null || state.pendingImpulse == null) continue;
+      PendingImpulse pending = state.pendingImpulse;
       if (packet.sequence() <= pending.sequence()) continue;
 
       PredictionFrame frame = frameAt(frames, packet.sequence());
       if (frame == null || !frame.uncertaintySources().isEmpty()) {
-        if (packet.sequence() - pending.sequence() > 8L) pending = null;
+        if (packet.sequence() - pending.sequence() > 12L) state.pendingImpulse = null;
         continue;
       }
 
@@ -261,18 +318,27 @@ public final class AccuracyChecks {
           + delta.z() * pending.velocity().z();
       double impulseSquared = expectedHorizontal * expectedHorizontal;
 
+      double retained = impulseSquared <= 1.0e-9
+          ? 1.0
+          : observedAlongImpulse / impulseSquared;
+      boolean noReachableExplanation = frame.predictedAfter().stream()
+          .noneMatch(c -> horizontalDistance(c.context().player().position(), frame.observedAfter().position()) <= 0.06);
       if (impulseSquared > 1.0e-9
-          && observedAlongImpulse / impulseSquared < KNOCKBACK_REQUIRED_RETAINED_FRACTION
-          && frame.predictedAfter().stream().noneMatch(c ->
-              horizontalDistance(c.context().player().position(), frame.observedAfter().position()) <= 0.06)) {
-        findings.add(hard(playerId, frame, "Knockback",
-            String.format(Locale.ROOT,
-                "observed movement retained only %.1f%% of server velocity projection",
-                Math.max(0.0, observedAlongImpulse / impulseSquared * 100.0)),
-            1.0 - Math.max(0.0, observedAlongImpulse / impulseSquared)));
-        pending = null;
-      } else if (packet.sequence() - pending.sequence() > 8L) {
-        pending = null;
+          && retained < KNOCKBACK_REQUIRED_RETAINED_FRACTION
+          && noReachableExplanation) {
+        int badMoves = pending.badMoves() + 1;
+        state.pendingImpulse = new PendingImpulse(
+            pending.sequence(), pending.receivedNanos(), pending.velocity(), badMoves);
+        if (badMoves >= 2) {
+          findings.add(hard(playerId, frame, "Knockback",
+              String.format(Locale.ROOT,
+                  "two consecutive post-velocity observations remained outside the predicted knockback envelope; retained projection was %.1f%%",
+                  Math.max(0.0, retained * 100.0)),
+              Math.min(1.0, 1.0 - Math.max(0.0, retained))));
+          state.pendingImpulse = null;
+        }
+      } else if (packet.sequence() - pending.sequence() > 12L || !noReachableExplanation) {
+        state.pendingImpulse = null;
       }
     }
 
@@ -282,13 +348,10 @@ public final class AccuracyChecks {
   private static List<ProductionCheckEngine.Finding> rotationAndCombat(
       String playerId,
       List<Packets.RawPacket> packets,
-      Map<Long, PredictionFrame> frames) {
+      Map<Long, PredictionFrame> frames,
+      State state) {
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
-    Map<Integer, BlockBox> entities = new HashMap<>();
-    float previousYaw = Float.NaN;
-    float previousPitch = Float.NaN;
-    int snapStreak = 0;
-    Packets.RawPacket previousAttack = null;
+    Map<Integer, BlockBox> entities = state.entities;
 
     for (Packets.RawPacket packet : packets) {
       if (packet.packet() instanceof Packets.EntitySpawn spawn) entities.put(spawn.entityId(), spawn.box());
@@ -297,16 +360,16 @@ public final class AccuracyChecks {
 
       if (packet.packet() instanceof Packets.Move move) {
         if (move.yaw() != null && Float.isFinite(move.yaw())) {
-          if (Float.isFinite(previousYaw)) {
-            double delta = Math.abs(Math.IEEEremainder(move.yaw() - previousYaw, 360.0));
-            double pitchDelta = move.pitch() == null || !Float.isFinite(previousPitch)
+          if (Float.isFinite(state.previousYaw)) {
+            double delta = Math.abs(Math.IEEEremainder(move.yaw() - state.previousYaw, 360.0));
+            double pitchDelta = move.pitch() == null || !Float.isFinite(state.previousPitch)
                 ? 0.0
-                : Math.abs(move.pitch() - previousPitch);
-            if (delta >= 75.0 || pitchDelta >= 55.0) snapStreak++;
-            else snapStreak = Math.max(0, snapStreak - 1);
+                : Math.abs(move.pitch() - state.previousPitch);
+            if (delta >= 75.0 || pitchDelta >= 55.0) state.snapStreak++;
+            else state.snapStreak = Math.max(0, state.snapStreak - 1);
           }
-          previousYaw = move.yaw();
-          if (move.pitch() != null && Float.isFinite(move.pitch())) previousPitch = move.pitch();
+          state.previousYaw = move.yaw();
+          if (move.pitch() != null && Float.isFinite(move.pitch())) state.previousPitch = move.pitch();
         }
       }
 
@@ -315,10 +378,10 @@ public final class AccuracyChecks {
         PredictionFrame frame = frameAt(frames, packet.sequence());
         if (frame == null) continue;
 
-        if (snapStreak >= 3) {
+        if (state.snapStreak >= 3) {
           findings.add(uncertain(playerId, frame, "Aim",
               "attack occurred immediately after a repeated large rotation snap sequence",
-              Math.min(1.0, snapStreak / 8.0)));
+              Math.min(1.0, state.snapStreak / 8.0)));
         }
 
         BlockBox target = entities.get(attack.entityId());
@@ -328,15 +391,15 @@ public final class AccuracyChecks {
               1.0));
         }
 
-        if (previousAttack != null) {
-          long delta = packet.receivedNanos() - previousAttack.receivedNanos();
+        if (state.lastAttackNanos >= 0L) {
+          long delta = packet.receivedNanos() - state.lastAttackNanos;
           if (delta >= 0L && delta <= 30_000_000L) {
             findings.add(uncertain(playerId, frame, "MultiActions",
                 "multiple attack actions arrived within one client-tick-sized window",
                 0.5));
           }
         }
-        previousAttack = packet;
+        state.lastAttackNanos = packet.receivedNanos();
       }
     }
 
@@ -346,22 +409,23 @@ public final class AccuracyChecks {
   private static List<ProductionCheckEngine.Finding> autoClicker(
       String playerId,
       List<Packets.RawPacket> packets,
-      Map<Long, PredictionFrame> frames) {
-    List<Long> attacks = new ArrayList<>();
+      Map<Long, PredictionFrame> frames,
+      State state) {
     for (Packets.RawPacket packet : packets) {
       if (packet.packet() instanceof Packets.InteractEntity attack
           && attack.action() == Packets.InteractAction.ATTACK) {
-        attacks.add(packet.receivedNanos());
+        state.attackTimes.addLast(packet.receivedNanos());
       }
     }
-    if (attacks.size() < AUTOCLICK_MIN_SAMPLES) return List.of();
+    if (state.attackTimes.size() < 49) return List.of();
 
+    List<Long> attacks = List.copyOf(state.attackTimes);
     List<Long> intervals = new ArrayList<>();
-    for (int i = Math.max(1, attacks.size() - 40); i < attacks.size(); i++) {
+    for (int i = Math.max(1, attacks.size() - 48); i < attacks.size(); i++) {
       long delta = attacks.get(i) - attacks.get(i - 1);
       if (delta > 0L && delta <= AUTOCLICK_MAX_INTERVAL_NANOS) intervals.add(delta);
     }
-    if (intervals.size() < AUTOCLICK_MIN_SAMPLES) return List.of();
+    if (intervals.size() < 40) return List.of();
 
     double mean = intervals.stream().mapToLong(Long::longValue).average().orElse(0.0);
     if (mean <= 0.0) return List.of();
@@ -371,7 +435,7 @@ public final class AccuracyChecks {
       variance += d * d;
     }
     double cv = Math.sqrt(variance / intervals.size()) / mean;
-    if (cv < AUTOCLICK_MAX_CV) {
+    if (cv < 0.02) {
       PredictionFrame frame = frameAt(frames,
           packets.stream().filter(p -> p.packet() instanceof Packets.InteractEntity)
               .mapToLong(Packets.RawPacket::sequence).max().orElse(0L));
@@ -379,7 +443,7 @@ public final class AccuracyChecks {
           String.format(Locale.ROOT,
               "attack intervals were unusually periodic (n=%d, mean=%.1fms, cv=%.4f)",
               intervals.size(), mean / 1_000_000.0, cv),
-          Math.min(1.0, (AUTOCLICK_MAX_CV - cv) / AUTOCLICK_MAX_CV)));
+          Math.min(1.0, (0.02 - cv) / 0.02)));
     }
     return List.of();
   }
@@ -387,26 +451,24 @@ public final class AccuracyChecks {
   private static List<ProductionCheckEngine.Finding> packetIntegrity(
       String playerId,
       List<Packets.RawPacket> packets,
-      Map<Long, PredictionFrame> frames) {
+      Map<Long, PredictionFrame> frames,
+      State state) {
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
-    long lastReceived = -1L;
-    Set<Short> openTransactions = new HashSet<>();
-    Set<Short> acknowledged = new HashSet<>();
-    Map<Long, Integer> actionsPerTick = new HashMap<>();
+    Map<Long, Integer> actionsPerTick = state.actionsPerTick;
 
     for (Packets.RawPacket packet : packets) {
-      if (lastReceived >= 0L && packet.receivedNanos() < lastReceived) {
+      if (state.lastReceivedNanos >= 0L && packet.receivedNanos() < state.lastReceivedNanos) {
         PredictionFrame frame = frameAt(frames, packet.sequence());
-        findings.add(hard(playerId, frame, "PacketOrder",
+        findings.add(uncertain(playerId, frame, "PacketOrder",
             "packet sequence increased while capture receive time moved backwards",
             1.0));
       }
-      lastReceived = Math.max(lastReceived, packet.receivedNanos());
+      state.lastReceivedNanos = Math.max(state.lastReceivedNanos, packet.receivedNanos());
 
       if (packet.packet() instanceof Packets.WorldTransactionSend send) {
-        openTransactions.add(send.id());
+        state.openTransactions.add(send.id());
       } else if (packet.packet() instanceof Packets.WorldTransactionAck ack) {
-        if (!openTransactions.remove(ack.id()) || !acknowledged.add(ack.id())) {
+        if (!state.openTransactions.remove(ack.id()) || !state.acknowledgedTransactions.add(ack.id())) {
           PredictionFrame frame = frameAt(frames, packet.sequence());
           findings.add(hard(playerId, frame, "TransactionOrder",
               "transaction acknowledgement was duplicated or referenced an unknown barrier",
@@ -430,16 +492,17 @@ public final class AccuracyChecks {
       }
     }
 
+    state.prune(packets.isEmpty() ? 0L : packets.getLast().sequence());
     return List.copyOf(findings);
   }
 
   private static List<ProductionCheckEngine.Finding> scaffoldAndPlacement(
       String playerId,
       List<Packets.RawPacket> packets,
-      Map<Long, PredictionFrame> frames) {
+      Map<Long, PredictionFrame> frames,
+      State state) {
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
-    Map<Long, Integer> placementsPerTick = new HashMap<>();
-    int consecutive = 0;
+    Map<Long, Integer> placementsPerTick = state.placementsPerTick;
 
     for (Packets.RawPacket packet : packets) {
       if (!(packet.packet() instanceof Packets.BlockPlace place)) continue;
@@ -458,16 +521,16 @@ public final class AccuracyChecks {
       float pitch = frame.observedAfter().pitch();
       if (Float.isFinite(pitch) && pitch > 78.0f
           && frame.movement().position() != null) {
-        consecutive++;
+        state.scaffoldConsecutive++;
       } else {
-        consecutive = Math.max(0, consecutive - 1);
+        state.scaffoldConsecutive = Math.max(0, state.scaffoldConsecutive - 1);
       }
 
-      if (consecutive >= 6) {
+      if (state.scaffoldConsecutive >= 6) {
         findings.add(uncertain(playerId, frame, "Scaffold",
             "sustained near-downward placement pattern accompanied forward movement",
-            Math.min(1.0, consecutive / 10.0)));
-        consecutive = 0;
+            Math.min(1.0, state.scaffoldConsecutive / 10.0)));
+        state.scaffoldConsecutive = 0;
       }
 
       if (place.cursorPresent()
@@ -486,18 +549,21 @@ public final class AccuracyChecks {
   private static List<ProductionCheckEngine.Finding> vehicleSafety(
       String playerId,
       List<Packets.RawPacket> packets,
-      Map<Long, PredictionFrame> frames) {
+      Map<Long, PredictionFrame> frames,
+      State state) {
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
-    Vec3 previous = null;
     for (Packets.RawPacket packet : packets) {
       if (!(packet.packet() instanceof Packets.VehicleMove move)) continue;
-      if (previous != null) {
+      if (state.previousVehiclePosition != null) {
+        Vec3 previous = state.previousVehiclePosition;
         Vec3 delta = new Vec3(
             move.position().x() - previous.x(),
             move.position().y() - previous.y(),
             move.position().z() - previous.z());
         double horizontal = Math.hypot(delta.x(), delta.z());
-        if (horizontal > 3.0 || Math.abs(delta.y()) > 2.5) {
+        if (packet.receivedNanos() >= state.previousVehicleNanos
+            && packet.receivedNanos() - state.previousVehicleNanos <= 100_000_000L
+            && (horizontal > 3.0 || Math.abs(delta.y()) > 2.5)) {
           PredictionFrame frame = frameAt(frames, packet.sequence());
           findings.add(hard(playerId, frame, "Vehicle",
               String.format(Locale.ROOT,
@@ -506,12 +572,13 @@ public final class AccuracyChecks {
               1.0));
         }
       }
-      previous = move.position();
+      state.previousVehiclePosition = move.position();
+      state.previousVehicleNanos = packet.receivedNanos();
     }
     return List.copyOf(findings);
   }
 
-  private record PendingImpulse(long sequence, long receivedNanos, Vec3 velocity) {}
+  private record PendingImpulse(long sequence, long receivedNanos, Vec3 velocity, int badMoves) {}
 
   private static PredictionFrame frameAt(Map<Long, PredictionFrame> frames, long sequence) {
     if (frames instanceof NavigableMap<?, ?> rawNavigable) {

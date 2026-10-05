@@ -30,9 +30,30 @@ public final class ProductionCheckEngine {
   private static final Set<String> ENTITY_ACTIONS = Set.of(
       "START_SPRINTING", "STOP_SPRINTING",
       "START_SNEAKING", "STOP_SNEAKING",
-      "START_FLYING_WITH_ELYTRA", "START_JUMPING_WITH_HORSE");
+      "LEAVE_BED", "OPEN_HORSE_INVENTORY",
+      "START_FLYING_WITH_ELYTRA", "START_JUMPING_WITH_HORSE",
+      "STOP_JUMPING_WITH_HORSE");
   private static final Set<String> WINDOW_CLICK_TYPES = Set.of(
       "PICKUP", "QUICK_MOVE", "SWAP", "CLONE", "THROW", "QUICK_CRAFT", "PICKUP_ALL");
+
+  /**
+   * Persistent packet-side state. The live validator intentionally analyzes only
+   * packets since the previous batch, so entity and digging state must survive
+   * executor coalescing.
+   */
+  public static final class SessionState {
+    final Map<Integer, BlockBox> entities = new HashMap<>();
+    final Map<Pos, Long> diggingStarts = new HashMap<>();
+    final Map<Pos, PredictionFrame> diggingStartFrames = new HashMap<>();
+
+    void prune(long currentSequence) {
+      while (diggingStarts.size() > 64) {
+        Pos oldest = diggingStarts.keySet().iterator().next();
+        diggingStarts.remove(oldest);
+      }
+      diggingStartFrames.keySet().retainAll(diggingStarts.keySet());
+    }
+  }
 
   private ProductionCheckEngine() {}
 
@@ -246,17 +267,38 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
       List<Packets.RawPacket> packets,
       Phase8PredictionRunner.Report movement,
       Config config) {
+    return analyze(playerId, packets, movement, config, new SessionState(), new AccuracyChecks.State());
+  }
+
+  public static Report analyze(
+      String playerId,
+      List<Packets.RawPacket> packets,
+      Phase8PredictionRunner.Report movement,
+      Config config,
+      SessionState state) {
+    return analyze(playerId, packets, movement, config, state, new AccuracyChecks.State());
+  }
+
+  public static Report analyze(
+      String playerId,
+      List<Packets.RawPacket> packets,
+      Phase8PredictionRunner.Report movement,
+      Config config,
+      SessionState state,
+      AccuracyChecks.State accuracyState) {
     Objects.requireNonNull(playerId);
     Objects.requireNonNull(packets);
     Objects.requireNonNull(movement);
     Objects.requireNonNull(config);
+    Objects.requireNonNull(state);
+    Objects.requireNonNull(accuracyState);
 
     if (!config.enabled() || packets.isEmpty()) return new Report(List.of());
 
     NavigableMap<Long, PredictionFrame> frames = new TreeMap<>();
     for (PredictionFrame frame : movement.frames()) frames.put(frame.sequence(), frame);
 
-    Map<Integer, BlockBox> entities = new HashMap<>();
+    Map<Integer, BlockBox> entities = state.entities;
     List<Finding> findings = new ArrayList<>();
     long lastServerTick = movement.frames().isEmpty() ? 0L : movement.frames().getLast().serverTick();
 
@@ -268,8 +310,6 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
     long lastRotationSequence = -1L;
     int modulo360Streak = 0;
     ArrayDeque<Long> clientTickEndTimes = new ArrayDeque<>();
-    Map<Pos, Long> diggingStarts = new HashMap<>();
-    Map<Pos, PredictionFrame> diggingStartFrames = new HashMap<>();
 
     for (Packets.RawPacket raw : ordered) {
       Packets.Packet packet = raw.packet();
@@ -448,14 +488,24 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
       if (packet instanceof Packets.ClientBlockBreak breakPacket && frame != null) {
         Pos pos = breakPacket.position();
         BlockBox block = new BlockBox(pos.x(), pos.y(), pos.z(), pos.x() + 1.0, pos.y() + 1.0, pos.z() + 1.0);
-        double distance = pointAabbDistance(eyePosition(frame.observedAfter()), block);
-        if (distance > config.blockInteractionReach()) {
+        Vec3 eye = eyePosition(frame.observedAfter());
+        double distance = pointAabbDistance(eye, block);
+        double rayDistance = rayEntryDistance(
+            eye,
+            lookDirection(frame.observedAfter().yaw(), frame.observedAfter().pitch()),
+            block,
+            config.blockInteractionReach());
+        if (!Double.isFinite(rayDistance) && distance > config.blockInteractionReach()) {
           findings.add((distance > config.blockInteractionReach() + 1.0)
               ? finding(playerId, serverTick, "FarBreak",
-                  String.format(Locale.ROOT, "block distance %.3f is more than 1 block beyond %.3f", distance, config.blockInteractionReach()),
+                  String.format(Locale.ROOT,
+                      "look ray misses the target block within %.3f blocks and the target is %.3f blocks away",
+                      config.blockInteractionReach(), distance),
                   Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0), sequence)
               : uncertainFinding(playerId, serverTick, "FarBreak",
-                  String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
+                  String.format(Locale.ROOT,
+                      "look ray misses the target block within %.3f blocks",
+                      config.blockInteractionReach()),
                   Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
                   sequence));
         }
@@ -481,14 +531,24 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
         if (frame != null) {
           Pos pos = place.position();
           BlockBox block = new BlockBox(pos.x(), pos.y(), pos.z(), pos.x() + 1.0, pos.y() + 1.0, pos.z() + 1.0);
-          double distance = pointAabbDistance(eyePosition(frame.observedAfter()), block);
-          if (distance > config.blockInteractionReach()) {
+          Vec3 eye = eyePosition(frame.observedAfter());
+          double distance = pointAabbDistance(eye, block);
+          double rayDistance = rayEntryDistance(
+              eye,
+              lookDirection(frame.observedAfter().yaw(), frame.observedAfter().pitch()),
+              block,
+              config.blockInteractionReach());
+          if (!Double.isFinite(rayDistance) && distance > config.blockInteractionReach()) {
             findings.add((distance > config.blockInteractionReach() + 1.0)
                 ? finding(playerId, serverTick, "FarPlace",
-                    String.format(Locale.ROOT, "block distance %.3f is more than 1 block beyond %.3f", distance, config.blockInteractionReach()),
+                    String.format(Locale.ROOT,
+                        "look ray misses the target block within %.3f blocks and the target is %.3f blocks away",
+                        config.blockInteractionReach(), distance),
                     Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0), sequence)
                 : uncertainFinding(playerId, serverTick, "FarPlace",
-                    String.format(Locale.ROOT, "block distance %.3f exceeds %.3f", distance, config.blockInteractionReach()),
+                    String.format(Locale.ROOT,
+                        "look ray misses the target block within %.3f blocks",
+                        config.blockInteractionReach()),
                     Math.min(1.0, (distance - config.blockInteractionReach()) / 2.0),
                     sequence));
           }
@@ -498,15 +558,15 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
       if (packet instanceof Packets.DigAction dig) {
         String action = dig.action();
         if (action.contains("STARTED_DIGGING")) {
-          diggingStarts.put(dig.position(), raw.receivedNanos());
+          state.diggingStarts.put(dig.position(), raw.receivedNanos());
           if (frame != null) {
-            diggingStartFrames.put(dig.position(), frame);
+            state.diggingStartFrames.put(dig.position(), frame);
           } else {
-            diggingStartFrames.remove(dig.position());
+            state.diggingStartFrames.remove(dig.position());
           }
         } else if (action.contains("FINISHED_DIGGING")) {
-          Long started = diggingStarts.remove(dig.position());
-          PredictionFrame startedFrame = diggingStartFrames.remove(dig.position());
+          Long started = state.diggingStarts.remove(dig.position());
+          PredictionFrame startedFrame = state.diggingStartFrames.remove(dig.position());
           PredictionFrame worldFrame = startedFrame != null ? startedFrame : frame;
           if (started != null
               && worldFrame != null
@@ -515,19 +575,26 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
               && raw.receivedNanos() - started <= 35_000_000L
               && ("survival".equalsIgnoreCase(frame.observedAfter().gamemode())
                   || "adventure".equalsIgnoreCase(frame.observedAfter().gamemode()))) {
-            var state = worldFrame.world().blockAtOrNull(
+            var blockState = worldFrame.world().blockAtOrNull(
                 dig.position().x(), dig.position().y(), dig.position().z());
-            if (state != null
-                && !state.isAir()
-                && !state.isUnsupported()
-                && isSlowBreakBlock(state.blockId())) {
-              findings.add((raw.receivedNanos() - started) <= 10_000_000L
-                  ? finding(playerId, serverTick, "FastBreak",
-                      "a slow-to-break block reached FINISHED_DIGGING within 10 ms of STARTED_DIGGING",
-                      1.0, sequence)
-                  : uncertainFinding(playerId, serverTick, "FastBreak",
-                      "a slow-to-break block reached FINISHED_DIGGING within 35 ms of STARTED_DIGGING",
-                      1.0, sequence));
+            if (blockState != null
+                && !blockState.isAir()
+                && !blockState.isUnsupported()
+                && isSlowBreakBlock(blockState.blockId())) {
+              long startClientTick = startedFrame == null ? -1L : startedFrame.clientTick();
+            long finishClientTick = frame.clientTick();
+            long clientTickDelta = startClientTick >= 0L && finishClientTick >= startClientTick
+                ? finishClientTick - startClientTick
+                : Long.MAX_VALUE;
+            if (clientTickDelta <= 1L) {
+              findings.add(finding(playerId, serverTick, "FastBreak",
+                  "a slow-to-break block reached FINISHED_DIGGING within one reconstructed client tick",
+                  1.0, sequence));
+            } else if (raw.receivedNanos() - started <= 35_000_000L) {
+              findings.add(uncertainFinding(playerId, serverTick, "FastBreak",
+                  "a slow-to-break block reached FINISHED_DIGGING unusually quickly; client timing was not sufficient for proof",
+                  1.0, sequence));
+            }
             }
           }
         }
@@ -544,8 +611,9 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
     }
 
     findings.addAll(analyzeMovementAnomalies(playerId, movement.frames()));
-    findings.addAll(AccuracyChecks.analyze(playerId, ordered, movement.frames()));
+    findings.addAll(AccuracyChecks.analyze(playerId, ordered, movement.frames(), accuracyState));
 
+    state.prune(ordered.isEmpty() ? 0L : ordered.getLast().sequence());
     return new Report(findings);
   }
 
