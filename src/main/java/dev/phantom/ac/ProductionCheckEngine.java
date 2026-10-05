@@ -110,6 +110,13 @@ public final class ProductionCheckEngine {
 
   public enum Verdict { CLEAR, IMPOSSIBLE, UNCERTAIN }
 
+  public enum EvidenceClass {
+    IMPOSSIBLE,
+    HIGHLY_SUSPICIOUS,
+    WEAK_HEURISTIC,
+    INSUFFICIENT_INFORMATION
+  }
+
   public record Finding(
       String playerId,
       long serverTick,
@@ -117,21 +124,61 @@ public final class ProductionCheckEngine {
       Verdict verdict,
       String reason,
       double severity,
-      String replayReference) implements java.io.Serializable {
+      String replayReference,
+      EvidenceClass evidenceClass,
+      double normalizedScore,
+      String independenceKey,
+      boolean causalEvidence) implements java.io.Serializable {
     public Finding {
       Objects.requireNonNull(playerId);
       Objects.requireNonNull(rule);
       Objects.requireNonNull(verdict);
       Objects.requireNonNull(reason);
       Objects.requireNonNull(replayReference);
-      if (serverTick < 0 || !Double.isFinite(severity) || severity < 0.0) {
+      Objects.requireNonNull(evidenceClass);
+      Objects.requireNonNull(independenceKey);
+      if (serverTick < 0 || !Double.isFinite(severity) || severity < 0.0
+          || !Double.isFinite(normalizedScore) || normalizedScore < 0.0
+          || normalizedScore > 1.0 || independenceKey.isBlank()) {
         throw new IllegalArgumentException("invalid finding");
       }
+    }
+
+    public Finding(
+        String playerId,
+        long serverTick,
+        String rule,
+        Verdict verdict,
+        String reason,
+        double severity,
+        String replayReference) {
+      this(
+          playerId,
+          serverTick,
+          rule,
+          verdict,
+          reason,
+          severity,
+          replayReference,
+          verdict == Verdict.IMPOSSIBLE
+              ? EvidenceClass.IMPOSSIBLE
+              : EvidenceClass.INSUFFICIENT_INFORMATION,
+          clampScore(severity),
+          independenceFingerprint(rule, verdict, reason),
+          verdict == Verdict.IMPOSSIBLE);
     }
 
     public String message(String playerName) {
       String name = playerName == null || playerName.isBlank() ? playerId : playerName;
       return "[PhantomAC] " + name + " failed " + rule + " (" + reason + ")";
+    }
+  }
+
+  private record EvidenceStamp(long seenMillis, double score) {
+    EvidenceStamp {
+      if (seenMillis < 0L || !Double.isFinite(score) || score < 0.0 || score > 1.0) {
+        throw new IllegalArgumentException("invalid evidence stamp");
+      }
     }
   }
 
@@ -141,13 +188,15 @@ public final class ProductionCheckEngine {
       long lastAlertTick,
       double violationLevel,
       double lastAlertViolationLevel,
-      List<Long> violationTimesMillis) implements java.io.Serializable {
+      List<Long> violationTimesMillis,
+      Map<String, EvidenceStamp> activeEvidence) implements java.io.Serializable {
     public State {
       if (supportingEvents < 0 || !Double.isFinite(violationLevel) || violationLevel < 0.0
           || !Double.isFinite(lastAlertViolationLevel) || lastAlertViolationLevel < 0.0) {
         throw new IllegalArgumentException("invalid production violation state");
       }
       violationTimesMillis = List.copyOf(violationTimesMillis);
+      activeEvidence = Map.copyOf(activeEvidence);
     }
 
     public State(
@@ -157,36 +206,70 @@ public final class ProductionCheckEngine {
         double violationLevel,
         double lastAlertViolationLevel) {
       this(supportingEvents, lastObservationTick, lastAlertTick,
-          violationLevel, lastAlertViolationLevel, List.of());
+          violationLevel, lastAlertViolationLevel, List.of(), Map.of());
     }
 
     public static State empty() {
-      return new State(0, -1L, -1L, 0.0, 0.0, List.of());
+      return new State(0, -1L, -1L, 0.0, 0.0, List.of(), Map.of());
     }
 
-    State addViolation(long tick, long nowMillis, Config config, String rule) {
-      GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(rule);
-      long cutoff = nowMillis - policy.removeViolationsAfterMillis();
-      List<Long> active = new ArrayList<>();
-      for (long timestamp : violationTimesMillis) if (timestamp > cutoff) active.add(timestamp);
-      active.add(nowMillis);
-      double level = active.size() * config.violationIncrement();
-      return new State(supportingEvents + 1, tick, lastAlertTick, level,
-          lastAlertViolationLevel, active);
+    State addViolation(
+        Finding finding,
+        long tick,
+        long nowMillis,
+        Config config) {
+      GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(finding.rule());
+      long cutoff = Math.max(0L, nowMillis - policy.removeViolationsAfterMillis());
+      Map<String, EvidenceStamp> active = new LinkedHashMap<>();
+      for (var entry : activeEvidence.entrySet()) {
+        if (entry.getValue().seenMillis() > cutoff) active.put(entry.getKey(), entry.getValue());
+      }
+      boolean independent = !active.containsKey(finding.independenceKey());
+      if (independent) {
+        active.put(finding.independenceKey(), new EvidenceStamp(nowMillis, finding.normalizedScore()));
+      }
+
+      double level = active.values().stream()
+          .mapToDouble(EvidenceStamp::score)
+          .sum() * config.violationIncrement();
+      level = Math.min(config.maximumViolationLevel(), level);
+
+      List<Long> timestamps = active.values().stream()
+          .map(EvidenceStamp::seenMillis)
+          .sorted()
+          .toList();
+      return new State(
+          supportingEvents + (independent ? 1 : 0),
+          tick,
+          lastAlertTick,
+          level,
+          lastAlertViolationLevel,
+          timestamps,
+          active);
     }
 
     State retainActive(long tick, long nowMillis, Config config, String rule) {
       GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(rule);
       long cutoff = Math.max(0L, nowMillis - policy.removeViolationsAfterMillis());
-      List<Long> active = violationTimesMillis.stream().filter(timestamp -> timestamp > cutoff).toList();
-      double level = active.size() * config.violationIncrement();
+      Map<String, EvidenceStamp> active = new LinkedHashMap<>();
+      for (var entry : activeEvidence.entrySet()) {
+        if (entry.getValue().seenMillis() > cutoff) active.put(entry.getKey(), entry.getValue());
+      }
+      double level = Math.min(
+          config.maximumViolationLevel(),
+          active.values().stream().mapToDouble(EvidenceStamp::score).sum()
+              * config.violationIncrement());
+      List<Long> timestamps = active.values().stream()
+          .map(EvidenceStamp::seenMillis)
+          .sorted()
+          .toList();
       return new State(supportingEvents, tick, lastAlertTick, level,
-          lastAlertViolationLevel, active);
+          lastAlertViolationLevel, timestamps, active);
     }
 
     State alerted(long tick, double level) {
       return new State(supportingEvents, tick == lastObservationTick ? tick : lastObservationTick,
-          tick, level, level, violationTimesMillis);
+          tick, level, level, violationTimesMillis, activeEvidence);
     }
   }
 
@@ -206,7 +289,7 @@ public final class ProductionCheckEngine {
       Map<String, State> updated = new LinkedHashMap<>(rules);
       State old = rules.getOrDefault(finding.rule(), State.empty());
       State next = finding.verdict() == Verdict.IMPOSSIBLE
-          ? old.addViolation(finding.serverTick(), nowMillis, config, finding.rule())
+          ? old.addViolation(finding, finding.serverTick(), nowMillis, config)
           : old.retainActive(finding.serverTick(), nowMillis, config, finding.rule());
 
       GrimAlertPolicy.Decision policy = config.alertPolicy().forRule(finding.rule());
@@ -260,6 +343,36 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
 
   public record Report(List<Finding> findings) {
     public Report { findings = List.copyOf(findings); }
+  }
+
+  private static double clampScore(double score) {
+    return Math.max(0.0, Math.min(1.0, score));
+  }
+
+  private static String independenceFingerprint(String rule, Verdict verdict, String reason) {
+    String normalized = reason
+        .replaceAll("[-+]?\\d+(?:\\.\\d+)?", "N")
+        .replaceAll("\\s+", " ")
+        .trim();
+    if (normalized.length() > 96) normalized = normalized.substring(0, 96);
+    return rule + "|" + verdict + "|" + normalized;
+  }
+
+  private static Finding typedFinding(
+      String playerId,
+      long serverTick,
+      String rule,
+      Verdict verdict,
+      String reason,
+      double score,
+      String replayReference,
+      EvidenceClass evidenceClass,
+      boolean causalEvidence) {
+    return new Finding(
+        playerId, serverTick, rule, verdict, reason, score, replayReference,
+        evidenceClass, clampScore(score),
+        independenceFingerprint(rule, verdict, reason),
+        causalEvidence);
   }
 
   public static Report analyze(
