@@ -1014,7 +1014,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
 
       Phase8PredictionRunner.Report report=incremental;
       ProductionCheckEngine.Report productionChecks =
-          ProductionCheckEngine.analyze(playerName, raw, incremental, productionCheckConfig, capture.productionCheckState);
+          ProductionCheckEngine.analyze(playerName, raw, incremental, productionCheckConfig,
+              capture.productionCheckState, capture.accuracyState);
       capture.lastDebugReport=incremental;
 
       DebugLevel debug=debugLevel(capture.playerId);
