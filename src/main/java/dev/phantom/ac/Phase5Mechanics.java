@@ -225,6 +225,23 @@ public final class Phase5Mechanics {
           fluidSpeedMultiplier, fluidDrag, gravityMultiplier, 1.0D, vehicle);
     }
 
+    public MovementEnvironment(
+        Fluid fluid,
+        boolean submerged,
+        boolean climbable,
+        boolean onGround,
+        boolean sprinting,
+        boolean sneaking,
+        boolean swimmingInput,
+        boolean gliding,
+        double fluidSpeedMultiplier,
+        double fluidDrag,
+        double gravityMultiplier,
+        double itemUseSpeedMultiplier) {
+      this(fluid, submerged, climbable, onGround, sprinting, sneaking, swimmingInput, gliding,
+          fluidSpeedMultiplier, fluidDrag, gravityMultiplier, itemUseSpeedMultiplier, VehicleState.NONE);
+    }
+
     public MovementEnvironment {
       Objects.requireNonNull(fluid, "fluid");
       Objects.requireNonNull(vehicle, "vehicle");
