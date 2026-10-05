@@ -189,29 +189,40 @@ class Phase8MovementCombinationRegressionTest {
 
   @Test
   void sneakingScalesAirInputBeforeJumpPrediction() {
-    WorldSnapshot world = floorWorld();
-    Player start = startPlayer();
-    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
-
-    Player airborne = physics.step(new Vanilla12111RichPhysics.Context(
-        0L,
-        start,
-        new Simulation.AdvancedInput(0, 0, true, false, false),
-        world,
-        Simulation.Environment.DRY,
-        start.attributes(),
-        MovementEffects.NONE,
+    var air = BlockCatalogue12111.decode("minecraft:air", Map.of());
+    var stone = BlockCatalogue12111.decode("minecraft:stone", Map.of());
+    var builder = WorldSnapshot.builder(Contracts.TARGET_VERSION).loadChunk(0, 0);
+    for (int x = 0; x <= 1; x++) {
+      for (int y = 63; y <= 70; y++) {
+        for (int z = 0; z <= 1; z++) {
+          builder.setBlock(x, y, z, y == 63 ? stone : air);
+        }
+      }
+    }
+    WorldSnapshot world = builder.build();
+    Player airborne = new Player(
+        new Maths.Vec3(0.5, 64.5, 0.5),
+        new Maths.Vec3(0.0, 0.24813599859094576, 0.0),
+        0f,
+        0f,
+        false,
+        "survival",
+        Map.of(),
+        OptionalInt.empty(),
+        false,
+        Optional.empty(),
+        new Simulation.Attributes(VANILLA_BASE_MOVEMENT_SPEED),
         Pose.STANDING,
-        MovementEnvironment.dry(true, false, false),
-        false,
-        false,
-        EntityCollisions.NONE_TRACKED)).state();
-    assertFalse(airborne.onGround());
+        State.Environment.DRY,
+        State.TickRange.exact(0),
+        State.Provenance.UNKNOWN,
+        Set.of());
+    Vanilla12111RichPhysics physics = new Vanilla12111RichPhysics();
 
     var walking = physics.step(new Vanilla12111RichPhysics.Context(
         1L,
         airborne,
-        new Simulation.AdvancedInput(-1, 0, false, false, false),
+        new Simulation.AdvancedInput(-1, 0, true, false, false),
         world,
         Simulation.Environment.DRY,
         airborne.attributes(),
@@ -225,7 +236,7 @@ class Phase8MovementCombinationRegressionTest {
     var sneaking = physics.step(new Vanilla12111RichPhysics.Context(
         1L,
         airborne,
-        new Simulation.AdvancedInput(-1, 0, false, true, true),
+        new Simulation.AdvancedInput(-1, 0, true, true, true),
         world,
         Simulation.Environment.DRY,
         airborne.attributes(),
@@ -239,6 +250,8 @@ class Phase8MovementCombinationRegressionTest {
     double walkingSpeed = Math.abs(walking.clientVelocityAfterTick().z());
     double sneakingSpeed = Math.abs(sneaking.clientVelocityAfterTick().z());
     assertTrue(walkingSpeed > 0.0, walking.toString());
+    assertFalse(walking.state().uncertain(), walking.toString());
+    assertFalse(sneaking.state().uncertain(), sneaking.toString());
     assertEquals(0.3, sneakingSpeed / walkingSpeed, 1e-9, sneaking.toString());
   }
 
