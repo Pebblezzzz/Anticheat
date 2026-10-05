@@ -55,6 +55,8 @@ public final class AccuracyChecks {
     final Map<Long, Integer> actionsPerTick = new HashMap<>();
     final Map<Long, Integer> placementsPerTick = new HashMap<>();
     final Map<Integer, Integer> aimMissStreaks = new HashMap<>();
+    final Map<Integer, ItemSlotState> inventorySlots = new HashMap<>();
+    int heldInventorySlot = -1;
     int scaffoldConsecutive;
     boolean noFallTracking;
     double fallOriginY;
@@ -128,6 +130,7 @@ public final class AccuracyChecks {
     Map<Long, PredictionFrame> framesBySequence = new TreeMap<>();
     for (PredictionFrame frame : frames) framesBySequence.put(frame.sequence(), frame);
 
+    findings.addAll(inventoryState(playerId, ordered, framesBySequence, state));
     findings.addAll(movementAdvantage(playerId, frames, state));
     findings.addAll(noFallContinuity(playerId, frames, state));
     findings.addAll(timerBalance(playerId, ordered, framesBySequence, state));
@@ -137,6 +140,53 @@ public final class AccuracyChecks {
     findings.addAll(packetIntegrity(playerId, ordered, framesBySequence, state));
     findings.addAll(scaffoldAndPlacement(playerId, ordered, framesBySequence, state));
     findings.addAll(vehicleSafety(playerId, ordered, framesBySequence, state));
+    return List.copyOf(findings);
+  }
+
+  private static List<ProductionCheckEngine.Finding> inventoryState(
+      String playerId,
+      List<Packets.RawPacket> packets,
+      Map<Long, PredictionFrame> frames,
+      State state) {
+    List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
+
+    for (Packets.RawPacket packet : packets) {
+      if (packet.packet() instanceof Packets.InventorySlotState slot) {
+        state.inventorySlots.put(
+            slot.slot(),
+            new ItemSlotState(slot.itemType(), slot.itemAmount(), slot.stateId()));
+        if (slot.slot() >= 0 && slot.slot() < 9 && state.heldInventorySlot < 0) {
+          state.heldInventorySlot = slot.slot();
+        }
+        continue;
+      }
+
+      if (packet.packet() instanceof Packets.HeldItemChange held) {
+        state.heldInventorySlot = held.slot();
+        continue;
+      }
+
+      String observedItem = null;
+      if (packet.packet() instanceof Packets.BlockPlace place) {
+        observedItem = place.heldItemType();
+      } else if (packet.packet() instanceof Packets.DigAction dig) {
+        observedItem = dig.heldItemType();
+      } else if (packet.packet() instanceof Packets.ClientBlockBreak breakPacket) {
+        observedItem = breakPacket.heldItemType();
+      }
+      if (observedItem == null || state.heldInventorySlot < 0) continue;
+
+      ItemSlotState known = state.inventorySlots.get(state.heldInventorySlot);
+      if (known == null || observedItem.equals(known.itemType())) continue;
+
+      PredictionFrame frame = frameAt(frames, packet.sequence());
+      findings.add(uncertain(playerId, frame, "InventoryState",
+          String.format(Locale.ROOT,
+              "action reported held item %s but the latest causally visible slot state is %s",
+              observedItem, known.itemType()),
+          0.55));
+    }
+
     return List.copyOf(findings);
   }
 
@@ -900,6 +950,8 @@ public final class AccuracyChecks {
     return a + (b - a) * alpha;
   }
 
+
+  private record ItemSlotState(String itemType, int amount, int stateId) {}
 
   private record PendingImpulse(
       long sequence, long receivedNanos, Vec3 velocity, int badMoves, String source) {}
