@@ -24,7 +24,8 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 
-// Coverage is intentionally broader than individual bug reproductions so movement regressions are caught centrally.\nclass Phase8MovementCombinationRegressionTest {
+// Coverage is intentionally broader than individual bug reproductions so movement regressions are caught centrally.
+class Phase8MovementCombinationRegressionTest {
 
   private static final double VANILLA_BASE_MOVEMENT_SPEED = 0.1D;
 
