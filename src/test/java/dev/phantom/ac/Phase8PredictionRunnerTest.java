@@ -3555,6 +3555,11 @@ class Phase8PredictionRunnerTest {
         first.attributes(), Phase5Mechanics.MovementEffects.NONE,
         Pose.STANDING, environment, false,
         dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
+    Player third = physics.step(new Vanilla12111RichPhysics.Context(
+        2L, second, forward, world, Simulation.Environment.DRY,
+        second.attributes(), Phase5Mechanics.MovementEffects.NONE,
+        Pose.STANDING, environment, false,
+        dev.phantom.ac.world.EntityCollisions.of(List.of()))).state();
 
     var report = runner.process(
         "explicit-tick-packet-gap",
@@ -3565,24 +3570,39 @@ class Phase8PredictionRunnerTest {
             new RawPacket(3L, 3_000_000L,
                 new Move(first.position(), 0f, 0f, true, 1L)),
             new RawPacket(5L, 5_000_000L,
-                new Move(second.position(), 0f, 0f, true, 2L))),
+                new Move(second.position(), 0f, 0f, true, 2L)),
+            new RawPacket(6L, 6_000_000L,
+                new Move(third.position(), 0f, 0f, true, 3L))),
         world,
         start,
         0L);
 
-    assertEquals(2, report.movementObservations(), report.toString());
+    assertEquals(3, report.movementObservations(), report.toString());
     assertEquals(
         Phase8MovementValidation.Verdict.UNCERTAIN,
+        report.results().get(1).verdict(),
+        report.results().toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getLast().verdict(),
         report.results().toString());
-    assertTrue(report.frames().getLast().trace().stream()
+    assertTrue(report.frames().get(1).trace().stream()
         .anyMatch(line -> line.startsWith("CLIENT_TICK 2")
             && line.contains("exact=true")
             && line.contains("timingUncertain=true")),
+        report.frames().get(1).trace().toString());
+    assertTrue(report.frames().get(1).trace().stream()
+        .anyMatch(line -> line.contains("TICK_RELIABILITY")
+            && line.contains("sequenceGap=true")),
+        report.frames().get(1).trace().toString());
+    assertTrue(report.frames().getLast().trace().stream()
+        .anyMatch(line -> line.startsWith("CLIENT_TICK 3")
+            && line.contains("exact=true")
+            && line.contains("timingUncertain=false")),
         report.frames().getLast().trace().toString());
     assertTrue(report.frames().getLast().trace().stream()
         .anyMatch(line -> line.contains("TICK_RELIABILITY")
-            && line.contains("sequenceGap=true")),
+            && line.contains("sequenceGap=false")),
         report.frames().getLast().trace().toString());
   }
 

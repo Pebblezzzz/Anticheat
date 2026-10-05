@@ -43,6 +43,16 @@ public final class Phase6Reachability {
           entityCollisions,uncertainty,actualMovementReference,value);
     }
     public Context withUncertainty(UncertainDimension... dimensions){EnumSet<UncertainDimension> u=EnumSet.noneOf(UncertainDimension.class);u.addAll(uncertainty);u.addAll(List.of(dimensions));return new Context(simulationTick,player,clientVelocity,environment,attributes,effects,pose,movementEnvironment,sleeping,entityCollisions,u,actualMovementReference,lastOnGround);}
+    public Context withoutUncertainty(Set<UncertainDimension> dimensions){
+      Objects.requireNonNull(dimensions, "dimensions");
+      if(dimensions.isEmpty() || uncertainty.isEmpty()) return this;
+      EnumSet<UncertainDimension> remaining=EnumSet.noneOf(UncertainDimension.class);
+      remaining.addAll(uncertainty);
+      remaining.removeAll(dimensions);
+      if(remaining.equals(uncertainty)) return this;
+      return new Context(simulationTick,player,clientVelocity,environment,attributes,effects,pose,movementEnvironment,
+          sleeping,entityCollisions,remaining,actualMovementReference,lastOnGround);
+    }
   }
 
   public record InputConstraint(OptionalInt forward,OptionalInt strafe,Optional<Boolean> jump,Optional<Boolean> sprint,Optional<Boolean> sneak) implements Serializable {
