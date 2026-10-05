@@ -813,17 +813,17 @@ public final class Phase6Reachability {
                 next.put(key, mergeProvenance(existing, newCandidate));
               }
               while (next.size() > config.maximumCandidates()) {
-                Map.Entry<String,Candidate> worst = next.lastEntry();
-                if (worst == null) break;
-                next.remove(worst.getKey());
+                Candidate prune = selectBudgetCandidate(next.values());
+                if (prune == null) break;
+                next.remove(candidateKey(prune).toString());
                 pruned++;
                 budgetReached = true;
                 uncertain = true;
-                reasons.add("candidate budget pruned deterministic excess state at tick " + tick);
+                reasons.add("candidate budget pruned a redundant deterministic state at tick " + tick);
                 addElimination(eliminations, new Elimination(
                     tick, parent.id(), "BUDGET", "candidate frontier budget pruned one state",
                     input.toString(), branch.id(), path.id(), branchKnowledge,
-                    List.of("priority=lexicographically-smallest canonical candidate key")));
+                    List.of("priority=redundancy-aware movement-envelope score")));
               }
               peak = Math.max(peak, next.size());
             }
@@ -1067,6 +1067,44 @@ public final class Phase6Reachability {
     b.append("elim=");
     for (Elimination elimination : result.eliminations()) b.append(elimination).append(';');
     return b.toString();
+  }
+
+  private static Candidate selectBudgetCandidate(Collection<Candidate> candidates) {
+    Map<MovementMode, Integer> modeCounts = new EnumMap<>(MovementMode.class);
+    for (Candidate candidate : candidates) {
+      modeCounts.merge(candidate.movementMode(), 1, Integer::sum);
+    }
+    return candidates.stream()
+        .max(Comparator
+            .comparingDouble((Candidate candidate) -> budgetPruneScore(candidate, modeCounts))
+            .thenComparingLong(Candidate::id))
+        .orElse(null);
+  }
+
+  private static double budgetPruneScore(
+      Candidate candidate,
+      Map<MovementMode, Integer> modeCounts) {
+    /*
+     * Never prefer pruning the last representative of a movement mode or the
+     * last candidate carrying uncertainty. Those states are disproportionately
+     * valuable for false-negative prevention.
+     */
+    if (modeCounts.getOrDefault(candidate.movementMode(), 0) <= 1) return -1_000_000.0;
+    if (!candidate.context().uncertainty().isEmpty()) return -500_000.0;
+
+    double score = modeCounts.getOrDefault(candidate.movementMode(), 0) * 0.25;
+    Maths.Vec3 reference = candidate.context().actualMovementReference();
+    if (reference != null) {
+      Maths.Vec3 velocity = candidate.context().clientVelocity();
+      double dx = velocity.x() - reference.x();
+      double dy = velocity.y() - reference.y();
+      double dz = velocity.z() - reference.z();
+      score += Math.sqrt(dx * dx + dy * dy + dz * dz) * 100.0;
+    } else {
+      score += Math.abs(candidate.context().clientVelocity().y()) * 0.1;
+    }
+    score += candidate.context().player().onGround() ? 0.0 : 0.02;
+    return score;
   }
 
   private static List<AdvancedInput> orderedInputs(InputConstraint constraint, Set<String> reasons) {
