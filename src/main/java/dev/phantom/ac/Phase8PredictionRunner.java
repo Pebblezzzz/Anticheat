@@ -4763,24 +4763,8 @@ public final class Phase8PredictionRunner {
        * carry the ambiguity instead of building every input chronology up front.
        */
       if (ambiguousInputTimingAt(selected.sequence(), simulationTick, movementSequence)) {
-        /*
-         * Grim's PLAYER_INPUT is a persistent KnownInput. Once the newest input
-         * packet has been observed before this movement packet, that held state
-         * replaces the older state; Phase 7 timing ambiguity must not resurrect
-         * the immediately previous jump/sneak state as a sibling at the same live
-         * movement boundary.
-         *
-         * Keep the previous-state sibling only for an older historical input.
-         * The current held state itself is already represented by selected.
-         */
-        boolean selectedIsCurrentHeldState =
-            selected.sequence() == currentInputSequence
-                && currentInputSequence >= 0L
-                && currentInputSequence < movementSequence;
-        if (!selectedIsCurrentHeldState) {
-          options.add(inputBeforeSequence(
-              history, simulationTick, selected.sequence(), movementSequence));
-        }
+        options.add(inputBeforeSequence(
+            history, simulationTick, selected.sequence(), movementSequence));
       }
     }
 
@@ -4853,14 +4837,17 @@ public final class Phase8PredictionRunner {
        * retaining the pre-transition held state as a sibling hypothesis.
        */
       /*
-       * PLAYER_INPUT is a persistent held-state update in Grim. When the newest
-       * input packet is already observed before this movement packet, the movement
-       * boundary is evaluated with that newest state rather than branching back to
-       * the immediately previous held state.
+       * Grim's PLAYER_INPUT is a persistent KnownInput. At the live movement
+       * boundary, a newest input packet already observed before this movement
+       * replaces the historical held state; it is not merely another sibling.
+       * Earlier catch-up ticks still use the Phase 7 historical envelope above.
        */
       boolean currentHeldStateIsCausallyNewer =
           currentInputSequence >= 0L && currentInputSequence < movementSequence;
-      if (!currentHeldStateIsCausallyNewer) {
+      if (currentHeldStateIsCausallyNewer) {
+        options.clear();
+        options.add(currentInput);
+      } else {
         InputConstraint previous = inputBeforeSequence(
             history, simulationTick, currentInputSequence, movementSequence);
         if (!previous.equals(currentInput)) {
