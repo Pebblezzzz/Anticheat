@@ -602,7 +602,20 @@ public final class Phase8PredictionRunner {
           pendingAuthorityContexts.put(barrierId, anchor);
         } else {
           applyClientVisibleAuthority(anchor);
-          if (itemUseAuthorityPending && sequence > lastItemUseSequence) {
+          /*
+           * A UseItem packet is sent before the server necessarily exposes the
+           * corresponding active-item state on the next authoritative snapshot.
+           * Do not consume the causal gap merely because a newer PlayerContext
+           * arrived: an ordinary 1.0 use_effects snapshot is not proof that the
+           * client/server active-use state was observed. A slowdown multiplier
+           * below the neutral 1.0 value is the movement-affecting use_effects
+           * evidence this model can prove from PlayerContext.
+           */
+          boolean authoritativeUseEffectsVisible =
+              authority.movementEnvironment().itemUseSpeedMultiplier() < 1.0D - 1.0E-9D;
+          if (itemUseAuthorityPending
+              && sequence > lastItemUseSequence
+              && authoritativeUseEffectsVisible) {
             itemUseAuthorityPending = false;
           }
           if (clientState == null) {
