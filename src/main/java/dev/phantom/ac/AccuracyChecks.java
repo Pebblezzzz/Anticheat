@@ -23,7 +23,7 @@ import static dev.phantom.ac.Maths.Vec3;
 public final class AccuracyChecks {
   private static final double MOVEMENT_ADVANTAGE_HARD = 0.20;
   private static final double MOVEMENT_ADVANTAGE_MIN_TICK = 0.018;
-  private static final double MOVEMENT_ADVANTAGE_IMMEDIATE = 0.10;
+  private static final double MOVEMENT_ADVANTAGE_IMMEDIATE = 0.15;
   private static final double VERTICAL_ADVANTAGE_HARD = 0.22;
   private static final double VERTICAL_ADVANTAGE_MIN_TICK = 0.025;
   private static final double VERTICAL_ADVANTAGE_IMMEDIATE = 0.10;
