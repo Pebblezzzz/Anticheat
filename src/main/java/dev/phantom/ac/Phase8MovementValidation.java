@@ -66,8 +66,8 @@ public final class Phase8MovementValidation {
               300_000L));
     }
     public static Config defaults() {
-      return new Config(100.0, 0, true, true,
-          1.0, 0.005, 100.0, 40.0, GrimAlertPolicy.Config.defaults());
+      return new Config(1.0, 0, true, true,
+          1.0, 0.005, 100.0, 1.0, GrimAlertPolicy.Config.defaults());
     }
     public double alertThreshold() { return alertViolationThreshold; }
   }

@@ -91,37 +91,37 @@ public final class GrimAlertPolicy {
           new Group("Simulation", window,
               List.of("MOVEMENT_REACHABILITY", "GroundSpoof", "Flight", "Jesus", "Step", "Speed",
                   "TimerBurst", "TimerLimit", "NoFall"),
-              CommandRule.parse("100:40"), CommandRule.parse("1:1")),
+              CommandRule.parse("1:1"), CommandRule.parse("1:1")),
           new Group("Knockback", window,
               List.of("Knockback", "Explosion"),
-              CommandRule.parse("5:5"), CommandRule.parse("1:1")),
+              CommandRule.parse("1:1"), CommandRule.parse("1:1")),
           new Group("Post", window,
               List.of("Post"),
-              CommandRule.parse("20:20"), CommandRule.parse("1:1")),
+              CommandRule.parse("1:1"), CommandRule.parse("1:1")),
           new Group("BadPackets", window,
               List.of("BadPackets", "PacketPosition", "PacketRotation", "EntityAction",
                   "HeldItemSlot", "InventorySlot", "InventoryClickType", "InventoryButton",
                   "BlockPlaceCursor", "BlockPlaceFace", "PacketOrder", "Crash"),
-              CommandRule.parse("20:20"), CommandRule.parse("1:1")),
+              CommandRule.parse("1:1"), CommandRule.parse("1:1")),
           new Group("Reach", window,
               List.of("Reach"),
               CommandRule.parse("1:1"), CommandRule.parse("1:1")),
           new Group("Hitboxes", window,
               List.of("Hitboxes"),
-              CommandRule.parse("5:3"), CommandRule.parse("1:1")),
+              CommandRule.parse("1:1"), CommandRule.parse("1:1")),
           new Group("Misc", window,
               List.of("Vehicle", "NoSlow", "Sprint", "MultiActions", "Place", "Baritone",
                   "Break", "TransactionOrder", "Elytra", "Chat", "Exploit",
                   "FarBreak", "FarPlace", "FastBreak"),
-              CommandRule.parse("10:5"), CommandRule.parse("1:1")),
+              CommandRule.parse("1:1"), CommandRule.parse("1:1")),
           new Group("Combat", window,
               List.of("Interact", "Aim", "AimModulo360"),
-              CommandRule.parse("20:40"), CommandRule.parse("1:1")),
+              CommandRule.parse("1:1"), CommandRule.parse("1:1")),
           new Group("Autoclicker", window,
               List.of("Autoclicker"),
-              CommandRule.parse("20:40"), CommandRule.parse("1:1"))
+              CommandRule.parse("1:1"), CommandRule.parse("1:1"))
       );
-      return new Config(groups, CommandRule.parse("100:40"), CommandRule.parse("1:1"), window);
+      return new Config(groups, CommandRule.parse("1:1"), CommandRule.parse("1:1"), window);
     }
   }
 }
