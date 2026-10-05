@@ -372,9 +372,22 @@ public final class AccuracyChecks {
       if (packet.packet() instanceof Packets.Velocity velocity) {
         double horizontal = Math.hypot(velocity.velocity().x(), velocity.velocity().z());
         if (horizontal >= KNOCKBACK_MIN_HORIZONTAL) {
-          state.pendingImpulse =
-              new PendingImpulse(packet.sequence(), packet.receivedNanos(), velocity.velocity(), 0, "KNOCKBACK");
-          state.knockbackResiduals.clear();
+          PendingImpulse existing = state.pendingImpulse;
+          boolean joinsExplosion = existing != null
+              && "EXPLOSION".equals(existing.source())
+              && packet.sequence() >= existing.sequence()
+              && packet.sequence() - existing.sequence() <= 3L
+              && vectorDistance(existing.velocity(), velocity.velocity()) <= 0.08;
+          state.pendingImpulse = joinsExplosion
+              ? new PendingImpulse(
+                  existing.sequence(),
+                  existing.receivedNanos(),
+                  velocity.velocity(),
+                  existing.badMoves(),
+                  existing.source())
+              : new PendingImpulse(
+                  packet.sequence(), packet.receivedNanos(), velocity.velocity(), 0, "KNOCKBACK");
+          if (!joinsExplosion) state.knockbackResiduals.clear();
         }
         continue;
       }
@@ -998,6 +1011,13 @@ public final class AccuracyChecks {
       if (tMin > tMax) return Double.POSITIVE_INFINITY;
     }
     return tMin >= 0.0 && tMin <= maxDistance ? tMin : Double.POSITIVE_INFINITY;
+  }
+
+  private static double vectorDistance(Vec3 a, Vec3 b) {
+    return Math.sqrt(
+        Math.pow(a.x() - b.x(), 2)
+            + Math.pow(a.y() - b.y(), 2)
+            + Math.pow(a.z() - b.z(), 2));
   }
 
   private static double angleBetween(Vec3 left, Vec3 right) {
