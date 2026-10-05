@@ -133,22 +133,23 @@ public final class GrimPredictionEngine {
         }
 
         /*
-         * Grim receives sprinting as a separate ENTITY_ACTION state. Phase 8
-         * now feeds that persistent physical lifecycle into this engine. When
-         * the input/timing boundary is still uncertain, keep a bounded
-         * non-sprinting sibling rather than turning stale sprint state into an
-         * exhaustive IMPOSSIBLE result.
+         * Grim keeps the physical sprint flag separate from the sprint-speed
+         * state because the client updates its sprinting attribute at the end
+         * of the tick. A server snapshot can therefore legitimately report
+         * physicalSprint=true while the movement tick still uses walking speed.
+         * Keep that non-sprinting speed branch alongside the physical sprint
+         * branch whenever the held sprint input is explicit. This is an
+         * exhaustive two-state speed envelope, not timing uncertainty.
          */
-        if (movementTimingUncertain
-            && inputOption.sprint().orElse(false)
-            && physical.sprinting()) {
+        if (inputOption.sprint().orElse(false) && physical.sprinting()) {
           MovementInputState nonSprinting = new MovementInputState(false, physical.sneaking());
           startsByMovementState
               .computeIfAbsent(nonSprinting, ignored -> new ArrayList<>())
               .add(withLocomotionState(
                   withActualMovementReference(base, actualMovementReference, simulationTick, targetTick),
                   false, physical.sneaking()));
-          exhaustive = false;
+          trace.add("GRIM_ENGINE_SPRINT_SPEED_STATE_ALTERNATIVE tick=" + simulationTick
+              + " physicalSprint=true effectiveSpeedSprint=false");
         }
 
         if (inputOption.sprint().isPresent() && inputOption.sneak().isPresent()) {
