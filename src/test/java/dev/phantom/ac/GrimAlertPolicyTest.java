@@ -28,18 +28,18 @@ class GrimAlertPolicyTest {
         "replay:" + tick, rule);
   }
 
-  @Test void defaultGroupsMatchGrimThresholds() {
+  @Test void defaultGroupsAlertEveryViolationLevel() {
     GrimAlertPolicy.Config config = GrimAlertPolicy.Config.defaults();
 
-    assertEquals(100.0, config.forRule("MOVEMENT_REACHABILITY").alert().threshold());
-    assertEquals(40.0, config.forRule("MOVEMENT_REACHABILITY").alert().interval());
+    assertEquals(1.0, config.forRule("MOVEMENT_REACHABILITY").alert().threshold());
+    assertEquals(1.0, config.forRule("MOVEMENT_REACHABILITY").alert().interval());
     assertEquals(1.0, config.forRule("MOVEMENT_REACHABILITY").log().threshold());
 
     assertEquals(1.0, config.forRule("Reach").alert().threshold());
     assertEquals(1.0, config.forRule("Reach").alert().interval());
 
-    assertEquals(10.0, config.forRule("FarBreak").alert().threshold());
-    assertEquals(5.0, config.forRule("FarBreak").alert().interval());
+    assertEquals(1.0, config.forRule("FarBreak").alert().threshold());
+    assertEquals(1.0, config.forRule("FarBreak").alert().interval());
     assertEquals(300_000L, config.forRule("FarBreak").removeViolationsAfterMillis());
   }
 
