@@ -310,10 +310,29 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         var digBlockPosition=digging.getBlockPosition();
         if(digBlockPosition!=null){
           int diggingSequence=digging.getSequence();
+          dev.phantom.ac.world.Pos digPosition =
+              new dev.phantom.ac.world.Pos(digBlockPosition.x,digBlockPosition.y,digBlockPosition.z);
+          org.bukkit.entity.Player bukkitPlayer = getServer().getPlayer(playerId);
+          Double breakSpeed = null;
+          String heldItemType = "minecraft:air";
+          int heldItemAmount = 0;
+          if (bukkitPlayer != null) {
+            org.bukkit.block.Block liveBlock =
+                bukkitPlayer.getWorld().getBlockAt(digPosition.x(), digPosition.y(), digPosition.z());
+            breakSpeed = (double) liveBlock.getBreakSpeed(bukkitPlayer);
+            org.bukkit.inventory.ItemStack heldItem = bukkitPlayer.getInventory().getItemInMainHand();
+            if (heldItem != null && !heldItem.getType().isAir()) {
+              heldItemType = heldItem.getType().getKey().toString();
+              heldItemAmount = heldItem.getAmount();
+            }
+          }
           Packets.DigAction digAction=new Packets.DigAction(
               digging.getAction().name(),
-              new dev.phantom.ac.world.Pos(digBlockPosition.x,digBlockPosition.y,digBlockPosition.z),
-              diggingSequence);
+              digPosition,
+              diggingSequence,
+              breakSpeed,
+              heldItemType,
+              heldItemAmount);
           record(capture,digAction);
         }
         if(digging.getAction()==DiggingAction.FINISHED_DIGGING){
