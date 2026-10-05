@@ -2053,13 +2053,19 @@ public final class Phase8PredictionRunner {
     Packets.MovementKind kind = move.movementKind();
     if (kind == Packets.MovementKind.POSITION || kind == Packets.MovementKind.POSITION_ROTATION) {
       fields.add(Phase6Reachability.ObservedField.POSITION);
+      fields.add(Phase6Reachability.ObservedField.GROUND);
+      /*
+       * Grim keeps rotation as a separate client-state observation. A
+       * position-bearing movement packet must not become kinematically
+       * impossible merely because its reported yaw/pitch differs from the
+       * physics candidate that produced the position. Rotation-only packets
+       * are still validated against rotation explicitly.
+       */
+      return fields;
     }
-    if (kind == Packets.MovementKind.ROTATION || kind == Packets.MovementKind.POSITION_ROTATION) {
+    if (kind == Packets.MovementKind.ROTATION) {
       fields.add(Phase6Reachability.ObservedField.ROTATION);
-    }
-    if (kind == Packets.MovementKind.STATUS
-        || kind == Packets.MovementKind.POSITION
-        || kind == Packets.MovementKind.POSITION_ROTATION) {
+    } else if (kind == Packets.MovementKind.STATUS) {
       fields.add(Phase6Reachability.ObservedField.GROUND);
     }
     return fields;
