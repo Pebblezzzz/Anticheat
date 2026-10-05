@@ -44,6 +44,8 @@ public final class ProductionCheckEngine {
   public static final class SessionState {
     final Map<Integer, EntityHistory> entities = new HashMap<>();
     final Map<Pos, Long> diggingStarts = new HashMap<>();
+    final Map<Pos, Double> diggingStartSpeeds = new HashMap<>();
+    final Map<Pos, String> diggingStartItems = new HashMap<>();
     final Map<Pos, PredictionFrame> diggingStartFrames = new HashMap<>();
 
     void prune(long currentSequence) {
@@ -52,6 +54,8 @@ public final class ProductionCheckEngine {
         diggingStarts.remove(oldest);
       }
       diggingStartFrames.keySet().retainAll(diggingStarts.keySet());
+      diggingStartSpeeds.keySet().retainAll(diggingStarts.keySet());
+      diggingStartItems.keySet().retainAll(diggingStarts.keySet());
     }
   }
 
@@ -605,6 +609,24 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
         }
       }
 
+      if (packet instanceof Packets.DigAction digAction) {
+        if (digAction.action().contains("STARTED_DIGGING")) {
+          state.diggingStarts.put(digAction.position(), raw.receivedNanos());
+          state.diggingStartFrames.put(digAction.position(), frame);
+          if (digAction.breakSpeedPerTick() != null) {
+            state.diggingStartSpeeds.put(digAction.position(), digAction.breakSpeedPerTick());
+          } else {
+            state.diggingStartSpeeds.remove(digAction.position());
+          }
+          state.diggingStartItems.put(digAction.position(), digAction.heldItemType());
+        } else if (digAction.action().contains("CANCELLED_DIGGING")) {
+          state.diggingStarts.remove(digAction.position());
+          state.diggingStartSpeeds.remove(digAction.position());
+          state.diggingStartItems.remove(digAction.position());
+          state.diggingStartFrames.remove(digAction.position());
+        }
+      }
+
       if (packet instanceof Packets.ClientBlockBreak breakPacket && frame != null) {
         Pos pos = breakPacket.position();
         BlockBox block = new BlockBox(pos.x(), pos.y(), pos.z(), pos.x() + 1.0, pos.y() + 1.0, pos.z() + 1.0);
@@ -686,6 +708,8 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
           }
         } else if (action.contains("FINISHED_DIGGING")) {
           Long started = state.diggingStarts.remove(dig.position());
+          Double startSpeed = state.diggingStartSpeeds.remove(dig.position());
+          String startItem = state.diggingStartItems.remove(dig.position());
           PredictionFrame startedFrame = state.diggingStartFrames.remove(dig.position());
           PredictionFrame worldFrame = startedFrame != null ? startedFrame : frame;
           if (started != null
@@ -697,24 +721,41 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
                   || "adventure".equalsIgnoreCase(frame.observedAfter().gamemode()))) {
             var blockState = worldFrame.world().blockAtOrNull(
                 dig.position().x(), dig.position().y(), dig.position().z());
-            if (blockState != null
-                && !blockState.isAir()
-                && !blockState.isUnsupported()
-                && isSlowBreakBlock(blockState.blockId())) {
+            if (blockState != null && !blockState.isAir() && !blockState.isUnsupported()) {
               long startClientTick = startedFrame == null ? -1L : startedFrame.clientTick();
-            long finishClientTick = frame.clientTick();
-            long clientTickDelta = startClientTick >= 0L && finishClientTick >= startClientTick
-                ? finishClientTick - startClientTick
-                : Long.MAX_VALUE;
-            if (clientTickDelta <= 1L) {
-              findings.add(finding(playerId, serverTick, "FastBreak",
-                  "a slow-to-break block reached FINISHED_DIGGING within one reconstructed client tick",
-                  1.0, sequence));
-            } else if (raw.receivedNanos() - started <= 35_000_000L) {
-              findings.add(uncertainFinding(playerId, serverTick, "FastBreak",
-                  "a slow-to-break block reached FINISHED_DIGGING unusually quickly; client timing was not sufficient for proof",
-                  1.0, sequence));
-            }
+              long finishClientTick = frame.clientTick();
+              long clientTickDelta = startClientTick >= 0L && finishClientTick >= startClientTick
+                  ? finishClientTick - startClientTick
+                  : Long.MAX_VALUE;
+              Double finishSpeed = breakPacket.breakSpeedPerTick();
+              double conservativeMaxSpeed = Math.max(
+                  startSpeed == null ? 0.0 : startSpeed,
+                  finishSpeed == null ? 0.0 : finishSpeed);
+              boolean speedKnown = conservativeMaxSpeed > 0.0
+                  && Double.isFinite(conservativeMaxSpeed)
+                  && startSpeed != null
+                  && finishSpeed != null;
+              if (speedKnown && clientTickDelta != Long.MAX_VALUE) {
+                double maximumVanillaProgress =
+                    Math.max(0.0, clientTickDelta) * conservativeMaxSpeed;
+                if (maximumVanillaProgress + 1.0e-6 < 1.0) {
+                  findings.add(finding(playerId, serverTick, "FastBreak",
+                      String.format(Locale.ROOT,
+                          "finished digging after %d client ticks, but the captured server break speed permits at most %.3f progress",
+                          clientTickDelta, maximumVanillaProgress),
+                      Math.min(1.0, 1.0 - maximumVanillaProgress), sequence));
+                }
+              } else if (clientTickDelta != Long.MAX_VALUE
+                  && raw.receivedNanos() - started <= 35_000_000L) {
+                findings.add(uncertainFinding(playerId, serverTick, "FastBreak",
+                    "finished digging unusually quickly, but complete server break-speed state was not captured across the interval",
+                    0.85, sequence));
+              }
+              if (startItem != null && !startItem.equals(breakPacket.heldItemType())) {
+                findings.add(uncertainFinding(playerId, serverTick, "InventoryState",
+                    "held tool changed during a single block-break interval; break-speed causality was segmented",
+                    0.65, sequence));
+              }
             }
           }
         }
