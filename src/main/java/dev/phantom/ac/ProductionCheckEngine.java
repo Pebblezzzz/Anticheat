@@ -659,7 +659,8 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
          * deterministic signature of a Step-height cheat.
          */
         if (before.onGround() && after.onGround() && !jumping
-            && delta.y() > 0.65 && horizontal > 0.05) {
+            && delta.y() > 0.65 && horizontal > 0.05
+            && predictionContradictsObservedPosition(frame, 0.08)) {
           findings.add(finding(playerId, tick, "Step",
               String.format(Locale.ROOT,
                   "grounded movement rose %.3f blocks in one client tick without a jump",
@@ -680,7 +681,8 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
                   candidate.context().clientVelocity().z());
               return env.vehicle().active() || env.gliding() || speed > 0.70;
             });
-        if (!candidateExternalMotion && !jumping && horizontal > 1.0) {
+        if (!candidateExternalMotion && !jumping && horizontal > 1.0
+            && predictionContradictsObservedPosition(frame, 0.08)) {
           findings.add(finding(playerId, tick, "Speed",
               String.format(Locale.ROOT,
                   "survival/adventure movement displaced %.3f blocks horizontally in one client tick",
@@ -749,7 +751,8 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
         }
 
         if (!externalVertical && !before.onGround() && !after.onGround() && !jumping
-            && before.velocity().y() <= 0.05 && delta.y() > 0.16) {
+            && before.velocity().y() <= 0.05 && delta.y() > 0.16
+            && predictionContradictsObservedPosition(frame, 0.08)) {
           findings.add(finding(playerId, tick, "Flight",
               String.format(Locale.ROOT,
                   "airborne movement gained %.3f vertical blocks without jump or vertical effect",
@@ -777,7 +780,8 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
                 && Math.abs(after.velocity().y()) <= 0.02;
             boolean previousHover = Math.abs(previous.observedAfter().velocity().y()) <= 0.02;
             if (currentHover && previousHover
-                && (horizontal > 0.05 || Math.hypot(previousDelta.x(), previousDelta.z()) > 0.05)) {
+                && (horizontal > 0.05 || Math.hypot(previousDelta.x(), previousDelta.z()) > 0.05)
+                && predictionContradictsObservedPosition(frame, 0.08)) {
               findings.add(finding(playerId, tick, "Flight",
                   "airborne vertical velocity remained near zero across consecutive movement ticks without a vertical effect",
                   1.0, sequence));
@@ -862,6 +866,21 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
       }
     }
     return true;
+  }
+
+  private static boolean predictionContradictsObservedPosition(
+      PredictionFrame frame, double minimumResidual) {
+    if (frame == null
+        || !frame.uncertaintySources().isEmpty()
+        || frame.predictedAfter().isEmpty()
+        || frame.observedAfter().position() == null) {
+      return false;
+    }
+    Vec3 observed = frame.observedAfter().position();
+    return frame.predictedAfter().stream()
+        .allMatch(candidate ->
+            distanceSquared(candidate.context().player().position(), observed)
+                > minimumResidual * minimumResidual);
   }
 
   private static boolean isSolidSupport(BlockState state) {
