@@ -647,7 +647,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     });
     acceptingAsyncValidation.set(true);
     stateTask=getServer().getScheduler().runTaskTimer(this,this::onAuthoritativeServerTick,1L,1L);
-    getLogger().info("[PhantomAC] Hardened Phase 8 adapter enabled; movement validation runs on per-connection Netty EventLoops");
+    getLogger().info("[PhantomAC] Hardened Phase 8 adapter enabled; live movement validation runs on bounded async workers");
   }
 
   @Override public void onDisable(){
