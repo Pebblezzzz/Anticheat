@@ -298,7 +298,7 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
     NavigableMap<Long, PredictionFrame> frames = new TreeMap<>();
     for (PredictionFrame frame : movement.frames()) frames.put(frame.sequence(), frame);
 
-    Map<Integer, BlockBox> entities = state.entities;
+    Map<Integer, EntityHistory> entities = state.entities;
     List<Finding> findings = new ArrayList<>();
     long lastServerTick = movement.frames().isEmpty() ? 0L : movement.frames().getLast().serverTick();
 
