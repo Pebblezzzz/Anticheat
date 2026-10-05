@@ -58,4 +58,35 @@ class HardenedPhantomPaperPluginTest {
     assertInstanceOf(Packets.BlockStateChange.class, packet);
     assertEquals(stone, ((Packets.BlockStateChange) packet).state());
   }
+
+  @Test
+  void excludesVanillaSprintModifierFromPredictionAttribute() {
+    java.util.UUID sprintUuid =
+        java.util.UUID.fromString("662a6b8d-da3e-4c1c-8813-96ea6097278d");
+    org.bukkit.attribute.AttributeModifier sprint = new org.bukkit.attribute.AttributeModifier(
+        sprintUuid, "Sprinting speed boost", 0.30000001192092896D,
+        org.bukkit.attribute.AttributeModifier.Operation.MULTIPLY_SCALAR_1);
+    org.bukkit.attribute.AttributeModifier custom = new org.bukkit.attribute.AttributeModifier(
+        java.util.UUID.fromString("9d4f8b9b-8bd8-4a59-9f6c-67d2b1a71f44"),
+        "custom-speed", 0.2D,
+        org.bukkit.attribute.AttributeModifier.Operation.ADD_SCALAR);
+
+    dev.phantom.ac.Simulation.Attributes attributes =
+        HardenedPhantomPaperPlugin.predictionAttributes(0.1D, java.util.List.of(sprint, custom));
+
+    assertEquals(0.1D, attributes.movementSpeed(), 1.0e-12);
+    assertEquals(1, attributes.modifiers().size());
+    var retained = attributes.modifiers().getFirst();
+    assertEquals("9d4f8b9b-8bd8-4a59-9f6c-67d2b1a71f44", retained.id());
+    assertEquals(0.2D, retained.amount(), 1.0e-12);
+    assertEquals(dev.phantom.ac.Phase5Mechanics.ModifierOperation.ADD_MULTIPLIED_BASE, retained.operation());
+  }
+
+  @Test
+  void invalidMovementSpeedBaseFallsBackToVanillaBaseSpeed() {
+    dev.phantom.ac.Simulation.Attributes attributes =
+        HardenedPhantomPaperPlugin.predictionAttributes(Double.NaN, java.util.List.of());
+    assertEquals(0.1D, attributes.movementSpeed(), 1.0e-12);
+    assertTrue(attributes.modifiers().isEmpty());
+  }
 }

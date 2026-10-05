@@ -23,3 +23,4 @@ jobs:
           cache: maven
       - name: Run complete Maven suite without output-pipeline masking
         run: mvn -B -ntp clean test
+# CI trigger for PR #220 verification.
