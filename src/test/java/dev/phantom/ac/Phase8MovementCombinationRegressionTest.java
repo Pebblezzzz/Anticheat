@@ -213,13 +213,13 @@ class Phase8MovementCombinationRegressionTest {
     var walking = physics.step(new Vanilla12111RichPhysics.Context(
         1L,
         airborne,
-        new Simulation.AdvancedInput(-1, 0, true, false, false),
+        new Simulation.AdvancedInput(-1, 0, true, true, false),
         world,
         Simulation.Environment.DRY,
         airborne.attributes(),
         MovementEffects.NONE,
         Pose.STANDING,
-        MovementEnvironment.dry(false, false, false),
+        MovementEnvironment.dry(false, true, false),
         false,
         false,
         noEntities));
