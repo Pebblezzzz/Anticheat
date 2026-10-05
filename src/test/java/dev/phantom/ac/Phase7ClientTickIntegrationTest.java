@@ -67,6 +67,21 @@ class Phase7ClientTickIntegrationTest {
     assertEquals(Consistency.CONSISTENT, reconstruction.consistency());
   }
 
+  @Test void missingMoveTickMarksStateUncertain() {
+    NormalizedPacket event = new NormalizedPacket(
+        1L,
+        0L,
+        new Move(Vec3.ZERO, 0f, 0f, true, null),
+        EnumSet.of(PacketFlag.NORMAL)
+    );
+
+    State.Player state = State.apply(State.Player.initial(Vec3.ZERO), event);
+
+    assertTrue(state.uncertain());
+    assertTrue(state.uncertaintyReasons().contains(State.UncertaintyReason.UNKNOWN_CLIENT_TICK));
+    assertFalse(state.clientTickRange().exact());
+  }
+
   @Test void exactMoveTickStopsStateFromInventingUnknownClientTick() {
     NormalizedPacket event = new NormalizedPacket(
         1L,

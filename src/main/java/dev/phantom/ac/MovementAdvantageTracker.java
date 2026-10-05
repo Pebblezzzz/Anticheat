@@ -109,60 +109,54 @@ final class MovementAdvantageTracker {
     double observedDx = observedAfter.x() - origin.x();
     double observedDy = observedAfter.y() - origin.y();
     double observedDz = observedAfter.z() - origin.z();
-    double observedHorizontal = Math.hypot(observedDx, observedDz);
 
+    double minObservedHorizontalDistance = Double.POSITIVE_INFINITY;
     double minVertical = Double.POSITIVE_INFINITY;
     double maxVertical = Double.NEGATIVE_INFINITY;
-    double minHorizontalProjection = Double.POSITIVE_INFINITY;
-    double maxHorizontalProjection = Double.NEGATIVE_INFINITY;
 
-    double horizontalUx = 0.0D;
-    double horizontalUz = 0.0D;
-    if (observedHorizontal > EPSILON) {
-      horizontalUx = observedDx / observedHorizontal;
-      horizontalUz = observedDz / observedHorizontal;
-    }
-
-    boolean horizontalEvaluated = observedHorizontal > EPSILON;
     for (Vec3 reachable : reachablePositions) {
       double dx = reachable.x() - origin.x();
       double dy = reachable.y() - origin.y();
       double dz = reachable.z() - origin.z();
       if (!Double.isFinite(dx) || !Double.isFinite(dy) || !Double.isFinite(dz)) continue;
 
+      double horizontalError = Math.hypot(observedDx - dx, observedDz - dz);
+      if (Double.isFinite(horizontalError)) {
+        minObservedHorizontalDistance =
+            Math.min(minObservedHorizontalDistance, horizontalError);
+      }
+
       minVertical = Math.min(minVertical, dy);
       maxVertical = Math.max(maxVertical, dy);
-
-      if (horizontalEvaluated) {
-        double projection = dx * horizontalUx + dz * horizontalUz;
-        minHorizontalProjection = Math.min(minHorizontalProjection, projection);
-        maxHorizontalProjection = Math.max(maxHorizontalProjection, projection);
-      }
     }
 
-    double signedHorizontal = horizontalEvaluated
-        ? signedOutside(observedHorizontal, minHorizontalProjection, maxHorizontalProjection)
-        : 0.0D;
+    boolean horizontalEvaluated = Double.isFinite(minObservedHorizontalDistance);
+    boolean verticalEvaluated =
+        Double.isFinite(minVertical) && Double.isFinite(maxVertical);
+
+    /*
+     * The old tracker projected the observed movement onto one axis (the
+     * direction of the observed displacement). That could report a large
+     * "advantage" even when a reachable candidate was only displaced
+     * laterally, and could miss a real 2-D miss in the opposite direction.
+     *
+     * Measure the actual closest horizontal residual instead. The candidate
+     * frontier already contains the complete modeled input/world alternatives,
+     * so the closest point is the meaningful geometric error signal.
+     */
+    double signedHorizontal =
+        horizontalEvaluated ? minObservedHorizontalDistance : 0.0D;
+
     double signedVertical =
-        Double.isFinite(minVertical) && Double.isFinite(maxVertical)
+        verticalEvaluated
             ? signedOutside(observedDy, minVertical, maxVertical)
             : 0.0D;
 
     return new EnvelopeExcess(
-        horizontalEvaluated || (Double.isFinite(minVertical) && Double.isFinite(maxVertical)),
+        horizontalEvaluated || verticalEvaluated,
         signedHorizontal,
         signedVertical);
   }
-
-  private static double signedOutside(double observed, double min, double max) {
-    if (!Double.isFinite(observed) || !Double.isFinite(min) || !Double.isFinite(max)) {
-      return 0.0D;
-    }
-    if (observed > max) return observed - max;
-    if (observed < min) return observed - min;
-    return 0.0D;
-  }
-
   private record EnvelopeExcess(
       boolean evaluated,
       double signedHorizontal,

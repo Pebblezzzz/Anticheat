@@ -1,11 +1,9 @@
 name: Test
 
 on:
-  push:
-    branches:
-      - main
-      - "fix/**"
   pull_request:
+  push:
+    branches: [main]
 
 jobs:
   test:
@@ -15,6 +13,16 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: '21'
           cache: maven
-      - run: mvn -B test
+      - name: Run tests
+        run: mvn -B test 2>&1 | tee test-workflow.log
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-workflow-diagnostics
+          path: |
+            test-workflow.log
+            target/surefire-reports/**
+          if-no-files-found: warn

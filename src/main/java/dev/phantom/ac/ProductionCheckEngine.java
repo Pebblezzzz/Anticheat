@@ -42,7 +42,7 @@ public final class ProductionCheckEngine {
    * executor coalescing.
    */
   public static final class SessionState {
-    final Map<Integer, BlockBox> entities = new HashMap<>();
+    final Map<Integer, EntityHistory> entities = new HashMap<>();
     final Map<Pos, Long> diggingStarts = new HashMap<>();
     final Map<Pos, PredictionFrame> diggingStartFrames = new HashMap<>();
 
@@ -338,11 +338,13 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
       }
 
       if (packet instanceof Packets.EntitySpawn spawn) {
-        entities.put(spawn.entityId(), spawn.box());
+        entities.put(spawn.entityId(), new EntityHistory(raw.receivedNanos(), spawn.box()));
         continue;
       }
       if (packet instanceof Packets.EntityMove move) {
-        entities.put(move.entityId(), move.box());
+        entities.computeIfAbsent(
+                move.entityId(), ignored -> new EntityHistory(raw.receivedNanos(), move.box()))
+            .add(raw.receivedNanos(), move.box());
         continue;
       }
       if (packet instanceof Packets.EntityDespawn despawn) {
@@ -466,7 +468,10 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
 
       if (packet instanceof Packets.InteractEntity attack
           && attack.action() == Packets.InteractAction.ATTACK) {
-        BlockBox target = entities.get(attack.entityId());
+        EntityHistory targetHistory = entities.get(attack.entityId());
+        BlockBox target = targetHistory == null
+            ? null
+            : targetHistory.compensated(raw.receivedNanos());
         if (target == null || frame == null) continue;
 
         Vec3 eye = eyePosition(frame.observedAfter());
@@ -654,7 +659,8 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
          * deterministic signature of a Step-height cheat.
          */
         if (before.onGround() && after.onGround() && !jumping
-            && delta.y() > 0.65 && horizontal > 0.05) {
+            && delta.y() > 0.65 && horizontal > 0.05
+            && predictionContradictsObservedPosition(frame, 0.08)) {
           findings.add(finding(playerId, tick, "Step",
               String.format(Locale.ROOT,
                   "grounded movement rose %.3f blocks in one client tick without a jump",
@@ -675,7 +681,8 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
                   candidate.context().clientVelocity().z());
               return env.vehicle().active() || env.gliding() || speed > 0.70;
             });
-        if (!candidateExternalMotion && !jumping && horizontal > 1.0) {
+        if (!candidateExternalMotion && !jumping && horizontal > 1.0
+            && predictionContradictsObservedPosition(frame, 0.08)) {
           findings.add(finding(playerId, tick, "Speed",
               String.format(Locale.ROOT,
                   "survival/adventure movement displaced %.3f blocks horizontally in one client tick",
@@ -744,7 +751,8 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
         }
 
         if (!externalVertical && !before.onGround() && !after.onGround() && !jumping
-            && before.velocity().y() <= 0.05 && delta.y() > 0.16) {
+            && before.velocity().y() <= 0.05 && delta.y() > 0.16
+            && predictionContradictsObservedPosition(frame, 0.08)) {
           findings.add(finding(playerId, tick, "Flight",
               String.format(Locale.ROOT,
                   "airborne movement gained %.3f vertical blocks without jump or vertical effect",
@@ -772,7 +780,8 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
                 && Math.abs(after.velocity().y()) <= 0.02;
             boolean previousHover = Math.abs(previous.observedAfter().velocity().y()) <= 0.02;
             if (currentHover && previousHover
-                && (horizontal > 0.05 || Math.hypot(previousDelta.x(), previousDelta.z()) > 0.05)) {
+                && (horizontal > 0.05 || Math.hypot(previousDelta.x(), previousDelta.z()) > 0.05)
+                && predictionContradictsObservedPosition(frame, 0.08)) {
               findings.add(finding(playerId, tick, "Flight",
                   "airborne vertical velocity remained near zero across consecutive movement ticks without a vertical effect",
                   1.0, sequence));
@@ -859,6 +868,21 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
     return true;
   }
 
+  private static boolean predictionContradictsObservedPosition(
+      PredictionFrame frame, double minimumResidual) {
+    if (frame == null
+        || !frame.uncertaintySources().isEmpty()
+        || frame.predictedAfter().isEmpty()
+        || frame.observedAfter().position() == null) {
+      return false;
+    }
+    Vec3 observed = frame.observedAfter().position();
+    return frame.predictedAfter().stream()
+        .allMatch(candidate ->
+            distanceSquared(candidate.context().player().position(), observed)
+                > minimumResidual * minimumResidual);
+  }
+
   private static boolean isSolidSupport(BlockState state) {
     if (state == null || state.isAir() || state.isUnsupported() || state.hasFluidName()) return false;
     return switch (state.variant()) {
@@ -895,6 +919,36 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
           || blockId.equals("minecraft:deepslate_bricks");
     };
   }
+
+  private static final class EntityHistory {
+    private final ArrayDeque<EntitySample> samples = new ArrayDeque<>();
+
+    EntityHistory(long receivedNanos, BlockBox box) {
+      add(receivedNanos, box);
+    }
+
+    void add(long receivedNanos, BlockBox box) {
+      samples.addLast(new EntitySample(receivedNanos, box));
+      while (samples.size() > 4) samples.removeFirst();
+    }
+
+    BlockBox compensated(long interactionNanos) {
+      if (samples.isEmpty()) return null;
+      BlockBox result = null;
+      int used = 0;
+      java.util.Iterator<EntitySample> iterator = samples.descendingIterator();
+      while (iterator.hasNext()) {
+        EntitySample sample = iterator.next();
+        if (sample.receivedNanos() > interactionNanos) continue;
+        if (interactionNanos - sample.receivedNanos() > 150_000_000L) continue;
+        result = result == null ? sample.box() : result.enclose(sample.box());
+        if (++used >= 3) break;
+      }
+      return result == null ? samples.getLast().box() : result;
+    }
+  }
+
+  private record EntitySample(long receivedNanos, BlockBox box) {}
 
   private static boolean positionExactlyMatches(Vec3 a, Vec3 b) {
     return a != null && b != null
