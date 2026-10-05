@@ -133,12 +133,11 @@ public final class GrimPredictionEngine {
         }
 
         /*
-         * Grim receives sprinting as a separate ENTITY_ACTION state. Phantom's
-         * reduced packet model currently has held-key input but not that action
-         * event, so an uncertain client/server boundary cannot safely assume
-         * that the retained physical sprint flag still applied to this tick.
-         * Keep a bounded non-sprinting sibling rather than turning the stale
-         * sprint assumption into an exhaustive IMPOSSIBLE result.
+         * Grim receives sprinting as a separate ENTITY_ACTION state. Phase 8
+         * now feeds that persistent physical lifecycle into this engine. When
+         * the input/timing boundary is still uncertain, keep a bounded
+         * non-sprinting sibling rather than turning stale sprint state into an
+         * exhaustive IMPOSSIBLE result.
          */
         if (movementTimingUncertain
             && inputOption.sprint().orElse(false)

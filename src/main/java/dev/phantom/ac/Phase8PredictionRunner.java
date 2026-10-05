@@ -338,6 +338,14 @@ public final class Phase8PredictionRunner {
   private long nextCandidateId;
   private long lastItemUseSequence = -1L;
   private boolean itemUseAuthorityPending;
+  /*
+   * Physical sprint/sneak state is a separate lifecycle from PLAYER_INPUT.
+   * Vanilla can enter sprint through START_SPRINTING (including double-tap W),
+   * so a held-key snapshot alone is not sufficient to reconstruct locomotion.
+   */
+  private boolean physicalSprintState;
+  private boolean physicalSneakState;
+  private boolean locomotionActionObserved;
   private Continuation latestContinuation = Continuation.UNANCHORED;
 
   public Phase8PredictionRunner(int maximumCandidates) {
@@ -442,6 +450,9 @@ public final class Phase8PredictionRunner {
     clearObservedMovementHistory();
     lastPositionClientTick = -1L;
     nextCandidateId = 1L;
+    physicalSprintState = false;
+    physicalSneakState = false;
+    locomotionActionObserved = false;
     movementAdvantageTracker.reset();
     latestMovementAdvantage = MovementAdvantageTracker.Snapshot.empty();
     latestContinuation = Continuation.UNANCHORED;
@@ -618,6 +629,15 @@ public final class Phase8PredictionRunner {
               && authoritativeUseEffectsVisible) {
             itemUseAuthorityPending = false;
           }
+          if (!locomotionActionObserved) {
+            /*
+             * Before the first explicit EntityAction, the newest client-visible
+             * PlayerContext is the only physical sprint/sneak lifecycle state
+             * available to the predictor.
+             */
+            physicalSprintState = authority.movementEnvironment().sprinting();
+            physicalSneakState = authority.movementEnvironment().sneaking();
+          }
           if (clientState == null) {
             /*
              * The first client-visible authority in a capture is the legitimate
@@ -643,6 +663,40 @@ public final class Phase8PredictionRunner {
       if (value instanceof Packets.UseItem) {
         lastItemUseSequence = sequence;
         itemUseAuthorityPending = true;
+        continue;
+      }
+
+      if (value instanceof Packets.EntityAction entityAction) {
+        switch (entityAction.action()) {
+          case "START_SPRINTING" -> {
+            physicalSprintState = true;
+            locomotionActionObserved = true;
+          }
+          case "STOP_SPRINTING" -> {
+            physicalSprintState = false;
+            locomotionActionObserved = true;
+          }
+          case "START_SNEAKING" -> {
+            physicalSneakState = true;
+            locomotionActionObserved = true;
+          }
+          case "STOP_SNEAKING" -> {
+            physicalSneakState = false;
+            locomotionActionObserved = true;
+          }
+          default -> {}
+        }
+
+        if (locomotionActionObserved && !prediction.isEmpty()) {
+          Set<Candidate> updated = overlayPhysicalLocomotionState(
+              prediction,
+              physicalSprintState,
+              physicalSneakState,
+              maximumCandidates);
+          if (!updated.isEmpty()) {
+            prediction = updated;
+          }
+        }
         continue;
       }
 
@@ -2912,6 +2966,15 @@ public final class Phase8PredictionRunner {
         authorityEnvironment.sprinting(), authorityEnvironment.sneaking()));
     locomotionOptions.add(new MovementInputState(
         keyState.sprint(), keyState.sneak()));
+    if (locomotionActionObserved) {
+      /*
+       * EntityAction is the client-side locomotion transition. Keep it as its
+       * own bootstrap hypothesis when capture begins after the sprint/sneak
+       * toggle rather than relying on a later PlayerInput packet.
+       */
+      locomotionOptions.add(new MovementInputState(
+          physicalSprintState, physicalSneakState));
+    }
     int maxBootstrapJumpDelay =
         keyState.jump() && physicalGroundOptions.contains(true)
             ? 10
@@ -3972,6 +4035,27 @@ public final class Phase8PredictionRunner {
         authority.gravityMultiplier(),
         authority.itemUseSpeedMultiplier(),
         authority.vehicle());
+  }
+
+  private static Set<Candidate> overlayPhysicalLocomotionState(
+      Set<Candidate> candidates,
+      boolean sprinting,
+      boolean sneaking,
+      int maximumCandidates) {
+    if (candidates.isEmpty() || candidates.size() > maximumCandidates) return Set.of();
+    Set<Candidate> result = new LinkedHashSet<>();
+    for (Candidate candidate : candidates) {
+      MovementEnvironment environment = withLocomotionState(
+          candidate.context().movementEnvironment(),
+          sprinting,
+          sneaking);
+      result.add(rebuildCandidate(
+          candidate,
+          candidate.context().player(),
+          candidate.context().entityCollisions(),
+          environment));
+    }
+    return Set.copyOf(result);
   }
 
   private static Set<Candidate> overlayClientInput(
