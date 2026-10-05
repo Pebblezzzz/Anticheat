@@ -388,11 +388,11 @@ public final class AccuracyChecks {
 
     for (Packets.RawPacket packet : packets) {
       if (packet.packet() instanceof Packets.EntitySpawn spawn) {
-        entities.put(spawn.entityId(), new EntityHistory(raw.receivedNanos(), spawn.box()));
+        entities.put(spawn.entityId(), new EntityHistory(packet.receivedNanos(), spawn.box()));
       } else if (packet.packet() instanceof Packets.EntityMove move) {
         entities.computeIfAbsent(
-                move.entityId(), ignored -> new EntityHistory(raw.receivedNanos(), move.box()))
-            .add(raw.receivedNanos(), move.box());
+                move.entityId(), ignored -> new EntityHistory(packet.receivedNanos(), move.box()))
+            .add(packet.receivedNanos(), move.box());
       } else if (packet.packet() instanceof Packets.EntityDespawn despawn) {
         entities.remove(despawn.entityId());
       }
@@ -426,7 +426,7 @@ public final class AccuracyChecks {
         EntityHistory history = entities.get(attack.entityId());
         BlockBox target = history == null
             ? null
-            : history.compensated(raw.receivedNanos());
+            : history.compensated(packet.receivedNanos());
         if (target == null) {
           findings.add(uncertain(playerId, frame, "Interact",
               "attack referenced an entity whose compensated/interpolated hitbox was not reconstructed",
