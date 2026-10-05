@@ -7,7 +7,7 @@ import static dev.phantom.ac.Maths.Vec3;
 public final class Packets {
   private Packets() {}
 
-  public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm, UseItem, ContainerState, SlotStateChange, BlockAck,
+  public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm, UseItem, ContainerState, InventorySlotState, SlotStateChange, BlockAck,
       Velocity, Effect, Gamemode, PlayerContext, FlightToggle, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange,
       WorldTransactionSend, WorldTransactionAck, PaperMovementRejection, ClientBlockBreak, EntitySpawn, EntityMove, EntityDespawn,
       InteractEntity, BlockPlace, VehicleMove, HeldItemChange, EntityAction, DigAction, InventoryClick {
