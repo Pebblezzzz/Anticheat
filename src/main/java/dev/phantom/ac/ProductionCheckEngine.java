@@ -253,7 +253,6 @@ public final class ProductionCheckEngine {
 public record Result(Accumulator state, Optional<Finding> alert, Optional<Finding> log) {
     public Result {
       Objects.requireNonNull(state);
-    Objects.requireNonNull(accuracyState);
       Objects.requireNonNull(alert);
       Objects.requireNonNull(log);
     }
@@ -292,6 +291,7 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
     Objects.requireNonNull(movement);
     Objects.requireNonNull(config);
     Objects.requireNonNull(state);
+    Objects.requireNonNull(accuracyState);
 
     if (!config.enabled() || packets.isEmpty()) return new Report(List.of());
 
