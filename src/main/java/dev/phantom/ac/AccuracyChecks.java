@@ -67,7 +67,9 @@ public final class AccuracyChecks {
     final Map<Integer, EntityHistory> entities = new HashMap<>();
     long lastAttackNanos = -1L;
     Vec3 previousVehiclePosition;
+    Vec3 vehiclePlayerOffset;
     long previousVehicleNanos = -1L;
+    boolean vehicleOffsetKnown;
 
     void prune(long currentSequence) {
       while (attackTimes.size() > 64) attackTimes.removeFirst();
@@ -91,7 +93,9 @@ public final class AccuracyChecks {
       actionsPerTick.clear();
       placementsPerTick.clear();
       previousVehiclePosition = null;
+      vehiclePlayerOffset = null;
       previousVehicleNanos = -1L;
+      vehicleOffsetKnown = false;
     }
   }
 
@@ -667,29 +671,60 @@ public final class AccuracyChecks {
       Map<Long, PredictionFrame> frames,
       State state) {
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
+
     for (Packets.RawPacket packet : packets) {
-      if (!(packet.packet() instanceof Packets.VehicleMove move)) continue;
-      if (state.previousVehiclePosition != null) {
-        Vec3 previous = state.previousVehiclePosition;
-        Vec3 delta = new Vec3(
-            move.position().x() - previous.x(),
-            move.position().y() - previous.y(),
-            move.position().z() - previous.z());
-        double horizontal = Math.hypot(delta.x(), delta.z());
-        if (packet.receivedNanos() >= state.previousVehicleNanos
-            && packet.receivedNanos() - state.previousVehicleNanos <= 100_000_000L
-            && (horizontal > 3.0 || Math.abs(delta.y()) > 2.5)) {
-          PredictionFrame frame = frameAt(frames, packet.sequence());
-          findings.add(uncertain(playerId, frame, "Vehicle",
-              String.format(Locale.ROOT,
-                  "vehicle movement displaced %.3f horizontal / %.3f vertical blocks; vehicle causality requires interpolation and passenger-state modeling",
-                  horizontal, Math.abs(delta.y())),
-              1.0));
-        }
+      if (!(packet.packet() instanceof Packets.VehicleMove vehicle)) continue;
+      PredictionFrame frame = frameAt(frames, packet.sequence());
+      if (frame == null || frame.uncertaintySources().isEmpty() == false
+          || frame.predictedAfter().isEmpty()) {
+        state.previousVehiclePosition = vehicle.position();
+        state.previousVehicleNanos = packet.receivedNanos();
+        continue;
       }
-      state.previousVehiclePosition = move.position();
+
+      if (!state.vehicleOffsetKnown) {
+        state.vehiclePlayerOffset = new Vec3(
+            frame.observedAfter().position().x() - vehicle.position().x(),
+            frame.observedAfter().position().y() - vehicle.position().y(),
+            frame.observedAfter().position().z() - vehicle.position().z());
+        state.vehicleOffsetKnown = true;
+      }
+
+      Vec3 expectedPlayer = new Vec3(
+          vehicle.position().x() + state.vehiclePlayerOffset.x(),
+          vehicle.position().y() + state.vehiclePlayerOffset.y(),
+          vehicle.position().z() + state.vehiclePlayerOffset.z());
+
+      double minResidual = Double.POSITIVE_INFINITY;
+      boolean vehicleCandidateSeen = false;
+      for (Candidate candidate : frame.predictedAfter()) {
+        boolean vehicleMode = candidate.movementMode() == Phase6Reachability.MovementMode.VEHICLE
+            || candidate.context().movementEnvironment().vehicle().active();
+        if (!vehicleMode) continue;
+        vehicleCandidateSeen = true;
+        Vec3 position = candidate.context().player().position();
+        minResidual = Math.min(minResidual, Math.sqrt(
+            Math.pow(position.x() - expectedPlayer.x(), 2)
+                + Math.pow(position.y() - expectedPlayer.y(), 2)
+                + Math.pow(position.z() - expectedPlayer.z(), 2)));
+      }
+
+      if (!vehicleCandidateSeen) {
+        findings.add(uncertain(playerId, frame, "Vehicle",
+            "vehicle movement arrived without a causally reconstructed vehicle-mode prediction candidate",
+            0.8));
+      } else if (minResidual >= 0.08) {
+        findings.add(hard(playerId, frame, "Vehicle",
+            String.format(Locale.ROOT,
+                "vehicle claim remained %.3f blocks outside every causally predicted vehicle-mode rider state",
+                minResidual),
+            Math.min(1.0, minResidual / 0.50)));
+      }
+
+      state.previousVehiclePosition = vehicle.position();
       state.previousVehicleNanos = packet.receivedNanos();
     }
+
     return List.copyOf(findings);
   }
 
