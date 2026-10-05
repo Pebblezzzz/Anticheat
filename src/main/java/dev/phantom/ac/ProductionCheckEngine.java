@@ -752,7 +752,7 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
               long clientTickDelta = startClientTick >= 0L && finishClientTick >= startClientTick
                   ? finishClientTick - startClientTick
                   : Long.MAX_VALUE;
-              Double finishSpeed = breakPacket.breakSpeedPerTick();
+              Double finishSpeed = dig.breakSpeedPerTick();
               double conservativeMaxSpeed = Math.max(
                   startSpeed == null ? 0.0 : startSpeed,
                   finishSpeed == null ? 0.0 : finishSpeed);
@@ -776,7 +776,7 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
                     "finished digging unusually quickly, but complete server break-speed state was not captured across the interval",
                     0.85, sequence));
               }
-              if (startItem != null && !startItem.equals(breakPacket.heldItemType())) {
+              if (startItem != null && !startItem.equals(dig.heldItemType())) {
                 findings.add(uncertainFinding(playerId, serverTick, "InventoryState",
                     "held tool changed during a single block-break interval; break-speed causality was segmented",
                     0.65, sequence));
@@ -812,8 +812,8 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
       Packets.Move move = frame.movement();
       if (move.position() == null) continue;
 
-      State.Player before = frame.observedBefore();
-      State.Player after = frame.observedAfter();
+      dev.phantom.ac.State.Player before = frame.observedBefore();
+      dev.phantom.ac.State.Player after = frame.observedAfter();
       if (!isNormalSurvivalMovement(frame)) continue;
 
       Vec3 delta = new Vec3(
@@ -839,8 +839,8 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
           && ("survival".equalsIgnoreCase(after.gamemode())
               || "adventure".equalsIgnoreCase(after.gamemode()))
           && after.onGround()
-          && (after.environment() == State.Environment.WATER
-              || after.environment() == State.Environment.LAVA)) {
+          && (after.environment() == dev.phantom.ac.State.Environment.WATER
+              || after.environment() == dev.phantom.ac.State.Environment.LAVA)) {
         int bx = (int) Math.floor(after.position().x());
         int by = (int) Math.floor(after.position().y());
         int bz = (int) Math.floor(after.position().z());
