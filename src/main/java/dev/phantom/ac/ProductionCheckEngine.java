@@ -162,7 +162,9 @@ public final class ProductionCheckEngine {
           replayReference,
           verdict == Verdict.IMPOSSIBLE
               ? EvidenceClass.IMPOSSIBLE
-              : EvidenceClass.INSUFFICIENT_INFORMATION,
+              : clampScore(severity) >= 0.75
+                  ? EvidenceClass.HIGHLY_SUSPICIOUS
+                  : EvidenceClass.INSUFFICIENT_INFORMATION,
           clampScore(severity),
           independenceFingerprint(rule, verdict, reason),
           verdict == Verdict.IMPOSSIBLE);
