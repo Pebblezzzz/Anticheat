@@ -159,12 +159,28 @@ public final class Packets {
     }
   }
 
-  /** Full digging action provenance used for safe break/timing analysis. */
-  public record DigAction(String action, dev.phantom.ac.world.Pos position, int sequence) implements Packet {
+  /** Full digging action provenance used for causal break/timing analysis. */
+  public record DigAction(
+      String action,
+      dev.phantom.ac.world.Pos position,
+      int sequence,
+      Double breakSpeedPerTick,
+      String heldItemType,
+      int heldItemAmount) implements Packet {
     public DigAction {
       if (action == null || action.isBlank()) throw new IllegalArgumentException("action is required");
       Objects.requireNonNull(position, "position");
       if (sequence < 0) throw new IllegalArgumentException("sequence must be non-negative");
+      if (breakSpeedPerTick != null
+          && (!Double.isFinite(breakSpeedPerTick) || breakSpeedPerTick < 0.0)) {
+        throw new IllegalArgumentException("breakSpeedPerTick must be finite and non-negative");
+      }
+      Objects.requireNonNull(heldItemType, "heldItemType");
+      if (heldItemAmount < 0) throw new IllegalArgumentException("heldItemAmount must be non-negative");
+    }
+
+    public DigAction(String action, dev.phantom.ac.world.Pos position, int sequence) {
+      this(action, position, sequence, null, "minecraft:air", 0);
     }
   }
 
