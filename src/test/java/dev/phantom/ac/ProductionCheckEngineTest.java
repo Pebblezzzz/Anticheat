@@ -500,4 +500,54 @@ class ProductionCheckEngineTest {
     assertTrue(result.findings().stream().noneMatch(f -> f.rule().equals("Speed")));
   }
 
+  @Test
+  void timerStateSurvivesLivePerPacketValidation() {
+    ProductionCheckEngine.SessionState state = new ProductionCheckEngine.SessionState();
+    AccuracyChecks.State accuracyState = new AccuracyChecks.State();
+
+    ProductionCheckEngine.Report latest = new ProductionCheckEngine.Report(List.of());
+    for (int i = 0; i < 20; i++) {
+      latest = ProductionCheckEngine.analyze(
+          "p",
+          List.of(new Packets.RawPacket(
+              i + 1L,
+              i * 10_000_000L,
+              new Packets.ClientTickEnd())),
+          report(),
+          CONFIG,
+          state,
+          accuracyState);
+    }
+
+    assertTrue(
+        latest.findings().stream().anyMatch(f -> f.rule().equals("TimerBurst")),
+        "live per-packet state was lost: " + latest.findings());
+  }
+
+  @Test
+  void modulo360StateSurvivesLivePerPacketValidation() {
+    ProductionCheckEngine.SessionState state = new ProductionCheckEngine.SessionState();
+    AccuracyChecks.State accuracyState = new AccuracyChecks.State();
+
+    ProductionCheckEngine.Report latest = new ProductionCheckEngine.Report(List.of());
+    float[] yaw = {0f, 360f, 720f, 1080f};
+    for (int i = 0; i < yaw.length; i++) {
+      latest = ProductionCheckEngine.analyze(
+          "p",
+          List.of(new Packets.RawPacket(
+              i + 1L,
+              i + 1L,
+              new Packets.Move(null, yaw[i], 0f, true, (long) i))),
+          report(),
+          CONFIG,
+          state,
+          accuracyState);
+    }
+
+    assertTrue(
+        latest.findings().stream().anyMatch(f -> f.rule().equals("AimModulo360")),
+        "rotation state was lost: " + latest.findings());
+  }
+
+
 }

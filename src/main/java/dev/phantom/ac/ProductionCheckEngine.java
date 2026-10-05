@@ -43,6 +43,10 @@ public final class ProductionCheckEngine {
    */
   public static final class SessionState {
     final Map<Integer, EntityHistory> entities = new HashMap<>();
+    final ArrayDeque<Long> clientTickEndTimes = new ArrayDeque<>();
+    float lastYaw = Float.NaN;
+    long lastRotationSequence = -1L;
+    int modulo360Streak;
     final Map<Pos, Long> diggingStarts = new HashMap<>();
     final Map<Pos, Double> diggingStartSpeeds = new HashMap<>();
     final Map<Pos, String> diggingStartItems = new HashMap<>();
@@ -448,11 +452,6 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
         .sorted(Comparator.comparingLong(Packets.RawPacket::sequence))
         .toList();
 
-    float lastYaw = Float.NaN;
-    long lastRotationSequence = -1L;
-    int modulo360Streak = 0;
-    ArrayDeque<Long> clientTickEndTimes = new ArrayDeque<>();
-
     for (Packets.RawPacket raw : ordered) {
       Packets.Packet packet = raw.packet();
       long sequence = raw.sequence();
@@ -463,12 +462,12 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
       lastServerTick = serverTick;
 
       if (packet instanceof Packets.ClientTickEnd && config.timerEnabled()) {
-        clientTickEndTimes.addLast(raw.receivedNanos());
-        while (clientTickEndTimes.size() > config.timerWindowTicks()) {
-          clientTickEndTimes.removeFirst();
+        state.clientTickEndTimes.addLast(raw.receivedNanos());
+        while (state.clientTickEndTimes.size() > config.timerWindowTicks()) {
+          state.clientTickEndTimes.removeFirst();
         }
-        if (clientTickEndTimes.size() == config.timerWindowTicks()) {
-          long elapsed = raw.receivedNanos() - clientTickEndTimes.getFirst();
+        if (state.clientTickEndTimes.size() == config.timerWindowTicks()) {
+          long elapsed = raw.receivedNanos() - state.clientTickEndTimes.getFirst();
           if (elapsed >= 0L && elapsed <= config.timerWindowNanos()) {
             double severity = Math.min(1.0,
                 (double) config.timerWindowNanos() / Math.max(1L, elapsed) / 4.0);
@@ -560,21 +559,21 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
         }
 
         if (move.yaw() != null && Float.isFinite(move.yaw())) {
-          if (Float.isFinite(lastYaw)) {
-            float delta = move.yaw() - lastYaw;
+          if (Float.isFinite(state.lastYaw)) {
+            float delta = move.yaw() - state.lastYaw;
             double wrapped = Math.IEEEremainder(delta, 360.0);
             if (Math.abs(delta) > 359.5f && Math.abs(wrapped) < 0.5) {
-              modulo360Streak++;
+              state.modulo360Streak++;
             } else {
-              modulo360Streak = 0;
+              state.modulo360Streak = 0;
             }
-            if (modulo360Streak >= 3) {
+            if (state.modulo360Streak >= 3) {
               findings.add(uncertainFinding(playerId, serverTick, "AimModulo360",
-                  "repeated yaw changes collapse modulo 360", Math.min(1.0, modulo360Streak / 10.0), sequence));
+                  "repeated yaw changes collapse modulo 360", Math.min(1.0, state.modulo360Streak / 10.0), sequence));
             }
           }
-          lastYaw = move.yaw();
-          lastRotationSequence = sequence;
+          state.lastYaw = move.yaw();
+          state.lastRotationSequence = sequence;
         } else if (move.yaw() != null && !Float.isFinite(move.yaw())) {
           findings.add(finding(playerId, serverTick, "PacketRotation",
               "non-finite yaw", 1.0, sequence));
@@ -753,7 +752,7 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
       // must be modeled before a spoof verdict is sound.
     }
 
-    if (lastRotationSequence < 0) {
+    if (state.lastRotationSequence < 0) {
       // No rotation packet means there is no aim evidence; intentionally silent.
     }
 
