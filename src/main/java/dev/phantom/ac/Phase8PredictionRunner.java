@@ -630,8 +630,6 @@ public final class Phase8PredictionRunner {
       if (value instanceof Packets.UseItem) {
         lastItemUseSequence = sequence;
         itemUseAuthorityPending = true;
-        trace.add("ITEM_USE_OBSERVED sequence=" + sequence
-            + " action=WAIT_FOR_CAUSAL_AUTHORITY");
         continue;
       }
 
@@ -777,6 +775,10 @@ public final class Phase8PredictionRunner {
       trace.add("PACKET seq=" + sequence
           + " receivedNanos=" + packet.receivedNanos()
           + " clientStatePosition=" + observedAfter.position());
+      if (itemUseAuthorityPending && sequence > lastItemUseSequence) {
+        trace.add("ITEM_USE_OBSERVED sequence=" + lastItemUseSequence
+            + " action=WAIT_FOR_CAUSAL_AUTHORITY");
+      }
 
       TickResolution tick = resolveMovementTick(
           packet, move, phase7TimingBySequence);
