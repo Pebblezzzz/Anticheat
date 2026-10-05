@@ -196,9 +196,23 @@ public final class AccuracyChecks {
     if (frames.isEmpty()) return List.of();
 
     List<ProductionCheckEngine.Finding> findings = new ArrayList<>();
+    MovementAdvantageTracker fallbackTracker = new MovementAdvantageTracker();
 
     for (PredictionFrame frame : frames) {
       MovementAdvantageTracker.Snapshot advantage = frame.movementAdvantage();
+      if (!advantage.evaluated()
+          && frame.uncertaintySources().isEmpty()
+          && !frame.predictedAfter().isEmpty()
+          && frame.observedBefore().position() != null
+          && frame.observedAfter().position() != null) {
+        advantage = fallbackTracker.observe(
+            frame.predictedAfter().stream()
+                .map(candidate -> candidate.context().player().position())
+                .toList(),
+            frame.observedBefore().position(),
+            frame.observedAfter().position(),
+            true);
+      }
       if (!advantage.evaluated()) continue;
 
       double horizontal = advantage.accumulatedHorizontal();
@@ -840,8 +854,19 @@ public final class AccuracyChecks {
     for (Packets.RawPacket packet : packets) {
       if (!(packet.packet() instanceof Packets.VehicleMove vehicle)) continue;
       PredictionFrame frame = frameAt(frames, packet.sequence());
-      if (frame == null || frame.uncertaintySources().isEmpty() == false
+      if (frame == null
+          || !frame.uncertaintySources().isEmpty()
           || frame.predictedAfter().isEmpty()) {
+        if (state.previousVehiclePosition != null) {
+          double displacement = horizontalDistance(state.previousVehiclePosition, vehicle.position());
+          if (displacement >= 1.0) {
+            findings.add(uncertain(playerId, frame, "Vehicle",
+                String.format(Locale.ROOT,
+                    "vehicle claim moved %.3f blocks without a causally complete vehicle prediction frame",
+                    displacement),
+                Math.min(1.0, displacement / 4.0)));
+          }
+        }
         state.previousVehiclePosition = vehicle.position();
         state.previousVehicleNanos = packet.receivedNanos();
         continue;
