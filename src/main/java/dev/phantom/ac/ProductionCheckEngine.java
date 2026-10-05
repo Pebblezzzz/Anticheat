@@ -544,6 +544,7 @@ public record Result(Accumulator state, Optional<Finding> alert, Optional<Findin
     }
 
     findings.addAll(analyzeMovementAnomalies(playerId, movement.frames()));
+    findings.addAll(AccuracyChecks.analyze(playerId, ordered, movement.frames()));
 
     return new Report(findings);
   }
