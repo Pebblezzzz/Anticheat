@@ -107,7 +107,7 @@ class AccuracyChecksTest {
 
     assertTrue(findings.stream().anyMatch(f ->
         f.rule().equals("Autoclicker")
-            && f.verdict() == ProductionCheckEngine.VerdICT.IMPOSSIBLE),
+            && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
         () -> findings.toString());
   }
 
@@ -127,7 +127,7 @@ class AccuracyChecksTest {
 
     assertTrue(findings.stream().anyMatch(f ->
         f.rule().equals("Autoclicker")
-            && f.verdict() == ProductionCheckEngine.VerdICT.IMPOSSIBLE),
+            && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
         () -> findings.toString());
   }
 
@@ -147,7 +147,7 @@ class AccuracyChecksTest {
 
     assertTrue(findings.stream().anyMatch(f ->
         f.rule().equals("Autoclicker")
-            && f.verdict() == ProductionCheckEngine.VerdICT.IMPOSSIBLE),
+            && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
         () -> findings.toString());
   }
 
@@ -167,7 +167,7 @@ class AccuracyChecksTest {
 
     assertTrue(findings.stream().anyMatch(f ->
         f.rule().equals("Autoclicker")
-            && f.verdict() == ProductionCheckEngine.VerdICT.IMPOSSIBLE),
+            && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
         () -> findings.toString());
   }
 
