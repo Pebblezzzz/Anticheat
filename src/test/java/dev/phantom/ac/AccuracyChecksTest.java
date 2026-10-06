@@ -310,12 +310,83 @@ class AccuracyChecksTest {
     }
 
     AccuracyChecks.State state = new AccuracyChecks.State();
+    packets = new ArrayList<>(withClientTicks(packets));
     var first = AccuracyChecks.analyze("p", packets, List.of(), state);
     assertTrue(first.stream().anyMatch(f -> f.rule().equals("Autoclicker")));
 
     var repeated = AccuracyChecks.analyze("p", packets, List.of(), state);
     assertTrue(repeated.stream().noneMatch(f -> f.rule().equals("Autoclicker")),
         () -> "overlapping batch re-flagged the same attacks: " + repeated);
+  }
+
+  @Test
+  void regularTransportCadenceWithoutClientTickCorroborationDoesNotProduceHardFinding() {
+    List<Packets.RawPacket> packets = new ArrayList<>();
+    long sequence = 1L;
+    long nanos = 0L;
+    long clientTick = 0L;
+    for (int i = 0; i < 120; i++) {
+      packets.add(new Packets.RawPacket(
+          sequence++, nanos,
+          new Packets.InteractEntity(7, Packets.InteractAction.ATTACK),
+          new Packets.CaptureProvenance(
+              "test-irregular-client-clock",
+              "CLIENT_TO_SERVER",
+              "InteractEntity",
+              null,
+              clientTick)));
+      nanos += 50_000_000L;
+      clientTick += (i % 7 == 6) ? 5L : 1L;
+    }
+
+    var findings = AccuracyChecks.analyze("p", packets, List.of());
+
+    assertTrue(findings.stream().noneMatch(f ->
+        f.rule().equals("Autoclicker")
+            && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
+        () -> findings.toString());
+  }
+
+  @Test
+  void longPauseDoesNotJoinTwoShortRegularClickRuns() {
+    List<Packets.RawPacket> packets = new ArrayList<>();
+    long sequence = 1L;
+    long nanos = 0L;
+
+    for (int i = 0; i < 40; i++) {
+      packets.add(new Packets.RawPacket(
+          sequence++, nanos,
+          new Packets.InteractEntity(7, Packets.InteractAction.ATTACK),
+          new Packets.CaptureProvenance(
+              "test-click",
+              "CLIENT_TO_SERVER",
+              "InteractEntity",
+              null,
+              nanos / 50_000_000L)));
+      nanos += 50_000_000L;
+    }
+
+    nanos += 1_000_000_000L;
+
+    for (int i = 0; i < 40; i++) {
+      packets.add(new Packets.RawPacket(
+          sequence++, nanos,
+          new Packets.InteractEntity(7, Packets.InteractAction.ATTACK),
+          new Packets.CaptureProvenance(
+              "test-click",
+              "CLIENT_TO_SERVER",
+              "InteractEntity",
+              null,
+              nanos / 50_000_000L)));
+      nanos += 50_000_000L;
+    }
+
+    var findings = AccuracyChecks.analyze("p", packets, List.of());
+
+    assertTrue(findings.stream().noneMatch(f ->
+        f.rule().equals("Autoclicker")
+            && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
+        () -> findings.toString());
   }
 
   @Test
