@@ -7,7 +7,7 @@ import static dev.phantom.ac.Maths.Vec3;
 public final class Packets {
   private Packets() {}
 
-  public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm, UseItem, ContainerState, InventorySlotState, SlotStateChange, BlockAck,
+  public sealed interface Packet extends Serializable permits Move, ClientInput, ClientTickEnd, Teleport, TeleportConfirm, UseItem, ArmAnimation, ContainerState, InventorySlotState, SlotStateChange, BlockAck,
       Velocity, ExplosionImpulse, Effect, Gamemode, PlayerContext, FlightToggle, ChunkData, ChunkUnload, BlockChange, ChunkStates, BlockStateChange, UnsupportedBlockStateChange,
       WorldTransactionSend, WorldTransactionAck, PaperMovementRejection, ClientBlockBreak, EntitySpawn, EntityMove, EntityDespawn,
       InteractEntity, BlockPlace, VehicleMove, HeldItemChange, EntityAction, DigAction, InventoryClick {
@@ -42,6 +42,13 @@ public final class Packets {
       if(sequence < 0) throw new IllegalArgumentException("sequence must be non-negative");
     }
   }
+  /** Client arm-swing animation, including left-clicks that hit empty air. */
+  public record ArmAnimation(int hand) implements Packet {
+    public ArmAnimation {
+      if (hand < 0) throw new IllegalArgumentException("hand must be non-negative");
+    }
+  }
+
   public record ContainerState(int windowId, int stateId, int slot, int itemCount, boolean carriedItemPresent) implements Packet {
     public ContainerState {
       if(windowId < -1) throw new IllegalArgumentException("windowId must be >= -1");
@@ -312,7 +319,7 @@ public final class Packets {
     public static String directionFor(Packet packet){
       if(packet instanceof Move||packet instanceof ClientInput||packet instanceof ClientTickEnd||packet instanceof TeleportConfirm
           ||packet instanceof WorldTransactionAck||packet instanceof FlightToggle||packet instanceof ClientBlockBreak
-          ||packet instanceof InteractEntity||packet instanceof BlockPlace||packet instanceof VehicleMove||packet instanceof UseItem||packet instanceof BlockAck
+          ||packet instanceof InteractEntity||packet instanceof BlockPlace||packet instanceof VehicleMove||packet instanceof UseItem||packet instanceof ArmAnimation||packet instanceof BlockAck
           ||packet instanceof HeldItemChange||packet instanceof EntityAction||packet instanceof DigAction
           ||packet instanceof InventoryClick||packet instanceof SlotStateChange)return "CLIENT_TO_SERVER";
       if(packet instanceof Teleport||packet instanceof Velocity||packet instanceof ExplosionImpulse
