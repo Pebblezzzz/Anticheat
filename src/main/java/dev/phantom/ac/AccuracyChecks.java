@@ -35,12 +35,15 @@ public final class AccuracyChecks {
   private static final double KNOCKBACK_MIN_HORIZONTAL = 0.28;
   private static final double KNOCKBACK_REQUIRED_RETAINED_FRACTION = 0.18;
 
-  private static final int AUTOCLICK_MIN_SAMPLES = 20;
+  private static final int AUTOCLICK_MIN_SAMPLES = 24;
   private static final int AUTOCLICK_ADVANCED_MIN_INTERVALS = 96;
-  private static final double AUTOCLICK_MAX_CV = 0.045;
-  private static final long AUTOCLICK_MAX_INTERVAL_NANOS = 150_000_000L;
-  private static final int AUTOCLICK_FINDING_ATTACK_GAP = 32;
-  private static final int AUTOCLICK_TEMPLATE_MAX_PERIOD = 16;
+  private static final int AUTOCLICK_HISTORY_SIZE = 768;
+  private static final int AUTOCLICK_TEMPLATE_MAX_PERIOD = 32;
+  private static final long AUTOCLICK_MIN_INTERVAL_NANOS = 8_000_000L;
+  private static final long AUTOCLICK_MAX_INTERVAL_NANOS = 300_000_000L;
+  private static final long AUTOCLICK_SWING_DEDUP_NANOS = 12_000_000L;
+  private static final int AUTOCLICK_FINDING_CLICK_GAP = 32;
+  private static final int AUTOCLICK_INVENTORY_MIN_SAMPLES = 40;
 
   /**
    * Persistent per-player evidence state. Validation is intentionally batched,
@@ -51,10 +54,10 @@ public final class AccuracyChecks {
     long lastTransactionPacketSequence = -1L;
     final Set<Short> openTransactions = new HashSet<>();
     final Set<Short> acknowledgedTransactions = new HashSet<>();
-    final ArrayDeque<Long> attackTimes = new ArrayDeque<>();
+    final ArrayDeque<ClickSample> autoclickSamples = new ArrayDeque<>();
     long lastAutoclickPacketSequence = -1L;
     long lastAutoclickFindingSequence = -1L;
-    int attacksSinceAutoclickFinding;
+    int clicksSinceAutoclickFinding;
     final ArrayDeque<Double> knockbackResiduals = new ArrayDeque<>();
     final ArrayDeque<Long> timerBoundaries = new ArrayDeque<>();
     long timerBalanceNanos;
@@ -82,7 +85,7 @@ public final class AccuracyChecks {
     boolean vehicleOffsetKnown;
 
     void prune(long currentSequence) {
-      while (attackTimes.size() > 192) attackTimes.removeFirst();
+      while (autoclickSamples.size() > AUTOCLICK_HISTORY_SIZE) autoclickSamples.removeFirst();
       while (timerBoundaries.size() > 32) timerBoundaries.removeFirst();
       actionsPerTick.keySet().removeIf(tick -> tick + 64 < currentSequence);
       placementsPerTick.keySet().removeIf(tick -> tick + 64 < currentSequence);
@@ -97,10 +100,10 @@ public final class AccuracyChecks {
       scaffoldConsecutive = 0;
       noFallTracking = false;
       airborneFrames = 0;
-      attackTimes.clear();
+      autoclickSamples.clear();
       lastAutoclickPacketSequence = -1L;
       lastAutoclickFindingSequence = -1L;
-      attacksSinceAutoclickFinding = 0;
+      clicksSinceAutoclickFinding = 0;
       knockbackResiduals.clear();
       timerBoundaries.clear();
       actionsPerTick.clear();
@@ -638,170 +641,377 @@ public final class AccuracyChecks {
       List<Packets.RawPacket> packets,
       Map<Long, PredictionFrame> frames,
       State state) {
-    int newAttacks = 0;
-    long latestAttackSequence = -1L;
+    List<ClickSample> newSamples = new ArrayList<>();
 
     for (Packets.RawPacket packet : packets) {
-      if (!(packet.packet() instanceof Packets.InteractEntity attack)
-          || attack.action() != Packets.InteractAction.ATTACK
-          || packet.sequence() <= state.lastAutoclickPacketSequence) {
+      if (packet.sequence() <= state.lastAutoclickPacketSequence) continue;
+      ClickSample sample = autoclickSample(packet);
+      if (sample == null) continue;
+
+      state.autoclickSamples.addLast(sample);
+      state.lastAutoclickPacketSequence = packet.sequence();
+      state.clicksSinceAutoclickFinding++;
+      newSamples.add(sample);
+    }
+
+    while (state.autoclickSamples.size() > AUTOCLICK_HISTORY_SIZE) {
+      state.autoclickSamples.removeFirst();
+    }
+
+    if (newSamples.isEmpty()) return List.of();
+
+    List<ClickSample> all = List.copyOf(state.autoclickSamples);
+    List<ClickSample> left = canonicalLeftClicks(all);
+    List<ClickSample> right = canonicalRightClicks(all);
+    List<ClickSample> inventory = canonicalInventoryClicks(all);
+
+    ClickEvidence leftEvidence = analyzeClickStream(left, AUTOCLICK_MIN_SAMPLES);
+    ClickEvidence rightEvidence = analyzeClickStream(right, AUTOCLICK_MIN_SAMPLES);
+    ClickEvidence inventoryEvidence =
+        analyzeClickStream(inventory, AUTOCLICK_INVENTORY_MIN_SAMPLES);
+
+    ClickEvidence best = strongestEvidence(leftEvidence, rightEvidence, inventoryEvidence);
+    if (!best.detected() || best.latestSequence() < 0L) return List.of();
+
+    boolean initialFinding = state.lastAutoclickFindingSequence < 0L;
+    boolean cooldownSatisfied =
+        initialFinding || state.clicksSinceAutoclickFinding >= AUTOCLICK_FINDING_CLICK_GAP;
+    if (!cooldownSatisfied) return List.of();
+
+    PredictionFrame frame = frameAt(frames, best.latestSequence());
+    state.lastAutoclickFindingSequence = best.latestSequence();
+    state.clicksSinceAutoclickFinding = 0;
+
+    String reason = String.format(Locale.ROOT,
+        "%s click stream matches an automated timing fingerprint "
+            + "(n=%d, rate=%.2f cps, mean=%.1fms, cv=%.4f, mad=%.4f, "
+            + "grid=%d, transitionEntropy=%.3f, template=%d/%.4f, windows=%d)",
+        best.kind(),
+        best.sampleCount(),
+        best.cps(),
+        best.meanNanos() / 1_000_000.0,
+        best.cv(),
+        best.madRatio(),
+        best.timingBuckets(),
+        best.transitionEntropy(),
+        best.templatePeriod(),
+        best.templateError(),
+        best.windowAgreement());
+
+    return List.of(hard(
+        playerId, frame, "Autoclicker", reason, best.severity()));
+  }
+
+  private static ClickSample autoclickSample(Packets.RawPacket packet) {
+    Packets.Packet value = packet.packet();
+
+    if (value instanceof Packets.InteractEntity interaction) {
+      return new ClickSample(
+          packet.sequence(),
+          packet.receivedNanos(),
+          interaction.action() == Packets.InteractAction.ATTACK
+              ? ClickKind.LEFT_COMBAT
+              : ClickKind.RIGHT_ENTITY);
+    }
+
+    if (value instanceof Packets.ArmAnimation) {
+      return new ClickSample(packet.sequence(), packet.receivedNanos(), ClickKind.SWING);
+    }
+
+    if (value instanceof Packets.BlockPlace) {
+      return new ClickSample(packet.sequence(), packet.receivedNanos(), ClickKind.RIGHT_BLOCK);
+    }
+
+    if (value instanceof Packets.UseItem) {
+      return new ClickSample(packet.sequence(), packet.receivedNanos(), ClickKind.RIGHT_USE);
+    }
+
+    if (value instanceof Packets.DigAction dig
+        && "STARTED_DIGGING".equals(dig.action())) {
+      return new ClickSample(packet.sequence(), packet.receivedNanos(), ClickKind.LEFT_BLOCK);
+    }
+
+    if (value instanceof Packets.InventoryClick) {
+      return new ClickSample(packet.sequence(), packet.receivedNanos(), ClickKind.INVENTORY);
+    }
+
+    return null;
+  }
+
+  private static List<ClickSample> canonicalLeftClicks(List<ClickSample> all) {
+    List<ClickSample> candidates = all.stream()
+        .filter(sample -> sample.kind() == ClickKind.LEFT_COMBAT
+            || sample.kind() == ClickKind.LEFT_BLOCK
+            || sample.kind() == ClickKind.SWING)
+        .sorted(Comparator.comparingLong(ClickSample::sequence))
+        .toList();
+
+    List<ClickSample> result = new ArrayList<>();
+    for (ClickSample sample : candidates) {
+      if (sample.kind() == ClickKind.SWING) {
+        if (hasNearbyRightClick(all, sample, AUTOCLICK_SWING_DEDUP_NANOS)
+            || hasNearbyLeftAction(candidates, sample, AUTOCLICK_SWING_DEDUP_NANOS)) {
+          continue;
+        }
+      }
+      if (!result.isEmpty()
+          && sample.nanos() - result.get(result.size() - 1).nanos()
+              <= AUTOCLICK_MIN_INTERVAL_NANOS
+          && sample.kind() == ClickKind.SWING) {
         continue;
       }
-
-      state.attackTimes.addLast(packet.receivedNanos());
-      state.lastAutoclickPacketSequence = packet.sequence();
-      latestAttackSequence = packet.sequence();
-      state.attacksSinceAutoclickFinding++;
-      newAttacks++;
+      result.add(new ClickSample(sample.sequence(), sample.nanos(), ClickKind.LEFT));
     }
+    return List.copyOf(result);
+  }
 
-    while (state.attackTimes.size() > 192) state.attackTimes.removeFirst();
-    if (newAttacks == 0 || state.attackTimes.size() < AUTOCLICK_MIN_SAMPLES + 1) {
-      return List.of();
+  private static List<ClickSample> canonicalRightClicks(List<ClickSample> all) {
+    List<ClickSample> candidates = all.stream()
+        .filter(sample -> sample.kind() == ClickKind.RIGHT_ENTITY
+            || sample.kind() == ClickKind.RIGHT_BLOCK
+            || sample.kind() == ClickKind.RIGHT_USE)
+        .sorted(Comparator.comparingLong(ClickSample::sequence))
+        .toList();
+
+    List<ClickSample> result = new ArrayList<>();
+    for (ClickSample sample : candidates) {
+      if (!result.isEmpty()
+          && sample.nanos() - result.get(result.size() - 1).nanos()
+              <= AUTOCLICK_SWING_DEDUP_NANOS) {
+        continue;
+      }
+      result.add(new ClickSample(sample.sequence(), sample.nanos(), ClickKind.RIGHT));
     }
+    return List.copyOf(result);
+  }
 
-    List<Long> attacks = List.copyOf(state.attackTimes);
+  private static List<ClickSample> canonicalInventoryClicks(List<ClickSample> all) {
+    return all.stream()
+        .filter(sample -> sample.kind() == ClickKind.INVENTORY)
+        .sorted(Comparator.comparingLong(ClickSample::sequence))
+        .toList();
+  }
+
+  private static boolean hasNearbyRightClick(
+      List<ClickSample> all, ClickSample target, long windowNanos) {
+    for (ClickSample sample : all) {
+      if (!sample.kind().rightSource()) continue;
+      long delta = Math.abs(sample.nanos() - target.nanos());
+      if (delta <= windowNanos) return true;
+      if (sample.nanos() > target.nanos() + windowNanos) break;
+    }
+    return false;
+  }
+
+  private static boolean hasNearbyLeftAction(
+      List<ClickSample> leftCandidates, ClickSample target, long windowNanos) {
+    for (ClickSample sample : leftCandidates) {
+      if (sample.kind() == ClickKind.SWING) continue;
+      long delta = Math.abs(sample.nanos() - target.nanos());
+      if (delta <= windowNanos) return true;
+      if (sample.nanos() > target.nanos() + windowNanos) break;
+    }
+    return false;
+  }
+
+  private static ClickEvidence strongestEvidence(ClickEvidence... evidences) {
+    return Arrays.stream(evidences)
+        .filter(ClickEvidence::detected)
+        .max(Comparator.comparingDouble(ClickEvidence::severity))
+        .orElse(ClickEvidence.none());
+  }
+
+  private static ClickEvidence analyzeClickStream(
+      List<ClickSample> samples, int minimumSamples) {
+    if (samples.size() < minimumSamples + 1) return ClickEvidence.none();
+
     List<Long> intervals = new ArrayList<>();
-    for (int i = Math.max(1, attacks.size() - 96); i < attacks.size(); i++) {
-      long delta = attacks.get(i) - attacks.get(i - 1);
-      if (delta > 0L && delta <= AUTOCLICK_MAX_INTERVAL_NANOS) intervals.add(delta);
+    long latestSequence = samples.get(samples.size() - 1).sequence();
+    for (int i = 1; i < samples.size(); i++) {
+      long delta = samples.get(i).nanos() - samples.get(i - 1).nanos();
+      if (delta >= AUTOCLICK_MIN_INTERVAL_NANOS
+          && delta <= AUTOCLICK_MAX_INTERVAL_NANOS) {
+        intervals.add(delta);
+      }
     }
-    if (intervals.size() < AUTOCLICK_MIN_SAMPLES * 2) return List.of();
 
-    double mean = intervals.stream().mapToLong(Long::longValue).average().orElse(0.0);
-    if (mean <= 0.0) return List.of();
+    if (intervals.size() < minimumSamples) return ClickEvidence.none();
+
+    double mean = intervals.stream()
+        .mapToLong(Long::longValue)
+        .average()
+        .orElse(0.0);
+    if (!Double.isFinite(mean) || mean <= 0.0) return ClickEvidence.none();
+
+    long[] sorted = intervals.stream().mapToLong(Long::longValue).sorted().toArray();
+    double median = percentile(sorted, 0.50);
+    double madRatio = medianAbsoluteDeviation(sorted, median) / Math.max(1.0, median);
 
     double variance = 0.0;
     double meanAbsStep = 0.0;
     for (int i = 0; i < intervals.size(); i++) {
       double d = intervals.get(i) - mean;
       variance += d * d;
-      if (i > 0) meanAbsStep += Math.abs(intervals.get(i) - intervals.get(i - 1));
+      if (i > 0) {
+        meanAbsStep += Math.abs(intervals.get(i) - intervals.get(i - 1));
+      }
     }
-    double cv = Math.sqrt(variance / intervals.size()) / mean;
-    double normalizedMeanAbsStep =
-        intervals.size() <= 1 ? Double.POSITIVE_INFINITY
-            : (meanAbsStep / (intervals.size() - 1)) / mean;
 
-    long[] buckets = intervals.stream()
-        .mapToLong(v -> v / 5_000_000L)
-        .distinct()
-        .sorted()
-        .toArray();
+    double cv = Math.sqrt(variance / intervals.size()) / mean;
+    double normalizedMeanAbsStep = intervals.size() <= 1
+        ? Double.POSITIVE_INFINITY
+        : (meanAbsStep / (intervals.size() - 1)) / mean;
+
+    int timingBuckets = timingBucketCount(intervals);
+    double transitionEntropy = transitionEntropy(intervals);
+    TemplateFingerprint template = bestTemplateFingerprint(intervals);
 
     boolean mechanical =
         cv < 0.030
+            && madRatio < 0.020
             && normalizedMeanAbsStep < 0.045
-            && buckets.length <= 8;
+            && timingBuckets <= 8;
 
-    /*
-     * Advanced signal: look for a repeating interval template rather than
-     * only "low variance". Humanized clickers commonly add bounded jitter to
-     * a fixed sequence. A real player may click quickly, but sustaining the
-     * same short timing template across three independent windows is much
-     * harder to explain without an automated scheduler.
-     */
-    PatternSignature pattern = intervals.size() >= AUTOCLICK_ADVANCED_MIN_INTERVALS
-        ? analyzeAutoclickPattern(intervals)
-        : PatternSignature.none();
+    boolean quantizedDeterministic =
+        cv < 0.065
+            && madRatio < 0.045
+            && timingBuckets <= 14
+            && transitionEntropy < 0.42
+            && template.period() >= 2
+            && template.error() < 0.045
+            && template.windowAgreement() >= 3;
 
-    boolean heavilyHumanizedButPeriodic =
-        cv < AUTOCLICK_MAX_CV
-            && normalizedMeanAbsStep < 0.060
-            && buckets.length <= 5;
+    boolean humanizedTemplate =
+        intervals.size() >= AUTOCLICK_ADVANCED_MIN_INTERVALS
+            && cv < 0.100
+            && madRatio < 0.065
+            && transitionEntropy < 0.58
+            && template.period() >= 2
+            && template.error() < 0.035
+            && template.windowAgreement() == 3;
 
-    boolean advancedPeriodic =
-        pattern.bestPeriod() >= 2
-            && pattern.bestPeriod() <= AUTOCLICK_TEMPLATE_MAX_PERIOD
-            && pattern.bestPeriodError() < 0.030
-            && pattern.windowAgreement() == 3
-            && pattern.timingBuckets() <= 28
-            && pattern.blockMeanCv() < 0.055
-            && mean < 145_000_000L;
+    boolean repeatedPhase =
+        intervals.size() >= AUTOCLICK_ADVANCED_MIN_INTERVALS
+            && cv < 0.120
+            && transitionEntropy < 0.68
+            && template.period() >= 2
+            && template.error() < 0.050
+            && template.windowAgreement() == 3
+            && timingBuckets <= 32;
 
-    boolean strong = mechanical || heavilyHumanizedButPeriodic || advancedPeriodic;
-    if (!strong || latestAttackSequence < 0L) return List.of();
+    boolean inventoryStrong =
+        samples.get(0).kind() == ClickKind.INVENTORY
+            && intervals.size() >= AUTOCLICK_INVENTORY_MIN_SAMPLES
+            && (mechanical || quantizedDeterministic || humanizedTemplate);
 
-    boolean initialFinding = state.lastAutoclickFindingSequence < 0L;
-    boolean cooldownSatisfied =
-        initialFinding || state.attacksSinceAutoclickFinding >= AUTOCLICK_FINDING_ATTACK_GAP;
-    if (!cooldownSatisfied) return List.of();
+    boolean detected =
+        mechanical
+            || quantizedDeterministic
+            || humanizedTemplate
+            || repeatedPhase
+            || inventoryStrong;
 
-    PredictionFrame frame = frameAt(frames, latestAttackSequence);
+    if (!detected) return ClickEvidence.none();
+
     double severity;
-    String reason;
-    if (advancedPeriodic && !mechanical) {
-      severity = 0.95;
-      reason = String.format(Locale.ROOT,
-          "attack timing repeated a %d-sample template across three windows "
-              + "(n=%d, mean=%.1fms, cv=%.4f, templateError=%.4f, timingBuckets=%d)",
-          pattern.bestPeriod(), intervals.size(), mean / 1_000_000.0, cv,
-          pattern.bestPeriodError(), pattern.timingBuckets());
-    } else if (mechanical) {
-      severity = 1.0;
-      reason = String.format(Locale.ROOT,
-          "attack timing was highly periodic (n=%d, mean=%.1fms, cv=%.4f, step=%.4f, timingBuckets=%d)",
-          intervals.size(), mean / 1_000_000.0, cv, normalizedMeanAbsStep, buckets.length);
-    } else {
-      severity = 0.75;
-      reason = String.format(Locale.ROOT,
-          "attack timing was highly periodic (n=%d, mean=%.1fms, cv=%.4f, step=%.4f, timingBuckets=%d)",
-          intervals.size(), mean / 1_000_000.0, cv, normalizedMeanAbsStep, buckets.length);
-    }
+    if (mechanical) severity = 1.0;
+    else if (humanizedTemplate) severity = 0.97;
+    else if (quantizedDeterministic) severity = 0.95;
+    else if (repeatedPhase) severity = 0.93;
+    else severity = 0.95;
 
-    state.lastAutoclickFindingSequence = latestAttackSequence;
-    state.attacksSinceAutoclickFinding = 0;
-    return List.of(hard(playerId, frame, "Autoclicker", reason, severity));
+    return new ClickEvidence(
+        true,
+        canonicalKindLabel(samples),
+        samples.size(),
+        latestSequence,
+        1_000_000_000.0 / mean,
+        mean,
+        cv,
+        madRatio,
+        timingBuckets,
+        transitionEntropy,
+        template.period(),
+        template.error(),
+        template.windowAgreement(),
+        severity);
   }
 
-  private static PatternSignature analyzeAutoclickPattern(List<Long> intervals) {
+  private static String canonicalKindLabel(List<ClickSample> samples) {
+    return switch (samples.get(0).kind()) {
+      case LEFT, LEFT_COMBAT, LEFT_BLOCK, SWING -> "left";
+      case RIGHT, RIGHT_ENTITY, RIGHT_BLOCK, RIGHT_USE -> "right";
+      case INVENTORY -> "inventory";
+    };
+  }
+
+  private static int timingBucketCount(List<Long> intervals) {
+    return (int) intervals.stream()
+        .mapToLong(value -> Math.round(value / 2_000_000.0))
+        .distinct()
+        .count();
+  }
+
+  private static double transitionEntropy(List<Long> intervals) {
+    if (intervals.size() < 3) return Double.POSITIVE_INFINITY;
+
+    Map<Long, Integer> transitions = new HashMap<>();
+    for (int i = 1; i < intervals.size(); i++) {
+      long left = Math.round(intervals.get(i - 1) / 2_000_000.0);
+      long right = Math.round(intervals.get(i) / 2_000_000.0);
+      long key = (left << 32) ^ (right & 0xffffffffL);
+      transitions.merge(key, 1, Integer::sum);
+    }
+
+    double total = intervals.size() - 1.0;
+    double entropy = 0.0;
+    for (int count : transitions.values()) {
+      double probability = count / total;
+      entropy -= probability * Math.log(probability);
+    }
+
+    double maxEntropy = Math.log(Math.max(2.0, transitions.size()));
+    return maxEntropy <= 0.0 ? 0.0 : entropy / maxEntropy;
+  }
+
+  private static TemplateFingerprint bestTemplateFingerprint(List<Long> intervals) {
     int bestPeriod = -1;
-    double bestPeriodError = Double.POSITIVE_INFINITY;
+    double bestError = Double.POSITIVE_INFINITY;
 
     for (int period = 2; period <= AUTOCLICK_TEMPLATE_MAX_PERIOD; period++) {
-      if (intervals.size() <= period) break;
-      double normalized = templateError(intervals, period);
-      if (normalized < bestPeriodError) {
-        bestPeriodError = normalized;
+      if (intervals.size() <= period * 2) break;
+      double error = templateError(intervals, period);
+      if (error < bestError) {
+        bestError = error;
         bestPeriod = period;
       }
     }
 
-    int windowAgreement = 0;
-    int windowSize = AUTOCLICK_ADVANCED_MIN_INTERVALS / 3;
+    if (bestPeriod < 0) return TemplateFingerprint.none();
+
+    int windowSize = intervals.size() / 3;
+    int agreement = 0;
     for (int window = 0; window < 3; window++) {
       int from = window * windowSize;
-      int to = Math.min(intervals.size(), from + windowSize);
+      int to = window == 2 ? intervals.size() : from + windowSize;
       List<Long> slice = intervals.subList(from, to);
       int period = bestTemplatePeriod(slice);
-      if (period == bestPeriod && templateError(slice, period) < 0.045) {
-        windowAgreement++;
+      if (period == bestPeriod && templateError(slice, period) < 0.055) {
+        agreement++;
       }
     }
 
-    double blockMeanCv = blockMeanCoefficientOfVariation(intervals);
-
-    int timingBuckets = (int) intervals.stream()
-        .mapToLong(v -> Math.round(v / 2_000_000.0))
-        .distinct()
-        .count();
-
-    return new PatternSignature(
-        bestPeriod,
-        bestPeriodError,
-        windowAgreement,
-        timingBuckets,
-        blockMeanCv);
+    return new TemplateFingerprint(bestPeriod, bestError, agreement);
   }
 
   private static int bestTemplatePeriod(List<Long> intervals) {
     int bestPeriod = -1;
     double bestError = Double.POSITIVE_INFINITY;
     for (int period = 2; period <= AUTOCLICK_TEMPLATE_MAX_PERIOD; period++) {
-      if (intervals.size() <= period) break;
-      double normalized = templateError(intervals, period);
-      if (normalized < bestError) {
-        bestError = normalized;
+      if (intervals.size() <= period * 2) break;
+      double error = templateError(intervals, period);
+      if (error < bestError) {
+        bestError = error;
         bestPeriod = period;
       }
     }
@@ -810,49 +1020,108 @@ public final class AccuracyChecks {
 
   private static double templateError(List<Long> intervals, int period) {
     if (period < 2 || intervals.size() <= period) return Double.POSITIVE_INFINITY;
+
     double mean = intervals.stream().mapToLong(Long::longValue).average().orElse(1.0);
     if (mean <= 0.0) return Double.POSITIVE_INFINITY;
-    double error = 0.0;
+
+    double absoluteError = 0.0;
     int count = 0;
     for (int i = period; i < intervals.size(); i++) {
-      error += Math.abs(intervals.get(i) - intervals.get(i - period));
+      absoluteError += Math.abs(intervals.get(i) - intervals.get(i - period));
       count++;
     }
-    return count == 0 ? Double.POSITIVE_INFINITY : (error / count) / mean;
+    return count == 0 ? Double.POSITIVE_INFINITY : (absoluteError / count) / mean;
   }
 
-  private static double blockMeanCoefficientOfVariation(List<Long> intervals) {
-    if (intervals.size() < 3) return Double.POSITIVE_INFINITY;
-    int blockSize = intervals.size() / 3;
-    double[] means = new double[3];
-
-    for (int block = 0; block < 3; block++) {
-      int from = block * blockSize;
-      int to = block == 2 ? intervals.size() : from + blockSize;
-      long sum = 0L;
-      for (int i = from; i < to; i++) sum += intervals.get(i);
-      means[block] = (double) sum / Math.max(1, to - from);
+  private static double medianAbsoluteDeviation(long[] sorted, double median) {
+    double[] deviations = new double[sorted.length];
+    for (int i = 0; i < sorted.length; i++) {
+      deviations[i] = Math.abs(sorted[i] - median);
     }
-
-    double mean = Arrays.stream(means).average().orElse(0.0);
-    if (mean <= 0.0) return Double.POSITIVE_INFINITY;
-    double variance = 0.0;
-    for (double value : means) {
-      double delta = value - mean;
-      variance += delta * delta;
-    }
-    return Math.sqrt(variance / means.length) / mean;
+    Arrays.sort(deviations);
+    return percentile(deviations, 0.50);
   }
 
-  private record PatternSignature(
-      int bestPeriod,
-      double bestPeriodError,
-      int windowAgreement,
+  private static double percentile(long[] sorted, double quantile) {
+    if (sorted.length == 0) return Double.NaN;
+    double position = Math.max(0.0, Math.min(1.0, quantile)) * (sorted.length - 1);
+    int lower = (int) Math.floor(position);
+    int upper = (int) Math.ceil(position);
+    if (lower == upper) return sorted[lower];
+    double weight = position - lower;
+    return sorted[lower] + (sorted[upper] - sorted[lower]) * weight;
+  }
+
+  private static double percentile(double[] sorted, double quantile) {
+    if (sorted.length == 0) return Double.NaN;
+    double position = Math.max(0.0, Math.min(1.0, quantile)) * (sorted.length - 1);
+    int lower = (int) Math.floor(position);
+    int upper = (int) Math.ceil(position);
+    if (lower == upper) return sorted[lower];
+    double weight = position - lower;
+    return sorted[lower] + (sorted[upper] - sorted[lower]) * weight;
+  }
+
+  private enum ClickKind {
+    LEFT(true, false, "left"),
+    RIGHT(false, true, "right"),
+    INVENTORY(false, false, "inventory"),
+    LEFT_COMBAT(true, false, "left-combat"),
+    LEFT_BLOCK(true, false, "left-block"),
+    SWING(true, false, "swing"),
+    RIGHT_ENTITY(false, true, "right-entity"),
+    RIGHT_BLOCK(false, true, "right-block"),
+    RIGHT_USE(false, true, "right-use");
+
+    private final boolean leftSource;
+    private final boolean rightSource;
+    private final String label;
+
+    ClickKind(boolean leftSource, boolean rightSource, String label) {
+      this.leftSource = leftSource;
+      this.rightSource = rightSource;
+      this.label = label;
+    }
+
+    boolean rightSource() {
+      return rightSource;
+    }
+
+    String label() {
+      return label;
+    }
+  }
+
+  private record ClickSample(long sequence, long nanos, ClickKind kind) {}
+
+  private record TemplateFingerprint(int period, double error, int windowAgreement) {
+    static TemplateFingerprint none() {
+      return new TemplateFingerprint(-1, Double.POSITIVE_INFINITY, 0);
+    }
+  }
+
+  private record ClickEvidence(
+      boolean detected,
+      String kind,
+      int sampleCount,
+      long latestSequence,
+      double cps,
+      double meanNanos,
+      double cv,
+      double madRatio,
       int timingBuckets,
-      double blockMeanCv) {
-    static PatternSignature none() {
-      return new PatternSignature(-1, Double.POSITIVE_INFINITY, 0, Integer.MAX_VALUE,
-          Double.POSITIVE_INFINITY);
+      double transitionEntropy,
+      int templatePeriod,
+      double templateError,
+      int windowAgreement,
+      double severity) {
+
+    static ClickEvidence none() {
+      return new ClickEvidence(
+          false, "unknown", 0, -1L, 0.0, 0.0,
+          Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY,
+          Integer.MAX_VALUE, Double.POSITIVE_INFINITY,
+          -1, Double.POSITIVE_INFINITY, 0, 0.0);
     }
   }
 
