@@ -4,6 +4,9 @@ alerts:
   broadcast: false
   print-to-console: true
   permission: phantom.alerts
+  # Compatibility mode for upgraded/legacy configs: force active alerts to 1:1.
+  # Set false to restore custom threshold:interval alert rules.
+  every-violation-alerts: true
   # Kept for configuration compatibility; Grim's active-VL alert model is not time-debounced.
   alert-interval-ticks: 0
   # VL added by each exhaustively-impossible observation.
