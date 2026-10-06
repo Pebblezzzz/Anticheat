@@ -71,6 +71,21 @@ class Phase8MovementValidationTest {
     assertEquals(21, result.evidence().firstInconsistentTick().orElseThrow());
     assertTrue(result.evidence().closestCandidate().isPresent());
     assertEquals(1, result.evidence().candidatesEliminated());
+
+    String reason = result.evidence().eliminationReason();
+    assertTrue(reason.startsWith("all exhaustively modeled legitimate candidates disagree"),
+        reason);
+    assertTrue(reason.contains("candidates=1"), reason);
+    assertTrue(reason.contains("mismatchFields=[POSITION]"), reason);
+    assertTrue(reason.contains("closestCandidate=#1@20"), reason);
+    assertTrue(reason.contains("positionDistance="), reason);
+    assertTrue(reason.contains("observedPos="), reason);
+    assertTrue(reason.contains("candidatePos="), reason);
+    assertTrue(reason.contains("deltaPos="), reason);
+    assertTrue(reason.contains("observedVel="), reason);
+    assertTrue(reason.contains("candidateVel="), reason);
+    assertTrue(reason.contains("deltaVel="), reason);
+    assertTrue(reason.contains("mismatchDetails=[position distance="), reason);
   }
 
   @Test void sneakEdgeEnvelopeIsLocalToEdgeConstrainedCandidates() {
