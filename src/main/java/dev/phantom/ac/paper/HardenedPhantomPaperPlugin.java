@@ -1623,9 +1623,10 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         long windowSeconds=Math.max(1L,
             group.getLong("remove-violations-after-seconds",fallbackWindowSeconds));
         try{
+          GrimAlertPolicy.CommandRule configuredAlert =
+              GrimAlertPolicy.CommandRule.parse(group.getString("alert","100:40"));
           GrimAlertPolicy.CommandRule alert=effectiveAlertRule(
-              everyViolationAlerts,
-              GrimAlertPolicy.CommandRule.parse(group.getString("alert","100:40")));
+              everyViolationAlerts, groupName, configuredAlert);
           GrimAlertPolicy.CommandRule log=GrimAlertPolicy.CommandRule.parse(
               group.getString("log","1:1"));
           groups.add(new GrimAlertPolicy.Group(
@@ -1654,6 +1655,22 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
 
     return new GrimAlertPolicy.Config(groups,fallbackAlert,fallbackLog,fallbackWindowMillis);
+  }
+
+  static GrimAlertPolicy.CommandRule effectiveAlertRule(
+      boolean everyViolationAlerts,
+      String groupName,
+      GrimAlertPolicy.CommandRule configured) {
+    /*
+     * Autoclicker evidence is a sustained statistical finding, not a single
+     * movement residual. When it is actually classified as impossible, staff
+     * should see the finding immediately. Keep this override for upgraded
+     * installations whose old config still contains Autoclicker: 20:40.
+     */
+    if ("Autoclicker".equalsIgnoreCase(groupName)) {
+      return GrimAlertPolicy.CommandRule.parse("1:1");
+    }
+    return effectiveAlertRule(everyViolationAlerts, configured);
   }
 
   static GrimAlertPolicy.CommandRule effectiveAlertRule(
