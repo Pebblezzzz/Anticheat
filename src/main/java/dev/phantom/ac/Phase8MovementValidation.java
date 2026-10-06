@@ -227,10 +227,16 @@ public final class Phase8MovementValidation {
 
     List<String> diagnostics = new ArrayList<>(comparison.reasons());
     if (timing.uncertain() && timingExhaustivelyModeled) diagnostics.add("Phase 7 timing uncertainty was exhaustively represented; no timing offset produced a matching candidate");
+
+    Optional<Candidate> closest = comparison.closestCandidates().stream().findFirst();
+    String detailedReason = impossibleReason(observed, reachable.candidates().size(),
+        comparison.matchingCandidates(), comparison, closest);
+    diagnostics.add(detailedReason);
+
     Evidence evidence = evidence(Verdict.IMPOSSIBLE, playerId, serverTick, prior, observed, world, worldReference, timing,
         inputAssumptions, reachable.candidates().size(), 0, reachable.candidates().size(),
-        "all exhaustively modeled legitimate candidates disagree with the observed movement state",
-        OptionalLong.of(serverTick), bestCandidate(reachable.candidates(), observed), diagnostics, uncertainty, replayReference);
+        detailedReason,
+        OptionalLong.of(serverTick), closest.map(Phase8MovementValidation::summary), diagnostics, uncertainty, replayReference);
     return new Result(Verdict.IMPOSSIBLE, evidence);
   }
 
@@ -298,6 +304,57 @@ public final class Phase8MovementValidation {
   private static Optional<CandidateSummary> bestMatchingCandidate(Set<Candidate> candidates, Observation observation) {
     return candidates.stream().filter(c -> matches(c.context().player(), observation))
         .sorted(Comparator.comparingLong(Candidate::id)).map(Phase8MovementValidation::summary).findFirst();
+  }
+
+  private static String impossibleReason(
+      Player observed,
+      int candidateCount,
+      int matchingCandidates,
+      Phase6Reachability.Evidence comparison,
+      Optional<Candidate> closest) {
+    StringBuilder reason = new StringBuilder(
+        "all exhaustively modeled legitimate candidates disagree with the observed movement state");
+    reason.append("; candidates=").append(candidateCount)
+        .append(" matching=").append(matchingCandidates)
+        .append(" mismatchFields=")
+        .append(comparison.mismatches().isEmpty()
+            ? "[]"
+            : comparison.mismatches().getFirst().dimensions());
+
+    if (closest.isEmpty()) {
+      reason.append("; closestCandidate=none");
+      return reason.toString();
+    }
+
+    Candidate candidate = closest.orElseThrow();
+    Player predicted = candidate.context().player();
+
+    reason.append("; closestCandidate=#").append(candidate.id())
+        .append("@").append(candidate.context().simulationTick())
+        .append(" positionDistance=")
+        .append(String.format(Locale.ROOT, "%.6f", distance(predicted.position(), observed.position())))
+        .append(" velocityDistance=")
+        .append(String.format(Locale.ROOT, "%.6f", distance(predicted.velocity(), observed.velocity())))
+        .append(" observedPos=").append(observed.position())
+        .append(" candidatePos=").append(predicted.position())
+        .append(" deltaPos=").append(delta(predicted.position(), observed.position()))
+        .append(" observedVel=").append(observed.velocity())
+        .append(" candidateVel=").append(predicted.velocity())
+        .append(" deltaVel=").append(delta(predicted.velocity(), observed.velocity()))
+        .append(" observedGround=").append(observed.onGround())
+        .append(" candidateGround=").append(predicted.onGround());
+
+    if (!comparison.mismatches().isEmpty()) {
+      reason.append(" mismatchDetails=").append(comparison.mismatches().getFirst().details());
+    }
+    return reason.toString();
+  }
+
+  private static Maths.Vec3 delta(Maths.Vec3 actual, Maths.Vec3 expected) {
+    return new Maths.Vec3(
+        actual.x() - expected.x(),
+        actual.y() - expected.y(),
+        actual.z() - expected.z());
   }
 
   private static Optional<CandidateSummary> bestCandidate(Set<Candidate> candidates, Player observed) {
