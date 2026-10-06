@@ -45,6 +45,7 @@ public final class AccuracyChecks {
    */
   public static final class State {
     long lastReceivedNanos = -1L;
+    long lastTransactionPacketSequence = -1L;
     final Set<Short> openTransactions = new HashSet<>();
     final Set<Short> acknowledgedTransactions = new HashSet<>();
     final ArrayDeque<Long> attackTimes = new ArrayDeque<>();
@@ -705,6 +706,11 @@ public final class AccuracyChecks {
     Map<Long, Integer> actionsPerTick = state.actionsPerTick;
 
     for (Packets.RawPacket packet : packets) {
+      if (packet.sequence() <= state.lastTransactionPacketSequence) {
+        continue;
+      }
+      state.lastTransactionPacketSequence = packet.sequence();
+
       if (state.lastReceivedNanos >= 0L && packet.receivedNanos() < state.lastReceivedNanos) {
         PredictionFrame frame = frameAt(frames, packet.sequence());
         findings.add(uncertain(playerId, frame, "PacketOrder",

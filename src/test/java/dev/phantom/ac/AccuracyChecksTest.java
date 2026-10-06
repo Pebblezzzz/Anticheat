@@ -23,6 +23,37 @@ class AccuracyChecksTest {
   }
 
   @Test
+  void repeatedValidationOfSameTransactionPacketDoesNotDuplicateFinding() {
+    AccuracyChecks.State state = new AccuracyChecks.State();
+
+    var send = new Packets.RawPacket(
+        1L, 1L, new Packets.WorldTransactionSend((short) -7));
+    var ack = new Packets.RawPacket(
+        2L, 2L, new Packets.WorldTransactionAck((short) -7));
+
+    var first = AccuracyChecks.analyze(
+        "p", List.of(send, ack), List.of(), state);
+    assertTrue(first.stream().noneMatch(f -> f.rule().equals("TransactionOrder")),
+        () -> first.toString());
+
+    var repeated = AccuracyChecks.analyze(
+        "p", List.of(ack), List.of(), state);
+    assertTrue(repeated.stream().noneMatch(f -> f.rule().equals("TransactionOrder")),
+        () -> repeated.toString());
+
+    var actualDuplicate = AccuracyChecks.analyze(
+        "p",
+        List.of(new Packets.RawPacket(
+            3L, 3L, new Packets.WorldTransactionAck((short) -7))),
+        List.of(),
+        state);
+    assertTrue(actualDuplicate.stream().anyMatch(f ->
+        f.rule().equals("TransactionOrder")
+            && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
+        () -> actualDuplicate.toString());
+  }
+
+  @Test
   void highlyPeriodicAttackIntervalsProduceAutoclickerFinding() {
     List<Packets.RawPacket> packets = new ArrayList<>();
     long sequence = 1L;
