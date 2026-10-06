@@ -330,18 +330,27 @@ public final class Phase8MovementValidation {
     Player predicted = candidate.context().player();
 
     reason.append("; closestCandidate=#").append(candidate.id())
-        .append("@").append(candidate.context().simulationTick())
-        .append(" positionDistance=")
-        .append(String.format(Locale.ROOT, "%.6f", distance(predicted.position(), observed.position())))
-        .append(" velocityDistance=")
-        .append(String.format(Locale.ROOT, "%.6f", distance(predicted.velocity(), observed.velocity())))
-        .append(" observedPos=").append(observed.position())
-        .append(" candidatePos=").append(predicted.position())
-        .append(" deltaPos=").append(delta(predicted.position(), observed.position()))
-        .append(" observedVel=").append(observed.velocity())
-        .append(" candidateVel=").append(predicted.velocity())
-        .append(" deltaVel=").append(delta(predicted.velocity(), observed.velocity()))
-        .append(" observedGround=").append(observed.onGround())
+        .append("@").append(candidate.context().simulationTick());
+
+    if (observed.position() != null && predicted.position() != null) {
+      reason.append(" positionDistance=")
+          .append(String.format(Locale.ROOT, "%.6f", distance(predicted.position(), observed.position())))
+          .append(" observedPos=").append(observed.position())
+          .append(" candidatePos=").append(predicted.position())
+          .append(" deltaPos=").append(delta(predicted.position(), observed.position()));
+    } else {
+      reason.append(" positionDistance=not-reported");
+    }
+
+    if (predicted.velocity() != null && observed.velocity() != null) {
+      reason.append(" velocityDistance=")
+          .append(String.format(Locale.ROOT, "%.6f", distance(predicted.velocity(), observed.velocity())))
+          .append(" observedVel=").append(observed.velocity())
+          .append(" candidateVel=").append(predicted.velocity())
+          .append(" deltaVel=").append(delta(predicted.velocity(), observed.velocity()));
+    }
+
+    reason.append(" observedGround=").append(observed.onGround())
         .append(" candidateGround=").append(predicted.onGround());
 
     if (!comparison.mismatches().isEmpty()) {
