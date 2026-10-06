@@ -114,6 +114,51 @@ class AccuracyChecksTest {
   }
 
   @Test
+  void humanizedPeriodicAttackTemplateProducesAutoclickerFinding() {
+    List<Packets.RawPacket> packets = new ArrayList<>();
+    long sequence = 1L;
+    long nanos = 0L;
+    long[] pattern = {
+        80_000_000L, 93_000_000L, 77_000_000L, 90_000_000L
+    };
+
+    for (int i = 0; i < 100; i++) {
+      packets.add(new Packets.RawPacket(
+          sequence++, nanos,
+          new Packets.InteractEntity(7, Packets.InteractAction.ATTACK)));
+      nanos += pattern[i % pattern.length];
+    }
+
+    var findings = AccuracyChecks.analyze("p", packets, List.of());
+
+    assertTrue(findings.stream().anyMatch(f ->
+        f.rule().equals("Autoclicker")
+            && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
+        () -> findings.toString());
+  }
+
+  @Test
+  void repeatedAutoclickerValidationBatchDoesNotDuplicateFinding() {
+    List<Packets.RawPacket> packets = new ArrayList<>();
+    long sequence = 1L;
+    long nanos = 0L;
+    for (int i = 0; i < 100; i++) {
+      packets.add(new Packets.RawPacket(
+          sequence++, nanos,
+          new Packets.InteractEntity(7, Packets.InteractAction.ATTACK)));
+      nanos += 80_000_000L;
+    }
+
+    AccuracyChecks.State state = new AccuracyChecks.State();
+    var first = AccuracyChecks.analyze("p", packets, List.of(), state);
+    assertTrue(first.stream().anyMatch(f -> f.rule().equals("Autoclicker")));
+
+    var repeated = AccuracyChecks.analyze("p", packets, List.of(), state);
+    assertTrue(repeated.stream().noneMatch(f -> f.rule().equals("Autoclicker")),
+        () -> "overlapping batch re-flagged the same attacks: " + repeated);
+  }
+
+  @Test
   void legitimateEntityActionsAreNotRejected() {
     List<String> actions = List.of(
         "LEAVE_BED",
