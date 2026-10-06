@@ -132,7 +132,8 @@ punishments:
       remove-violations-after-seconds: 300
       checks:
         - "Autoclicker"
-      alert: "20:40"
+      # Statistical autoclicker evidence is already sustained; alert immediately.
+      alert: "1:1"
       log: "1:1"
 
 debug:
