@@ -138,6 +138,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   private int validationBudget;
   private ProductionCheckEngine.Config productionCheckConfig;
   private boolean alertsEnabled,broadcastAlerts,printAlertsToConsole,setbacksEnabled,setbacksOnlyExhaustive;
+  private boolean everyViolationAlerts;
   private GrimAlertPolicy.Config alertPolicy;
   private String alertPermission;
   private int alertIntervalTicks;
@@ -590,6 +591,7 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     alertsEnabled=getConfig().getBoolean("alerts.enabled",true);
     broadcastAlerts=getConfig().getBoolean("alerts.broadcast",false);
     printAlertsToConsole=getConfig().getBoolean("alerts.print-to-console",true);
+    everyViolationAlerts=getConfig().getBoolean("alerts.every-violation-alerts",true);
     alertPermission=getConfig().getString("alerts.permission","phantom.alerts");
     alertIntervalTicks=Math.max(0,getConfig().getInt("alerts.alert-interval-ticks",2));
     violationIncrement=Math.max(0.000001,getConfig().getDouble("alerts.violation-increment",1.0));
@@ -601,7 +603,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     punishmentEnabled=getConfig().getBoolean("enforcement.punishment-enabled",false);
     enforcementOnlyExhaustive=getConfig().getBoolean("enforcement.only-when-exhaustive",true);
     permissionExempt=getConfig().getBoolean("enforcement.permission-exempt",true);
-    alertViolationThreshold=Math.max(0.000001,getConfig().getDouble("alerts.violation-alert-threshold",100.0));
+    double configuredAlertViolationThreshold=Math.max(
+        0.000001,getConfig().getDouble("alerts.violation-alert-threshold",100.0));
+    alertViolationThreshold=everyViolationAlerts?1.0:configuredAlertViolationThreshold;
     minimumSetbackViolationLevel=Math.max(0.0,getConfig().getDouble("enforcement.setback-violation-level",10.0));
     minimumKickViolationLevel=Math.max(0.0,getConfig().getDouble("enforcement.kick-violation-level",100.0));
     minimumPunishmentViolationLevel=Math.max(0.0,getConfig().getDouble("enforcement.punishment-violation-level",100.0));
@@ -612,7 +616,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     validationBudget=Math.max(1,getConfig().getInt("validation.candidate-budget",4096));
     productionCheckConfig=new ProductionCheckEngine.Config(
         getConfig().getBoolean("checks.enabled",true),
-        Math.max(0.000001,getConfig().getDouble("checks.alert-violation-threshold",100.0)),
+        everyViolationAlerts?1.0:Math.max(
+            0.000001,getConfig().getDouble("checks.alert-violation-threshold",100.0)),
         Math.max(1,getConfig().getInt("checks.reset-after-ticks",40)),
         Math.max(0,getConfig().getInt("checks.alert-debounce-ticks",20)),
         Math.max(1.0,getConfig().getDouble("checks.attack-reach",4.0)),
@@ -623,7 +628,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         violationIncrement,
         violationDecayPerTick,
         maximumViolationLevel,
-        Math.max(0.000001,getConfig().getDouble("checks.violation-alert-interval",40.0)),
+        everyViolationAlerts?1.0:Math.max(
+            0.000001,getConfig().getDouble("checks.violation-alert-interval",40.0)),
         alertPolicy);
     getServer().getPluginManager().registerEvents(this,this);
     PacketEvents.getAPI().getEventManager().registerListener(listener);
@@ -731,7 +737,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         new Phase8MovementValidation.Config(
             alertViolationThreshold, 0, alertsEnabled, true,
             violationIncrement, violationDecayPerTick, maximumViolationLevel,
-            Math.max(0.000001, getConfig().getDouble("alerts.violation-alert-interval",40.0)),
+            everyViolationAlerts?1.0:Math.max(
+            0.000001, getConfig().getDouble("alerts.violation-alert-interval",40.0)),
             alertPolicy),
         alertNowMillis);
     capture.accumulator=accumulated.state();
@@ -1462,7 +1469,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         new Phase8MovementValidation.Config(
             alertViolationThreshold, 0, alertsEnabled, true,
             violationIncrement, violationDecayPerTick, maximumViolationLevel,
-            Math.max(0.000001, getConfig().getDouble("alerts.violation-alert-interval",40.0)),
+            everyViolationAlerts?1.0:Math.max(
+            0.000001, getConfig().getDouble("alerts.violation-alert-interval",40.0)),
             alertPolicy);
 
     Phase8EnforcementPolicy.Config enforcementConfig =
@@ -1586,9 +1594,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     long fallbackWindowSeconds=Math.max(1L,
         getConfig().getLong("punishments.remove-violations-after-seconds",300L));
     long fallbackWindowMillis=fallbackWindowSeconds*1000L;
-    GrimAlertPolicy.CommandRule fallbackAlert=new GrimAlertPolicy.CommandRule(
-        Math.max(0.000001,getConfig().getDouble("alerts.violation-alert-threshold",100.0)),
-        Math.max(0.0,getConfig().getDouble("alerts.violation-alert-interval",40.0)));
+    GrimAlertPolicy.CommandRule fallbackAlert=effectiveAlertRule(
+        everyViolationAlerts,
+        new GrimAlertPolicy.CommandRule(
+            Math.max(0.000001,getConfig().getDouble("alerts.violation-alert-threshold",100.0)),
+            Math.max(0.0,getConfig().getDouble("alerts.violation-alert-interval",40.0))));
     GrimAlertPolicy.CommandRule fallbackLog=GrimAlertPolicy.CommandRule.parse("1:1");
 
     List<GrimAlertPolicy.Group> groups=new ArrayList<>();
@@ -1607,8 +1617,9 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         long windowSeconds=Math.max(1L,
             group.getLong("remove-violations-after-seconds",fallbackWindowSeconds));
         try{
-          GrimAlertPolicy.CommandRule alert=GrimAlertPolicy.CommandRule.parse(
-              group.getString("alert","100:40"));
+          GrimAlertPolicy.CommandRule alert=effectiveAlertRule(
+              everyViolationAlerts,
+              GrimAlertPolicy.CommandRule.parse(group.getString("alert","100:40")));
           GrimAlertPolicy.CommandRule log=GrimAlertPolicy.CommandRule.parse(
               group.getString("log","1:1"));
           groups.add(new GrimAlertPolicy.Group(
@@ -1637,6 +1648,14 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
     }
 
     return new GrimAlertPolicy.Config(groups,fallbackAlert,fallbackLog,fallbackWindowMillis);
+  }
+
+  static GrimAlertPolicy.CommandRule effectiveAlertRule(
+      boolean everyViolationAlerts,
+      GrimAlertPolicy.CommandRule configured) {
+    return everyViolationAlerts
+        ? GrimAlertPolicy.CommandRule.parse("1:1")
+        : configured;
   }
 
   private boolean setbackEnabled(UUID playerId){
