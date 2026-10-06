@@ -255,7 +255,10 @@ class Phase8MovementValidationTest {
     assertEquals("[PhantomAC] alice failed MOVEMENT_REACHABILITY (VL 1)", alert.message());
     assertEquals("[PhantomAC] Steve failed MOVEMENT_REACHABILITY (VL 1)", alert.serverMessage("Steve"));
     assertTrue(alert.debugMessage().contains("[PhantomAC][PHASE8] player=alice type=MOVEMENT result=IMPOSSIBLE"));
-    assertTrue(alert.debugMessage().contains("reason=all exhaustively modeled legitimate candidates disagree with the observed movement state"));
+    assertTrue(alert.debugMessage().contains("reason=all exhaustively modeled legitimate candidates disagree"));
+    assertTrue(alert.debugMessage().contains("closestCandidate=#1@20"));
+    assertTrue(alert.debugMessage().contains("deltaPos="));
+    assertTrue(alert.debugMessage().contains("mismatchDetails="));
     assertEquals("replay:40", alert.replayReference());
   }
 }
