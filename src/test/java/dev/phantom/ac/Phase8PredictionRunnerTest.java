@@ -702,8 +702,10 @@ class Phase8PredictionRunnerTest {
         0L);
 
     assertEquals(1, report.movementObservations(), report.results().toString());
-    assertEquals(Phase8MovementValidation.Verdict.UNCERTAIN,
+    assertEquals(Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getFirst().verdict(), report.results().toString());
+    assertTrue(report.results().getFirst().evidence().uncertaintySources().isEmpty(),
+        report.results().getFirst().toString());
     assertTrue(report.frames().getFirst().trace().stream()
         .anyMatch(line -> line.startsWith("GROUND_CLAIM_MISMATCH")),
         report.frames().toString());
@@ -757,17 +759,17 @@ class Phase8PredictionRunnerTest {
         0L);
 
     assertEquals(2, report.movementObservations(), report.results().toString());
-    assertTrue(
-        report.results().getLast().verdict()
-            != Phase8MovementValidation.Verdict.IMPOSSIBLE,
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getLast().verdict(),
         report.results().toString());
     assertTrue(
-        report.results().getLast().evidence().uncertaintySources().stream()
-            .anyMatch(reason -> reason.contains("client ground claim differs")),
+        report.results().getLast().evidence().uncertaintySources().isEmpty(),
         report.results().toString());
     assertTrue(
         report.frames().getLast().trace().stream()
-            .anyMatch(line -> line.startsWith("GROUND_CLAIM_SEPARATED bootstrapPhysicalGround=false")),
+            .anyMatch(line -> line.startsWith("GROUND_CLAIM_SEPARATED bootstrapPhysicalGround=false")
+                || line.startsWith("GROUND_CLAIM_MISMATCH")),
         report.frames().getLast().toString());
     assertTrue(
         report.frames().getLast().predictedAfter().stream()
@@ -836,12 +838,11 @@ class Phase8PredictionRunnerTest {
 
     assertEquals(2, report.movementObservations(), report.results().toString());
     assertEquals(
-        Phase8MovementValidation.Verdict.UNCERTAIN,
+        Phase8MovementValidation.Verdict.POSSIBLE,
         report.results().getFirst().verdict(),
         report.results().toString());
     assertTrue(
-        report.results().getFirst().evidence().uncertaintySources().stream()
-            .anyMatch(reason -> reason.contains("client ground claim differs")),
+        report.results().getFirst().evidence().uncertaintySources().isEmpty(),
         report.results().toString());
     assertTrue(
         report.results().getLast().verdict()
@@ -1083,6 +1084,97 @@ class Phase8PredictionRunnerTest {
         .anyMatch(line -> line.startsWith("BOOTSTRAP_LOCOMOTION_OPTIONS")
             && line.contains("alternatives=[MovementInputState[sprinting=false, sneaking=false], MovementInputState[sprinting=true, sneaking=false]]")),
         report.frames().toString());
+  }
+
+  @Test
+  void groundedJumpCanRecoverFromAirborneRetainedFrontier() {
+    Phase8PredictionRunner runner = new Phase8PredictionRunner(4096);
+    WorldSnapshot world = floorWorld();
+    Maths.Vec3 position = new Maths.Vec3(.5, 64.0, .5);
+
+    /*
+     * Model the false-flag shape from live captures: the retained frontier says
+     * the player is airborne, but the observed position is exactly on a known
+     * support surface and the next movement is a legitimate held-jump step.
+     */
+    Player airborneRoot = new Player(
+        position,
+        new Maths.Vec3(-0.19141793322346334, 0.42000854544344746, 0.12818165171214058),
+        0f, 0f, false, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.empty(),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
+
+    Simulation.AdvancedInput jumpInput =
+        new Simulation.AdvancedInput(1, 0, true, true, false);
+    Player groundedJumpStart = new Player(
+        position,
+        Maths.Vec3.ZERO,
+        0f, 0f, true, "survival", Map.of(),
+        OptionalInt.empty(), false, Optional.of(jumpInput),
+        Simulation.Attributes.DEFAULT, Pose.STANDING, State.Environment.DRY,
+        State.TickRange.exact(0), State.Provenance.UNKNOWN, Set.of());
+
+    Player expected = new Vanilla12111RichPhysics().step(
+        new Vanilla12111RichPhysics.Context(
+            0L,
+            groundedJumpStart,
+            jumpInput,
+            world,
+            Simulation.Environment.DRY,
+            groundedJumpStart.attributes(),
+            Phase5Mechanics.MovementEffects.NONE,
+            Pose.STANDING,
+            MovementEnvironment.dry(true, true, false),
+            false,
+            dev.phantom.ac.world.EntityCollisions.of(List.of())))
+        .state();
+
+    PlayerContext authority = new PlayerContext(
+        "survival",
+        airborneRoot.attributes(),
+        Map.of(),
+        Pose.STANDING,
+        MovementEnvironment.dry(false, false, false),
+        position,
+        airborneRoot.velocity(),
+        false, false, false, List.of());
+
+    Move movement = new Move(
+        expected.position(),
+        0f,
+        0f,
+        expected.onGround(),
+        1L);
+
+    var report = runner.process(
+        "grounded-jump-recovery",
+        List.of(
+            new RawPacket(1L, 10L, authority),
+            new RawPacket(2L, 20L, new ClientInput(
+                true, false, false, false, true, false, true)),
+            new RawPacket(3L, 30L, movement)),
+        world,
+        airborneRoot,
+        0L);
+
+    assertEquals(1, report.movementObservations(), report.toString());
+    assertEquals(
+        Phase8MovementValidation.Verdict.POSSIBLE,
+        report.results().getFirst().verdict(),
+        report.results().toString());
+    assertTrue(
+        report.frames().getFirst().trace().stream()
+            .anyMatch(line -> line.startsWith("GROUND_JUMP_RECOVERY")),
+        report.frames().getFirst().trace().toString());
+    assertTrue(
+        report.frames().getFirst().predictedAfter().stream()
+            .anyMatch(candidate ->
+                Math.abs(candidate.context().player().position().x() - expected.position().x()) <= 1.0E-9
+                    && Math.abs(candidate.context().player().position().y() - expected.position().y()) <= 1.0E-9
+                    && Math.abs(candidate.context().player().position().z() - expected.position().z()) <= 1.0E-9
+                    && !candidate.context().player().onGround()),
+        report.frames().getFirst().toString());
   }
 
   @Test
