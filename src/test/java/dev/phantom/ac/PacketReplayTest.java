@@ -59,7 +59,13 @@ class PacketReplayTest {
       new RawPacket(3,102,new Teleport(7,new Vec3(1,2,3),4,5,true,false,true,false,true)),
       new RawPacket(4,103,new TeleportConfirm(7)),new RawPacket(5,104,new Velocity(new Vec3(1,2,3))),
       new RawPacket(6,105,new Effect("minecraft:speed",2,false)),new RawPacket(7,106,new Gamemode("survival")),
-      new RawPacket(8,107,new ChunkData(chunk,Map.of(blockPos,World.Block.FULL))),new RawPacket(9,108,new ChunkUnload(chunk)),new RawPacket(10,109,new BlockChange(blockPos,World.Block.AIR)));
+      new RawPacket(8,107,new ChunkData(chunk,Map.of(blockPos,World.Block.FULL))),new RawPacket(9,108,new ChunkUnload(chunk)),new RawPacket(10,109,new BlockChange(blockPos,World.Block.AIR)),
+      new RawPacket(11,110,new ArmAnimation(0)),
+      new RawPacket(12,111,new InteractEntity(7,InteractAction.ATTACK)),
+      new RawPacket(13,112,new BlockPlace(new dev.phantom.ac.world.Pos(2,64,-4),1,new Vec3(.5,.75,.25),true,"minecraft:stone",16)),
+      new RawPacket(14,113,new UseItem(0,77,12f,-3f)),
+      new RawPacket(15,114,new InventoryClick(0,5,1,"PICKUP")),
+      new RawPacket(16,115,new DigAction("STARTED_DIGGING",new dev.phantom.ac.world.Pos(2,64,-4),88,.42,"minecraft:diamond_pickaxe",1)));
     var snapshot=timeline(raw);var codec=new Timeline.Codec();byte[] first=codec.encode(snapshot),second=codec.encode(snapshot);
     assertArrayEquals(first,second);assertEquals(snapshot,codec.decode(first));
   }

@@ -27,6 +27,7 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientHe
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientEntityAction;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientClickWindow;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientUseItem;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientAnimation;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientSlotStateChange;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetSlot;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerWindowItems;
@@ -225,6 +226,11 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
                 event.getPacketType().toString(),
                 authoritativeTick,
                 clientTick)));
+        processLivePacket(capture);
+      }else if(event.getPacketType()==PacketType.Play.Client.ANIMATION){
+        var animation=new WrapperPlayClientAnimation(event);
+        Packets.ArmAnimation packet=new Packets.ArmAnimation(animation.getHand().getId());
+        record(capture,packet);
         processLivePacket(capture);
       }else if(event.getPacketType()==PacketType.Play.Client.INTERACT_ENTITY){
         var interaction=new WrapperPlayClientInteractEntity(event);

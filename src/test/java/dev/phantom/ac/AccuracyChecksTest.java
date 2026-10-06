@@ -74,6 +74,127 @@ class AccuracyChecksTest {
   }
 
   @Test
+  void leftClickingAirProducesAutoclickerFinding() {
+    List<Packets.RawPacket> packets = new ArrayList<>();
+    long sequence = 1L;
+    long nanos = 0L;
+    for (int i = 0; i < 80; i++) {
+      packets.add(new Packets.RawPacket(
+          sequence++, nanos, new Packets.ArmAnimation(0)));
+      nanos += 50_000_000L;
+    }
+
+    var findings = AccuracyChecks.analyze("p", packets, List.of());
+
+    assertTrue(findings.stream().anyMatch(f ->
+        f.rule().equals("Autoclicker")
+            && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
+        () -> findings.toString());
+  }
+
+  @Test
+  void rightClickUseItemProducesAutoclickerFinding() {
+    List<Packets.RawPacket> packets = new ArrayList<>();
+    long sequence = 1L;
+    long nanos = 0L;
+    for (int i = 0; i < 70; i++) {
+      packets.add(new Packets.RawPacket(
+          sequence++, nanos, new Packets.UseItem(0, i + 1, 0f, 0f)));
+      nanos += 60_000_000L;
+    }
+
+    var findings = AccuracyChecks.analyze("p", packets, List.of());
+
+    assertTrue(findings.stream().anyMatch(f ->
+        f.rule().equals("Autoclicker")
+            && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
+        () -> findings.toString());
+  }
+
+  @Test
+  void rightClickBlockProducesAutoclickerFinding() {
+    List<Packets.RawPacket> packets = new ArrayList<>();
+    long sequence = 1L;
+    long nanos = 0L;
+    for (int i = 0; i < 70; i++) {
+      packets.add(new Packets.RawPacket(
+          sequence++, nanos,
+          new Packets.BlockPlace(new dev.phantom.ac.world.Pos(0, 64, i))));
+      nanos += 70_000_000L;
+    }
+
+    var findings = AccuracyChecks.analyze("p", packets, List.of());
+
+    assertTrue(findings.stream().anyMatch(f ->
+        f.rule().equals("Autoclicker")
+            && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
+        () -> findings.toString());
+  }
+
+  @Test
+  void rightClickEntityProducesAutoclickerFinding() {
+    List<Packets.RawPacket> packets = new ArrayList<>();
+    long sequence = 1L;
+    long nanos = 0L;
+    for (int i = 0; i < 70; i++) {
+      packets.add(new Packets.RawPacket(
+          sequence++, nanos,
+          new Packets.InteractEntity(7, Packets.InteractAction.INTERACT)));
+      nanos += 65_000_000L;
+    }
+
+    var findings = AccuracyChecks.analyze("p", packets, List.of());
+
+    assertTrue(findings.stream().anyMatch(f ->
+        f.rule().equals("Autoclicker")
+            && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
+        () -> findings.toString());
+  }
+
+  @Test
+  void inventoryAutoclickPatternProducesAutoclickerFinding() {
+    List<Packets.RawPacket> packets = new ArrayList<>();
+    long sequence = 1L;
+    long nanos = 0L;
+    for (int i = 0; i < 90; i++) {
+      packets.add(new Packets.RawPacket(
+          sequence++, nanos,
+          new Packets.InventoryClick(0, i % 9, 0, "PICKUP")));
+      nanos += 80_000_000L;
+    }
+
+    var findings = AccuracyChecks.analyze("p", packets, List.of());
+
+    assertTrue(findings.stream().anyMatch(f ->
+        f.rule().equals("Autoclicker")
+            && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
+        () -> findings.toString());
+  }
+
+  @Test
+  void rightClickArmSwingIsNotDoubleCountedAsLeftClick() {
+    List<Packets.RawPacket> packets = new ArrayList<>();
+    long sequence = 1L;
+    long nanos = 0L;
+    for (int i = 0; i < 60; i++) {
+      packets.add(new Packets.RawPacket(
+          sequence++, nanos, new Packets.ArmAnimation(0)));
+      packets.add(new Packets.RawPacket(
+          sequence++, nanos + 2_000_000L,
+          new Packets.UseItem(0, i + 1, 0f, 0f)));
+      nanos += 80_000_000L;
+    }
+
+    var findings = AccuracyChecks.analyze("p", packets, List.of());
+
+    assertTrue(findings.stream().anyMatch(f -> f.rule().equals("Autoclicker")),
+        () -> findings.toString());
+    assertTrue(findings.stream().noneMatch(f ->
+        f.rule().equals("Autoclicker") && f.reason().contains("left click stream")),
+        () -> "right-use activity was classified as left-click automation: " + findings);
+  }
+
+  @Test
   void transactionStateSurvivesValidationBatchBoundary() {
     AccuracyChecks.State state = new AccuracyChecks.State();
 
