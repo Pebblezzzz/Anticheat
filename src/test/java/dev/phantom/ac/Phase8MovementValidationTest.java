@@ -71,6 +71,21 @@ class Phase8MovementValidationTest {
     assertEquals(21, result.evidence().firstInconsistentTick().orElseThrow());
     assertTrue(result.evidence().closestCandidate().isPresent());
     assertEquals(1, result.evidence().candidatesEliminated());
+
+    String reason = result.evidence().eliminationReason();
+    assertTrue(reason.startsWith("all exhaustively modeled legitimate candidates disagree"),
+        reason);
+    assertTrue(reason.contains("candidates=1"), reason);
+    assertTrue(reason.contains("mismatchFields=[POSITION]"), reason);
+    assertTrue(reason.contains("closestCandidate=#1@20"), reason);
+    assertTrue(reason.contains("positionDistance="), reason);
+    assertTrue(reason.contains("observedPos="), reason);
+    assertTrue(reason.contains("candidatePos="), reason);
+    assertTrue(reason.contains("deltaPos="), reason);
+    assertTrue(reason.contains("observedVel="), reason);
+    assertTrue(reason.contains("candidateVel="), reason);
+    assertTrue(reason.contains("deltaVel="), reason);
+    assertTrue(reason.contains("mismatchDetails=[position distance="), reason);
   }
 
   @Test void sneakEdgeEnvelopeIsLocalToEdgeConstrainedCandidates() {
@@ -240,7 +255,10 @@ class Phase8MovementValidationTest {
     assertEquals("[PhantomAC] alice failed MOVEMENT_REACHABILITY (VL 1)", alert.message());
     assertEquals("[PhantomAC] Steve failed MOVEMENT_REACHABILITY (VL 1)", alert.serverMessage("Steve"));
     assertTrue(alert.debugMessage().contains("[PhantomAC][PHASE8] player=alice type=MOVEMENT result=IMPOSSIBLE"));
-    assertTrue(alert.debugMessage().contains("reason=all exhaustively modeled legitimate candidates disagree with the observed movement state"));
+    assertTrue(alert.debugMessage().contains("reason=all exhaustively modeled legitimate candidates disagree"));
+    assertTrue(alert.debugMessage().contains("closestCandidate=#1@20"));
+    assertTrue(alert.debugMessage().contains("deltaPos="));
+    assertTrue(alert.debugMessage().contains("mismatchDetails="));
     assertEquals("replay:40", alert.replayReference());
   }
 }
