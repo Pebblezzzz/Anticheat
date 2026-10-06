@@ -885,6 +885,7 @@ public final class AccuracyChecks {
 
     List<Long> intervals = new ArrayList<>();
     List<Long> clientTickIntervals = new ArrayList<>();
+    int clientTickComparisons = 0;
     long latestSequence = samples.get(samples.size() - 1).sequence();
 
     for (int i = 1; i < samples.size(); i++) {
@@ -898,17 +899,21 @@ public final class AccuracyChecks {
 
       Long previousTick = previous.clientTick();
       Long currentTick = current.clientTick();
-      if (previousTick != null && currentTick != null && currentTick > previousTick) {
-        clientTickIntervals.add(currentTick - previousTick);
+      if (previousTick != null && currentTick != null && currentTick >= previousTick) {
+        clientTickComparisons++;
+        if (currentTick > previousTick) {
+          clientTickIntervals.add(currentTick - previousTick);
+        }
       }
     }
 
     if (intervals.size() < minimumSamples) return ClickEvidence.none();
 
-    double clientTickCoverage = clientTickIntervals.size() / (double) intervals.size();
+    double clientTickCoverage = clientTickComparisons / (double) intervals.size();
     boolean sufficientClientTiming =
-        clientTickIntervals.size() >= AUTOCLICK_MIN_HARD_INTERVALS
-            && clientTickCoverage >= AUTOCLICK_MIN_CLIENT_TICK_COVERAGE;
+        clientTickComparisons >= AUTOCLICK_MIN_HARD_INTERVALS
+            && clientTickCoverage >= AUTOCLICK_MIN_CLIENT_TICK_COVERAGE
+            && !clientTickIntervals.isEmpty();
 
     double mean = intervals.stream().mapToLong(Long::longValue).average().orElse(0.0);
     if (!Double.isFinite(mean) || mean <= 0.0) return ClickEvidence.none();
