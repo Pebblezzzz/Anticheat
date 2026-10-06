@@ -259,6 +259,30 @@ class AccuracyChecksTest {
   }
 
   @Test
+  void fixedCadenceWithTransportJitterProducesAutoclickerFinding() {
+    List<Packets.RawPacket> packets = new ArrayList<>();
+    long sequence = 1L;
+    long nanos = 0L;
+    long[] jitteredIntervals = {
+        47_000_000L, 52_000_000L, 49_000_000L, 51_000_000L,
+        50_000_000L, 53_000_000L, 48_000_000L, 50_000_000L
+    };
+
+    for (int i = 0; i < 110; i++) {
+      packets.add(new Packets.RawPacket(
+          sequence++, nanos, new Packets.ArmAnimation(0)));
+      nanos += jitteredIntervals[i % jitteredIntervals.length];
+    }
+
+    var findings = AccuracyChecks.analyze("p", packets, List.of());
+
+    assertTrue(findings.stream().anyMatch(f ->
+        f.rule().equals("Autoclicker")
+            && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
+        () -> findings.toString());
+  }
+
+  @Test
   void repeatedAutoclickerValidationBatchDoesNotDuplicateFinding() {
     List<Packets.RawPacket> packets = new ArrayList<>();
     long sequence = 1L;
