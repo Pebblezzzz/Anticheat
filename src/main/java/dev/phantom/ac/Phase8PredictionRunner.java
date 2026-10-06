@@ -1467,20 +1467,19 @@ public final class Phase8PredictionRunner {
                   move.onGround() != null
                       && candidate.context().player().onGround() != move.onGround());
           if (bootstrapGroundClaimMismatch) {
+            /*
+             * Move.onGround is a client claim, not the physical state used by
+             * the canonical movement engine. The bootstrap has already replayed
+             * the observed position exactly, so do not turn a claim-only mismatch
+             * into timing uncertainty or poison the retained physics context.
+             */
             trace.add("GROUND_CLAIM_MISMATCH"
                 + " observed=" + move.onGround()
                 + " predictedCandidates=" + bootstrapCandidates.size()
-                + " movementReachability=not-impossible");
+                + " movementReachability=claim-separated");
             bootstrapUncertainty = new ArrayList<>(bootstrapUncertainty);
             bootstrapUncertainty.add(
-                "client ground claim differs from the reconstructed physical ground state; bootstrap reachability ignores that client-only claim");
-            bootstrapValidationTick = new TickResolution(
-                tick.clientTick(),
-                tick.known(),
-                tick.exact(),
-                true,
-                tick.source(),
-                "client ground claim differs from the reconstructed physical ground state; movement reachability does not treat this claim mismatch as an IMPOSSIBLE contradiction");
+                "client ground claim differs from the reconstructed physical ground state; the claim is retained as observation evidence but does not alter physical reachability");
           }
 
           Set<Phase6Reachability.ObservedField> bootstrapObservedFields =
@@ -1525,9 +1524,12 @@ public final class Phase8PredictionRunner {
           if (result.verdict() == Phase8MovementValidation.Verdict.UNCERTAIN) {
             Set<Phase6Reachability.UncertainDimension> dimensions =
                 EnumSet.noneOf(Phase6Reachability.UncertainDimension.class);
-            if (bootstrapGroundClaimMismatch) {
-              dimensions.add(Phase6Reachability.UncertainDimension.GROUND);
-            }
+            /*
+             * A ground-claim mismatch is intentionally not carried into the
+             * candidate context. The physical ground state has already been
+             * reconstructed by canonical physics and the client claim is only
+             * an observed field we separated from reachability above.
+             */
             if (!bootstrapTimingExhaustive) {
               dimensions.add(Phase6Reachability.UncertainDimension.TIMING);
             }
@@ -1891,6 +1893,47 @@ public final class Phase8PredictionRunner {
        * rebases the retained candidate to the observed position for the next
        * client tick.
        */
+      Optional<Candidate> jumpRecovery = Optional.empty();
+      if (fullMatches.isEmpty()
+          && !groundClaimMismatch
+          && uncertaintySources.isEmpty()) {
+        jumpRecovery = recoverObservedGroundJump(
+            packet, move, observedBefore, observedAfter, tick, world, trace);
+      }
+      if (jumpRecovery.isPresent()) {
+        Candidate recovered = jumpRecovery.orElseThrow();
+        prediction = Set.of(recovered);
+        predictionTick = targetTick;
+        packetOnlyProvisionalFrontier = false;
+        latestContinuation = Continuation.ACTIVE;
+
+        SearchResult jumpRecoverySearch = new SearchResult(
+            Verdict.POSSIBLE,
+            prediction,
+            advance.simulatedTicks(),
+            1,
+            0, 0, 0, 0,
+            List.of(
+                "canonical jump replay recovered a grounded start state from a known support surface",
+                "retained frontier ground state was not trusted for the jump transition"));
+        Phase8MovementValidation.Result result = validate(
+            playerId, packet, move, observedBefore, observedAfter, world,
+            tick, uncertaintySources, jumpRecoverySearch,
+            !tick.timingUncertain() && tick.exact(),
+            observedFieldsFor(move));
+        results.add(result);
+        possible++;
+        lastPositionClientTick = targetTick;
+        trace.add("FRONTIER_RECOVERED reason=OBSERVED_GROUND_JUMP"
+            + " tick=" + targetTick
+            + " retainedClientVelocity=" + recovered.context().clientVelocity());
+        rememberObservedMovement(observedBefore, observedAfter, tick);
+        frames.add(frame(
+            sequence, packet, tick, move, observedBefore, observedAfter,
+            predictedBefore, prediction, world, result.evidence().uncertaintySources(), trace));
+        continue;
+      }
+
       Optional<Candidate> reconciliation = Optional.empty();
       if (fullMatches.isEmpty()
           && !groundClaimMismatch
@@ -1975,28 +2018,21 @@ public final class Phase8PredictionRunner {
           advance.exhaustive()
               && (explicitTimingFullyRepresented || tick.exact())
               && !tick.timingUncertain()
-              && uncertaintySources.isEmpty()
-              && !groundClaimMismatch;
+              && uncertaintySources.isEmpty();
       /*
        * Exhaustively enumerating the permitted simulation offsets can eliminate
        * offset ambiguity, but it cannot erase an independent Phase 7 chronology
        * uncertainty. Keep that signal intact so evidence stays honest.
        */
-      TickResolution validationTick;
+      TickResolution validationTick =
+          explicitTimingFullyRepresented
+              ? tick.withTimingUncertaintyResolved(
+                  "Phase 7 bounded simulation timing was exhaustively evaluated for every permitted offset")
+              : tick;
       if (groundClaimMismatch) {
-        validationTick = new TickResolution(
-            tick.clientTick(),
-            tick.known(),
-            tick.exact(),
-            true,
-            tick.source(),
-            "client ground claim differs from the simulated physical ground state; movement reachability does not treat this claim mismatch as an IMPOSSIBLE contradiction");
-      } else {
-        validationTick =
-            explicitTimingFullyRepresented
-                ? tick.withTimingUncertaintyResolved(
-                    "Phase 7 bounded simulation timing was exhaustively evaluated for every permitted offset")
-                : tick;
+        trace.add("GROUND_CLAIM_SEPARATED"
+            + " observed=" + move.onGround()
+            + " action=IGNORE_FOR_PHYSICS_REACHABILITY");
       }
       Set<Phase6Reachability.ObservedField> validationFields =
           groundClaimMismatch
@@ -2796,6 +2832,211 @@ public final class Phase8PredictionRunner {
         closest.id(),
         rebasedContext,
         closest.provenance()));
+  }
+
+  /**
+   * Recover a legitimate jump when the retained frontier has the wrong physical
+   * ground bit but the observed movement is an exact vanilla ground-jump step.
+   */
+  private Optional<Candidate> recoverObservedGroundJump(
+      Packets.RawPacket movementPacket,
+      Packets.Move move,
+      Player observedBefore,
+      Player observedAfter,
+      TickResolution tick,
+      WorldSnapshot world,
+      List<String> trace) {
+    if (world == null
+        || !tick.known()
+        || !tick.exact()
+        || tick.timingUncertain()
+        || move.position() == null) {
+      return Optional.empty();
+    }
+
+    InputConstraint jumpConstraint =
+        inputForSimulationTick(
+            inputHistory,
+            Math.max(0L, tick.clientTick() - 1L),
+            movementPacket.sequence());
+    Optional<Simulation.AdvancedInput> keyInput =
+        inputConstraintToAdvancedInput(jumpConstraint);
+    if (keyInput.isEmpty() || !keyInput.orElseThrow().jump()) {
+      return Optional.empty();
+    }
+
+    Vec3 observedDelta = new Vec3(
+        observedAfter.position().x() - observedBefore.position().x(),
+        observedAfter.position().y() - observedBefore.position().y(),
+        observedAfter.position().z() - observedBefore.position().z());
+    if (!Double.isFinite(observedDelta.y())
+        || observedDelta.y() <= 0.30) {
+      return Optional.empty();
+    }
+
+    MovementEffects effects = movementEffects(observedBefore);
+    double expectedJump = Vanilla12111RichPhysics.JUMP + effects.jumpVelocityAdd();
+    if (Math.abs(observedDelta.y() - expectedJump) > POSITION_TOLERANCE
+        || observedAfter.onGround()) {
+      return Optional.empty();
+    }
+
+    int supportX = (int) Math.floor(observedBefore.position().x());
+    int supportY = (int) Math.floor(observedBefore.position().y() - 1.0E-4);
+    int supportZ = (int) Math.floor(observedBefore.position().z());
+    if (world.coverageAt(supportX, supportY, supportZ)
+        != dev.phantom.ac.world.Coverage.KNOWN) {
+      return Optional.empty();
+    }
+    var support = world.blockAtOrNull(supportX, supportY, supportZ);
+    if (support == null || support.isAir() || support.isUnsupported()
+        || support.variant() == dev.phantom.ac.world.BlockState.Variant.FLUID) {
+      return Optional.empty();
+    }
+
+    Simulation.AdvancedInput input = keyInput.orElseThrow();
+    LinkedHashSet<MovementInputState> locomotionOptions = new LinkedHashSet<>();
+    locomotionOptions.add(new MovementInputState(
+        physicalSprintState, physicalSneakState));
+    locomotionOptions.add(new MovementInputState(input.sprint(), input.sneak()));
+
+    AuthorityAnchor authority = latestCausalAuthority(movementPacket);
+    if (authority != null) {
+      locomotionOptions.add(new MovementInputState(
+          authority.context().movementEnvironment().sprinting(),
+          authority.context().movementEnvironment().sneaking()));
+    }
+
+    for (MovementInputState locomotion : locomotionOptions) {
+      Simulation.AdvancedInput advancedInput = new Simulation.AdvancedInput(
+          input.forward(),
+          input.strafe(),
+          true,
+          locomotion.sprinting(),
+          locomotion.sneaking());
+
+      Player startTemplate = new Player(
+          observedBefore.position(),
+          observedBefore.velocity(),
+          move.yaw() == null ? observedBefore.yaw() : move.yaw(),
+          move.pitch() == null ? observedBefore.pitch() : move.pitch(),
+          true,
+          observedBefore.gamemode(),
+          observedBefore.effects(),
+          observedBefore.awaitingTeleport(),
+          false,
+          Optional.of(advancedInput),
+          observedBefore.attributes(),
+          observedBefore.pose(),
+          observedBefore.environment(),
+          observedBefore.clientTickRange(),
+          observedBefore.provenance(),
+          observedBefore.uncertaintyReasons(),
+          0);
+
+      MovementEnvironment environment = packetMovementEnvironment(startTemplate, world);
+      environment = withLocomotionState(
+          environment,
+          locomotion.sprinting(),
+          locomotion.sneaking());
+
+      if (environment.fluid() != Fluid.NONE
+          || environment.climbable()
+          || environment.gliding()) {
+        continue;
+      }
+
+      Optional<Vec3> startVelocity = reconstructCollisionFreeStartVelocity(
+          startTemplate,
+          advancedInput,
+          observedDelta,
+          world,
+          environment,
+          0);
+      if (startVelocity.isEmpty()) continue;
+
+      Player reconstructedStart = new Player(
+          startTemplate.position(),
+          startVelocity.orElseThrow(),
+          startTemplate.yaw(),
+          startTemplate.pitch(),
+          true,
+          startTemplate.gamemode(),
+          startTemplate.effects(),
+          startTemplate.awaitingTeleport(),
+          false,
+          startTemplate.input(),
+          startTemplate.attributes(),
+          startTemplate.pose(),
+          startTemplate.environment(),
+          startTemplate.clientTickRange(),
+          startTemplate.provenance(),
+          startTemplate.uncertaintyReasons(),
+          0);
+
+      Vanilla12111RichPhysics.Context context =
+          new Vanilla12111RichPhysics.Context(
+              Math.max(0L, tick.clientTick() - 1L),
+              reconstructedStart,
+              advancedInput,
+              world,
+              simulationEnvironmentFor(environment),
+              reconstructedStart.attributes(),
+              movementEffects(reconstructedStart),
+              reconstructedStart.pose(),
+              environment,
+              reconstructedStart.pose() == Pose.SLEEPING,
+              false,
+              entityCollisions(authority),
+              observedDelta,
+              true);
+      Vanilla12111RichPhysics.StepResult step =
+          new Vanilla12111RichPhysics().step(context);
+
+      if (step.state().uncertain()
+          || step.collided()
+          || !positionsMatch(step.state().position(), observedAfter.position())
+          || step.state().onGround()) {
+        continue;
+      }
+
+      Player after = new Player(
+          step.state().position(),
+          step.state().velocity(),
+          observedAfter.yaw(),
+          observedAfter.pitch(),
+          step.state().onGround(),
+          step.state().gamemode(),
+          step.state().effects(),
+          step.state().awaitingTeleport(),
+          false,
+          step.state().input(),
+          step.state().attributes(),
+          step.state().pose(),
+          step.state().environment(),
+          observedAfter.clientTickRange(),
+          step.state().provenance(),
+          step.state().uncertaintyReasons(),
+          step.state().jumpDelay());
+
+      Candidate recovered = candidateFromPlayer(
+          after,
+          tick.clientTick(),
+          "CLIENT_OBSERVED_GROUND_JUMP_RECOVERY",
+          authority == null ? -1L : authority.sequence(),
+          entityCollisions(authority),
+          environment,
+          step.clientVelocityAfterTick());
+
+      trace.add("GROUND_JUMP_RECOVERY"
+          + " support=" + supportX + "," + supportY + "," + supportZ
+          + " locomotion=" + locomotion
+          + " observedDelta=" + observedDelta
+          + " recoveredVelocity=" + step.clientVelocityAfterTick());
+      return Optional.of(recovered);
+    }
+
+    return Optional.empty();
   }
 
   private Optional<Candidate> recoverObservedInertialContinuation(
