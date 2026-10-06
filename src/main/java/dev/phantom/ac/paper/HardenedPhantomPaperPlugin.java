@@ -628,7 +628,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         violationIncrement,
         violationDecayPerTick,
         maximumViolationLevel,
-        Math.max(0.000001,getConfig().getDouble("checks.violation-alert-interval",40.0)),
+        everyViolationAlerts?1.0:Math.max(
+            0.000001,getConfig().getDouble("checks.violation-alert-interval",40.0)),
         alertPolicy);
     getServer().getPluginManager().registerEvents(this,this);
     PacketEvents.getAPI().getEventManager().registerListener(listener);
@@ -1468,7 +1469,8 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
         new Phase8MovementValidation.Config(
             alertViolationThreshold, 0, alertsEnabled, true,
             violationIncrement, violationDecayPerTick, maximumViolationLevel,
-            Math.max(0.000001, getConfig().getDouble("alerts.violation-alert-interval",40.0)),
+            everyViolationAlerts?1.0:Math.max(
+            0.000001, getConfig().getDouble("alerts.violation-alert-interval",40.0)),
             alertPolicy);
 
     Phase8EnforcementPolicy.Config enforcementConfig =
