@@ -320,6 +320,32 @@ class AccuracyChecksTest {
   }
 
   @Test
+  void highCpsAutoclickerWithMultipleClicksPerClientTickStillFlags() {
+    List<Packets.RawPacket> packets = new ArrayList<>();
+    long sequence = 1L;
+    long nanos = 0L;
+    for (int i = 0; i < 80; i++) {
+      packets.add(new Packets.RawPacket(
+          sequence++, nanos,
+          new Packets.InteractEntity(7, Packets.InteractAction.ATTACK),
+          new Packets.CaptureProvenance(
+              "test-high-cps",
+              "CLIENT_TO_SERVER",
+              "InteractEntity",
+              null,
+              nanos / 50_000_000L)));
+      nanos += 25_000_000L;
+    }
+
+    var findings = AccuracyChecks.analyze("p", packets, List.of());
+
+    assertTrue(findings.stream().anyMatch(f ->
+        f.rule().equals("Autoclicker")
+            && f.verdict() == ProductionCheckEngine.Verdict.IMPOSSIBLE),
+        () -> findings.toString());
+  }
+
+  @Test
   void regularTransportCadenceWithoutClientTickCorroborationDoesNotProduceHardFinding() {
     List<Packets.RawPacket> packets = new ArrayList<>();
     long sequence = 1L;
