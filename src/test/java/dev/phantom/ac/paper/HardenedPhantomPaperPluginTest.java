@@ -57,6 +57,28 @@ class HardenedPhantomPaperPluginTest {
   }
 
   @Test
+  void autoclickerAlertPolicyOverridesLegacyTwentyFortyThreshold() {
+    var effective = HardenedPhantomPaperPlugin.effectiveAlertRule(
+        false,
+        "Autoclicker",
+        dev.phantom.ac.GrimAlertPolicy.CommandRule.parse("20:40"));
+
+    assertEquals(1.0, effective.threshold(), 1.0e-9);
+    assertEquals(1.0, effective.interval(), 1.0e-9);
+  }
+
+  @Test
+  void nonAutoclickerLegacyPolicyRemainsConfigurable() {
+    var effective = HardenedPhantomPaperPlugin.effectiveAlertRule(
+        false,
+        "BadPackets",
+        dev.phantom.ac.GrimAlertPolicy.CommandRule.parse("20:40"));
+
+    assertEquals(20.0, effective.threshold(), 1.0e-9);
+    assertEquals(40.0, effective.interval(), 1.0e-9);
+  }
+
+  @Test
   void unsupportedBlockChangesAreRecordedAsUnsupportedPackets() {
     Pos position = new Pos(1, 64, 1);
     BlockState unsupported = BlockState.unsupported("minecraft:future_block");
