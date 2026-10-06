@@ -9,7 +9,7 @@ import static dev.phantom.ac.Simulation.Input;
 public final class Timeline {
   private Timeline() {}
   private static final int MAGIC=0x50484143; // PHAC
-  private static final short FORMAT_VERSION=11;
+  private static final short FORMAT_VERSION=12;
 
   public record Metadata(String modelVersion,long captureEpochNanos,long serverTickNanos) implements Serializable {
     public Metadata { Contracts.requireTargetVersion(modelVersion); if(captureEpochNanos<0||serverTickNanos<=0) throw new IllegalArgumentException("invalid timeline clock metadata"); }
@@ -93,6 +93,12 @@ public final class Timeline {
       else if(p instanceof PaperMovementRejection v){out.writeByte(19);writeString(out,v.failReason());out.writeBoolean(v.allowed());}
       else if(p instanceof WorldTransactionSend v){out.writeByte(15);out.writeShort(v.id());}
       else if(p instanceof WorldTransactionAck v){out.writeByte(16);out.writeShort(v.id());}
+      else if(p instanceof ArmAnimation v){out.writeByte(25);out.writeInt(v.hand());}
+      else if(p instanceof InteractEntity v){out.writeByte(26);out.writeInt(v.entityId());out.writeByte(v.action().ordinal());}
+      else if(p instanceof BlockPlace v){out.writeByte(27);writeWorldPos(out,v.position());out.writeInt(v.faceId());writeVec(out,v.cursor());out.writeBoolean(v.cursorPresent());writeString(out,v.heldItemType());out.writeInt(v.heldItemAmount());}
+      else if(p instanceof UseItem v){out.writeByte(28);out.writeInt(v.hand());out.writeInt(v.sequence());writeNullableFloat(out,v.yaw());writeNullableFloat(out,v.pitch());}
+      else if(p instanceof InventoryClick v){out.writeByte(29);out.writeInt(v.windowId());out.writeInt(v.slot());out.writeInt(v.button());writeString(out,v.clickType());}
+      else if(p instanceof DigAction v){out.writeByte(30);writeString(out,v.action());writeWorldPos(out,v.position());out.writeInt(v.sequence());writeNullableDouble(out,v.breakSpeedPerTick());writeString(out,v.heldItemType());out.writeInt(v.heldItemAmount());}
       else throw new IllegalArgumentException("unsupported packet type: "+p.getClass());
     }
     private static Packet readPacket(DataInputStream in,int version)throws IOException{return switch(in.readUnsignedByte()){
@@ -105,6 +111,12 @@ public final class Timeline {
       case 9->new ChunkUnload(readChunk(in));case 10->new BlockChange(readPos(in),readBlock(in));case 11->new BlockStateChange(readWorldPos(in),readBlockState(in,version));case 13->new UnsupportedBlockStateChange(readWorldPos(in),readBlockState(in,version));case 20->new EntitySpawn(in.readInt(),readBlockBox(in));case 21->new EntityMove(in.readInt(),readBlockBox(in));case 22->new EntityDespawn(in.readInt());case 19->new PaperMovementRejection(readString(in),in.readBoolean());      case 15->new WorldTransactionSend(in.readShort());case 18->new FlightToggle(in.readBoolean(),in.readBoolean());case 16->new WorldTransactionAck(in.readShort());
       case 12->{dev.phantom.ac.world.Chunk chunk=readWorldChunk(in);int count=readCount(in,"chunk state");Map<dev.phantom.ac.world.Pos,dev.phantom.ac.world.BlockState> states=new HashMap<>();for(int i=0;i<count;i++){dev.phantom.ac.world.Pos pos=readWorldPos(in);if(states.put(pos,readBlockState(in,version))!=null)throw new IllegalArgumentException("duplicate chunk state");}yield new ChunkStates(chunk,states);}
       case 14->{String gamemode=readString(in);Simulation.Attributes attributes=readAttributes(in);int effectCount=readCount(in,"effect");Map<String,Integer> effects=new HashMap<>();for(int i=0;i<effectCount;i++){String id=readString(in);if(effects.put(id,in.readInt())!=null)throw new IllegalArgumentException("duplicate player effect");}Phase5Mechanics.Pose pose=ordinal(Phase5Mechanics.Pose.values(),in.readUnsignedByte(),"pose");Phase5Mechanics.MovementEnvironment environment=readMovementEnvironment(in,version);Maths.Vec3 serverPosition=readVec(in);Maths.Vec3 serverVelocity=readVec(in);boolean canFly=in.readBoolean();boolean flying=in.readBoolean();boolean sleeping=in.readBoolean();int entityCount=readCount(in,"entity box");List<dev.phantom.ac.world.EntityCollisions.EntityBox> entities=new ArrayList<>();for(int i=0;i<entityCount;i++)entities.add(new dev.phantom.ac.world.EntityCollisions.EntityBox(in.readInt(),readBlockBox(in)));yield new PlayerContext(gamemode,attributes,effects,pose,environment,serverPosition,serverVelocity,canFly,flying,sleeping,entities);}
+      case 25->new ArmAnimation(in.readInt());
+      case 26->{int entityId=in.readInt();yield new InteractEntity(entityId,ordinal(InteractAction.values(),in.readUnsignedByte(),"interact action"));}
+      case 27->{var pos=readWorldPos(in);int faceId=in.readInt();var cursor=readVec(in);boolean cursorPresent=in.readBoolean();String itemType=readString(in);int amount=in.readInt();yield new BlockPlace(pos,faceId,cursor,cursorPresent,itemType,amount);}
+      case 28->{int hand=in.readInt();int sequence=in.readInt();yield new UseItem(hand,sequence,readNullableFloat(in),readNullableFloat(in));}
+      case 29->new InventoryClick(in.readInt(),in.readInt(),in.readInt(),readString(in));
+      case 30->{String action=readString(in);var pos=readWorldPos(in);int sequence=in.readInt();yield new DigAction(action,pos,sequence,readNullableDouble(in),readString(in),in.readInt());}
       default->throw new IllegalArgumentException("unknown packet tag");};}
     private static void writeAttributes(DataOutputStream out,Simulation.Attributes a)throws IOException{out.writeDouble(a.movementSpeed());out.writeInt(a.modifiers().size());for(var m:a.modifiers()){writeString(out,m.id());out.writeDouble(m.amount());out.writeByte(m.operation().ordinal());}}
     private static Simulation.Attributes readAttributes(DataInputStream in)throws IOException{double base=in.readDouble();int count=readCount(in,"attribute modifier");List<Phase5Mechanics.AttributeModifier> modifiers=new ArrayList<>();for(int i=0;i<count;i++)modifiers.add(new Phase5Mechanics.AttributeModifier(readString(in),in.readDouble(),ordinal(Phase5Mechanics.ModifierOperation.values(),in.readUnsignedByte(),"attribute operation")));return new Simulation.Attributes(base,modifiers);}
@@ -118,6 +130,7 @@ public final class Timeline {
     private static void writeVec(DataOutputStream out,Maths.Vec3 v)throws IOException{out.writeDouble(v.x());out.writeDouble(v.y());out.writeDouble(v.z());}private static Maths.Vec3 readVec(DataInputStream in)throws IOException{return new Maths.Vec3(in.readDouble(),in.readDouble(),in.readDouble());}
     private static void writeNullableVec(DataOutputStream out,Maths.Vec3 v)throws IOException{out.writeBoolean(v!=null);if(v!=null)writeVec(out,v);}private static Maths.Vec3 readNullableVec(DataInputStream in)throws IOException{return in.readBoolean()?readVec(in):null;}
     private static void writeNullableFloat(DataOutputStream out,Float v)throws IOException{out.writeBoolean(v!=null);if(v!=null)out.writeFloat(v);}private static Float readNullableFloat(DataInputStream in)throws IOException{return in.readBoolean()?in.readFloat():null;}
+    private static void writeNullableDouble(DataOutputStream out,Double v)throws IOException{out.writeBoolean(v!=null);if(v!=null)out.writeDouble(v);}private static Double readNullableDouble(DataInputStream in)throws IOException{return in.readBoolean()?in.readDouble():null;}
     private static void writeNullableBoolean(DataOutputStream out,Boolean v)throws IOException{out.writeByte(v==null?0:v?1:2);}private static Boolean readNullableBoolean(DataInputStream in)throws IOException{return switch(in.readUnsignedByte()){case 0->null;case 1->true;case 2->false;default->throw new IllegalArgumentException("invalid nullable boolean");};}
     private static void writeNullableLong(DataOutputStream out,Long v)throws IOException{out.writeBoolean(v!=null);if(v!=null)out.writeLong(v);}private static Long readNullableLong(DataInputStream in)throws IOException{return in.readBoolean()?in.readLong():null;}
     private static void writeString(DataOutputStream out,String value)throws IOException{byte[] b=value.getBytes(java.nio.charset.StandardCharsets.UTF_8);if(b.length>1_000_000)throw new IllegalArgumentException("string too long");out.writeInt(b.length);out.write(b);}private static String readString(DataInputStream in)throws IOException{int n=readCount(in,"string byte");byte[] b=in.readNBytes(n);if(b.length!=n)throw new EOFException();return new String(b,java.nio.charset.StandardCharsets.UTF_8);}
