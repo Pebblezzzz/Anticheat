@@ -9,6 +9,21 @@ import org.junit.jupiter.api.Test;
 
 class AccuracyChecksTest {
 
+  private static List<Packets.RawPacket> withClientTicks(List<Packets.RawPacket> packets) {
+    return packets.stream()
+        .map(packet -> new Packets.RawPacket(
+            packet.sequence(),
+            packet.receivedNanos(),
+            packet.packet(),
+            new Packets.CaptureProvenance(
+                "test-click",
+                Packets.CaptureProvenance.directionFor(packet.packet()),
+                packet.packet().getClass().getSimpleName(),
+                null,
+                packet.receivedNanos() / 50_000_000L)))
+        .toList();
+  }
+
   @Test
   void unknownTransactionAcknowledgementProducesHardIntegrityFinding() {
     List<Packets.RawPacket> packets = List.of(
@@ -65,7 +80,7 @@ class AccuracyChecksTest {
       nanos += 50_000_000L;
     }
 
-    var findings = AccuracyChecks.analyze("p", packets, List.of());
+    var findings = AccuracyChecks.analyze("p", withClientTicks(packets), List.of());
 
     assertTrue(findings.stream().anyMatch(f ->
         f.rule().equals("Autoclicker")
@@ -84,7 +99,7 @@ class AccuracyChecksTest {
       nanos += 50_000_000L;
     }
 
-    var findings = AccuracyChecks.analyze("p", packets, List.of());
+    var findings = AccuracyChecks.analyze("p", withClientTicks(packets), List.of());
 
     assertTrue(findings.stream().anyMatch(f ->
         f.rule().equals("Autoclicker")
@@ -103,7 +118,7 @@ class AccuracyChecksTest {
       nanos += 60_000_000L;
     }
 
-    var findings = AccuracyChecks.analyze("p", packets, List.of());
+    var findings = AccuracyChecks.analyze("p", withClientTicks(packets), List.of());
 
     assertTrue(findings.stream().anyMatch(f ->
         f.rule().equals("Autoclicker")
@@ -123,7 +138,7 @@ class AccuracyChecksTest {
       nanos += 70_000_000L;
     }
 
-    var findings = AccuracyChecks.analyze("p", packets, List.of());
+    var findings = AccuracyChecks.analyze("p", withClientTicks(packets), List.of());
 
     assertTrue(findings.stream().anyMatch(f ->
         f.rule().equals("Autoclicker")
@@ -143,7 +158,7 @@ class AccuracyChecksTest {
       nanos += 65_000_000L;
     }
 
-    var findings = AccuracyChecks.analyze("p", packets, List.of());
+    var findings = AccuracyChecks.analyze("p", withClientTicks(packets), List.of());
 
     assertTrue(findings.stream().anyMatch(f ->
         f.rule().equals("Autoclicker")
@@ -163,7 +178,7 @@ class AccuracyChecksTest {
       nanos += 80_000_000L;
     }
 
-    var findings = AccuracyChecks.analyze("p", packets, List.of());
+    var findings = AccuracyChecks.analyze("p", withClientTicks(packets), List.of());
 
     assertTrue(findings.stream().anyMatch(f ->
         f.rule().equals("Autoclicker")
@@ -185,7 +200,7 @@ class AccuracyChecksTest {
       nanos += 80_000_000L;
     }
 
-    var findings = AccuracyChecks.analyze("p", packets, List.of());
+    var findings = AccuracyChecks.analyze("p", withClientTicks(packets), List.of());
 
     assertTrue(findings.stream().anyMatch(f -> f.rule().equals("Autoclicker")),
         () -> findings.toString());
@@ -228,7 +243,7 @@ class AccuracyChecksTest {
       nanos += 30_000_000L + (i % 5) * 17_000_000L;
     }
 
-    var findings = AccuracyChecks.analyze("p", packets, List.of());
+    var findings = AccuracyChecks.analyze("p", withClientTicks(packets), List.of());
 
     assertFalse(findings.stream().anyMatch(f -> f.rule().equals("Autoclicker")),
         () -> findings.toString());
@@ -250,7 +265,7 @@ class AccuracyChecksTest {
       nanos += pattern[i % pattern.length];
     }
 
-    var findings = AccuracyChecks.analyze("p", packets, List.of());
+    var findings = AccuracyChecks.analyze("p", withClientTicks(packets), List.of());
 
     assertTrue(findings.stream().anyMatch(f ->
         f.rule().equals("Autoclicker")
@@ -274,7 +289,7 @@ class AccuracyChecksTest {
       nanos += jitteredIntervals[i % jitteredIntervals.length];
     }
 
-    var findings = AccuracyChecks.analyze("p", packets, List.of());
+    var findings = AccuracyChecks.analyze("p", withClientTicks(packets), List.of());
 
     assertTrue(findings.stream().anyMatch(f ->
         f.rule().equals("Autoclicker")
