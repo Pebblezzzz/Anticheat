@@ -38,6 +38,7 @@ public final class AccuracyChecks {
   private static final int AUTOCLICK_MIN_SAMPLES = 24;
   private static final int AUTOCLICK_ADVANCED_MIN_INTERVALS = 96;
   private static final int AUTOCLICK_HISTORY_SIZE = 768;
+  private static final int AUTOCLICK_ANALYSIS_WINDOW = 256;
   private static final int AUTOCLICK_TEMPLATE_MAX_PERIOD = 32;
   private static final long AUTOCLICK_MIN_INTERVAL_NANOS = 8_000_000L;
   private static final long AUTOCLICK_MAX_INTERVAL_NANOS = 300_000_000L;
@@ -48,6 +49,11 @@ public final class AccuracyChecks {
   private static final long AUTOCLICK_STABLE_CADENCE_MAX_MAD_NANOS = 5_000_000L;
   private static final double AUTOCLICK_STABLE_CADENCE_MAX_CV = 0.120;
   private static final int AUTOCLICK_STABLE_CADENCE_MAX_BUCKETS = 24;
+  private static final long AUTOCLICK_RUN_BREAK_NANOS = 300_000_000L;
+  private static final long AUTOCLICK_RUN_BREAK_TICKS = 6L;
+  private static final double AUTOCLICK_MIN_CLIENT_TICK_COVERAGE = 0.80;
+  private static final double AUTOCLICK_MAX_CLIENT_TICK_CV = 0.55;
+  private static final int AUTOCLICK_MIN_HARD_INTERVALS = 48;
 
   /**
    * Persistent per-player evidence state. Validation is intentionally batched,
@@ -665,9 +671,11 @@ public final class AccuracyChecks {
     if (newSamples.isEmpty()) return List.of();
 
     List<ClickSample> all = List.copyOf(state.autoclickSamples);
-    List<ClickSample> left = canonicalLeftClicks(all);
-    List<ClickSample> right = canonicalRightClicks(all);
-    List<ClickSample> inventory = canonicalInventoryClicks(all);
+    int windowStart = Math.max(0, all.size() - AUTOCLICK_ANALYSIS_WINDOW);
+    List<ClickSample> recent = all.subList(windowStart, all.size());
+    List<ClickSample> left = canonicalLeftClicks(recent);
+    List<ClickSample> right = canonicalRightClicks(recent);
+    List<ClickSample> inventory = canonicalInventoryClicks(recent);
 
     ClickEvidence leftEvidence = analyzeClickStream(left, AUTOCLICK_MIN_SAMPLES);
     ClickEvidence rightEvidence = analyzeClickStream(right, AUTOCLICK_MIN_SAMPLES);
@@ -675,7 +683,7 @@ public final class AccuracyChecks {
         analyzeClickStream(inventory, AUTOCLICK_INVENTORY_MIN_SAMPLES);
 
     ClickEvidence best = strongestEvidence(leftEvidence, rightEvidence, inventoryEvidence);
-    if (!best.detected() || best.latestSequence() < 0L) return List.of();
+    if (!best.detected() || !best.hardEvidence() || best.latestSequence() < 0L) return List.of();
 
     boolean initialFinding = state.lastAutoclickFindingSequence < 0L;
     boolean cooldownSatisfied =
@@ -687,9 +695,10 @@ public final class AccuracyChecks {
     state.clicksSinceAutoclickFinding = 0;
 
     String reason = String.format(Locale.ROOT,
-        "%s click stream matches an automated timing fingerprint "
+        "%s click stream matches a corroborated automated timing fingerprint "
             + "(n=%d, rate=%.2f cps, mean=%.1fms, cv=%.4f, mad=%.4f, "
-            + "grid=%d, transitionEntropy=%.3f, template=%d/%.4f, windows=%d)",
+            + "grid=%d, transitionEntropy=%.3f, template=%d/%.4f, windows=%d, "
+            + "clientTickCoverage=%.2f, clientTickCv=%.3f, clientTickBuckets=%d)",
         best.kind(),
         best.sampleCount(),
         best.cps(),
@@ -700,7 +709,10 @@ public final class AccuracyChecks {
         best.transitionEntropy(),
         best.templatePeriod(),
         best.templateError(),
-        best.windowAgreement());
+        best.windowAgreement(),
+        best.clientTickCoverage(),
+        best.clientTickCv(),
+        best.clientTickBuckets());
 
     return List.of(hard(
         playerId, frame, "Autoclicker", reason, best.severity()));
@@ -715,28 +727,39 @@ public final class AccuracyChecks {
           packet.receivedNanos(),
           interaction.action() == Packets.InteractAction.ATTACK
               ? ClickKind.LEFT_COMBAT
-              : ClickKind.RIGHT_ENTITY);
+              : ClickKind.RIGHT_ENTITY,
+          packet.provenance().authoritativeClientTick());
     }
 
     if (value instanceof Packets.ArmAnimation) {
-      return new ClickSample(packet.sequence(), packet.receivedNanos(), ClickKind.SWING);
+      return new ClickSample(
+          packet.sequence(), packet.receivedNanos(), ClickKind.SWING,
+          packet.provenance().authoritativeClientTick());
     }
 
     if (value instanceof Packets.BlockPlace) {
-      return new ClickSample(packet.sequence(), packet.receivedNanos(), ClickKind.RIGHT_BLOCK);
+      return new ClickSample(
+          packet.sequence(), packet.receivedNanos(), ClickKind.RIGHT_BLOCK,
+          packet.provenance().authoritativeClientTick());
     }
 
     if (value instanceof Packets.UseItem) {
-      return new ClickSample(packet.sequence(), packet.receivedNanos(), ClickKind.RIGHT_USE);
+      return new ClickSample(
+          packet.sequence(), packet.receivedNanos(), ClickKind.RIGHT_USE,
+          packet.provenance().authoritativeClientTick());
     }
 
     if (value instanceof Packets.DigAction dig
         && "STARTED_DIGGING".equals(dig.action())) {
-      return new ClickSample(packet.sequence(), packet.receivedNanos(), ClickKind.LEFT_BLOCK);
+      return new ClickSample(
+          packet.sequence(), packet.receivedNanos(), ClickKind.LEFT_BLOCK,
+          packet.provenance().authoritativeClientTick());
     }
 
     if (value instanceof Packets.InventoryClick) {
-      return new ClickSample(packet.sequence(), packet.receivedNanos(), ClickKind.INVENTORY);
+      return new ClickSample(
+          packet.sequence(), packet.receivedNanos(), ClickKind.INVENTORY,
+          packet.provenance().authoritativeClientTick());
     }
 
     return null;
@@ -764,7 +787,7 @@ public final class AccuracyChecks {
           && sample.kind() == ClickKind.SWING) {
         continue;
       }
-      result.add(new ClickSample(sample.sequence(), sample.nanos(), ClickKind.LEFT));
+      result.add(new ClickSample(sample.sequence(), sample.nanos(), ClickKind.LEFT, sample.clientTick()));
     }
     return List.copyOf(result);
   }
@@ -784,7 +807,7 @@ public final class AccuracyChecks {
               <= AUTOCLICK_SWING_DEDUP_NANOS) {
         continue;
       }
-      result.add(new ClickSample(sample.sequence(), sample.nanos(), ClickKind.RIGHT));
+      result.add(new ClickSample(sample.sequence(), sample.nanos(), ClickKind.RIGHT, sample.clientTick()));
     }
     return List.copyOf(result);
   }
@@ -829,22 +852,70 @@ public final class AccuracyChecks {
       List<ClickSample> samples, int minimumSamples) {
     if (samples.size() < minimumSamples + 1) return ClickEvidence.none();
 
+    ClickEvidence best = ClickEvidence.none();
+    List<ClickSample> run = new ArrayList<>();
+    for (ClickSample sample : samples) {
+      if (!run.isEmpty() && clickRunBreaks(run.get(run.size() - 1), sample)) {
+        best = stronger(best, analyzeClickRun(run, minimumSamples));
+        run.clear();
+      }
+      run.add(sample);
+    }
+    best = stronger(best, analyzeClickRun(run, minimumSamples));
+    return best;
+  }
+
+  private static boolean clickRunBreaks(ClickSample previous, ClickSample current) {
+    long deltaNanos = current.nanos() - previous.nanos();
+    if (deltaNanos < AUTOCLICK_MIN_INTERVAL_NANOS
+        || deltaNanos > AUTOCLICK_RUN_BREAK_NANOS) {
+      return true;
+    }
+    Long previousTick = previous.clientTick();
+    Long currentTick = current.clientTick();
+    return previousTick != null
+        && currentTick != null
+        && currentTick > previousTick
+        && currentTick - previousTick > AUTOCLICK_RUN_BREAK_TICKS;
+  }
+
+  private static ClickEvidence analyzeClickRun(
+      List<ClickSample> samples, int minimumSamples) {
+    if (samples.size() < minimumSamples + 1) return ClickEvidence.none();
+
     List<Long> intervals = new ArrayList<>();
+    List<Long> clientTickIntervals = new ArrayList<>();
+    int clientTickComparisons = 0;
     long latestSequence = samples.get(samples.size() - 1).sequence();
+
     for (int i = 1; i < samples.size(); i++) {
-      long delta = samples.get(i).nanos() - samples.get(i - 1).nanos();
-      if (delta >= AUTOCLICK_MIN_INTERVAL_NANOS
-          && delta <= AUTOCLICK_MAX_INTERVAL_NANOS) {
-        intervals.add(delta);
+      ClickSample previous = samples.get(i - 1);
+      ClickSample current = samples.get(i);
+      long delta = current.nanos() - previous.nanos();
+      if (delta < AUTOCLICK_MIN_INTERVAL_NANOS || delta > AUTOCLICK_MAX_INTERVAL_NANOS) {
+        return ClickEvidence.none();
+      }
+      intervals.add(delta);
+
+      Long previousTick = previous.clientTick();
+      Long currentTick = current.clientTick();
+      if (previousTick != null && currentTick != null && currentTick >= previousTick) {
+        clientTickComparisons++;
+        if (currentTick > previousTick) {
+          clientTickIntervals.add(currentTick - previousTick);
+        }
       }
     }
 
     if (intervals.size() < minimumSamples) return ClickEvidence.none();
 
-    double mean = intervals.stream()
-        .mapToLong(Long::longValue)
-        .average()
-        .orElse(0.0);
+    double clientTickCoverage = clientTickComparisons / (double) intervals.size();
+    boolean sufficientClientTiming =
+        clientTickComparisons >= AUTOCLICK_MIN_HARD_INTERVALS
+            && clientTickCoverage >= AUTOCLICK_MIN_CLIENT_TICK_COVERAGE
+            && !clientTickIntervals.isEmpty();
+
+    double mean = intervals.stream().mapToLong(Long::longValue).average().orElse(0.0);
     if (!Double.isFinite(mean) || mean <= 0.0) return ClickEvidence.none();
 
     long[] sorted = intervals.stream().mapToLong(Long::longValue).sorted().toArray();
@@ -857,9 +928,7 @@ public final class AccuracyChecks {
     for (int i = 0; i < intervals.size(); i++) {
       double d = intervals.get(i) - mean;
       variance += d * d;
-      if (i > 0) {
-        meanAbsStep += Math.abs(intervals.get(i) - intervals.get(i - 1));
-      }
+      if (i > 0) meanAbsStep += Math.abs(intervals.get(i) - intervals.get(i - 1));
     }
 
     double cv = Math.sqrt(variance / intervals.size()) / mean;
@@ -870,6 +939,8 @@ public final class AccuracyChecks {
     int timingBuckets = timingBucketCount(intervals);
     double transitionEntropy = transitionEntropy(intervals);
     TemplateFingerprint template = bestTemplateFingerprint(intervals);
+    double clientTickCv = clientTickCv(clientTickIntervals);
+    int clientTickBuckets = (int) clientTickIntervals.stream().distinct().count();
 
     boolean mechanical =
         cv < 0.030
@@ -904,14 +975,6 @@ public final class AccuracyChecks {
             && template.windowAgreement() == 3
             && timingBuckets <= 32;
 
-    /*
-     * Live packet arrival is not a perfect clock: Netty scheduling, batching,
-     * OS wakeups and server load can add a few milliseconds of noise to an
-     * otherwise fixed client cadence. A long, high-rate stream with a tiny
-     * absolute MAD is therefore a stronger signal than the old raw-CV gate.
-     * Requiring 96 intervals keeps this relaxed path firmly in sustained-
-     * automation territory rather than normal short human click bursts.
-     */
     boolean stableCadence =
         intervals.size() >= AUTOCLICK_STABLE_CADENCE_MIN_INTERVALS
             && mean <= 125_000_000.0
@@ -919,28 +982,35 @@ public final class AccuracyChecks {
             && cv < AUTOCLICK_STABLE_CADENCE_MAX_CV
             && timingBuckets <= AUTOCLICK_STABLE_CADENCE_MAX_BUCKETS;
 
-    boolean inventoryStrong =
-        samples.get(0).kind() == ClickKind.INVENTORY
-            && intervals.size() >= AUTOCLICK_INVENTORY_MIN_SAMPLES
-            && (mechanical || quantizedDeterministic || humanizedTemplate);
+    boolean suspicious =
+        mechanical || quantizedDeterministic || humanizedTemplate || repeatedPhase || stableCadence;
 
-    boolean detected =
+    boolean strongSignature =
         mechanical
-            || quantizedDeterministic
-            || humanizedTemplate
-            || repeatedPhase
-            || stableCadence
-            || inventoryStrong;
+            || (quantizedDeterministic && transitionEntropy < 0.35)
+            || (humanizedTemplate && madRatio < 0.050)
+            || (repeatedPhase && transitionEntropy < 0.55);
 
-    if (!detected) return ClickEvidence.none();
+    boolean clientTickCorroborates =
+        sufficientClientTiming
+            && Double.isFinite(clientTickCv)
+            && clientTickCv <= AUTOCLICK_MAX_CLIENT_TICK_CV
+            && clientTickBuckets <= 6;
+
+    boolean hardEvidence =
+        suspicious
+            && strongSignature
+            && clientTickCorroborates
+            && intervals.size() >= AUTOCLICK_MIN_HARD_INTERVALS;
+
+    if (!suspicious) return ClickEvidence.none();
 
     double severity;
     if (mechanical) severity = 1.0;
     else if (humanizedTemplate) severity = 0.97;
     else if (quantizedDeterministic) severity = 0.95;
     else if (repeatedPhase) severity = 0.93;
-    else if (stableCadence) severity = 0.96;
-    else severity = 0.95;
+    else severity = 0.90;
 
     return new ClickEvidence(
         true,
@@ -956,7 +1026,29 @@ public final class AccuracyChecks {
         template.period(),
         template.error(),
         template.windowAgreement(),
-        severity);
+        severity,
+        hardEvidence,
+        clientTickCoverage,
+        clientTickCv,
+        clientTickBuckets);
+  }
+
+  private static ClickEvidence stronger(ClickEvidence left, ClickEvidence right) {
+    if (!left.detected()) return right;
+    if (!right.detected()) return left;
+    return right.severity() > left.severity() ? right : left;
+  }
+
+  private static double clientTickCv(List<Long> intervals) {
+    if (intervals.isEmpty()) return Double.POSITIVE_INFINITY;
+    double mean = intervals.stream().mapToLong(Long::longValue).average().orElse(0.0);
+    if (mean <= 0.0) return Double.POSITIVE_INFINITY;
+    double variance = 0.0;
+    for (long interval : intervals) {
+      double delta = interval - mean;
+      variance += delta * delta;
+    }
+    return Math.sqrt(variance / intervals.size()) / mean;
   }
 
   private static String canonicalKindLabel(List<ClickSample> samples) {
@@ -1134,7 +1226,7 @@ public final class AccuracyChecks {
     }
   }
 
-  private record ClickSample(long sequence, long nanos, ClickKind kind) {}
+  private record ClickSample(long sequence, long nanos, ClickKind kind, Long clientTick) {}
 
   private record TemplateFingerprint(int period, double error, int windowAgreement) {
     static TemplateFingerprint none() {
@@ -1156,14 +1248,19 @@ public final class AccuracyChecks {
       int templatePeriod,
       double templateError,
       int windowAgreement,
-      double severity) {
+      double severity,
+      boolean hardEvidence,
+      double clientTickCoverage,
+      double clientTickCv,
+      int clientTickBuckets) {
 
     static ClickEvidence none() {
       return new ClickEvidence(
           false, "unknown", 0, -1L, 0.0, 0.0,
           Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY,
           Integer.MAX_VALUE, Double.POSITIVE_INFINITY,
-          -1, Double.POSITIVE_INFINITY, 0, 0.0);
+          -1, Double.POSITIVE_INFINITY, 0, 0.0,
+          false, 0.0, Double.POSITIVE_INFINITY, Integer.MAX_VALUE);
     }
   }
 

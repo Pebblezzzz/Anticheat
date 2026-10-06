@@ -1999,7 +1999,21 @@ public final class HardenedPhantomPaperPlugin extends JavaPlugin implements List
   }
 
   private void record(Capture capture,Packets.Packet packet){
-    appendPacket(capture,new RawPacket(capture.sequence.incrementAndGet(),System.nanoTime(),packet));
+    long sequence = capture.sequence.incrementAndGet();
+    long receivedNanos = System.nanoTime();
+    Long serverTick = capture.authoritativeServerTick.get() >= 0
+        ? capture.authoritativeServerTick.get()
+        : null;
+    Long clientTick = capture.clientTickTracker.hasObservedBoundary()
+        ? capture.clientTickTracker.clientTickForMovement()
+        : null;
+    Packets.CaptureProvenance provenance = new Packets.CaptureProvenance(
+        "paper-live-packet",
+        Packets.CaptureProvenance.directionFor(packet),
+        packet.getClass().getSimpleName(),
+        serverTick,
+        clientTick);
+    appendPacket(capture,new RawPacket(sequence,receivedNanos,packet,provenance));
   }
 
   /** Creates the lossless timeline representation for a client-bound block change without throwing on unsupported states. */
