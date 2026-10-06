@@ -952,26 +952,46 @@ public final class AccuracyChecks {
         .count();
   }
 
+  /**
+   * Measures conditional entropy of the next timing bucket given the previous bucket.
+   * A human click stream can revisit the same interval while producing many different
+   * successors; an automated template tends to have a low-entropy successor mapping.
+   */
   private static double transitionEntropy(List<Long> intervals) {
     if (intervals.size() < 3) return Double.POSITIVE_INFINITY;
 
-    Map<Long, Integer> transitions = new HashMap<>();
+    Map<Long, Map<Long, Integer>> nextByPrevious = new HashMap<>();
     for (int i = 1; i < intervals.size(); i++) {
-      long left = Math.round(intervals.get(i - 1) / 2_000_000.0);
-      long right = Math.round(intervals.get(i) / 2_000_000.0);
-      long key = (left << 32) ^ (right & 0xffffffffL);
-      transitions.merge(key, 1, Integer::sum);
+      long previous = Math.round(intervals.get(i - 1) / 2_000_000.0);
+      long next = Math.round(intervals.get(i) / 2_000_000.0);
+      nextByPrevious
+          .computeIfAbsent(previous, ignored -> new HashMap<>())
+          .merge(next, 1, Integer::sum);
     }
 
-    double total = intervals.size() - 1.0;
-    double entropy = 0.0;
-    for (int count : transitions.values()) {
-      double probability = count / total;
-      entropy -= probability * Math.log(probability);
+    double weightedEntropy = 0.0;
+    double totalTransitions = intervals.size() - 1.0;
+
+    for (Map<Long, Integer> successors : nextByPrevious.values()) {
+      int bucketCount = successors.values().stream().mapToInt(Integer::intValue).sum();
+      if (bucketCount <= 0) continue;
+
+      double localEntropy = 0.0;
+      for (int count : successors.values()) {
+        double probability = count / (double) bucketCount;
+        localEntropy -= probability * Math.log(probability);
+      }
+
+      double weight = bucketCount / totalTransitions;
+      weightedEntropy += weight * localEntropy;
     }
 
-    double maxEntropy = Math.log(Math.max(2.0, transitions.size()));
-    return maxEntropy <= 0.0 ? 0.0 : entropy / maxEntropy;
+    int observedBuckets = (int) intervals.stream()
+        .mapToLong(value -> Math.round(value / 2_000_000.0))
+        .distinct()
+        .count();
+    double maxEntropy = Math.log(Math.max(2, observedBuckets));
+    return maxEntropy <= 0.0 ? 0.0 : weightedEntropy / maxEntropy;
   }
 
   private static TemplateFingerprint bestTemplateFingerprint(List<Long> intervals) {
