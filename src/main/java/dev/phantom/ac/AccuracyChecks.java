@@ -44,6 +44,10 @@ public final class AccuracyChecks {
   private static final long AUTOCLICK_SWING_DEDUP_NANOS = 12_000_000L;
   private static final int AUTOCLICK_FINDING_CLICK_GAP = 32;
   private static final int AUTOCLICK_INVENTORY_MIN_SAMPLES = 40;
+  private static final int AUTOCLICK_STABLE_CADENCE_MIN_INTERVALS = 96;
+  private static final long AUTOCLICK_STABLE_CADENCE_MAX_MAD_NANOS = 5_000_000L;
+  private static final double AUTOCLICK_STABLE_CADENCE_MAX_CV = 0.120;
+  private static final int AUTOCLICK_STABLE_CADENCE_MAX_BUCKETS = 24;
 
   /**
    * Persistent per-player evidence state. Validation is intentionally batched,
@@ -845,7 +849,8 @@ public final class AccuracyChecks {
 
     long[] sorted = intervals.stream().mapToLong(Long::longValue).sorted().toArray();
     double median = percentile(sorted, 0.50);
-    double madRatio = medianAbsoluteDeviation(sorted, median) / Math.max(1.0, median);
+    double madNanos = medianAbsoluteDeviation(sorted, median);
+    double madRatio = madNanos / Math.max(1.0, median);
 
     double variance = 0.0;
     double meanAbsStep = 0.0;
@@ -899,6 +904,21 @@ public final class AccuracyChecks {
             && template.windowAgreement() == 3
             && timingBuckets <= 32;
 
+    /*
+     * Live packet arrival is not a perfect clock: Netty scheduling, batching,
+     * OS wakeups and server load can add a few milliseconds of noise to an
+     * otherwise fixed client cadence. A long, high-rate stream with a tiny
+     * absolute MAD is therefore a stronger signal than the old raw-CV gate.
+     * Requiring 96 intervals keeps this relaxed path firmly in sustained-
+     * automation territory rather than normal short human click bursts.
+     */
+    boolean stableCadence =
+        intervals.size() >= AUTOCLICK_STABLE_CADENCE_MIN_INTERVALS
+            && mean <= 125_000_000.0
+            && madNanos <= AUTOCLICK_STABLE_CADENCE_MAX_MAD_NANOS
+            && cv < AUTOCLICK_STABLE_CADENCE_MAX_CV
+            && timingBuckets <= AUTOCLICK_STABLE_CADENCE_MAX_BUCKETS;
+
     boolean inventoryStrong =
         samples.get(0).kind() == ClickKind.INVENTORY
             && intervals.size() >= AUTOCLICK_INVENTORY_MIN_SAMPLES
@@ -909,6 +929,7 @@ public final class AccuracyChecks {
             || quantizedDeterministic
             || humanizedTemplate
             || repeatedPhase
+            || stableCadence
             || inventoryStrong;
 
     if (!detected) return ClickEvidence.none();
@@ -918,6 +939,7 @@ public final class AccuracyChecks {
     else if (humanizedTemplate) severity = 0.97;
     else if (quantizedDeterministic) severity = 0.95;
     else if (repeatedPhase) severity = 0.93;
+    else if (stableCadence) severity = 0.96;
     else severity = 0.95;
 
     return new ClickEvidence(
