@@ -36,8 +36,11 @@ public final class AccuracyChecks {
   private static final double KNOCKBACK_REQUIRED_RETAINED_FRACTION = 0.18;
 
   private static final int AUTOCLICK_MIN_SAMPLES = 20;
+  private static final int AUTOCLICK_ADVANCED_MIN_INTERVALS = 96;
   private static final double AUTOCLICK_MAX_CV = 0.045;
   private static final long AUTOCLICK_MAX_INTERVAL_NANOS = 150_000_000L;
+  private static final int AUTOCLICK_FINDING_ATTACK_GAP = 32;
+  private static final int AUTOCLICK_TEMPLATE_MAX_PERIOD = 16;
 
   /**
    * Persistent per-player evidence state. Validation is intentionally batched,
@@ -49,6 +52,9 @@ public final class AccuracyChecks {
     final Set<Short> openTransactions = new HashSet<>();
     final Set<Short> acknowledgedTransactions = new HashSet<>();
     final ArrayDeque<Long> attackTimes = new ArrayDeque<>();
+    long lastAutoclickPacketSequence = -1L;
+    long lastAutoclickFindingSequence = -1L;
+    int attacksSinceAutoclickFinding;
     final ArrayDeque<Double> knockbackResiduals = new ArrayDeque<>();
     final ArrayDeque<Long> timerBoundaries = new ArrayDeque<>();
     long timerBalanceNanos;
@@ -76,7 +82,7 @@ public final class AccuracyChecks {
     boolean vehicleOffsetKnown;
 
     void prune(long currentSequence) {
-      while (attackTimes.size() > 64) attackTimes.removeFirst();
+      while (attackTimes.size() > 192) attackTimes.removeFirst();
       while (timerBoundaries.size() > 32) timerBoundaries.removeFirst();
       actionsPerTick.keySet().removeIf(tick -> tick + 64 < currentSequence);
       placementsPerTick.keySet().removeIf(tick -> tick + 64 < currentSequence);
@@ -92,6 +98,9 @@ public final class AccuracyChecks {
       noFallTracking = false;
       airborneFrames = 0;
       attackTimes.clear();
+      lastAutoclickPacketSequence = -1L;
+      lastAutoclickFindingSequence = -1L;
+      attacksSinceAutoclickFinding = 0;
       knockbackResiduals.clear();
       timerBoundaries.clear();
       actionsPerTick.clear();
@@ -629,22 +638,35 @@ public final class AccuracyChecks {
       List<Packets.RawPacket> packets,
       Map<Long, PredictionFrame> frames,
       State state) {
+    int newAttacks = 0;
+    long latestAttackSequence = -1L;
+
     for (Packets.RawPacket packet : packets) {
-      if (packet.packet() instanceof Packets.InteractEntity attack
-          && attack.action() == Packets.InteractAction.ATTACK) {
-        state.attackTimes.addLast(packet.receivedNanos());
+      if (!(packet.packet() instanceof Packets.InteractEntity attack)
+          || attack.action() != Packets.InteractAction.ATTACK
+          || packet.sequence() <= state.lastAutoclickPacketSequence) {
+        continue;
       }
+
+      state.attackTimes.addLast(packet.receivedNanos());
+      state.lastAutoclickPacketSequence = packet.sequence();
+      latestAttackSequence = packet.sequence();
+      state.attacksSinceAutoclickFinding++;
+      newAttacks++;
     }
-    while (state.attackTimes.size() > 128) state.attackTimes.removeFirst();
-    if (state.attackTimes.size() < 49) return List.of();
+
+    while (state.attackTimes.size() > 192) state.attackTimes.removeFirst();
+    if (newAttacks == 0 || state.attackTimes.size() < AUTOCLICK_MIN_SAMPLES + 1) {
+      return List.of();
+    }
 
     List<Long> attacks = List.copyOf(state.attackTimes);
     List<Long> intervals = new ArrayList<>();
-    for (int i = Math.max(1, attacks.size() - 48); i < attacks.size(); i++) {
+    for (int i = Math.max(1, attacks.size() - 96); i < attacks.size(); i++) {
       long delta = attacks.get(i) - attacks.get(i - 1);
       if (delta > 0L && delta <= AUTOCLICK_MAX_INTERVAL_NANOS) intervals.add(delta);
     }
-    if (intervals.size() < 40) return List.of();
+    if (intervals.size() < AUTOCLICK_MIN_SAMPLES * 2) return List.of();
 
     double mean = intervals.stream().mapToLong(Long::longValue).average().orElse(0.0);
     if (mean <= 0.0) return List.of();
@@ -667,34 +689,171 @@ public final class AccuracyChecks {
         .sorted()
         .toArray();
 
-    /*
-     * CV alone is easy to defeat with a little random jitter. Combine three
-     * independent signals: low coefficient of variation, tiny interval-to-
-     * interval movement, and low timing alphabet. Constant/near-constant
-     * automation therefore remains a hard signal while human-ish timing stays
-     * outside the hard threshold.
-     */
     boolean mechanical =
         cv < 0.030
             && normalizedMeanAbsStep < 0.045
             && buckets.length <= 8;
+
+    /*
+     * Advanced signal: look for a repeating interval template rather than
+     * only "low variance". Humanized clickers commonly add bounded jitter to
+     * a fixed sequence. A real player may click quickly, but sustaining the
+     * same short timing template across three independent windows is much
+     * harder to explain without an automated scheduler.
+     */
+    PatternSignature pattern = intervals.size() >= AUTOCLICK_ADVANCED_MIN_INTERVALS
+        ? analyzeAutoclickPattern(intervals)
+        : PatternSignature.none();
+
     boolean heavilyHumanizedButPeriodic =
         cv < AUTOCLICK_MAX_CV
             && normalizedMeanAbsStep < 0.060
             && buckets.length <= 5;
 
-    if (mechanical || heavilyHumanizedButPeriodic) {
-      PredictionFrame frame = frameAt(frames,
-          packets.stream().filter(p -> p.packet() instanceof Packets.InteractEntity)
-              .mapToLong(Packets.RawPacket::sequence).max().orElse(0L));
-      double severity = mechanical ? 1.0 : 0.75;
-      return List.of(hard(playerId, frame, "Autoclicker",
-          String.format(Locale.ROOT,
-              "attack timing was highly periodic (n=%d, mean=%.1fms, cv=%.4f, step=%.4f, timingBuckets=%d)",
-              intervals.size(), mean / 1_000_000.0, cv, normalizedMeanAbsStep, buckets.length),
-          severity));
+    boolean advancedPeriodic =
+        pattern.bestPeriod() >= 2
+            && pattern.bestPeriod() <= AUTOCLICK_TEMPLATE_MAX_PERIOD
+            && pattern.bestPeriodError() < 0.030
+            && pattern.windowAgreement() == 3
+            && pattern.timingBuckets() <= 28
+            && pattern.blockMeanCv() < 0.055
+            && mean < 145_000_000L;
+
+    boolean strong = mechanical || heavilyHumanizedButPeriodic || advancedPeriodic;
+    if (!strong || latestAttackSequence < 0L) return List.of();
+
+    boolean initialFinding = state.lastAutoclickFindingSequence < 0L;
+    boolean cooldownSatisfied =
+        initialFinding || state.attacksSinceAutoclickFinding >= AUTOCLICK_FINDING_ATTACK_GAP;
+    if (!cooldownSatisfied) return List.of();
+
+    PredictionFrame frame = frameAt(frames, latestAttackSequence);
+    double severity;
+    String reason;
+    if (advancedPeriodic && !mechanical) {
+      severity = 0.95;
+      reason = String.format(Locale.ROOT,
+          "attack timing repeated a %d-sample template across three windows "
+              + "(n=%d, mean=%.1fms, cv=%.4f, templateError=%.4f, timingBuckets=%d)",
+          pattern.bestPeriod(), intervals.size(), mean / 1_000_000.0, cv,
+          pattern.bestPeriodError(), pattern.timingBuckets());
+    } else if (mechanical) {
+      severity = 1.0;
+      reason = String.format(Locale.ROOT,
+          "attack timing was highly periodic (n=%d, mean=%.1fms, cv=%.4f, step=%.4f, timingBuckets=%d)",
+          intervals.size(), mean / 1_000_000.0, cv, normalizedMeanAbsStep, buckets.length);
+    } else {
+      severity = 0.75;
+      reason = String.format(Locale.ROOT,
+          "attack timing was highly periodic (n=%d, mean=%.1fms, cv=%.4f, step=%.4f, timingBuckets=%d)",
+          intervals.size(), mean / 1_000_000.0, cv, normalizedMeanAbsStep, buckets.length);
     }
-    return List.of();
+
+    state.lastAutoclickFindingSequence = latestAttackSequence;
+    state.attacksSinceAutoclickFinding = 0;
+    return List.of(hard(playerId, frame, "Autoclicker", reason, severity));
+  }
+
+  private static PatternSignature analyzeAutoclickPattern(List<Long> intervals) {
+    int bestPeriod = -1;
+    double bestPeriodError = Double.POSITIVE_INFINITY;
+
+    for (int period = 2; period <= AUTOCLICK_TEMPLATE_MAX_PERIOD; period++) {
+      if (intervals.size() <= period) break;
+      double normalized = templateError(intervals, period);
+      if (normalized < bestPeriodError) {
+        bestPeriodError = normalized;
+        bestPeriod = period;
+      }
+    }
+
+    int windowAgreement = 0;
+    int windowSize = AUTOCLICK_ADVANCED_MIN_INTERVALS / 3;
+    for (int window = 0; window < 3; window++) {
+      int from = window * windowSize;
+      int to = Math.min(intervals.size(), from + windowSize);
+      List<Long> slice = intervals.subList(from, to);
+      int period = bestTemplatePeriod(slice);
+      if (period == bestPeriod && templateError(slice, period) < 0.045) {
+        windowAgreement++;
+      }
+    }
+
+    double blockMeanCv = blockMeanCoefficientOfVariation(intervals);
+
+    int timingBuckets = (int) intervals.stream()
+        .mapToLong(v -> Math.round(v / 2_000_000.0))
+        .distinct()
+        .count();
+
+    return new PatternSignature(
+        bestPeriod,
+        bestPeriodError,
+        windowAgreement,
+        timingBuckets,
+        blockMeanCv);
+  }
+
+  private static int bestTemplatePeriod(List<Long> intervals) {
+    int bestPeriod = -1;
+    double bestError = Double.POSITIVE_INFINITY;
+    for (int period = 2; period <= AUTOCLICK_TEMPLATE_MAX_PERIOD; period++) {
+      if (intervals.size() <= period) break;
+      double normalized = templateError(intervals, period);
+      if (normalized < bestError) {
+        bestError = normalized;
+        bestPeriod = period;
+      }
+    }
+    return bestPeriod;
+  }
+
+  private static double templateError(List<Long> intervals, int period) {
+    if (period < 2 || intervals.size() <= period) return Double.POSITIVE_INFINITY;
+    double mean = intervals.stream().mapToLong(Long::longValue).average().orElse(1.0);
+    if (mean <= 0.0) return Double.POSITIVE_INFINITY;
+    double error = 0.0;
+    int count = 0;
+    for (int i = period; i < intervals.size(); i++) {
+      error += Math.abs(intervals.get(i) - intervals.get(i - period));
+      count++;
+    }
+    return count == 0 ? Double.POSITIVE_INFINITY : (error / count) / mean;
+  }
+
+  private static double blockMeanCoefficientOfVariation(List<Long> intervals) {
+    if (intervals.size() < 3) return Double.POSITIVE_INFINITY;
+    int blockSize = intervals.size() / 3;
+    double[] means = new double[3];
+
+    for (int block = 0; block < 3; block++) {
+      int from = block * blockSize;
+      int to = block == 2 ? intervals.size() : from + blockSize;
+      long sum = 0L;
+      for (int i = from; i < to; i++) sum += intervals.get(i);
+      means[block] = (double) sum / Math.max(1, to - from);
+    }
+
+    double mean = Arrays.stream(means).average().orElse(0.0);
+    if (mean <= 0.0) return Double.POSITIVE_INFINITY;
+    double variance = 0.0;
+    for (double value : means) {
+      double delta = value - mean;
+      variance += delta * delta;
+    }
+    return Math.sqrt(variance / means.length) / mean;
+  }
+
+  private record PatternSignature(
+      int bestPeriod,
+      double bestPeriodError,
+      int windowAgreement,
+      int timingBuckets,
+      double blockMeanCv) {
+    static PatternSignature none() {
+      return new PatternSignature(-1, Double.POSITIVE_INFINITY, 0, Integer.MAX_VALUE,
+          Double.POSITIVE_INFINITY);
+    }
   }
 
   private static List<ProductionCheckEngine.Finding> packetIntegrity(
