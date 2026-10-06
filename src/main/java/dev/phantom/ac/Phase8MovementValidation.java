@@ -350,6 +350,13 @@ public final class Phase8MovementValidation {
     return reason.toString();
   }
 
+  private static double distance(Maths.Vec3 actual, Maths.Vec3 expected) {
+    double dx = actual.x() - expected.x();
+    double dy = actual.y() - expected.y();
+    double dz = actual.z() - expected.z();
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+
   private static Maths.Vec3 delta(Maths.Vec3 actual, Maths.Vec3 expected) {
     return new Maths.Vec3(
         actual.x() - expected.x(),
